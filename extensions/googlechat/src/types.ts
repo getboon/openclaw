@@ -2,11 +2,13 @@
 export type GoogleChatSpace = {
   name?: string;
   displayName?: string;
+  // Deprecated by Google Chat in favor of `spaceType`; kept for backward compat.
   type?: string;
   /** Current Google Chat field that replaces the deprecated `type` field. */
   spaceType?: string;
   /** True when the space is a 1:1 DM between a user and the Chat app. */
   singleUserBotDm?: boolean;
+  spaceThreadingState?: string;
 };
 
 export type GoogleChatUser = {
@@ -59,6 +61,7 @@ export type GoogleChatMessage = {
   sender?: GoogleChatUser;
   thread?: GoogleChatThread;
   cardsV2?: GoogleChatCardV2[];
+  threadReply?: boolean;
   attachment?: GoogleChatAttachment[];
   annotations?: GoogleChatAnnotation[];
 };
@@ -89,6 +92,7 @@ export type GoogleChatEvent = {
     invokedFunction?: string;
     parameters?: Record<string, string>;
   };
+  thread?: GoogleChatThread;
 };
 
 export type GoogleChatReaction = {

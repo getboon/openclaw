@@ -7,7 +7,9 @@ import { mergePairLoopGuardConfig } from "openclaw/plugin-sdk/pair-loop-guard-ru
 import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { OpenClawConfig } from "../runtime-api.js";
 import {
+  createInboundEnvelopeBuilder,
   resolveInboundRouteEnvelopeBuilderWithRuntime,
+  resolveThreadSessionKeys,
   resolveWebhookPath,
 } from "../runtime-api.js";
 import type { ResolvedGoogleChatAccount } from "./accounts.js";
@@ -114,6 +116,36 @@ function resolveGoogleChatBotLoopProtectionConfig(params: {
   return mergePairLoopGuardConfig(params.accountConfig, params.groupConfig);
 }
 
+// Google Chat delivers a `thread.name` for every message, but only THREADED
+// spaces give that name meaningful per-thread identity. In UNTHREADED /
+// GROUPED spaces (DMs, group chats) every message would otherwise become its
+// own session — that breaks conversation flow.
+function spaceSupportsThreading(space: {
+  spaceType?: string;
+  spaceThreadingState?: string;
+  type?: string;
+}): boolean {
+  const threadingState = (space.spaceThreadingState ?? "").toUpperCase();
+  if (threadingState === "THREADED_MESSAGES") {
+    return true;
+  }
+  if (threadingState === "GROUPED_MESSAGES" || threadingState === "UNTHREADED_MESSAGES") {
+    return false;
+  }
+  const spaceType = (space.spaceType ?? "").toUpperCase();
+  if (spaceType === "SPACE") {
+    return true;
+  }
+  if (spaceType === "DIRECT_MESSAGE" || spaceType === "GROUP_CHAT") {
+    return false;
+  }
+  return (space.type ?? "").toUpperCase() === "ROOM";
+}
+
+function resolveGoogleChatInboundThreadName(event: GoogleChatEvent): string | undefined {
+  return event.thread?.name?.trim() || event.message?.thread?.name?.trim() || undefined;
+}
+
 function shouldSuppressGoogleChatBotLoop(params: {
   botLoopProtection?: ChannelBotLoopProtectionFacts;
   core: GoogleChatCoreRuntime;
@@ -201,6 +233,10 @@ async function processMessageWithPipeline(params: {
     return;
   }
   const isGroup = isGoogleChatGroupSpace(space);
+  const inboundThreadName = resolveGoogleChatInboundThreadName(event);
+  const threadName = spaceSupportsThreading(space) ? inboundThreadName : undefined;
+  // Native compound id matches Slack's `${channel}:${thread_ts}` debounce-key shape.
+  const botLoopConversationId = threadName ? `${spaceId}:${threadName}` : spaceId;
   const sender = message.sender ?? event.user;
   const senderId = sender?.name ?? "";
   const senderName = sender?.displayName ?? "";
@@ -253,7 +289,7 @@ async function processMessageWithPipeline(params: {
     senderId,
     appUserId,
     accountId: account.accountId,
-    conversationId: spaceId,
+    conversationId: botLoopConversationId,
     config: resolveGoogleChatBotLoopProtectionConfig({
       accountConfig: account.config.botLoopProtection,
       groupConfig: groupBotLoopProtection,
@@ -277,6 +313,34 @@ async function processMessageWithPipeline(params: {
     sessionStore: config.session?.store,
   });
 
+  // Suffix the resolved space-scoped session key with `:thread:<name>` when the
+  // message lives in a threaded space. parentSessionKey lets the first turn in
+  // a fresh thread session inherit space-level transcript so existing
+  // conversations are not orphaned on deploy.
+  const threadKeys = resolveThreadSessionKeys({
+    baseSessionKey: route.sessionKey,
+    threadId: threadName,
+    parentSessionKey: route.sessionKey,
+    normalizeThreadId: (id) => id,
+  });
+  const threadScopedSessionKey = threadKeys.sessionKey;
+  const threadParentSessionKey = threadKeys.parentSessionKey;
+  // Rebind the envelope builder so `previousTimestamp` reads the thread-scoped
+  // session's last-updated time, not the space-scoped key the original
+  // resolveInboundRouteEnvelopeBuilderWithRuntime closure captured.
+  const threadScopedBuildEnvelope =
+    threadScopedSessionKey === route.sessionKey
+      ? buildEnvelope
+      : createInboundEnvelopeBuilder({
+          cfg: config,
+          route: { ...route, sessionKey: threadScopedSessionKey },
+          sessionStore: config.session?.store,
+          resolveStorePath: core.channel.session.resolveStorePath,
+          readSessionUpdatedAt: core.channel.session.readSessionUpdatedAt,
+          resolveEnvelopeFormatOptions: core.channel.reply.resolveEnvelopeFormatOptions,
+          formatAgentEnvelope: core.channel.reply.formatAgentEnvelope,
+        });
+
   let mediaPath: string | undefined;
   let mediaType: string | undefined;
   if (attachments.length > 0) {
@@ -292,7 +356,7 @@ async function processMessageWithPipeline(params: {
     ? space.displayName || `space:${spaceId}`
     : senderName || `user:${senderId}`;
   const timestampMs = resolveGoogleChatTimestampMs(event.eventTime);
-  const { storePath, body } = buildEnvelope({
+  const { storePath, body } = threadScopedBuildEnvelope({
     channel: "Google Chat",
     from: fromLabel,
     timestamp: timestampMs,
@@ -315,12 +379,14 @@ async function processMessageWithPipeline(params: {
     conversation: {
       kind: isGroup ? "channel" : "direct",
       id: spaceId,
+      threadId: threadName,
       label: fromLabel,
     },
     route: {
       agentId: route.agentId,
       accountId: route.accountId,
-      routeSessionKey: route.sessionKey,
+      routeSessionKey: threadScopedSessionKey,
+      parentSessionKey: threadParentSessionKey,
     },
     reply: {
       to: `googlechat:${spaceId}`,
@@ -406,7 +472,7 @@ async function processMessageWithPipeline(params: {
         channel: "googlechat",
         accountId: route.accountId,
         agentId: route.agentId,
-        routeSessionKey: route.sessionKey,
+        routeSessionKey: threadScopedSessionKey,
         storePath,
         ctxPayload,
         recordInboundSession: core.channel.session.recordInboundSession,
@@ -455,10 +521,13 @@ async function processMessageWithPipeline(params: {
 }
 
 export const testing = {
+  processGoogleChatEvent,
   processMessageWithPipeline,
   resolveGoogleChatBotLoopProtection,
   resolveGoogleChatBotLoopProtectionConfig,
+  resolveGoogleChatInboundThreadName,
   shouldSuppressGoogleChatBotLoop,
+  spaceSupportsThreading,
 };
 
 async function downloadAttachment(
