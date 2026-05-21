@@ -3123,6 +3123,14 @@ export async function runEmbeddedAttempt(
       };
       const abortable = <T>(promise: Promise<T>): Promise<T> =>
         abortableWithSignal(runAbortController.signal, promise);
+      const ownedTranscriptWriteContext = {
+        sessionFile: params.sessionFile,
+        sessionKey: params.sessionKey,
+        withSessionWriteLock: <T>(
+          operation: () => Promise<T> | T,
+          options?: { publishOwnedWrite?: boolean },
+        ) => sessionLockController.withSessionWriteLock(operation, options),
+      };
       const promptActiveSession = (
         prompt: string,
         options?: Parameters<typeof activeSession.prompt>[1],
@@ -3776,6 +3784,7 @@ export async function runEmbeddedAttempt(
               waitForSessionEvents: (sessionToDrain) =>
                 sessionLockController.waitForSessionEvents(sessionToDrain),
               releaseForPrompt: () => sessionLockController.releaseForPrompt(),
+              reacquireAfterPrompt: () => sessionLockController.reacquireAfterPrompt(),
             });
           }
 

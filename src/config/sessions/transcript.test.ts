@@ -110,6 +110,62 @@ describe("appendAssistantMessageToSessionTranscript", () => {
     }
   });
 
+  it("runs matching owned transcript appends through the active session write lock", async () => {
+    writeTranscriptStore();
+    const sessionFile = resolveSessionTranscriptPathInDir(sessionId, fixture.sessionsDir());
+    const events: string[] = [];
+
+    const result = await withOwnedSessionTranscriptWrites(
+      {
+        sessionFile,
+        sessionKey,
+        withSessionWriteLock: async (run) => {
+          events.push("lock");
+          return await run();
+        },
+      },
+      async () =>
+        await appendAssistantMessageToSessionTranscript({
+          sessionKey,
+          text: "Hello under lock",
+          storePath: fixture.storePath(),
+        }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(events).toEqual(["lock", "lock", "lock"]);
+  });
+
+  it("keeps matching owned transcript appends locked from bound callbacks", async () => {
+    const sessionFile = resolveSessionTranscriptPathInDir(sessionId, fixture.sessionsDir());
+    const events: string[] = [];
+    const callback = bindOwnedSessionTranscriptWrites(
+      {
+        sessionFile,
+        sessionKey,
+        withSessionWriteLock: async (run) => {
+          events.push("lock");
+          return await run();
+        },
+      },
+      async () =>
+        await appendSessionTranscriptMessage({
+          transcriptPath: sessionFile,
+          message: {
+            role: "assistant",
+            content: "Hello from bound delivery",
+            timestamp: Date.now(),
+            stopReason: "stop",
+          },
+        }),
+    );
+
+    const result = await callback();
+
+    expect(result.messageId).toBeTruthy();
+    expect(events).toEqual(["lock"]);
+  });
+
   it("appends to legacy lowercase Signal group session entries", async () => {
     const mixedGroupId = "VWATodkf2hc8zdOS76q9Tb0+5Bi522E03qLdaQ/9ypg=";
     const signalSessionKey = `agent:main:signal:group:${mixedGroupId}`;
