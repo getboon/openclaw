@@ -40,7 +40,14 @@ type CapturedTurn = {
   messageId: string | undefined;
 };
 
+// Unique account id per harness call so the process-scoped bot-loop guard
+// (keyed by accountId in `resolveGoogleChatBotLoopProtection`) cannot leak
+// state across tests. The SDK does not expose its clear helper to plugins.
+let harnessSequence = 0;
+
 function buildE2EHarness() {
+  harnessSequence += 1;
+  const accountId = `e2e-${harnessSequence}-${Date.now()}`;
   const captured: CapturedTurn[] = [];
 
   const run = vi.fn(
@@ -76,8 +83,8 @@ function buildE2EHarness() {
         resolveAgentRoute: vi.fn((params: { peer: { kind: string; id: string } }) => ({
           agentId: "main",
           channel: "googlechat",
-          accountId: "default",
-          sessionKey: `agent:main:googlechat:default:${params.peer.kind}:${params.peer.id}`,
+          accountId,
+          sessionKey: `agent:main:googlechat:${accountId}:${params.peer.kind}:${params.peer.id}`,
         })),
       },
       session: {
@@ -107,7 +114,7 @@ function buildE2EHarness() {
 
   const runtime: GoogleChatRuntimeEnv = { error: vi.fn(), log: vi.fn() };
   const account = {
-    accountId: "default",
+    accountId,
     config: {
       allowBots: false,
       botUser: "users/app",
@@ -134,11 +141,11 @@ function buildRealisticMessageEvent(opts: {
   spaceId: string;
   spaceDisplayName?: string;
   threadName?: string;
-  threadReply?: boolean;
   messageId: string;
   text: string;
   senderName?: string;
   senderDisplayName?: string;
+  senderType?: "HUMAN" | "BOT";
   eventTime?: string;
   spaceType?: string;
   spaceThreadingState?: string;
@@ -159,10 +166,9 @@ function buildRealisticMessageEvent(opts: {
       sender: {
         name: opts.senderName ?? "users/alice",
         displayName: opts.senderDisplayName ?? "Alice",
-        type: "HUMAN",
+        type: opts.senderType ?? "HUMAN",
       },
       ...(opts.threadName ? { thread: { name: opts.threadName } } : {}),
-      ...(typeof opts.threadReply === "boolean" ? { threadReply: opts.threadReply } : {}),
     },
   };
 }
@@ -188,7 +194,6 @@ describe("googlechat thread-session-key e2e", () => {
       buildRealisticMessageEvent({
         spaceId: "spaces/AAAA-engineering",
         threadName: "spaces/AAAA-engineering/threads/T-deploy",
-        threadReply: false,
         messageId: "m1",
         text: "@OpenClaw can you check the deploy status?",
         eventTime: "2026-05-21T10:00:00.000Z",
@@ -196,7 +201,6 @@ describe("googlechat thread-session-key e2e", () => {
       buildRealisticMessageEvent({
         spaceId: "spaces/AAAA-engineering",
         threadName: "spaces/AAAA-engineering/threads/T-incident",
-        threadReply: false,
         messageId: "m2",
         text: "@OpenClaw summarize the incident timeline",
         senderName: "users/bob",
@@ -206,7 +210,6 @@ describe("googlechat thread-session-key e2e", () => {
       buildRealisticMessageEvent({
         spaceId: "spaces/AAAA-engineering",
         threadName: "spaces/AAAA-engineering/threads/T-deploy",
-        threadReply: true,
         messageId: "m3",
         text: "and what about the canary?",
         eventTime: "2026-05-21T10:02:00.000Z",
@@ -225,7 +228,7 @@ describe("googlechat thread-session-key e2e", () => {
     expect(captured[1].routeSessionKey).not.toBe(captured[0].routeSessionKey);
 
     // All three carry the parent (space-level) session for first-turn continuity.
-    const expectedParent = "agent:main:googlechat:default:group:spaces/AAAA-engineering";
+    const expectedParent = `agent:main:googlechat:${target.account.accountId}:group:spaces/AAAA-engineering`;
     expect(captured.every((c) => c.parentSessionKey === expectedParent)).toBe(true);
 
     // Outbound thread targeting still uses the inbound thread name (unchanged).
@@ -288,5 +291,73 @@ describe("googlechat thread-session-key e2e", () => {
       target,
     );
     expect(captured).toHaveLength(0);
+  });
+
+  it("exercises the real bot-loop SDK: suppresses a tight bot-to-bot ping-pong within one space", async () => {
+    const { captured, target } = buildE2EHarness();
+    // Allow bot senders so bot-loop protection actually engages.
+    target.account.config.allowBots = true;
+    target.account.config.botUser = "users/openclaw-app";
+    target.account.config.botLoopProtection = {
+      maxEventsPerWindow: 1,
+      windowSeconds: 60,
+      cooldownSeconds: 60,
+    };
+
+    const baseEvent = (messageId: string, eventTime: string): GoogleChatEvent =>
+      buildRealisticMessageEvent({
+        spaceId: "spaces/DDDD-noisy-bot",
+        threadName: "spaces/DDDD-noisy-bot/threads/T-A",
+        messageId,
+        text: "PING",
+        senderName: "users/other-bot",
+        senderDisplayName: "Other Bot",
+        senderType: "BOT",
+        eventTime,
+      });
+
+    // First bot message: passes the guard, turn dispatched.
+    await testing.processGoogleChatEvent(baseEvent("m1", "2026-05-21T10:00:00.000Z"), target);
+    // Second bot message in the same space within the window: real guard
+    // should suppress and the turn must NOT be dispatched.
+    await testing.processGoogleChatEvent(baseEvent("m2", "2026-05-21T10:00:01.000Z"), target);
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].messageId).toBe("spaces/DDDD-noisy-bot/messages/m1");
+  });
+
+  it("real bot-loop SDK does NOT cross-suppress across different spaces (regression for scope isolation)", async () => {
+    const { captured, target } = buildE2EHarness();
+    target.account.config.allowBots = true;
+    target.account.config.botUser = "users/openclaw-app";
+    target.account.config.botLoopProtection = {
+      maxEventsPerWindow: 1,
+      windowSeconds: 60,
+      cooldownSeconds: 60,
+    };
+
+    const inSpace = (spaceId: string, messageId: string, eventTime: string): GoogleChatEvent =>
+      buildRealisticMessageEvent({
+        spaceId,
+        threadName: `${spaceId}/threads/T-A`,
+        messageId,
+        text: "PING",
+        senderName: "users/other-bot",
+        senderType: "BOT",
+        eventTime,
+      });
+
+    await testing.processGoogleChatEvent(
+      inSpace("spaces/EEEE", "m1", "2026-05-21T10:00:00.000Z"),
+      target,
+    );
+    await testing.processGoogleChatEvent(
+      inSpace("spaces/FFFF", "m2", "2026-05-21T10:00:01.000Z"),
+      target,
+    );
+
+    expect(captured).toHaveLength(2);
+    expect(captured[0].conversationId).toBe("spaces/EEEE");
+    expect(captured[1].conversationId).toBe("spaces/FFFF");
   });
 });

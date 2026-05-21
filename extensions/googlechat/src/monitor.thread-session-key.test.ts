@@ -36,12 +36,16 @@ vi.mock("openclaw/plugin-sdk/inbound-reply-dispatch", async () => {
 type CapturedTurn = {
   routeSessionKey: string;
   ctxConversationId: string;
+  ctxConversationKind: string;
+  ctxRoutePeerKind: string;
   ctxThreadId: string | undefined;
   ctxParentSessionKey: string | undefined;
+  resolvedPeerKind: string | undefined;
 };
 
 function buildHarness() {
   const captured: CapturedTurn[] = [];
+  const observedPeerKinds: string[] = [];
   const buildContext = vi.fn((payload: unknown) => payload);
   const run = vi.fn(
     async (params: {
@@ -49,14 +53,17 @@ function buildHarness() {
     }) => {
       const turn = params.adapter.resolveTurn();
       const ctx = turn.ctxPayload as {
-        conversation: { id: string; threadId?: string };
+        conversation: { id: string; kind: string; threadId?: string; routePeer: { kind: string } };
         route: { routeSessionKey: string; parentSessionKey?: string };
       };
       captured.push({
         routeSessionKey: turn.routeSessionKey,
         ctxConversationId: ctx.conversation.id,
+        ctxConversationKind: ctx.conversation.kind,
+        ctxRoutePeerKind: ctx.conversation.routePeer.kind,
         ctxThreadId: ctx.conversation.threadId,
         ctxParentSessionKey: ctx.route.parentSessionKey,
+        resolvedPeerKind: observedPeerKinds.at(-1),
       });
     },
   );
@@ -64,12 +71,15 @@ function buildHarness() {
     logging: { shouldLogVerbose: () => false },
     channel: {
       routing: {
-        resolveAgentRoute: vi.fn((params: { peer: { kind: string; id: string } }) => ({
-          agentId: "main",
-          channel: "googlechat",
-          accountId: "default",
-          sessionKey: `agent:main:googlechat:default:${params.peer.kind}:${params.peer.id}`,
-        })),
+        resolveAgentRoute: vi.fn((params: { peer: { kind: string; id: string } }) => {
+          observedPeerKinds.push(params.peer.kind);
+          return {
+            agentId: "main",
+            channel: "googlechat",
+            accountId: "default",
+            sessionKey: `agent:main:googlechat:default:${params.peer.kind}:${params.peer.id}`,
+          };
+        }),
       },
       session: {
         resolveStorePath: vi.fn(() => "/tmp/store.json"),
@@ -221,6 +231,40 @@ describe("googlechat monitor thread-scoped session keys", () => {
     expect(captured[0].routeSessionKey).not.toMatch(/:thread:/);
   });
 
+  it("does NOT suffix when spaceType=SPACE has NO threading-state signal (GROUPED is also SPACE)", async () => {
+    const { captured, core, runtime, account } = buildHarness();
+    await testing.processMessageWithPipeline({
+      event: buildEvent({
+        threadName: "spaces/AAA/threads/T1",
+        messageId: "m1",
+        space: { spaceType: "SPACE", spaceThreadingState: undefined, type: undefined },
+      }),
+      account,
+      config: {},
+      runtime,
+      core,
+      mediaMaxMb: 0,
+    });
+    expect(captured[0].routeSessionKey).not.toMatch(/:thread:/);
+  });
+
+  it("suffixes when legacy `space.type === 'ROOM'` and no modern signal is present", async () => {
+    const { captured, core, runtime, account } = buildHarness();
+    await testing.processMessageWithPipeline({
+      event: buildEvent({
+        threadName: "spaces/AAA/threads/T1",
+        messageId: "m1",
+        space: { type: "ROOM", spaceType: undefined, spaceThreadingState: undefined },
+      }),
+      account,
+      config: {},
+      runtime,
+      core,
+      mediaMaxMb: 0,
+    });
+    expect(captured[0].routeSessionKey).toMatch(/:thread:spaces\/AAA\/threads\/T1$/);
+  });
+
   it("does NOT suffix in a DIRECT_MESSAGE space (modern spaceType)", async () => {
     const { captured, core, runtime, account } = buildHarness();
     await testing.processMessageWithPipeline({
@@ -240,6 +284,50 @@ describe("googlechat monitor thread-scoped session keys", () => {
       mediaMaxMb: 0,
     });
     expect(captured[0].routeSessionKey).not.toMatch(/:thread:/);
+  });
+
+  it("routes a modern DIRECT_MESSAGE payload as `direct` peer kind (not group)", async () => {
+    const { captured, core, runtime, account } = buildHarness();
+    await testing.processMessageWithPipeline({
+      event: buildEvent({
+        messageId: "m1",
+        space: {
+          spaceType: "DIRECT_MESSAGE",
+          spaceThreadingState: "UNTHREADED_MESSAGES",
+          type: undefined,
+        },
+      }),
+      account,
+      config: {},
+      runtime,
+      core,
+      mediaMaxMb: 0,
+    });
+    expect(captured[0].resolvedPeerKind).toBe("direct");
+    expect(captured[0].ctxConversationKind).toBe("direct");
+    expect(captured[0].ctxRoutePeerKind).toBe("direct");
+    expect(captured[0].routeSessionKey).toMatch(/:direct:spaces\/AAA$/);
+  });
+
+  it("routes a GROUP_CHAT payload as `group` peer kind", async () => {
+    const { captured, core, runtime, account } = buildHarness();
+    await testing.processMessageWithPipeline({
+      event: buildEvent({
+        messageId: "m1",
+        space: {
+          spaceType: "GROUP_CHAT",
+          spaceThreadingState: "UNTHREADED_MESSAGES",
+          type: undefined,
+        },
+      }),
+      account,
+      config: {},
+      runtime,
+      core,
+      mediaMaxMb: 0,
+    });
+    expect(captured[0].resolvedPeerKind).toBe("group");
+    expect(captured[0].ctxRoutePeerKind).toBe("group");
   });
 
   it("does NOT suffix when only legacy `space.type === 'DM'` is set", async () => {
@@ -320,7 +408,7 @@ describe("googlechat monitor thread-scoped session keys", () => {
     expect(captured[0].ctxThreadId).toBe("spaces/AAA/threads/FROM_EVENT");
   });
 
-  it("scopes bot-loop conversationId per thread using a native compound id", async () => {
+  it("uses the native space id (not the agent session key) as bot-loop conversationId", async () => {
     const { core, runtime, account } = buildHarness();
     account.config.allowBots = true;
     account.config.botUser = "users/app";
@@ -334,18 +422,19 @@ describe("googlechat monitor thread-scoped session keys", () => {
       core,
       mediaMaxMb: 0,
     });
+    // Match Slack: bot-loop scope is the channel/space, not the thread.
+    // Per-thread suppression would diverge from peer channels without justification.
     expect(botLoopMocks.recordChannelBotPairLoopAndCheckSuppression).toHaveBeenCalledWith(
-      expect.objectContaining({
-        conversationId: "spaces/AAA:spaces/AAA/threads/T1",
-      }),
+      expect.objectContaining({ conversationId: "spaces/AAA" }),
     );
     const arg = botLoopMocks.recordChannelBotPairLoopAndCheckSuppression.mock.calls[0]?.[0] as
       | { conversationId?: string }
       | undefined;
     expect(arg?.conversationId).not.toMatch(/^agent:/);
+    expect(arg?.conversationId).not.toMatch(/:thread:/);
   });
 
-  it("falls back to space-only bot-loop conversationId in unthreaded spaces", async () => {
+  it("keeps space-only bot-loop conversationId in unthreaded spaces", async () => {
     const { core, runtime, account } = buildHarness();
     account.config.allowBots = true;
     account.config.botUser = "users/app";

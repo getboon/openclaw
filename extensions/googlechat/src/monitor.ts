@@ -119,12 +119,13 @@ function resolveGoogleChatBotLoopProtectionConfig(params: {
 // Google Chat delivers a `thread.name` for every message, but only THREADED
 // spaces give that name meaningful per-thread identity. In UNTHREADED /
 // GROUPED spaces (DMs, group chats) every message would otherwise become its
-// own session — that breaks conversation flow.
-function spaceSupportsThreading(space: {
-  spaceType?: string;
-  spaceThreadingState?: string;
-  type?: string;
-}): boolean {
+// own session — that breaks conversation flow. We require an *explicit*
+// positive signal (`spaceThreadingState === "THREADED_MESSAGES"` or legacy
+// `type === "ROOM"`) before suffixing — `spaceType === "SPACE"` alone is not
+// sufficient because GROUPED_MESSAGES spaces also report as SPACE.
+function spaceSupportsThreading(
+  space: Pick<GoogleChatSpace, "spaceType" | "spaceThreadingState" | "type">,
+): boolean {
   const threadingState = (space.spaceThreadingState ?? "").toUpperCase();
   if (threadingState === "THREADED_MESSAGES") {
     return true;
@@ -132,17 +133,17 @@ function spaceSupportsThreading(space: {
   if (threadingState === "GROUPED_MESSAGES" || threadingState === "UNTHREADED_MESSAGES") {
     return false;
   }
-  const spaceType = (space.spaceType ?? "").toUpperCase();
-  if (spaceType === "SPACE") {
-    return true;
-  }
-  if (spaceType === "DIRECT_MESSAGE" || spaceType === "GROUP_CHAT") {
-    return false;
-  }
+  // No threading-state signal — fall back to legacy `type === "ROOM"` (only
+  // emitted by rooms that supported threading at creation). Do NOT infer
+  // threading from `spaceType: "SPACE"` alone; GROUPED_MESSAGES is also SPACE.
   return (space.type ?? "").toUpperCase() === "ROOM";
 }
 
-function resolveGoogleChatInboundThreadName(event: GoogleChatEvent): string | undefined {
+// `event.thread.name` (event-level) sometimes carries the canonical identity
+// for app-created threads ahead of `message.thread.name`. We use the SAME
+// source for inbound session scoping AND outbound reply targeting to avoid a
+// split-brain where the agent thinks it's in thread A but replies to thread B.
+function resolveGoogleChatThreadName(event: GoogleChatEvent): string | undefined {
   return event.thread?.name?.trim() || event.message?.thread?.name?.trim() || undefined;
 }
 
@@ -233,10 +234,16 @@ async function processMessageWithPipeline(params: {
     return;
   }
   const isGroup = isGoogleChatGroupSpace(space);
-  const inboundThreadName = resolveGoogleChatInboundThreadName(event);
-  const threadName = spaceSupportsThreading(space) ? inboundThreadName : undefined;
-  // Native compound id matches Slack's `${channel}:${thread_ts}` debounce-key shape.
-  const botLoopConversationId = threadName ? `${spaceId}:${threadName}` : spaceId;
+  // Same source for inbound session scoping AND outbound reply targeting.
+  const inboundThreadName = resolveGoogleChatThreadName(event);
+  // Only suffix the session key when the space supports threading; outbound
+  // path still gets `inboundThreadName` so replies land in the right thread
+  // even in non-threaded spaces (Google Chat's REST API accepts it harmlessly).
+  const sessionThreadName = spaceSupportsThreading(space) ? inboundThreadName : undefined;
+  // Bot-loop conversationId is the native space id — matches Slack's
+  // `prepared.message.channel` shape (no thread suffix). Bot loops are rare
+  // enough that space-level scope is sufficient; per-thread suppression
+  // would diverge from peer-channel behavior without strong justification.
   const sender = message.sender ?? event.user;
   const senderId = sender?.name ?? "";
   const senderName = sender?.displayName ?? "";
@@ -289,7 +296,7 @@ async function processMessageWithPipeline(params: {
     senderId,
     appUserId,
     accountId: account.accountId,
-    conversationId: botLoopConversationId,
+    conversationId: spaceId,
     config: resolveGoogleChatBotLoopProtectionConfig({
       accountConfig: account.config.botLoopProtection,
       groupConfig: groupBotLoopProtection,
@@ -319,8 +326,10 @@ async function processMessageWithPipeline(params: {
   // conversations are not orphaned on deploy.
   const threadKeys = resolveThreadSessionKeys({
     baseSessionKey: route.sessionKey,
-    threadId: threadName,
+    threadId: sessionThreadName,
     parentSessionKey: route.sessionKey,
+    // Identity: Google Chat thread names are case-sensitive REST resource ids;
+    // do not lowercase (the helper's default normalizer would).
     normalizeThreadId: (id) => id,
   });
   const threadScopedSessionKey = threadKeys.sessionKey;
@@ -363,7 +372,6 @@ async function processMessageWithPipeline(params: {
     body: rawBody,
   });
 
-  const replyThreadName = isGroup ? message.thread?.name : undefined;
   const ctxPayload = core.channel.inbound.buildContext({
     channel: "googlechat",
     accountId: route.accountId,
@@ -379,7 +387,7 @@ async function processMessageWithPipeline(params: {
     conversation: {
       kind: isGroup ? "channel" : "direct",
       id: spaceId,
-      threadId: threadName,
+      threadId: sessionThreadName,
       label: fromLabel,
     },
     route: {
@@ -391,8 +399,8 @@ async function processMessageWithPipeline(params: {
     reply: {
       to: `googlechat:${spaceId}`,
       originatingTo: `googlechat:${spaceId}`,
-      replyToId: replyThreadName,
-      replyToIdFull: replyThreadName,
+      replyToId: inboundThreadName,
+      replyToIdFull: inboundThreadName,
     },
     message: {
       body,
@@ -446,7 +454,7 @@ async function processMessageWithPipeline(params: {
         account,
         space: spaceId,
         text: `_${botName} is typing..._`,
-        thread: replyThreadName,
+        thread: inboundThreadName,
       });
       typingMessageName = result?.messageName;
     } catch (err) {
@@ -525,7 +533,7 @@ export const testing = {
   processMessageWithPipeline,
   resolveGoogleChatBotLoopProtection,
   resolveGoogleChatBotLoopProtectionConfig,
-  resolveGoogleChatInboundThreadName,
+  resolveGoogleChatThreadName,
   shouldSuppressGoogleChatBotLoop,
   spaceSupportsThreading,
 };
