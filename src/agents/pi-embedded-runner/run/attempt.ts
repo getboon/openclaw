@@ -8,7 +8,7 @@ import { isAcpRuntimeSpawnAvailable } from "../../../acp/runtime/availability.js
 import { buildHierarchyReinforcementMessage } from "../../../auto-reply/handoff-summarizer.js";
 import { filterHeartbeatPairs } from "../../../auto-reply/heartbeat-filter.js";
 import { stripInboundMetadata } from "../../../auto-reply/reply/strip-inbound-meta.js";
-import { getRuntimeConfig } from "../../../config/config.js";
+import { getRuntimeConfig, type OpenClawConfig } from "../../../config/config.js";
 import { resolveStorePath } from "../../../config/sessions/paths.js";
 import {
   loadSessionStore,
@@ -361,7 +361,6 @@ import { resolveAttemptTranscriptPolicy } from "./attempt.transcript-policy.js";
 import { waitForCompactionRetryWithAggregateTimeout } from "./compaction-retry-aggregate-timeout.js";
 import {
   resolveRunTimeoutDuringCompaction,
-  resolveRunTimeoutWithCompactionGraceMs,
   selectCompactionTimeoutSnapshot,
   shouldFlagCompactionTimeout,
 } from "./compaction-timeout.js";
@@ -774,8 +773,32 @@ async function cancelQueuedSteeringMessage(
 
 export const __testing = {
   cancelQueuedSteeringMessage,
+  resolveEmbeddedAttemptSessionWriteLockOptions,
+  resolveAttemptStreamAuthProfileId,
   steerAndWaitForTranscriptCommit,
 };
+
+function resolveEmbeddedAttemptSessionWriteLockOptions(params: {
+  config?: OpenClawConfig;
+  compactionTimeoutMs: number;
+  env?: NodeJS.ProcessEnv;
+}): { timeoutMs: number; staleMs: number; maxHoldMs: number } {
+  // Bound embedded-attempt lock holds to the compaction window, not the full run timeout.
+  // With defaults this permits roughly 900s compaction time plus the shared 120s
+  // timeout grace before the watchdog releases a stuck live-process lock.
+  return resolveSessionWriteLockOptions(params.config, {
+    env: params.env,
+    maxHoldMsFallback: resolveSessionLockMaxHoldFromTimeout({
+      timeoutMs: params.compactionTimeoutMs,
+    }),
+  });
+}
+
+function resolveAttemptStreamAuthProfileId(
+  params: Pick<EmbeddedRunAttemptParams, "authProfileId" | "runtimePlan">,
+): string | undefined {
+  return params.runtimePlan?.auth.forwardedAuthProfileId;
+}
 
 async function steerAndWaitForTranscriptCommit(
   activeSession: EmbeddedPiActiveSessionSteerTarget,
@@ -2019,13 +2042,10 @@ export async function runEmbeddedAttempt(
     let systemPromptText = systemPromptOverride();
     prepStages.mark("system-prompt");
 
-    const sessionWriteLockOptions = resolveSessionWriteLockOptions(params.config, {
-      maxHoldMsFallback: resolveSessionLockMaxHoldFromTimeout({
-        timeoutMs: resolveRunTimeoutWithCompactionGraceMs({
-          runTimeoutMs: params.timeoutMs,
-          compactionTimeoutMs: resolveCompactionTimeoutMs(params.config),
-        }),
-      }),
+    const compactionTimeoutMs = resolveCompactionTimeoutMs(params.config);
+    const sessionWriteLockOptions = resolveEmbeddedAttemptSessionWriteLockOptions({
+      config: params.config,
+      compactionTimeoutMs,
     });
     const sessionLockController = await createEmbeddedAttemptSessionLockController({
       acquireSessionWriteLock,
