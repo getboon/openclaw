@@ -804,29 +804,31 @@ export function installPromptSubmissionLockRelease(params: {
   const wrappedStreamFn: PromptReleaseStreamFn = async (...args: unknown[]) => {
     await params.waitForSessionEvents(params.session);
     await params.releaseForPrompt();
+    let streamResult: unknown;
     let streamError: unknown;
     let streamThrew = false;
     try {
-      return await originalStreamFn(...args);
+      streamResult = await originalStreamFn(...args);
     } catch (err) {
       streamError = err;
       streamThrew = true;
-      throw err;
-    } finally {
-      try {
-        await params.reacquireAfterPrompt();
-      } catch (reacquireError) {
-        // If the stream itself already failed (e.g. a provider error) AND the
-        // session file changed while the prompt lock was released, prefer the
-        // original provider error — don't let the reacquire takeover error mask
-        // the real failure. Only surface the reacquire error when the stream
-        // succeeded.
-        if (!streamThrew) {
-          throw reacquireError;
-        }
-        void streamError;
+    }
+    // Always reacquire the prompt lock. If the stream itself already failed
+    // (e.g. a provider error) AND the session file changed while the lock was
+    // released, prefer the original provider error — don't let the reacquire
+    // takeover error mask the real failure. Only surface the reacquire error
+    // when the stream succeeded. (No throw inside finally — no-unsafe-finally.)
+    try {
+      await params.reacquireAfterPrompt();
+    } catch (reacquireError) {
+      if (!streamThrew) {
+        throw reacquireError;
       }
     }
+    if (streamThrew) {
+      throw streamError;
+    }
+    return streamResult;
   };
   wrappedStreamFn.__openclawSessionLockPromptReleaseInstalled = true;
   agent.streamFn = wrappedStreamFn;
