@@ -229,6 +229,30 @@ async function readSessionFileFenceSnapshot(
   }
 }
 
+function readSessionFilePrefixSync(params: {
+  sessionFile: string;
+  length: bigint;
+}): string | undefined {
+  if (params.length > MAX_SAFE_FILE_OFFSET) {
+    return undefined;
+  }
+  const length = Number(params.length);
+  if (length === 0) {
+    return "";
+  }
+  const buffer = Buffer.alloc(length);
+  const file = openSync(params.sessionFile, "r");
+  try {
+    const bytesRead = readSync(file, buffer, 0, length, 0);
+    if (bytesRead !== length) {
+      return undefined;
+    }
+  } finally {
+    closeSync(file);
+  }
+  return buffer.toString("utf8");
+}
+
 function sessionFenceAdvanceIsBenignSync(params: {
   sessionFile: string;
   previous: SessionFileFenceSnapshot | undefined;
@@ -239,6 +263,20 @@ function sessionFenceAdvanceIsBenignSync(params: {
     !params.current.exists ||
     !sameSessionFileIdentity(params.previous.fingerprint, params.current)
   ) {
+    return false;
+  }
+  // Fail closed unless we can prove the fenced prefix is byte-identical to the
+  // trusted snapshot. Otherwise a writer that rewrites the existing prefix AND
+  // appends a benign-looking (delivery-mirror/gateway-injected) line could be
+  // laundered as an owned advance, masking a genuine external takeover (#86572).
+  if (params.previous.text === undefined) {
+    return false;
+  }
+  const prefix = readSessionFilePrefixSync({
+    sessionFile: params.sessionFile,
+    length: params.previous.fingerprint.size,
+  });
+  if (prefix === undefined || prefix !== params.previous.text) {
     return false;
   }
   const text = readAppendedSessionFileTextSync({
@@ -766,10 +804,28 @@ export function installPromptSubmissionLockRelease(params: {
   const wrappedStreamFn: PromptReleaseStreamFn = async (...args: unknown[]) => {
     await params.waitForSessionEvents(params.session);
     await params.releaseForPrompt();
+    let streamError: unknown;
+    let streamThrew = false;
     try {
       return await originalStreamFn(...args);
+    } catch (err) {
+      streamError = err;
+      streamThrew = true;
+      throw err;
     } finally {
-      await params.reacquireAfterPrompt();
+      try {
+        await params.reacquireAfterPrompt();
+      } catch (reacquireError) {
+        // If the stream itself already failed (e.g. a provider error) AND the
+        // session file changed while the prompt lock was released, prefer the
+        // original provider error — don't let the reacquire takeover error mask
+        // the real failure. Only surface the reacquire error when the stream
+        // succeeded.
+        if (!streamThrew) {
+          throw reacquireError;
+        }
+        void streamError;
+      }
     }
   };
   wrappedStreamFn.__openclawSessionLockPromptReleaseInstalled = true;
