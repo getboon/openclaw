@@ -312,7 +312,7 @@ describe("acquireSessionWriteLock", () => {
 
   it("marks live lock payloads stale once they exceed max hold", () => {
     const nowMs = Date.now();
-    const inspected = testing.inspectLockPayloadForTest(
+    const inspected = __testing.inspectLockPayloadForTest(
       {
         pid: process.pid,
         createdAt: new Date(nowMs - 30_000).toISOString(),
@@ -329,7 +329,7 @@ describe("acquireSessionWriteLock", () => {
 
   it("keeps live lock payloads fresh until their recorded holder max hold expires", () => {
     const nowMs = Date.now();
-    const inspected = testing.inspectLockPayloadForTest(
+    const inspected = __testing.inspectLockPayloadForTest(
       {
         pid: process.pid,
         createdAt: new Date(nowMs - 30_000).toISOString(),

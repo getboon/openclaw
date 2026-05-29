@@ -7,6 +7,10 @@ import { resolveSessionTranscriptPathInDir } from "./paths.js";
 import { useTempSessionsFixture } from "./test-helpers.js";
 import { appendSessionTranscriptMessage } from "./transcript-append.js";
 import {
+  bindOwnedSessionTranscriptWrites,
+  withOwnedSessionTranscriptWrites,
+} from "./transcript-write-context.js";
+import {
   appendAssistantMessageToSessionTranscript,
   appendExactAssistantMessageToSessionTranscript,
   readLatestAssistantTextFromSessionTranscript,
