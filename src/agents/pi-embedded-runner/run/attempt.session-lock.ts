@@ -2,7 +2,6 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import { normalizeStringEntries } from "../../../shared/string-normalization.js";
 import { isSessionWriteLockTimeoutError } from "../../session-write-lock-error.js";
 import type { acquireSessionWriteLock } from "../../session-write-lock.js";
@@ -122,8 +121,6 @@ export type SessionFileFingerprint =
 const TRANSCRIPT_ONLY_OPENCLAW_ASSISTANT_MODELS = new Set(["delivery-mirror", "gateway-injected"]);
 const MAX_BENIGN_SESSION_FENCE_ADVANCE_BYTES = 1024 * 1024;
 const MAX_BENIGN_SESSION_FENCE_REWRITE_BYTES = 8 * 1024 * 1024;
-const MAX_BENIGN_SESSION_FENCE_REWRITE_RESULT_BYTES =
-  MAX_BENIGN_SESSION_FENCE_REWRITE_BYTES + MAX_BENIGN_SESSION_FENCE_ADVANCE_BYTES;
 const MAX_SAFE_FILE_OFFSET = BigInt(Number.MAX_SAFE_INTEGER);
 
 type SessionFileFenceSnapshot = {
@@ -157,10 +154,6 @@ function sameSessionFileIdentity(
   return Boolean(left?.exists && right.exists && left.dev === right.dev && left.ino === right.ino);
 }
 
-function splitSessionFileLines(text: string): string[] {
-  return normalizeStringEntries(text.split(/\r?\n/));
-}
-
 function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -184,101 +177,6 @@ function isTranscriptOnlyOpenClawAssistantLine(line: string): boolean {
   } catch {
     return false;
   }
-}
-
-function normalizeTranscriptEntryId(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
-}
-
-function omitRecordKeys(
-  record: Record<string, unknown>,
-  keys: Set<string>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(record)) {
-    if (!keys.has(key)) {
-      result[key] = value;
-    }
-  }
-  return result;
-}
-
-function lineMatchesLinearTranscriptMigration(params: {
-  previousLine: string;
-  currentLine: string;
-  expectedParentId: string | null;
-}): { ok: true; nextPreviousId?: string } | { ok: false } {
-  let previousParsed: unknown;
-  let currentParsed: unknown;
-  try {
-    previousParsed = JSON.parse(params.previousLine);
-    currentParsed = JSON.parse(params.currentLine);
-  } catch {
-    return params.previousLine === params.currentLine ? { ok: true } : { ok: false };
-  }
-  if (!isJsonRecord(previousParsed)) {
-    return params.previousLine === params.currentLine ? { ok: true } : { ok: false };
-  }
-  if (!isJsonRecord(currentParsed)) {
-    return { ok: false };
-  }
-  if (previousParsed.type === "session") {
-    return isDeepStrictEqual(
-      omitRecordKeys(previousParsed, new Set(["version"])),
-      omitRecordKeys(currentParsed, new Set(["version"])),
-    )
-      ? { ok: true }
-      : { ok: false };
-  }
-
-  const previousId = normalizeTranscriptEntryId(previousParsed.id);
-  const currentId = normalizeTranscriptEntryId(currentParsed.id);
-  if (previousId ? currentId !== previousId : !currentId) {
-    return { ok: false };
-  }
-  if (Object.hasOwn(previousParsed, "parentId")) {
-    if (!isDeepStrictEqual(previousParsed.parentId, currentParsed.parentId)) {
-      return { ok: false };
-    }
-  } else if (!isDeepStrictEqual(currentParsed.parentId, params.expectedParentId)) {
-    return { ok: false };
-  }
-
-  return isDeepStrictEqual(
-    omitRecordKeys(previousParsed, new Set(["id", "parentId"])),
-    omitRecordKeys(currentParsed, new Set(["id", "parentId"])),
-  )
-    ? { ok: true, nextPreviousId: currentId }
-    : { ok: false };
-}
-
-async function readAppendedSessionFileText(params: {
-  sessionFile: string;
-  previous: Extract<SessionFileFingerprint, { exists: true }>;
-  current: Extract<SessionFileFingerprint, { exists: true }>;
-}): Promise<string | undefined> {
-  if (params.current.size <= params.previous.size || params.previous.size > MAX_SAFE_FILE_OFFSET) {
-    return undefined;
-  }
-  const appendedBytes = params.current.size - params.previous.size;
-  if (
-    appendedBytes > BigInt(MAX_BENIGN_SESSION_FENCE_ADVANCE_BYTES) ||
-    appendedBytes > MAX_SAFE_FILE_OFFSET
-  ) {
-    return undefined;
-  }
-  const length = Number(appendedBytes);
-  const buffer = Buffer.alloc(length);
-  const file = await fs.open(params.sessionFile, "r");
-  try {
-    const { bytesRead } = await file.read(buffer, 0, length, Number(params.previous.size));
-    if (bytesRead !== length) {
-      return undefined;
-    }
-  } finally {
-    await file.close();
-  }
-  return buffer.toString("utf8");
 }
 
 function readAppendedSessionFileTextSync(params: {
@@ -331,30 +229,6 @@ async function readSessionFileFenceSnapshot(
   }
 }
 
-async function sessionFenceAdvanceIsBenign(params: {
-  sessionFile: string;
-  previous: SessionFileFenceSnapshot | undefined;
-  current: SessionFileFingerprint;
-}): Promise<boolean> {
-  if (
-    !params.previous?.fingerprint.exists ||
-    !params.current.exists ||
-    !sameSessionFileIdentity(params.previous.fingerprint, params.current)
-  ) {
-    return false;
-  }
-  const text = await readAppendedSessionFileText({
-    sessionFile: params.sessionFile,
-    previous: params.previous.fingerprint,
-    current: params.current,
-  });
-  if (!text?.endsWith("\n")) {
-    return false;
-  }
-  const lines = normalizeStringEntries(text.split("\n"));
-  return lines.length > 0 && lines.every(isTranscriptOnlyOpenClawAssistantLine);
-}
-
 function sessionFenceAdvanceIsBenignSync(params: {
   sessionFile: string;
   previous: SessionFileFenceSnapshot | undefined;
@@ -377,51 +251,6 @@ function sessionFenceAdvanceIsBenignSync(params: {
   }
   const lines = normalizeStringEntries(text.split("\n"));
   return lines.length > 0 && lines.every(isTranscriptOnlyOpenClawAssistantLine);
-}
-
-async function sessionFenceRewriteIsBenign(params: {
-  sessionFile: string;
-  previous: SessionFileFenceSnapshot | undefined;
-  current: SessionFileFingerprint;
-}): Promise<boolean> {
-  if (
-    !params.previous?.fingerprint.exists ||
-    !params.current.exists ||
-    !params.previous.text ||
-    !sameSessionFileIdentity(params.previous.fingerprint, params.current) ||
-    params.current.size > BigInt(MAX_BENIGN_SESSION_FENCE_REWRITE_RESULT_BYTES) ||
-    params.current.size > MAX_SAFE_FILE_OFFSET
-  ) {
-    return false;
-  }
-  let currentText: string;
-  try {
-    currentText = await fs.readFile(params.sessionFile, "utf8");
-  } catch {
-    return false;
-  }
-  if (!currentText.endsWith("\n")) {
-    return false;
-  }
-  const previousLines = splitSessionFileLines(params.previous.text);
-  const currentLines = splitSessionFileLines(currentText);
-  if (currentLines.length <= previousLines.length) {
-    return false;
-  }
-  let expectedParentId: string | null = null;
-  for (let index = 0; index < previousLines.length; index += 1) {
-    const lineMatch = lineMatchesLinearTranscriptMigration({
-      previousLine: previousLines[index] ?? "",
-      currentLine: currentLines[index] ?? "",
-      expectedParentId,
-    });
-    if (!lineMatch.ok) {
-      return false;
-    }
-    expectedParentId = lineMatch.nextPreviousId ?? expectedParentId;
-  }
-  const appendedLines = currentLines.slice(previousLines.length);
-  return appendedLines.every(isTranscriptOnlyOpenClawAssistantLine);
 }
 
 type OwnedSessionFileWrite = {
@@ -621,6 +450,7 @@ export type EmbeddedAttemptSessionLockController = {
   refreshAfterOwnedSessionWrite(): void;
   publishOwnedPostMessageWrite(beforeWrite: SessionFileFingerprint | undefined): void;
   reacquireAfterPrompt(): Promise<void>;
+  releaseHeldLockForAbort(): Promise<void>;
   waitForSessionEvents(session: unknown): Promise<void>;
   withSessionWriteLock<T>(
     run: () => Promise<T> | T,

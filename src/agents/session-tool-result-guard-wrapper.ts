@@ -121,7 +121,6 @@ export function guardSessionManager(
         : undefined,
     suppressNextUserMessagePersistence: opts?.suppressNextUserMessagePersistence,
     suppressTranscriptOnlyAssistantPersistence: opts?.suppressTranscriptOnlyAssistantPersistence,
-    suppressAssistantErrorPersistence: opts?.suppressAssistantErrorPersistence,
     onMessagePersisted: opts?.onMessagePersisted,
     beforeMessagePersist: opts?.beforeMessagePersist,
     onUserMessagePersisted: opts?.onUserMessagePersisted,
