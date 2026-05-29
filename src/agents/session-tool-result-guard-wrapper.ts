@@ -42,9 +42,6 @@ export function guardSessionManager(
       context: { beforeWriteSnapshot?: unknown },
     ) => void | Promise<void>;
     beforeMessagePersist?: () => unknown;
-    onAssistantErrorMessagePersisted?: (
-      message: Extract<AgentMessage, { role: "assistant" }>,
-    ) => void | Promise<void>;
   },
 ): GuardedSessionManager {
   if (typeof (sessionManager as GuardedSessionManager).flushPendingToolResults === "function") {

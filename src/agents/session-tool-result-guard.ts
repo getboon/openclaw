@@ -565,9 +565,6 @@ export function installSessionToolResultGuard(
     // earlier lifecycle checkpoints and the current append (see #86572 for
     // the session-takeover fence trust gate that consumes it).
     beforeMessagePersist?: () => unknown;
-    onAssistantErrorMessagePersisted?: (
-      message: Extract<AgentMessage, { role: "assistant" }>,
-    ) => void | Promise<void>;
   },
 ): {
   flushPendingToolResults: () => void;
