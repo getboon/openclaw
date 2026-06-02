@@ -1,0 +1,19 @@
+.github/workflows/claude-pr-review.yml
+  s_dcaebc0b6632f7::t_9b90ce588421cd 18-20,22-29,34-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "52af31452a724f36b0ac5b3b3e8d74792b52889e",
+  "prompts": {},
+  "sessions": {
+    "s_dcaebc0b6632f7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d31d10c0-3012-43a5-bd39-4540d6ad324c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
