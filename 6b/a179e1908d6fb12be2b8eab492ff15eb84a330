@@ -1,0 +1,22 @@
+extensions/sentry-monitor/src/register.ts
+  s_f5942d51f11f40::t_4a762ab8a253b2 55-61
+extensions/sentry-monitor/src/register.test.ts
+  ai_agent 117-118
+  s_f5942d51f11f40::t_9c250143157c44 113-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "6ba179e1908d6fb12be2b8eab492ff15eb84a330",
+  "prompts": {},
+  "sessions": {
+    "s_f5942d51f11f40": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70f58ca1-7327-4b99-a852-32ccdab2d1a3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
