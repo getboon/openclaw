@@ -1,0 +1,38 @@
+extensions/sentry-monitor/src/format.ts
+  s_f5942d51f11f40::t_834c1e2dc56586 49
+docs/gateway/sentry-monitor.md
+  s_f5942d51f11f40::t_6450ebc6aade1e 24
+src/plugins/contracts/boundary-invariants.test.ts
+  s_f5942d51f11f40::t_26534038da1284 24
+  s_f5942d51f11f40::t_63197850b3ea10 50-58
+extensions/sentry-monitor/src/dispatch.test.ts
+  s_f5942d51f11f40::t_2111ca56a480f0 54-56
+  s_f5942d51f11f40::t_1b51ebd3a48860 33-36
+extensions/sentry-monitor/src/format.test.ts
+  s_f5942d51f11f40::t_d4cf79a3bd02b8 18-22
+  s_f5942d51f11f40::t_cdb9782ddbd8b1 6
+config/knip.config.ts
+  s_f5942d51f11f40::t_50fac8ee25157c 45
+  s_f5942d51f11f40::t_474ece2fb6603b 68
+extensions/sentry-monitor/src/register.ts
+  s_f5942d51f11f40::t_06707c753707b9 29,65-71,73-103
+extensions/sentry-monitor/src/register.test.ts
+  s_f5942d51f11f40::t_cf93f5f3412b1d 65,70,75,82-83,90,93
+  s_f5942d51f11f40::t_3137fb2053e214 31,42,45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "26ab8f6e532ec78f0432945d39971cd1cb984d60",
+  "prompts": {},
+  "sessions": {
+    "s_f5942d51f11f40": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70f58ca1-7327-4b99-a852-32ccdab2d1a3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <awc.aliana@gmail.com>"
+    }
+  }
+}
