@@ -52,9 +52,13 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
     dsn,
     environment,
     release: typeof api.version === "string" ? api.version : undefined,
-    // Guard the untrusted config value: only a real number enables tracing;
-    // anything else (string, NaN, missing) falls back to 0 (errors only).
-    tracesSampleRate: typeof cfg.tracesSampleRate === "number" ? cfg.tracesSampleRate : 0,
+    // Guard the untrusted config value: only a finite number enables tracing;
+    // anything else (string, NaN, Infinity, missing) falls back to 0. Note
+    // `typeof NaN === "number"`, so the finite check is what rejects NaN.
+    tracesSampleRate:
+      typeof cfg.tracesSampleRate === "number" && Number.isFinite(cfg.tracesSampleRate)
+        ? cfg.tracesSampleRate
+        : 0,
     // Disable default integrations and selectively re-enable only the ones that
     // capture genuine process-level failures. Skips noisy auto-instrumentation
     // (Http, Console, Modules) that would ship every outbound fetch and

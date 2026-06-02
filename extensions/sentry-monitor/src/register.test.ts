@@ -110,8 +110,12 @@ describe("registerSentryMonitor", () => {
     expect(on).toHaveBeenCalledTimes(HOOK_NAMES.length);
   });
 
-  it("ignores a non-number tracesSampleRate and defaults to 0", () => {
-    const { api } = makeApi({ dsn: "https://abc@o1.ingest.sentry.io/5", tracesSampleRate: "0.5" });
+  it.each([
+    { label: "string", value: "0.5" },
+    { label: "NaN", value: Number.NaN },
+    { label: "Infinity", value: Number.POSITIVE_INFINITY },
+  ])("ignores a non-finite tracesSampleRate ($label) and defaults to 0", ({ value }) => {
+    const { api } = makeApi({ dsn: "https://abc@o1.ingest.sentry.io/5", tracesSampleRate: value });
     registerSentryMonitor(api);
     expect(vi.mocked(Sentry.init).mock.calls[0]?.[0]?.tracesSampleRate).toBe(0);
   });
