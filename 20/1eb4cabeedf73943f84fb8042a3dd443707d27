@@ -1,0 +1,70 @@
+extensions/sentry-monitor/src/register.test.ts
+  s_f5942d51f11f40::t_cf93f5f3412b1d 65,70,75,82-83,90,93
+  s_f5942d51f11f40::t_6d35d2e291046e 1-30,32-41,43-44,46-64,66-69,71-74,76-81,84-89,91-92,94-104
+  s_f5942d51f11f40::t_3137fb2053e214 31,42,45
+extensions/sentry-monitor/src/captures.ts
+  s_f5942d51f11f40::t_d57842aa2319da 38,88,104,120,146,178
+  s_f5942d51f11f40::t_46044c3674af35 1-8,18-37,39-87,89-103,105-119,121-145,147-177,179-199
+  s_f5942d51f11f40::t_207b0e5516465e 9-17
+docs/gateway/sentry-monitor.md
+  s_f5942d51f11f40::t_6450ebc6aade1e 24
+  s_f5942d51f11f40::t_6a0858be5d3bd4 1-23,25-68
+package.json
+  s_f5942d51f11f40::t_6caa693505aa95 1779
+extensions/sentry-monitor/index.ts
+  s_f5942d51f11f40::t_4dc0139e16955c 1,3-8,10
+  s_f5942d51f11f40::t_c0315d95e07a02 2,9
+extensions/sentry-monitor/src/dispatch.ts
+  s_f5942d51f11f40::t_3bb48970c0f979 1-34
+src/plugins/contracts/boundary-invariants.test.ts
+  s_f5942d51f11f40::t_63197850b3ea10 50-58
+  s_f5942d51f11f40::t_26534038da1284 24
+extensions/sentry-monitor/src/dispatch.test.ts
+  s_f5942d51f11f40::t_8ea4e6353424b2 6-10
+  s_f5942d51f11f40::t_1b51ebd3a48860 33-36
+  s_f5942d51f11f40::t_2111ca56a480f0 54-56
+  s_f5942d51f11f40::t_ce16ceed72686a 1-5,11-32,37-53,57-58
+config/knip.config.ts
+  s_f5942d51f11f40::t_50fac8ee25157c 45
+  s_f5942d51f11f40::t_474ece2fb6603b 68
+extensions/sentry-monitor/src/format.test.ts
+  s_f5942d51f11f40::t_d4cf79a3bd02b8 18-22
+  s_f5942d51f11f40::t_cdb9782ddbd8b1 6
+  s_f5942d51f11f40::t_aef7093014c47f 1
+  s_f5942d51f11f40::t_0b680185d53ce6 3-5,7-17,23-84
+docs/docs.json
+  s_f5942d51f11f40::t_eb95126e6d230c 1514
+extensions/sentry-monitor/src/format.ts
+  s_f5942d51f11f40::t_ea52f736822b2b 4
+  s_f5942d51f11f40::t_5432edae5f4699 1-3,5-21,23-48,50-64
+  s_f5942d51f11f40::t_386d45f5bb3790 22
+  s_f5942d51f11f40::t_834c1e2dc56586 49
+.github/labeler.yml
+  s_f5942d51f11f40::t_c20715649cb2ed 55-59
+extensions/sentry-monitor/package.json
+  s_f5942d51f11f40::t_3b38971a1b0aaa 1-13
+extensions/sentry-monitor/openclaw.plugin.json
+  s_f5942d51f11f40::t_709911d438c5cf 1-27
+extensions/sentry-monitor/src/register.ts
+  s_f5942d51f11f40::t_06707c753707b9 29,65-71,73-103
+  s_f5942d51f11f40::t_4f8f6987a8c3fb 1-28,30-64,72,104-113
+extensions/sentry-monitor/src/captures.test.ts
+  s_f5942d51f11f40::t_905b2d44e828aa 10-103,105-121,123-161,163-183,185-209
+  s_f5942d51f11f40::t_aef7093014c47f 104,122,162,184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "201eb4cabeedf73943f84fb8042a3dd443707d27",
+  "prompts": {},
+  "sessions": {
+    "s_f5942d51f11f40": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70f58ca1-7327-4b99-a852-32ccdab2d1a3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <awc.aliana@gmail.com>"
+    }
+  }
+}
