@@ -30,10 +30,10 @@ describe("dispatchCapture", () => {
     dispatchCapture(client, capture);
     expect(client.captureMessage).not.toHaveBeenCalled();
     expect(client.captureException).toHaveBeenCalledOnce();
-    const [error, scope] = client.captureException.mock.calls[0]!;
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe("boom");
-    expect(scope).toEqual({
+    const call = client.captureException.mock.lastCall;
+    expect(call?.[0]).toBeInstanceOf(Error);
+    expect((call?.[0] as Error).message).toBe("boom");
+    expect(call?.[1]).toEqual({
       tags: { hook: "model_call_ended" },
       contexts: { run: { run_id: "r1" } },
       extra: { duration_ms: 5 },
@@ -51,8 +51,8 @@ describe("dispatchCapture", () => {
     dispatchCapture(client, capture);
     expect(client.captureException).not.toHaveBeenCalled();
     expect(client.captureMessage).toHaveBeenCalledOnce();
-    const [message, scope] = client.captureMessage.mock.calls[0]!;
-    expect(message).toBe("session_end reason=unknown");
-    expect(scope).toMatchObject({ level: "warning", tags: { hook: "session_end" } });
+    const call = client.captureMessage.mock.lastCall;
+    expect(call?.[0]).toBe("session_end reason=unknown");
+    expect(call?.[1]).toMatchObject({ level: "warning", tags: { hook: "session_end" } });
   });
 });

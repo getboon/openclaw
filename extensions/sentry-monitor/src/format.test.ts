@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { describeModelCallError, pruneTags, runContext, safe, stringifyErr } from "./format.js";
 
 describe("pruneTags", () => {
-  it("drops undefined, null, and empty values and stringifies the rest", () => {
+  it("drops undefined, null, and empty values and keeps the rest", () => {
     expect(
       pruneTags({
         hook: "model_call_ended",
@@ -15,8 +15,11 @@ describe("pruneTags", () => {
     ).toEqual({ hook: "model_call_ended", provider: "anthropic" });
   });
 
-  it("coerces non-string values to strings", () => {
-    expect(pruneTags({ count: 3 as unknown as string })).toEqual({ count: "3" });
+  it("keeps present string values verbatim", () => {
+    expect(pruneTags({ outcome: "error", reason: "stale" })).toEqual({
+      outcome: "error",
+      reason: "stale",
+    });
   });
 });
 

@@ -46,7 +46,7 @@ export function pruneTags(tags: Record<string, string | undefined>): Record<stri
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(tags)) {
     if (v !== undefined && v !== null && v !== "") {
-      out[k] = String(v);
+      out[k] = v;
     }
   }
   return out;

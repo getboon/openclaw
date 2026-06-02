@@ -21,6 +21,7 @@ Set the Sentry DSN via one of:
 
 - **Env var:** `BOON_SENTRY_DSN=https://<key>@<org>.ingest.sentry.io/<project>`
 - **Plugin config** in `~/.openclaw/openclaw.json`:
+
   ```json5
   {
     plugins: {

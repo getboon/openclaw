@@ -9,7 +9,6 @@ import {
   buildModelCallEndedCapture,
   buildSessionEndCapture,
   buildSubagentEndedCapture,
-  type SentryCapture,
 } from "./captures.js";
 import { dispatchCapture } from "./dispatch.js";
 import { safe } from "./format.js";
@@ -27,16 +26,8 @@ type MonitorConfig = {
 // stubbing the whole host API.
 export type SentryMonitorApi = Pick<
   OpenClawPluginApi,
-  "pluginConfig" | "version" | "logger" | "registerHook" | "lifecycle"
+  "pluginConfig" | "version" | "logger" | "on" | "lifecycle"
 >;
-
-// Lifecycle hook payloads originate from the core hook dispatcher, a trusted
-// in-process producer with declared payload shapes. We coerce the opaque hook
-// event to its declared SDK type at this single boundary rather than
-// re-validating every field on a hot path.
-function coerceHookEvent<E>(raw: unknown): E {
-  return raw as E;
-}
 
 export function registerSentryMonitor(api: SentryMonitorApi): void {
   const cfg = (api.pluginConfig ?? {}) as MonitorConfig;
@@ -71,25 +62,45 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
     `${PLUGIN_ID}: Sentry initialized (environment=${host}${api.version ? `, release=${api.version}` : ""})`,
   );
 
-  // Wire one error-bearing hook to its pure capture builder. The builder
-  // decides whether the event warrants a capture (returns null to ignore);
-  // dispatchCapture forwards non-null descriptors to Sentry. safe() guards the
-  // whole body so a reporting bug can never take down the host gateway.
-  const wire = <E>(hook: string, build: (event: E, host: string) => SentryCapture | null) => {
-    api.registerHook(hook, (rawEvent) => {
-      safe(api.logger, PLUGIN_ID, hook, () => {
-        dispatchCapture(Sentry, build(coerceHookEvent<E>(rawEvent), host));
-      });
+  // Typed lifecycle subscriptions. api.on supplies a payload already typed per
+  // hook name, so each builder receives its exact event shape with no cast.
+  // safe() guards every handler so a reporting bug can never take down the host
+  // gateway; builders return null for events that are not error-bearing.
+  api.on("model_call_ended", (event) => {
+    safe(api.logger, PLUGIN_ID, "model_call_ended", () => {
+      dispatchCapture(Sentry, buildModelCallEndedCapture(event, host));
     });
-  };
-
-  wire("model_call_ended", buildModelCallEndedCapture);
-  wire("agent_end", buildAgentEndCapture);
-  wire("after_tool_call", buildAfterToolCallCapture);
-  wire("message_sent", buildMessageSentCapture);
-  wire("subagent_ended", buildSubagentEndedCapture);
-  wire("cron_changed", buildCronChangedCapture);
-  wire("session_end", buildSessionEndCapture);
+  });
+  api.on("agent_end", (event) => {
+    safe(api.logger, PLUGIN_ID, "agent_end", () => {
+      dispatchCapture(Sentry, buildAgentEndCapture(event, host));
+    });
+  });
+  api.on("after_tool_call", (event) => {
+    safe(api.logger, PLUGIN_ID, "after_tool_call", () => {
+      dispatchCapture(Sentry, buildAfterToolCallCapture(event, host));
+    });
+  });
+  api.on("message_sent", (event) => {
+    safe(api.logger, PLUGIN_ID, "message_sent", () => {
+      dispatchCapture(Sentry, buildMessageSentCapture(event, host));
+    });
+  });
+  api.on("subagent_ended", (event) => {
+    safe(api.logger, PLUGIN_ID, "subagent_ended", () => {
+      dispatchCapture(Sentry, buildSubagentEndedCapture(event, host));
+    });
+  });
+  api.on("cron_changed", (event) => {
+    safe(api.logger, PLUGIN_ID, "cron_changed", () => {
+      dispatchCapture(Sentry, buildCronChangedCapture(event, host));
+    });
+  });
+  api.on("session_end", (event) => {
+    safe(api.logger, PLUGIN_ID, "session_end", () => {
+      dispatchCapture(Sentry, buildSessionEndCapture(event, host));
+    });
+  });
 
   // Flush buffered Sentry events before the gateway exits.
   api.lifecycle.registerRuntimeLifecycle({

@@ -28,7 +28,7 @@ const HOOK_NAMES = [
 ];
 
 function makeApi(pluginConfig?: Record<string, unknown>) {
-  const registerHook = vi.fn<SentryMonitorApi["registerHook"]>();
+  const on = vi.fn<SentryMonitorApi["on"]>();
   const registerRuntimeLifecycle =
     vi.fn<SentryMonitorApi["lifecycle"]["registerRuntimeLifecycle"]>();
   const warn = vi.fn<(message: string) => void>();
@@ -39,10 +39,10 @@ function makeApi(pluginConfig?: Record<string, unknown>) {
     pluginConfig,
     version: "1.2.3",
     logger: { info, warn, error, debug },
-    registerHook,
+    on,
     lifecycle: { registerRuntimeLifecycle },
   };
-  return { api, registerHook, registerRuntimeLifecycle, warn, info };
+  return { api, on, registerRuntimeLifecycle, warn, info };
 }
 
 describe("registerSentryMonitor", () => {
@@ -62,35 +62,35 @@ describe("registerSentryMonitor", () => {
   });
 
   it("stays inactive when no DSN is configured: warns, inits nothing, registers nothing", () => {
-    const { api, registerHook, registerRuntimeLifecycle, warn } = makeApi();
+    const { api, on, registerRuntimeLifecycle, warn } = makeApi();
     registerSentryMonitor(api);
     expect(warn).toHaveBeenCalledOnce();
     expect(warn.mock.calls[0]?.[0]).toContain("plugin inactive");
     expect(Sentry.init).not.toHaveBeenCalled();
-    expect(registerHook).not.toHaveBeenCalled();
+    expect(on).not.toHaveBeenCalled();
     expect(registerRuntimeLifecycle).not.toHaveBeenCalled();
   });
 
   it("activates from a plugin-config dsn: inits Sentry and registers all seven hooks plus flush", () => {
-    const { api, registerHook, registerRuntimeLifecycle, info } = makeApi({
+    const { api, on, registerRuntimeLifecycle, info } = makeApi({
       dsn: "https://abc@o1.ingest.sentry.io/1",
     });
     registerSentryMonitor(api);
 
     expect(Sentry.init).toHaveBeenCalledOnce();
     expect(info).toHaveBeenCalledOnce();
-    expect(registerHook).toHaveBeenCalledTimes(HOOK_NAMES.length);
-    expect(registerHook.mock.calls.map((call) => call[0])).toEqual(HOOK_NAMES);
+    expect(on).toHaveBeenCalledTimes(HOOK_NAMES.length);
+    expect(on.mock.calls.map((call) => call[0])).toEqual(HOOK_NAMES);
     expect(registerRuntimeLifecycle).toHaveBeenCalledOnce();
     expect(registerRuntimeLifecycle.mock.calls[0]?.[0]?.id).toBe(`${PLUGIN_ID}/sentry-flush`);
   });
 
   it("activates from the BOON_SENTRY_DSN env var when no plugin-config dsn is set", () => {
     process.env.BOON_SENTRY_DSN = "https://abc@o1.ingest.sentry.io/2";
-    const { api, registerHook } = makeApi();
+    const { api, on } = makeApi();
     registerSentryMonitor(api);
     expect(Sentry.init).toHaveBeenCalledOnce();
-    expect(registerHook).toHaveBeenCalledTimes(HOOK_NAMES.length);
+    expect(on).toHaveBeenCalledTimes(HOOK_NAMES.length);
   });
 
   it("passes the resolved environment and release into Sentry.init", () => {
