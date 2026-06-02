@@ -101,4 +101,51 @@ describe("registerSentryMonitor", () => {
     expect(initArg?.release).toBe("1.2.3");
     expect(initArg?.tracesSampleRate).toBe(0);
   });
+
+  it("falls through an empty-string config dsn to the env var (|| not ??)", () => {
+    process.env.BOON_SENTRY_DSN = "https://abc@o1.ingest.sentry.io/4";
+    const { api, on } = makeApi({ dsn: "" });
+    registerSentryMonitor(api);
+    expect(Sentry.init).toHaveBeenCalledOnce();
+    expect(on).toHaveBeenCalledTimes(HOOK_NAMES.length);
+  });
+
+  it("ignores a non-number tracesSampleRate and defaults to 0", () => {
+    const { api } = makeApi({ dsn: "https://abc@o1.ingest.sentry.io/5", tracesSampleRate: "0.5" });
+    registerSentryMonitor(api);
+    expect(vi.mocked(Sentry.init).mock.calls[0]?.[0]?.tracesSampleRate).toBe(0);
+  });
+
+  it("wires each hook to its builder: an errored event dispatches, a healthy one does not", () => {
+    const { api, on } = makeApi({ dsn: "https://abc@o1.ingest.sentry.io/6" });
+    registerSentryMonitor(api);
+    const fire = (name: string, event: unknown) => {
+      const handler = on.mock.calls.find((call) => call[0] === name)?.[1];
+      expect(handler).toBeDefined();
+      (handler as (e: unknown, ctx: unknown) => void)(event, undefined);
+    };
+    fire("model_call_ended", {
+      outcome: "error",
+      provider: "p",
+      model: "m",
+      runId: "r",
+      callId: "c",
+      durationMs: 1,
+    });
+    expect(Sentry.captureException).toHaveBeenCalledOnce();
+    fire("session_end", { sessionId: "s", messageCount: 1, reason: "unknown" });
+    expect(Sentry.captureMessage).toHaveBeenCalledOnce();
+    fire("agent_end", { messages: [], success: true });
+    expect(Sentry.captureException).toHaveBeenCalledOnce(); // healthy turn is ignored
+  });
+
+  it("flushes Sentry with a 2s timeout on cleanup", async () => {
+    const { api, registerRuntimeLifecycle } = makeApi({
+      dsn: "https://abc@o1.ingest.sentry.io/7",
+    });
+    registerSentryMonitor(api);
+    const registration = registerRuntimeLifecycle.mock.calls[0]?.[0];
+    await registration?.cleanup?.({ reason: "restart" });
+    expect(Sentry.close).toHaveBeenCalledWith(2000);
+  });
 });

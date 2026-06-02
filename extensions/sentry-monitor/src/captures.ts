@@ -147,13 +147,20 @@ export function buildCronChangedCapture(
   host: string,
 ): SentryCapture | null {
   const hasRunError = event.status === "error" && !!event.error;
-  const hasDeliveryError = !!event.deliveryError;
-  if (!hasRunError && !hasDeliveryError) {
+  // A run can succeed yet have its output silently dropped; "not-delivered"
+  // is a failure even when no deliveryError string is attached.
+  const hasDeliveryFailure = event.deliveryStatus === "not-delivered" || !!event.deliveryError;
+  if (!hasRunError && !hasDeliveryFailure) {
     return null;
   }
   return {
     kind: "exception",
-    message: event.error ?? event.deliveryError ?? `cron_changed status=${event.status}`,
+    // `||` so an empty error string falls through to the delivery error / a
+    // descriptive fallback rather than producing a blank Error("").
+    message:
+      event.error ||
+      event.deliveryError ||
+      `cron_changed status=${event.status ?? "unknown"} delivery=${event.deliveryStatus ?? "unknown"}`,
     tags: pruneTags({
       hook: "cron_changed",
       host,
@@ -162,11 +169,12 @@ export function buildCronChangedCapture(
       delivery_status: event.deliveryStatus,
     }),
     contexts: { run: runContext(event.runId, event.sessionId) },
+    // `summary` is intentionally omitted: it is free-form cron run output
+    // (content), and this plugin ships structured metadata only.
     extra: {
       job_id: event.jobId,
       agent_id: event.agentId,
       duration_ms: event.durationMs,
-      summary: event.summary,
       delivery_error: event.deliveryError,
       model: event.model,
       provider: event.provider,

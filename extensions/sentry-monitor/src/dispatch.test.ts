@@ -40,19 +40,26 @@ describe("dispatchCapture", () => {
     });
   });
 
-  it("routes message captures to captureMessage and threads the level", () => {
+  it("routes message captures to captureMessage and forwards level/tags/contexts/extra", () => {
     const client = fakeClient();
     const capture: SentryCapture = {
       kind: "message",
       message: "session_end reason=unknown",
       level: "warning",
       tags: { hook: "session_end" },
+      contexts: { run: { run_id: "r2" } },
+      extra: { message_count: 3 },
     };
     dispatchCapture(client, capture);
     expect(client.captureException).not.toHaveBeenCalled();
     expect(client.captureMessage).toHaveBeenCalledOnce();
     const call = client.captureMessage.mock.lastCall;
     expect(call?.[0]).toBe("session_end reason=unknown");
-    expect(call?.[1]).toMatchObject({ level: "warning", tags: { hook: "session_end" } });
+    expect(call?.[1]).toEqual({
+      level: "warning",
+      tags: { hook: "session_end" },
+      contexts: { run: { run_id: "r2" } },
+      extra: { message_count: 3 },
+    });
   });
 });

@@ -177,6 +177,36 @@ describe("buildCronChangedCapture", () => {
     const capture = buildCronChangedCapture({ ...base, deliveryError: "post failed" }, HOST);
     expect(capture?.kind).toBe("exception");
     expect(capture?.message).toBe("post failed");
+    expect(capture?.tags.delivery_status).toBeUndefined();
+    expect(capture?.extra?.delivery_error).toBe("post failed");
+  });
+
+  it("captures a not-delivered status even with no error string (dropped output)", () => {
+    const capture = buildCronChangedCapture(
+      { ...base, status: "ok", deliveryStatus: "not-delivered" },
+      HOST,
+    );
+    expect(capture?.kind).toBe("exception");
+    expect(capture?.tags.delivery_status).toBe("not-delivered");
+    expect(capture?.message).toBe("cron_changed status=ok delivery=not-delivered");
+  });
+
+  it("ignores benign delivery statuses", () => {
+    expect(
+      buildCronChangedCapture({ ...base, status: "ok", deliveryStatus: "not-requested" }, HOST),
+    ).toBeNull();
+    expect(
+      buildCronChangedCapture({ ...base, status: "ok", deliveryStatus: "delivered" }, HOST),
+    ).toBeNull();
+  });
+
+  it("never ships the free-form run summary as content", () => {
+    const capture = buildCronChangedCapture(
+      { ...base, status: "error", error: "boom", summary: "customer X owes $5000" },
+      HOST,
+    );
+    expect(capture?.extra).not.toHaveProperty("summary");
+    expect(JSON.stringify(capture)).not.toContain("customer X");
   });
 });
 

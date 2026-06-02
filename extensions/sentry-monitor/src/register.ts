@@ -31,7 +31,10 @@ export type SentryMonitorApi = Pick<
 
 export function registerSentryMonitor(api: SentryMonitorApi): void {
   const cfg = (api.pluginConfig ?? {}) as MonitorConfig;
-  const dsn = cfg.dsn ?? process.env.BOON_SENTRY_DSN;
+  // Use `||` (not `??`) so an empty-string `dsn` in config — a common
+  // documented-but-unset state — falls through to the env var instead of
+  // shadowing it and silently disabling the plugin.
+  const dsn = cfg.dsn || process.env.BOON_SENTRY_DSN;
   if (!dsn) {
     api.logger.warn(
       `${PLUGIN_ID}: BOON_SENTRY_DSN unset and no plugin-config dsn; plugin inactive`,
@@ -39,12 +42,14 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
     return;
   }
 
-  const host = cfg.environment ?? os.hostname();
+  const host = cfg.environment || os.hostname();
   Sentry.init({
     dsn,
     environment: host,
     release: typeof api.version === "string" ? api.version : undefined,
-    tracesSampleRate: cfg.tracesSampleRate ?? 0,
+    // Guard the untrusted config value: only a real number enables tracing;
+    // anything else (string, NaN, missing) falls back to 0 (errors only).
+    tracesSampleRate: typeof cfg.tracesSampleRate === "number" ? cfg.tracesSampleRate : 0,
     // Disable default integrations and selectively re-enable only the ones that
     // capture genuine process-level failures. Skips noisy auto-instrumentation
     // (Http, Console, Modules) that would ship every outbound fetch and
