@@ -1,0 +1,13 @@
+{
+  "name": "@openclaw/sentry-monitor",
+  "version": "2026.5.18",
+  "type": "module",
+  "dependencies": {
+    "@sentry/node": "8.45.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
