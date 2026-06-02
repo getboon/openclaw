@@ -1,0 +1,29 @@
+.github/workflows/codeql-android-critical-security.yml
+  s_f5942d51f11f40::t_70e7afa357dc77 23
+.github/workflows/codeql-macos-critical-security.yml
+  s_f5942d51f11f40::t_70e7afa357dc77 23
+.github/workflows/opengrep-precise-full.yml
+  s_f5942d51f11f40::t_70e7afa357dc77 24
+.github/workflows/codeql.yml
+  s_f5942d51f11f40::t_70e7afa357dc77 49,54,59,64,69,74
+.github/workflows/opengrep-precise.yml
+  s_f5942d51f11f40::t_70e7afa357dc77 40
+.github/workflows/codeql-critical-quality.yml
+  s_f5942d51f11f40::t_70e7afa357dc77 152,321,344,367,390,413,469,492,515,538,561,584,606,628,651,674
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "b307843c54201cc754a486fe2144994b7003f7fb",
+  "prompts": {},
+  "sessions": {
+    "s_f5942d51f11f40": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70f58ca1-7327-4b99-a852-32ccdab2d1a3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
