@@ -15,16 +15,29 @@ concurrency:
 
 jobs:
   review:
-    # Auto-review new non-draft PRs, and re-run on demand via a `/cr` (exact) or
-    # `/claude-review` comment from a human. Skip PRs opened by claude[bot]: those
-    # are mechanical bot PRs that don't warrant a full review and would otherwise
+    # Auto-review new non-draft PRs, and re-run on demand via a `/cr` or
+    # `/claude-review` comment. Skip PRs opened by claude[bot]: those are
+    # mechanical bot PRs that don't warrant a full review and would otherwise
     # trip the action's non-human-actor guard.
+    #
+    # The comment path needs two guards the PR-open path does not. This repo is
+    # public and issue_comment always runs in the base repo *with secrets*
+    # regardless of commenter (unlike fork pull_request events, which get no
+    # secret), so restrict /cr to trusted roles or any drive-by user could spend
+    # the ANTHROPIC_API_KEY budget. Match commands exactly (or `cmd `-prefixed
+    # to allow trailing args) so a comment merely mentioning `/claude-review`
+    # doesn't fire a run.
     if: |
       (github.event_name == 'pull_request' && github.event.pull_request.draft == false &&
        github.event.pull_request.user.login != 'claude[bot]') ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
-       (github.event.comment.body == '/cr' || contains(github.event.comment.body, '/claude-review')) &&
-       github.event.comment.user.type != 'Bot')
+       github.event.comment.user.type != 'Bot' &&
+       (github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.author_association == 'MEMBER' ||
+        github.event.comment.author_association == 'COLLABORATOR') &&
+       (github.event.comment.body == '/cr' || github.event.comment.body == '/claude-review' ||
+        startsWith(github.event.comment.body, '/cr ') ||
+        startsWith(github.event.comment.body, '/claude-review ')))
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
