@@ -1,0 +1,64 @@
+extensions/sentry-monitor/src/format.ts
+  s_f5942d51f11f40::t_5432edae5f4699 1-3,5-21,23-64
+  s_f5942d51f11f40::t_ea52f736822b2b 4
+  s_f5942d51f11f40::t_386d45f5bb3790 22
+package.json
+  s_f5942d51f11f40::t_6caa693505aa95 1779
+docs/gateway/sentry-monitor.md
+  ai_agent 46-55
+  s_f5942d51f11f40::t_6a0858be5d3bd4 1-45,56-67
+extensions/sentry-monitor/src/register.ts
+  s_f5942d51f11f40::t_4f8f6987a8c3fb 1-44,48-102
+  ai_agent 45-47
+extensions/sentry-monitor/package.json
+  s_f5942d51f11f40::t_3b38971a1b0aaa 1-13
+pnpm-lock.yaml
+  ai_agent 37-42,96-98,650,1369-1374,1929,3267-3274,3285-3290,3297-3308,3381-3524,3531-3542,3573-3582,3607-3612,3625-3632,3637-3642,3927-3929,4064-4081,4459-4461,4516-4518,4531-4536,4555-4560,4893-4896,5088-5090,5560-5562,5783-5785,6722-6732,6788-6803,7011-7014,7152-7154,7796-7799,9805-9812,9821-9824,9829-9838,9950-10157,10167-10190,10225-10232,10284-10290,10305-10308,10311-10315,10471-10478,10570-10620,11095-11098,11160-11163,11178-11187,11205-11210,11730-11731,12231-12232,12538-12544,13701-13712,13765-13774,14036-14043,14229-14230,14810
+extensions/sentry-monitor/src/format.test.ts
+  s_f5942d51f11f40::t_aef7093014c47f 1
+  ai_agent 2,25-31,35-37
+  s_f5942d51f11f40::t_0b680185d53ce6 3-24,32-34,38-81
+extensions/sentry-monitor/openclaw.plugin.json
+  s_f5942d51f11f40::t_709911d438c5cf 1-27
+extensions/sentry-monitor/src/dispatch.ts
+  s_f5942d51f11f40::t_3bb48970c0f979 1-34
+extensions/sentry-monitor/index.ts
+  s_f5942d51f11f40::t_c0315d95e07a02 2,9
+  s_f5942d51f11f40::t_4dc0139e16955c 1,3-8,10
+.github/labeler.yml
+  s_f5942d51f11f40::t_c20715649cb2ed 55-59
+docs/docs.json
+  s_f5942d51f11f40::t_eb95126e6d230c 1514
+extensions/sentry-monitor/src/captures.ts
+  s_f5942d51f11f40::t_46044c3674af35 1-8,18-37,39-67,72-87,89-103,105-119,121-145,147-177,179-199
+  s_f5942d51f11f40::t_207b0e5516465e 9-17
+  s_f5942d51f11f40::t_d57842aa2319da 38,88,104,120,146,178
+  ai_agent 68-71
+extensions/sentry-monitor/src/captures.test.ts
+  s_f5942d51f11f40::t_905b2d44e828aa 10-22,26-43,50-75,83-87,93-103,105-121,123-137,143-161,163-170,174-183,185,198-209
+  s_f5942d51f11f40::t_aef7093014c47f 104,122,162,184
+  ai_agent 1-9,23-25,44-49,76-82,88-92,138-142,171-173,186-197
+extensions/sentry-monitor/src/dispatch.test.ts
+  s_f5942d51f11f40::t_c9553c99a47305 33
+  s_f5942d51f11f40::t_ca7d77026ae85f 54
+  s_f5942d51f11f40::t_ce16ceed72686a 1-5,11-32,34-53,55-58
+  s_f5942d51f11f40::t_8ea4e6353424b2 6-10
+extensions/sentry-monitor/src/register.test.ts
+  s_f5942d51f11f40::t_6d35d2e291046e 1-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "e0a8eeeffb6b855e0ae56ffbdb8ca49ff6ef7bbd",
+  "prompts": {},
+  "sessions": {
+    "s_f5942d51f11f40": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70f58ca1-7327-4b99-a852-32ccdab2d1a3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <awc.aliana@gmail.com>"
+    }
+  }
+}
