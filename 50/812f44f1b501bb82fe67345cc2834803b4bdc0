@@ -1,0 +1,29 @@
+extensions/sentry-monitor/src/captures.ts
+  s_f5942d51f11f40::t_12d4cd2b694671 149-152
+extensions/sentry-monitor/package.json
+  s_f5942d51f11f40::t_328ed899cb3e7b 4,9-10
+pnpm-lock.yaml
+  ai_agent 1374-1377
+extensions/sentry-monitor/src/register.ts
+  s_f5942d51f11f40::t_13bb219b2c56ca 45-50,53
+  s_f5942d51f11f40::t_e60680c7c67f99 81,86,91,96,101,106,111
+  s_f5942d51f11f40::t_c196ac692bfc95 72
+extensions/sentry-monitor/src/captures.test.ts
+  s_f5942d51f11f40::t_6ca03994179f64 169-172
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "50812f44f1b501bb82fe67345cc2834803b4bdc0",
+  "prompts": {},
+  "sessions": {
+    "s_f5942d51f11f40": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70f58ca1-7327-4b99-a852-32ccdab2d1a3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
