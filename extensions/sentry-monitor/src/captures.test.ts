@@ -166,8 +166,10 @@ describe("buildCronChangedCapture", () => {
     expect(buildCronChangedCapture({ ...base, action: "added" }, HOST)).toBeNull();
   });
 
-  it("requires both status=error AND an error string for a run error", () => {
-    expect(buildCronChangedCapture({ ...base, status: "error" }, HOST)).toBeNull();
+  it("captures a run error even when the error text is missing", () => {
+    expect(buildCronChangedCapture({ ...base, status: "error" }, HOST)?.message).toBe(
+      "cron_changed status=error delivery=unknown",
+    );
     expect(
       buildCronChangedCapture({ ...base, status: "error", error: "boom" }, HOST)?.message,
     ).toBe("boom");

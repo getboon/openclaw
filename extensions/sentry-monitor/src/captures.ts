@@ -146,8 +146,10 @@ export function buildCronChangedCapture(
   event: PluginHookCronChangedEvent,
   host: string,
 ): SentryCapture | null {
-  const hasRunError = event.status === "error" && !!event.error;
-  // A run can succeed yet have its output silently dropped; "not-delivered"
+  // A failed run is a failure whether or not an error string is attached; the
+  // message fallback below covers the no-text case (no blank Error("")).
+  const hasRunError = event.status === "error";
+  // A run can also succeed yet have its output silently dropped; "not-delivered"
   // is a failure even when no deliveryError string is attached.
   const hasDeliveryFailure = event.deliveryStatus === "not-delivered" || !!event.deliveryError;
   if (!hasRunError && !hasDeliveryFailure) {

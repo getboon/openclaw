@@ -1371,6 +1371,10 @@ importers:
       '@sentry/node':
         specifier: 8.45.0
         version: 8.45.0
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
 
   extensions/sglang:
     devDependencies:

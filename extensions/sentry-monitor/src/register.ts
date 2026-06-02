@@ -42,10 +42,15 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
     return;
   }
 
-  const host = cfg.environment || os.hostname();
+  // Keep these distinct: `environment` is the configurable Sentry environment
+  // (defaults to the hostname); `hostname` is always the real machine and is
+  // what the `host` tag reports. Conflating them makes the host tag wrong
+  // whenever an operator sets a custom environment.
+  const hostname = os.hostname();
+  const environment = cfg.environment || hostname;
   Sentry.init({
     dsn,
-    environment: host,
+    environment,
     release: typeof api.version === "string" ? api.version : undefined,
     // Guard the untrusted config value: only a real number enables tracing;
     // anything else (string, NaN, missing) falls back to 0 (errors only).
@@ -64,7 +69,7 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
   });
 
   api.logger.info(
-    `${PLUGIN_ID}: Sentry initialized (environment=${host}${api.version ? `, release=${api.version}` : ""})`,
+    `${PLUGIN_ID}: Sentry initialized (environment=${environment}${api.version ? `, release=${api.version}` : ""})`,
   );
 
   // Typed lifecycle subscriptions. api.on supplies a payload already typed per
@@ -73,37 +78,37 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
   // gateway; builders return null for events that are not error-bearing.
   api.on("model_call_ended", (event) => {
     safe(api.logger, PLUGIN_ID, "model_call_ended", () => {
-      dispatchCapture(Sentry, buildModelCallEndedCapture(event, host));
+      dispatchCapture(Sentry, buildModelCallEndedCapture(event, hostname));
     });
   });
   api.on("agent_end", (event) => {
     safe(api.logger, PLUGIN_ID, "agent_end", () => {
-      dispatchCapture(Sentry, buildAgentEndCapture(event, host));
+      dispatchCapture(Sentry, buildAgentEndCapture(event, hostname));
     });
   });
   api.on("after_tool_call", (event) => {
     safe(api.logger, PLUGIN_ID, "after_tool_call", () => {
-      dispatchCapture(Sentry, buildAfterToolCallCapture(event, host));
+      dispatchCapture(Sentry, buildAfterToolCallCapture(event, hostname));
     });
   });
   api.on("message_sent", (event) => {
     safe(api.logger, PLUGIN_ID, "message_sent", () => {
-      dispatchCapture(Sentry, buildMessageSentCapture(event, host));
+      dispatchCapture(Sentry, buildMessageSentCapture(event, hostname));
     });
   });
   api.on("subagent_ended", (event) => {
     safe(api.logger, PLUGIN_ID, "subagent_ended", () => {
-      dispatchCapture(Sentry, buildSubagentEndedCapture(event, host));
+      dispatchCapture(Sentry, buildSubagentEndedCapture(event, hostname));
     });
   });
   api.on("cron_changed", (event) => {
     safe(api.logger, PLUGIN_ID, "cron_changed", () => {
-      dispatchCapture(Sentry, buildCronChangedCapture(event, host));
+      dispatchCapture(Sentry, buildCronChangedCapture(event, hostname));
     });
   });
   api.on("session_end", (event) => {
     safe(api.logger, PLUGIN_ID, "session_end", () => {
-      dispatchCapture(Sentry, buildSessionEndCapture(event, host));
+      dispatchCapture(Sentry, buildSessionEndCapture(event, hostname));
     });
   });
 
