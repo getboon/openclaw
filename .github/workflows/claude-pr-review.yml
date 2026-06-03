@@ -40,11 +40,12 @@ jobs:
         startsWith(github.event.comment.body, '/claude-review ')))
     runs-on: ubuntu-latest
     continue-on-error: true
+    # No id-token: the action authenticates with ANTHROPIC_API_KEY, so OIDC is
+    # not needed; withholding it shrinks the privileged surface of this job.
     permissions:
       actions: read
       contents: read
       pull-requests: write
-      id-token: write
     steps:
       - name: Get PR head ref
         id: pr-ref
@@ -55,6 +56,16 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          # The comment path is privileged (secrets + write token). Refuse fork
+          # PRs so we never check out untrusted code here; /cr on a fork PR would
+          # have no usable secret anyway. Same-repo branches are push-gated to
+          # collaborators, so their head is trusted.
+          CROSS=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json isCrossRepository -q '.isCrossRepository')
+          if [[ "$CROSS" == "true" ]]; then
+            echo "::notice::/cr is disabled for fork PRs to avoid untrusted checkout in a privileged context."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           HEAD_SHA=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json headRefOid -q '.headRefOid')
           if [[ -z "$HEAD_SHA" || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::Failed to resolve head SHA for PR #$PR_NUMBER. Got: '$HEAD_SHA'"
@@ -63,6 +74,7 @@ jobs:
           echo "sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Checkout repository
+        if: steps.pr-ref.outputs.skip != 'true'
         uses: actions/checkout@v6
         with:
           persist-credentials: false
@@ -70,6 +82,7 @@ jobs:
           ref: ${{ steps.pr-ref.outputs.sha || github.event.pull_request.head.sha }}
 
       - name: Run Claude PR Review
+        if: steps.pr-ref.outputs.skip != 'true'
         uses: anthropics/claude-code-action@787c5a0ce96a9a6cfb050ea0c8f4c05f2447c251 # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
