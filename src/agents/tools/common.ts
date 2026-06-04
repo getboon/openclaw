@@ -3,9 +3,8 @@ import type {
   AgentToolResult,
   AgentToolUpdateCallback,
 } from "@earendil-works/pi-agent-core";
-import { stat } from "node:fs/promises";
 import type { TSchema } from "typebox";
-import { readLocalFileSafely } from "../../infra/fs-safe.js";
+import { FsSafeError, readLocalFileSafely } from "../../infra/fs-safe.js";
 import { MAX_INLINE_BASE64_BYTES } from "../../media/constants.js";
 import { detectMime } from "../../media/mime.js";
 import { readSnakeCaseParamRaw } from "../../param-key.js";
@@ -361,16 +360,6 @@ function formatMib(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
-function assertInlineableSize(bytes: number, filePath: string): void {
-  if (bytes > MAX_INLINE_BASE64_BYTES) {
-    throw new Error(
-      `Cannot inline file ${formatMib(bytes)} as image content: exceeds the ` +
-        `${formatMib(MAX_INLINE_BASE64_BYTES)} inline-media limit. The file was saved to ` +
-        `${filePath}; reference it by path instead of loading it into the model context.`,
-    );
-  }
-}
-
 export async function imageResultFromFile(params: {
   label: string;
   path: string;
@@ -378,22 +367,28 @@ export async function imageResultFromFile(params: {
   details?: Record<string, unknown>;
   imageSanitization?: ImageSanitizationLimits;
 }): Promise<AgentToolResult<unknown>> {
-  // Guard before reading/base64-encoding: turning the file into a single base64
-  // JS string is bounded by V8's ~512 MiB max string length. Stat first so an
-  // oversized file fails with a clear, actionable error surfaced to the agent
-  // (Fix B treats this as a hard stop) instead of a raw V8 throw
-  // ("Cannot create a string longer than 0x1fffffe8 characters").
-  let fileSize: number | undefined;
+  // Turning the file into a single base64 JS string is bounded by V8's ~512 MiB
+  // max string length. readLocalFileSafely enforces MAX_INLINE_BASE64_BYTES both
+  // before read (stat) and after read, so an oversized file fails fast without
+  // being read into memory. Map its `too-large` error to a clear, actionable
+  // message the agent must report (Fix B treats tool errors as a hard stop)
+  // rather than a raw V8 "Cannot create a string longer than 0x1fffffe8
+  // characters" throw.
+  let buf: Buffer;
   try {
-    fileSize = (await stat(params.path)).size;
-  } catch {
-    // If stat fails, fall through; readLocalFileSafely will surface the real error.
+    buf = (
+      await readLocalFileSafely({ filePath: params.path, maxBytes: MAX_INLINE_BASE64_BYTES })
+    ).buffer;
+  } catch (err) {
+    if (err instanceof FsSafeError && err.code === "too-large") {
+      throw new Error(
+        `Cannot inline file as image content: exceeds the ${formatMib(MAX_INLINE_BASE64_BYTES)} ` +
+          `inline-media limit. The file was saved to ${params.path}; reference it by path ` +
+          `instead of loading it into the model context.`,
+      );
+    }
+    throw err;
   }
-  if (fileSize !== undefined) {
-    assertInlineableSize(fileSize, params.path);
-  }
-  const buf = (await readLocalFileSafely({ filePath: params.path })).buffer;
-  assertInlineableSize(buf.byteLength, params.path);
   const mimeType = (await detectMime({ buffer: buf.slice(0, 256) })) ?? "image/png";
   return await imageResult({
     label: params.label,
