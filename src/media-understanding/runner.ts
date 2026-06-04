@@ -15,6 +15,7 @@ import type {
   MediaUnderstandingModelConfig,
 } from "../config/types.tools.js";
 import { logVerbose, shouldLogVerbose } from "../globals.js";
+import { isAbortError } from "../infra/unhandled-rejections.js";
 import { logWarn } from "../logger.js";
 import { resolveChannelInboundAttachmentRoots } from "../media/channel-inbound-roots.js";
 import { mergeInboundPathRoots } from "../media/inbound-path-policy.js";
@@ -878,17 +879,28 @@ async function runAttachmentEntries(params: {
         }
         continue;
       }
+      // Abort/timeout (e.g. the request signal firing under memory pressure)
+      // surfaced as an opaque "This operation was aborted" before. Tag it so
+      // the failure reason is actionable rather than silently swallowed.
+      const aborted = isAbortError(err);
+      const reason = aborted
+        ? `${capability} model call aborted/timed out (likely a timeout or memory pressure): ${String(err)}`
+        : String(err);
       attempts.push(
         buildModelDecision({
           entry,
           entryType,
           outcome: "failed",
-          reason: String(err),
+          reason,
         }),
       );
-      if (shouldLogVerbose()) {
-        logVerbose(`${capability} understanding failed: ${String(err)}`);
-      }
+      // Always surface model failures at warn level. Hiding them behind the
+      // verbose flag meant aborts/timeouts vanished from normal logs, leaving
+      // no signal that a vision call never produced a description.
+      const model = entry.model?.trim();
+      logWarn(
+        `${capability} understanding failed${model ? ` (${model})` : ""}: ${reason}`,
+      );
     }
   }
 

@@ -3,6 +3,20 @@ export const MAX_AUDIO_BYTES = 16 * 1024 * 1024; // 16MB
 export const MAX_VIDEO_BYTES = 16 * 1024 * 1024; // 16MB
 export const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024; // 100MB
 
+/**
+ * V8's hard maximum string length is 0x1fffffe8 (~512 MiB) characters. Any code
+ * path that turns a file into a single base64 JS string (e.g. inlining media as
+ * tool-result content for the model) is capped by that limit. base64 inflates
+ * bytes by 4/3, so the largest file that can be base64-encoded into one string
+ * is ~402 MiB of raw bytes. We pick a conservative limit well under that so the
+ * failure surfaces as a clear, actionable error instead of a raw V8
+ * "Cannot create a string longer than 0x1fffffe8 characters" throw.
+ *
+ * Files larger than this must be referenced by path (streamed to disk) rather
+ * than inlined as base64 — see `imageResultFromFile`.
+ */
+export const MAX_INLINE_BASE64_BYTES = 256 * 1024 * 1024; // 256MB
+
 export type MediaKind = "image" | "audio" | "video" | "document";
 
 export function mediaKindFromMime(mime?: string | null): MediaKind | undefined {

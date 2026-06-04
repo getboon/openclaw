@@ -395,6 +395,7 @@ type SlackFileInfoSummary = {
   id?: string;
   name?: string;
   mimetype?: string;
+  size?: number;
   url_private?: string;
   url_private_download?: string;
   channels?: unknown;
@@ -535,6 +536,22 @@ export async function downloadSlackFile(
   }
   if (hasSlackScopeMismatch({ file, channelId: opts.channelId, threadId: opts.threadId })) {
     return null;
+  }
+
+  // Pre-flight size guard: Slack's files.info reports the byte size up front.
+  // Failing here with a clear, actionable error (rather than letting the
+  // streamed download abort and surface as an undifferentiated "could not be
+  // downloaded" null) means the agent is told *why* it failed — a hard stop it
+  // must report, never fabricate around. The downstream stream save still
+  // enforces maxBytes for cases where size is missing or understated.
+  if (typeof file.size === "number" && file.size > opts.maxBytes) {
+    const fileMb = (file.size / (1024 * 1024)).toFixed(1);
+    const limitMb = (opts.maxBytes / (1024 * 1024)).toFixed(1);
+    throw new Error(
+      `Slack file ${file.name ?? fileId} is ${fileMb} MB, which exceeds the ` +
+        `${limitMb} MB download limit; cannot process. Increase channels.slack.<account>.mediaMaxMb ` +
+        `to raise the limit, or ask the sender to share a smaller file.`,
+    );
   }
 
   const results = await resolveSlackMedia({

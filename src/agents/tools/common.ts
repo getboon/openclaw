@@ -3,8 +3,10 @@ import type {
   AgentToolResult,
   AgentToolUpdateCallback,
 } from "@earendil-works/pi-agent-core";
+import { stat } from "node:fs/promises";
 import type { TSchema } from "typebox";
 import { readLocalFileSafely } from "../../infra/fs-safe.js";
+import { MAX_INLINE_BASE64_BYTES } from "../../media/constants.js";
 import { detectMime } from "../../media/mime.js";
 import { readSnakeCaseParamRaw } from "../../param-key.js";
 import type { ImageSanitizationLimits } from "../image-sanitization.js";
@@ -355,6 +357,10 @@ export async function imageResult(params: {
   return await sanitizeToolResultImages(result, params.label, params.imageSanitization);
 }
 
+function formatMib(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export async function imageResultFromFile(params: {
   label: string;
   path: string;
@@ -362,7 +368,32 @@ export async function imageResultFromFile(params: {
   details?: Record<string, unknown>;
   imageSanitization?: ImageSanitizationLimits;
 }): Promise<AgentToolResult<unknown>> {
+  // Guard before reading/base64-encoding: turning the file into a single base64
+  // JS string is bounded by V8's ~512 MiB max string length. Stat first so an
+  // oversized file fails with a clear, actionable error surfaced to the agent
+  // (Fix B treats this as a hard stop) instead of a raw V8 throw
+  // ("Cannot create a string longer than 0x1fffffe8 characters").
+  let fileSize: number | undefined;
+  try {
+    fileSize = (await stat(params.path)).size;
+  } catch {
+    // If stat fails, fall through; readLocalFileSafely will surface the real error.
+  }
+  if (fileSize !== undefined && fileSize > MAX_INLINE_BASE64_BYTES) {
+    throw new Error(
+      `Cannot inline file ${formatMib(fileSize)} as image content: exceeds the ` +
+        `${formatMib(MAX_INLINE_BASE64_BYTES)} inline-media limit. The file was saved to ` +
+        `${params.path}; reference it by path instead of loading it into the model context.`,
+    );
+  }
   const buf = (await readLocalFileSafely({ filePath: params.path })).buffer;
+  if (buf.byteLength > MAX_INLINE_BASE64_BYTES) {
+    throw new Error(
+      `Cannot inline file ${formatMib(buf.byteLength)} as image content: exceeds the ` +
+        `${formatMib(MAX_INLINE_BASE64_BYTES)} inline-media limit. The file was saved to ` +
+        `${params.path}; reference it by path instead of loading it into the model context.`,
+    );
+  }
   const mimeType = (await detectMime({ buffer: buf.slice(0, 256) })) ?? "image/png";
   return await imageResult({
     label: params.label,

@@ -267,6 +267,56 @@ describe("runCapability image skip", () => {
     );
   });
 
+  it("surfaces image-model abort/timeout as a failed attempt with an actionable reason", async () => {
+    await withMediaFixture(
+      {
+        filePrefix: "openclaw-image-abort",
+        extension: "png",
+        mediaType: "image/png",
+        fileContents: Buffer.from("image"),
+      },
+      async ({ ctx, media, cache }) => {
+        const cfg = {} as OpenClawConfig;
+
+        const result = await runCapability({
+          capability: "image",
+          cfg,
+          ctx,
+          attachments: cache,
+          media,
+          agentDir: "/tmp",
+          providerRegistry: new Map([
+            [
+              "openrouter",
+              {
+                id: "openrouter",
+                capabilities: ["image"],
+                describeImage: async () => {
+                  // Mirrors the undici abort surfaced under memory pressure.
+                  throw new Error("This operation was aborted");
+                },
+              },
+            ],
+          ]),
+          config: {
+            models: [{ provider: "openrouter", model: "google/gemini-2.5-flash" }],
+          },
+          activeModel: { provider: "openai", model: "gpt-4.1" },
+        });
+
+        expect(result.decision.outcome).toBe("failed");
+        const attachment = requireDecisionAttachment(result, 0);
+        const attempt = attachment.attempts[0];
+        if (!attempt) {
+          throw new Error("expected media-understanding failed attempt");
+        }
+        expect(attempt.outcome).toBe("failed");
+        expect(attempt.reason).toMatch(/aborted\/timed out/);
+        expect(attempt.reason).toContain("This operation was aborted");
+      },
+    );
+  });
+
   it("prefers agents.defaults.imageModel over the active model for auto image resolution", async () => {
     const cfg = {
       agents: {

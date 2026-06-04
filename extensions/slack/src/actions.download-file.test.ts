@@ -165,6 +165,45 @@ describe("downloadSlackFile", () => {
     );
   });
 
+  it("throws a clear, actionable error when the file size exceeds maxBytes", async () => {
+    const client = createClient();
+    client.files.info.mockResolvedValueOnce({
+      file: makeSlackFileInfo({
+        name: "Plans.zip",
+        mimetype: "application/zip",
+        size: 868 * 1024 * 1024,
+        url_private_download: "https://files.slack.com/files-pri/T1-F123/Plans.zip",
+      }),
+    });
+
+    await expect(
+      downloadSlackFile("F123", {
+        client,
+        token: "xoxb-test",
+        maxBytes: 20 * 1024 * 1024,
+      }),
+    ).rejects.toThrow(/exceeds the .* MB download limit; cannot process/);
+    // Must fail fast before attempting the streamed download.
+    expect(resolveSlackMedia).not.toHaveBeenCalled();
+  });
+
+  it("downloads when the reported file size is within maxBytes", async () => {
+    const client = createClient();
+    client.files.info.mockResolvedValueOnce({
+      file: makeSlackFileInfo({ size: 512 }),
+    });
+    resolveSlackMedia.mockResolvedValueOnce([makeResolvedSlackMedia()]);
+
+    const result = await downloadSlackFile("F123", {
+      client,
+      token: "xoxb-test",
+      maxBytes: 20 * 1024 * 1024,
+    });
+
+    expect(result).toEqual(makeResolvedSlackMedia());
+    expect(resolveSlackMedia).toHaveBeenCalledTimes(1);
+  });
+
   it("returns null when channel scope definitely mismatches file shares", async () => {
     const client = createClient();
     client.files.info.mockResolvedValueOnce({
