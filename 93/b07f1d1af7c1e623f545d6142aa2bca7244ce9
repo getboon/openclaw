@@ -1,0 +1,29 @@
+extensions/slack/src/actions.ts
+  s_1fdecfb08acdc5::t_f882606763dde1 548-549,551-552
+src/agents/tools/common.ts
+  s_1fdecfb08acdc5::t_d14bb56878b09f 361-371
+  s_1fdecfb08acdc5::t_0b1e5dc25ec792 392-393,396
+extensions/slack/src/actions.download-file.test.ts
+  s_1fdecfb08acdc5::t_16c78a665765c5 185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "93b07f1d1af7c1e623f545d6142aa2bca7244ce9",
+  "prompts": {},
+  "humans": {
+    "h_b018692674290f": {
+      "author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  },
+  "sessions": {
+    "s_1fdecfb08acdc5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dbe6864b-181f-4c95-bc69-5c1a82252f47",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
