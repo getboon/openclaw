@@ -545,11 +545,11 @@ export async function downloadSlackFile(
   // must report, never fabricate around. The downstream stream save still
   // enforces maxBytes for cases where size is missing or understated.
   if (typeof file.size === "number" && file.size > opts.maxBytes) {
-    const fileMb = (file.size / (1024 * 1024)).toFixed(1);
-    const limitMb = (opts.maxBytes / (1024 * 1024)).toFixed(1);
+    const fileMib = (file.size / (1024 * 1024)).toFixed(1);
+    const limitMib = (opts.maxBytes / (1024 * 1024)).toFixed(1);
     throw new Error(
-      `Slack file ${file.name ?? fileId} is ${fileMb} MB, which exceeds the ` +
-        `${limitMb} MB download limit; cannot process. Increase channels.slack.<account>.mediaMaxMb ` +
+      `Slack file ${file.name ?? fileId} is ${fileMib} MiB, which exceeds the ` +
+        `${limitMib} MiB download limit; cannot process. Increase channels.slack.<account>.mediaMaxMb ` +
         `to raise the limit, or ask the sender to share a smaller file.`,
     );
   }

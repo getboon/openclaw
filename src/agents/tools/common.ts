@@ -358,7 +358,17 @@ export async function imageResult(params: {
 }
 
 function formatMib(bytes: number): string {
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function assertInlineableSize(bytes: number, filePath: string): void {
+  if (bytes > MAX_INLINE_BASE64_BYTES) {
+    throw new Error(
+      `Cannot inline file ${formatMib(bytes)} as image content: exceeds the ` +
+        `${formatMib(MAX_INLINE_BASE64_BYTES)} inline-media limit. The file was saved to ` +
+        `${filePath}; reference it by path instead of loading it into the model context.`,
+    );
+  }
 }
 
 export async function imageResultFromFile(params: {
@@ -379,21 +389,11 @@ export async function imageResultFromFile(params: {
   } catch {
     // If stat fails, fall through; readLocalFileSafely will surface the real error.
   }
-  if (fileSize !== undefined && fileSize > MAX_INLINE_BASE64_BYTES) {
-    throw new Error(
-      `Cannot inline file ${formatMib(fileSize)} as image content: exceeds the ` +
-        `${formatMib(MAX_INLINE_BASE64_BYTES)} inline-media limit. The file was saved to ` +
-        `${params.path}; reference it by path instead of loading it into the model context.`,
-    );
+  if (fileSize !== undefined) {
+    assertInlineableSize(fileSize, params.path);
   }
   const buf = (await readLocalFileSafely({ filePath: params.path })).buffer;
-  if (buf.byteLength > MAX_INLINE_BASE64_BYTES) {
-    throw new Error(
-      `Cannot inline file ${formatMib(buf.byteLength)} as image content: exceeds the ` +
-        `${formatMib(MAX_INLINE_BASE64_BYTES)} inline-media limit. The file was saved to ` +
-        `${params.path}; reference it by path instead of loading it into the model context.`,
-    );
-  }
+  assertInlineableSize(buf.byteLength, params.path);
   const mimeType = (await detectMime({ buffer: buf.slice(0, 256) })) ?? "image/png";
   return await imageResult({
     label: params.label,

@@ -182,7 +182,7 @@ describe("downloadSlackFile", () => {
         token: "xoxb-test",
         maxBytes: 20 * 1024 * 1024,
       }),
-    ).rejects.toThrow(/exceeds the .* MB download limit; cannot process/);
+    ).rejects.toThrow(/exceeds the .* MiB download limit; cannot process/);
     // Must fail fast before attempting the streamed download.
     expect(resolveSlackMedia).not.toHaveBeenCalled();
   });
