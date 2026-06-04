@@ -1,0 +1,25 @@
+src/agents/tools/common.ts
+  s_1fdecfb08acdc5::t_697e5d09ead159 370-377,379-390
+  s_1fdecfb08acdc5::t_32f8b03b3eaeb1 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "18b8b133706b3426fdc72618c8b481fced665e60",
+  "prompts": {},
+  "humans": {
+    "h_b018692674290f": {
+      "author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  },
+  "sessions": {
+    "s_1fdecfb08acdc5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dbe6864b-181f-4c95-bc69-5c1a82252f47",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
