@@ -17,9 +17,17 @@ describe("resolveLlmIdleTimeoutMs", () => {
     expect(resolveLlmIdleTimeoutMs({ cfg })).toBe(DEFAULT_LLM_IDLE_TIMEOUT_MS);
   });
 
-  it("caps agents.defaults.timeoutSeconds fallback at the default idle watchdog", () => {
+  it("honors agents.defaults.timeoutSeconds above the default idle watchdog (ENG-12929)", () => {
+    // An explicit turn budget governs the idle timeout — it is NOT clamped down
+    // to the 120s network-silence default. Heavy turns (large context + extended
+    // thinking) can legitimately be silent >120s; capping idle at 120s killed them.
     const cfg = { agents: { defaults: { timeoutSeconds: 300 } } } as OpenClawConfig;
-    expect(resolveLlmIdleTimeoutMs({ cfg })).toBe(DEFAULT_LLM_IDLE_TIMEOUT_MS);
+    expect(resolveLlmIdleTimeoutMs({ cfg })).toBe(300_000);
+  });
+
+  it("scales the idle watchdog with a larger agents.defaults.timeoutSeconds (ENG-12929)", () => {
+    const cfg = { agents: { defaults: { timeoutSeconds: 600 } } } as OpenClawConfig;
+    expect(resolveLlmIdleTimeoutMs({ cfg })).toBe(600_000);
   });
 
   it("uses agents.defaults.timeoutSeconds when it is shorter than the default idle watchdog", () => {
