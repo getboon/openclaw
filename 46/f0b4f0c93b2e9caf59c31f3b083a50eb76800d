@@ -1,0 +1,27 @@
+src/agents/pi-embedded-runner/run/llm-idle-timeout.test.ts
+  s_1fdecfb08acdc5::t_d50fd11fd6fd2d 20-23,25-30
+src/agents/pi-embedded-runner/run/llm-idle-timeout.ts
+  s_1fdecfb08acdc5::t_7ed45adf013174 181-187
+  s_1fdecfb08acdc5::t_157674dc11a8a9 171-179,188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.3",
+  "base_commit_sha": "46f0b4f0c93b2e9caf59c31f3b083a50eb76800d",
+  "prompts": {},
+  "humans": {
+    "h_b018692674290f": {
+      "author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  },
+  "sessions": {
+    "s_1fdecfb08acdc5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dbe6864b-181f-4c95-bc69-5c1a82252f47",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
