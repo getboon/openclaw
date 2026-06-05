@@ -385,6 +385,7 @@ export async function imageResultFromFile(params: {
         `Cannot inline file as image content: exceeds the ${formatMib(MAX_INLINE_BASE64_BYTES)} ` +
           `inline-media limit (${err.message}). The file was saved to ${params.path}; reference it ` +
           `by path instead of loading it into the model context.`,
+        { cause: err },
       );
     }
     throw err;
