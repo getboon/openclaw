@@ -168,8 +168,24 @@ export function resolveLlmIdleTimeoutMs(params?: {
     return clampImplicitTimeoutMs(runTimeoutMs);
   }
 
+  // An explicitly-configured agent turn budget (agents.defaults.timeoutSeconds)
+  // governs the LLM stream-idle timeout directly. An operator who sets a long
+  // turn budget for heavy work (large context + extended thinking) is opting
+  // into longer permissible model silence, so the idle watchdog must scale with
+  // it rather than being pinned at the default. The DEFAULT_LLM_IDLE_TIMEOUT_MS
+  // network-silence watchdog below applies only when NO turn budget is set.
+  // (ENG-12929: the prior implicit clamp held idle at the 120s default no matter
+  // how high timeoutSeconds was, silently killing heavy estimation turns
+  // mid-generation — model goes quiet >120s during extended thinking → aborted.)
   if (agentTimeoutMs !== undefined) {
-    return clampImplicitTimeoutMs(agentTimeoutMs);
+    // Cron keeps the prior default-watchdog cap on the turn-budget fallback;
+    // only interactive triggers honor the explicit turn budget as the idle
+    // ceiling (cron has its own permissive handling on the explicit-timeout
+    // paths above and disables the watchdog entirely when nothing is set).
+    if (params?.trigger === "cron") {
+      return clampImplicitTimeoutMs(agentTimeoutMs);
+    }
+    return clampTimeoutMs(agentTimeoutMs);
   }
 
   if (params?.trigger === "cron") {
