@@ -204,6 +204,32 @@ Use this only on hosts that can tolerate the extra file-system scan and snapshot
 write during critical memory pressure. Normal memory pressure events still
 record RSS, heap, threshold, and growth facts when the snapshot is off.
 
+The pressure thresholds default to RSS warn 1.5 GiB / critical 3 GiB, heap warn
+1 GiB / critical 2 GiB, and re-emit a sustained pressure state every 5 minutes.
+On a host that legitimately runs hot, those defaults page on healthy
+steady-state usage. Raise them (and stretch the repeat interval) per host:
+
+```json5
+{
+  diagnostics: {
+    memoryPressureThresholds: {
+      rssCriticalBytes: 6442450944, // ~6 GiB — only signal genuine pre-OOM pressure
+      heapUsedCriticalBytes: 5368709120, // ~5 GiB — raise with RSS, else 2 GiB heap default fires
+      pressureRepeatMs: 3600000, // re-emit hourly instead of every 5 min
+    },
+  },
+}
+```
+
+Raise the critical bytes for **both** RSS and heap together: the monitor signals
+`critical` when _either_ crosses its threshold, so leaving `heapUsedCriticalBytes`
+at its 2 GiB default keeps paging a host whose heap legitimately sits higher. Any
+unset field keeps its built-in default. The sampler always reports the
+highest-severity signal, so a fast `rss_growth` runaway (`rssGrowthCriticalBytes`
+over `growthWindowMs`) still surfaces as `critical` even when the absolute
+RSS/heap thresholds are raised. See the field reference in
+[Configuration reference](/gateway/configuration-reference#diagnostics).
+
 ## Related
 
 - [Health checks](/gateway/health)
