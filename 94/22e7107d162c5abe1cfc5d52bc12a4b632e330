@@ -1,0 +1,2225 @@
+apps/ios/Sources/Design/SettingsProTabActions.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-789
+docs/cli/docs.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 5,11,38,55-58
+.agents/skills/openclaw-ghsa-maintainer/SKILL.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,8,88
+extensions/alibaba/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/plugins/reference/slack.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+docs/concepts/streaming.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 57-61,66,164,201-205
+docs/.i18n/glossary.ja-JP.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 43-45
+.agents/skills/technical-documentation/SKILL.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-79
+extensions/copilot-proxy/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/gateway/bridge-protocol.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 66,68-69,73-74
+docs/gateway/config-agents.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 106,110,141,249-254,276,332-351,452-453,460,462-463,486,490,498-500,504,509-518,524,567,620,637,643-644,664-665,669-670,678,735,1059,1106,1275,1314,1409,1418,1432,1440,1468,1492,1517
+.github/workflows/package-acceptance.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 20,33,38-43,120,134,139-144,194-195,206-207,371-372,387,509,526-528,537-562,565-570,591,635,653,661,671
+apps/android/app/src/main/java/ai/openclaw/app/voice/VoiceWakeCommandExtractor.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 4
+apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatMessageViews.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 10-58,206-209,212-239,566-569,572-595,597,604-607,630-633,636-652,654
+docs/maturity-scores.yaml
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-5361
+docs/tools/parallel-search.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-154
+docs/platforms/macos.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 50-51,110
+.github/workflows/plugin-prerelease.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 55,224,260,333,347,365
+apps/android/app/src/main/java/ai/openclaw/app/NodeForegroundService.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 22,39-40,215,225,261,269,277
+apps/macos/Sources/OpenClaw/HostEnvSanitizer.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 27-37,51-56,102-120,159-174
+apps/ios/Tests/TalkModeConfigParsingTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,8-402
+docs/.i18n/glossary.pl.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+extensions/acpx/openclaw.plugin.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 8
+extensions/zai/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/macos/Sources/OpenClaw/GatewayConnection.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 522-526,671,683-687
+extensions/zalo/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,12,15,46,49
+docs/start/showcase.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 104-105,274-275,296-297,310-311
+docs/concepts/memory-search.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 16-17,24,31-33,35-36,47-58,80-82,84-89
+docs/plugins/dependency-resolution.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 37-38,42,45,49-53,57-88,92-96,160,173-176
+docs/channels/telegram.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 295,302-305,314,322,325-346,415,417,591,643,671-672,733,798,800,812-821,866,1080,1083
+docs/gateway/openresponses-http-api.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 75,122,127-128,180-182,266
+docs/install/index.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 13,20-23,129,132,174-203
+docs/.i18n/glossary.nl.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+docs/channels/troubleshooting.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 59
+apps/macos/Sources/OpenClaw/ChannelsSettings+View.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 11,76-77,89-90
+extensions/llm-task/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,8
+apps/android/app/src/main/java/ai/openclaw/app/node/DeviceNotificationListenerService.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 24-26,29,33-35,63-65,72-74,81-83,90-92,101-103,134,153-155,255,318,330,340,352,358,364,371,413,487
+apps/ios/Sources/Status/GatewayStatusBuilder.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 4-10,13,23
+apps/macos/Sources/OpenClaw/AboutSettings.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 80,88
+docs/gateway/security/index.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 28-31,60-71,511,515-518,542,545-546,955,1018,1022,1024
+apps/android/app/src/debug/java/ai/openclaw/app/VoiceE2eReceiver.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-195
+docs/nodes/media-understanding.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 140-165,280-284
+extensions/anthropic/cli-backend.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,20,24,37,77
+extensions/anthropic/media-understanding-provider.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,11,15
+extensions/discord/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,12-14,16,20,23,35-37,66,70,73
+extensions/anthropic/cli-catalog.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,12,18-28,46,48-58
+apps/ios/Sources/Design/AgentProTab+Skills.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-813
+extensions/amazon-bedrock/bedrock-options.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-54
+extensions/amazon-bedrock-mantle/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11-12,27,30
+docs/plugins/reference.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 18-19
+apps/android/app/src/main/java/ai/openclaw/app/ui/DreamingSettingsScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-202
+extensions/acpx/src/service.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,10-14,29-33,39-46,74,84-87,89,116,124,230,252-269,272-275,328,342-345,370,372-374
+apps/shared/OpenClawKit/Sources/OpenClawKit/GatewayNodeSession.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 314-324
+docs/cli/onboard.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 50-54,96,226
+.github/workflows/mantis-discord-thread-attachment.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 59,94,606
+apps/ios/Sources/Chat/IOSGatewayChatTransport.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 8-9,12-67,72-140,142-159,164,173-180,185,190,207-208,212-213,218,222,227-252,265-266,276-317
+apps/macos/Sources/OpenClaw/SystemRunSettingsView.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 15
+.github/workflows/openclaw-release-checks.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 81-85,89,119,135,194,198-208,251,259-268,290,336-339,349,365-367,375-376,389,394,399,404-409,435,452,482-486,512,634,695,709,716,727,803,816,819,832,850,859-904,922,942,945,952,956,965-1008,1015,1033,1046,1058,1062,1072,1075-1088,1090,1101,1111-1126,1128,1137-1180,1197,1236,1249,1262,1302,1311-1354,1373,1405,1413,1443,1452-1495,1499,1514,1546,1583,1592-1635,1639,1657,1689,1726,1735-1778,1782,1797,1829,1866,1875-1918,1939-1940,1943-1951,1963-2005,2024-2029,2033
+docs/gateway/config-tools.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 23-28,46-108,391-393,420-422,425-426,448,471-472,480,514,523-524,571-572,649,654,656,669-670,672-674,684,790
+extensions/line/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11,16,19,49,52
+docs/install/migrating-hermes.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 68-69,102,138,140-143,168
+extensions/senseaudio/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/.generated/plugin-sdk-api-baseline.sha256
+  s_ee70570d53827a::t_462d3be19fc2cb 1-2
+docs/plugins/architecture-internals.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 266,273-277,282,315-321,674-675,688-690,1024,1027
+apps/swabble/.github/workflows/ci.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 10
+apps/swabble/LICENSE
+  s_ee70570d53827a::t_7fe0b94c060fdd 3
+apps/ios/Sources/Design/IPadSidebarFeaturePreviews.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-672
+apps/macos/Sources/OpenClaw/GeneralSettings.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 49
+docs/concepts/model-providers.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 33-34,40,83,85,95,119,133,135,137,141-142,144,148,150-152,169,180,269,293-322,334,340,535,540
+.github/workflows/openclaw-performance.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 247-248,305-315,317,354-412,426,438,458-460,530,532-536,550,554,561,566-570,575,578,651-654
+apps/ios/Sources/LiveActivity/LiveActivityManager.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 11-12,29,33,45,50-52,61-92,96,100-111,121-137,139,146,150-160,162-164,168,170,177-182
+docs/channels/sms.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-380
+extensions/microsoft/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/plugins/reference/diagnostics-otel.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+apps/android/app/src/main/java/ai/openclaw/app/voice/TalkAudioPlayer.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 16,19,23,44,53,181-182,256,261
+docs/tools/slash-commands.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2-4,8,11-36,39,41-48,52,80-82,84,86-89,91,93-95,97,99-100,102,104-105,107,109,111,113,115,117,119,121,123,125,127,129-130,132,134-136,138,142,144,146,148-150,152,159,161-163,165-168,172-189,192,194-223,227-240,243-249,252-259,262-270,273-280,284,286-287,289,296-297,301-308,310,312,314,317-320,323-324,326-328,331-335,339,341-342,344-347,349-351,353,355-358,361,364-366,368,371,382-383,385,387-389,398-401,403-404,407-413,415,417-419,427,430-432,434,436-440,442-444,446,448,450-453,455,457-460,462,464,466-472,474-484,486-495,497-501,505-518
+extensions/video-generation-core/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/twitch/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,30,33
+apps/android/app/src/main/java/ai/openclaw/app/node/GatewayEventHandler.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 12-14,25,32,52,66
+apps/android/app/src/main/java/ai/openclaw/app/node/DeviceHandler.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 11,28-106,110-111,113-125,127-144,152-154,170,173,176,179,182-223,234,315-318,326,417,461,515-532,534,596,623
+apps/ios/Tests/IOSGatewayChatTransportTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,3,8-59,88-160
+docs/plugins/reference/pixverse.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-23
+extensions/diagnostics-prometheus/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,24,27
+docs/channels/msteams.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 669-720,735-736,918-919,921
+apps/ios/Tests/NodeAppModelInvokeTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 2-3,36-43,91,101,111,121,131,200-209,218-328,331-332,347-348,369-370,413-415,441-443,484-485,493,518,522,526,530,534,557,563,569,575,587-589,664-666,693-698,715,732,738,744,756,947,949,954,957,1028-1057
+.github/workflows/ci.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 31,79-122,149,152,239,340-383,413,415-423,426,459-464,469-528,537,564,567,600-618,620,659-676,724-725,758-769,810,813,837,853,856-859,899,902,979,982,1056,1059,1105,1131,1134,1170-1171,1213,1222-1224,1258,1261,1306-1309,1390,1393,1429,1446-1456,1460-1461,1469-1474,1557,1560,1587-1626,1642-1669,1708-1738,1760-1765,1767,1770,1822,1829-1859,1892,1896-1926,1997-2011,2056,2059,2096,2104,2126,2151-2200
+extensions/huggingface/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/byteplus/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/plugins/reference/openai.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10,19
+extensions/oc-path/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,10,15,18
+apps/android/app/src/main/java/ai/openclaw/app/LocationMode.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-5,14,17
+apps/android/app/src/main/java/ai/openclaw/app/ui/MobileUiTokens.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 44-45,47-64,100-101,109-110,133-134
+docs/plugins/reference/microsoft-foundry.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 19-113
+apps/android/app/src/main/java/ai/openclaw/app/gateway/DeviceIdentityStore.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 10,19,28,50,56,81,105,108-109,114,154,167-168,181
+extensions/telegram/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,10-11
+extensions/runway/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/acpx/setup-api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+CHANGELOG.md
+  s_ee70570d53827a::t_d60f5c7f9f351b 5,7-306,308-822,824-906,911,919,922,924-926,933,935,947,950-953,957-1005,1007-1011,1014,1018-1019,1021,1025,1028-1029,1031,1051,1064,1111,1143-1144,1181,1192-1196,1561,1696,2190,2435,2607,2827,2879,3423,3745,3770,4511,5662-5663,6155
+docs/providers/xiaomi.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,5,9-27,32-33,35,37-38,43-49,53,60,65,77-93,118,129-156,203-243,246,253-254,257,263-264
+.agents/skills/control-ui-e2e/SKILL.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-74
+docs/concepts/queue.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 19,43,81-93
+docs/specs/claw-supervisor.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-247
+.agents/skills/technical-documentation/references/agent-and-contributing.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-145
+apps/android/app/src/main/java/ai/openclaw/app/ui/VoiceScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-1114
+apps/android/app/src/test/java/ai/openclaw/app/ui/ShellScreenLogicTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-124
+apps/ios/Sources/Design/OpenClawDocsScreen.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-129
+docs/concepts/models.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 19,26,64,96-97,153,343,365
+.github/workflows/opengrep-precise-full.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 35,38-39,56
+apps/android/app/src/test/java/ai/openclaw/app/voice/MicCaptureManagerTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 104-136,188-193
+apps/ios/Sources/Design/IPadSidebarFeatureScreens.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-17
+docs/providers/opencode-go.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 21
+src/config/sessions/transcript.test.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1,3-5,24-44,141-255,481,583-622,855-894,976-1056
+docs/platforms/index.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 13-17,35,40,63
+extensions/zalouser/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11,17,20,57,60
+apps/macos/Tests/OpenClawIPCTests/MacNodeModeCoordinatorTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 92-126
+extensions/acpx/src/state.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-34
+extensions/anthropic/provider-discovery.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+docs/plugins/bundles.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 73-80,98,101,103,107,174,180,182,191,195,229-231,296
+docs/gateway/troubleshooting.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 174,176,181-183,199-235,335-349,457-508,628,694
+.github/codeql/codeql-core-auth-secrets-critical-quality.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 25-26,33
+extensions/sglang/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/migrate-claude/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,9,12
+apps/ios/Tests/SwiftUIRenderSmokeTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 8-10,18,22,30-33,35-39,41-42,45-48,50-56,58-59,62-87,89-92,94-96,100-141,143,152-197
+CONTRIBUTING.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 110
+apps/macos/Sources/OpenClaw/SettingsComponents.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 6,8-17
+docs/plugins/reference/matrix.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+extensions/deepgram/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/android/app/src/main/AndroidManifest.xml
+  s_ee70570d53827a::t_7fe0b94c060fdd 4,6,54
+docs/plugins/reference/line.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+docs/ci.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 18,46-76,83,85,119,126-134,136,149,163-164,186,192,199,207-208,241,286-287,337,350-359,382,400,420,511,570-576,589,604,619,654
+extensions/matrix/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11,14-15,17,22,25,48,91,94
+docs/channels/whatsapp.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 69-72,112-118,178-209,525,552,634,637-647,694
+docs/install/fly.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 101,104,108
+extensions/amazon-bedrock/lazy-import.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1
+docs/help/environment.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 11,16-17,25-39,107-113,122,164-169,183,185,197-199
+docs/plugins/reference/xiaomi.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10,19
+extensions/litellm/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+src/config/sessions/transcript-append.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1,6-7,15-24,38-40,101,160,167,172,174,191-192,220-221,241-244,248-253,263-267,270-282,285-288,292-295,302,307-399
+apps/android/app/src/main/java/ai/openclaw/app/ui/TalkOrbOverlay.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 29-31
+docs/help/faq-first-run.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 70,165,390-391,538,565,582-585,600,603,607-610,614-616,620-621,829,859-860
+docs/plugins/google-meet.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1127,1144,1172-1173,1176
+docs/install/upstash.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-96
+apps/ios/fastlane/metadata/en-US/promotional_text.txt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1
+docs/providers/together.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 36-38,56-57,64-70,77-81
+docs/concepts/system-prompt.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 9,59,169-170,181-198,200-201,203-204,211,219-225,258-271,287
+apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-978
+apps/android/app/src/main/java/ai/openclaw/app/node/MotionHandler.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 28,35,41,54,64,105-106,140,227-228,273,280,328,366,369,382-383,409,412
+apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 13,37,39,43-44,49-56,60-67,83-113,127-129,140,142,158,165,169-173,177-181,190-191,195-199,247,264,291-294,296-300,305-393,401-405,407-411,413-430,433,439-476,560-596,638-639,655-663,666,669-688,690-692,694,698,740,744-753,755-758,760-766,771,777-778,780-782,787,793-795,834-835,838,841-842,850-854,860-863,865,868,871-886,888-889,892-895,905,915,917-918,928,930-932,939,943,945-947,949-996,1006,1012,1022,1038,1047-1048,1135,1157,1175,1186,1296,1322-1341,1361-1363,1366,1387,1420,1476-1477,1487,1489-1490,1497,1503-1512,1522-1526,1533,1544-1546,1565-1567,1573-1578,1580-1581,1583-1623,1627-1629,1632-1634,1641-1642,1663-1841,1843-1900,1903,1915-1917,1925,1927,1930-1934,1938,1944,1947-1951,1955-1956,1961-1962,1965
+docs/plugins/reference/llama-cpp.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-23
+apps/android/app/src/test/java/ai/openclaw/app/gateway/GatewaySessionReconnectTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-21,23,26-30,32-80,82-127,236-424
+apps/ios/Sources/Design/AgentProTab+Overview.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-742
+docs/tools/browser-control.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 37-41,199,206-207,242-247,261,378-381
+docs/plugins/message-presentation.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 55-58,61-62,70,76-78,94-100,115-118,122-123
+extensions/acpx/src/command-line.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-56
+apps/android/app/src/main/java/ai/openclaw/app/gateway/DeviceAuthStore.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 8,22,24,30,36,44,51,113-114,127,130,133,138-139
+extensions/googlechat/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,17,20,78,81
+apps/shared/OpenClawKit/Sources/OpenClawKit/GatewayConnectionProblem.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 124-127,216,232,265,281,325,358,372,418-419,432-433,447,748,762,789
+docs/tools/agent-send.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 18,35-37,61,82-89,105-109
+docs/plugins/codex-harness.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 7,11,20-34,48,65,116,119,126-127,129-132,134-135,140-144,146-151,157,164,199,203-204,216-217,222-228,233,360-364,366-367,371-375,386-387,390-397,451-452,533-551,554,556,558-559,572-600,627,666-670,690-693,710,714,722,743,746,767-779,783,795
+apps/android/app/src/debug/AndroidManifest.xml
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-14
+apps/android/app/src/main/java/ai/openclaw/app/node/NotificationsHandler.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 13-15,28,41,46,53,60,66,88-89,137
+docs/cli/backup.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 20,27
+.github/workflows/control-ui-locale-refresh.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 141
+extensions/active-memory/index.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,19-24,31,33-37,55,293-296,374,376,529-531,612,617,624,630,645-646,648,674-675,678-681,694-700,714-723,822,908-940,1305-1310,1318-1319,1322,1325-1332,1338,1350-1354,1356,1477,1479-1481,1538-1541,1549-1580,1799-1801,1988,2492,2505,2732,2842,2868,3156
+extensions/google/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,8-9
+extensions/amazon-bedrock-mantle/mantle-anthropic.runtime.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,6-7,11-12,14,30-59,73,102,114,117,122,142-144,154-155,157,162
+apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatMessageViews.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 55,66-67,133,150,194,288
+extensions/acpx/src/runtime.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,24,26,28,30,57-58,64-68,78-88,188,201-210,227,270,273,301-312,331-332,477,538,546,568-588,610,613,664,761,763,931,935-936,963-965,970,985,992,998,1012,1227-1233,1253,1279-1280,1286,1291
+docs/security/network-proxy.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 90,99-101,137,256
+apps/android/app/src/main/java/ai/openclaw/app/ui/ProvidersModelsScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-334
+apps/android/app/src/testThirdParty/java/ai/openclaw/app/node/CallLogHandlerTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 4,250-254
+docs/channels/qqbot.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 155,177-178,182-183,273-276
+docs/plugins/codex-harness-reference.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 88-106,121-125,156-209,313-314,317,332-359,376,379-385,438-452
+docs/tools/music-generation.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 18-23,98-104,278-279
+extensions/admin-http-rpc/src/handler.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,8,134,191
+docs/start/docs-directory.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 54
+extensions/tlon/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11-12,19,22,76,79,82
+extensions/cerebras/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/ios/Tests/ShareToAgentDeepLinkTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,40,47
+.github/workflows/plugin-npm-release.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 35-38,178-214,246,251,272-273,281-283,287,291
+.github/package-trusted-sources.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+apps/android/app/src/main/java/ai/openclaw/app/MainViewModel.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 7-8,10,19,27,29-31,39-43,46-47,53-55,64-79,115,118-151,173,175,197,215-217,228-230,233-236,287-289,292-334,342-356,361-364,400,416-419,432-435,444-447,449-455,462-467,514-547
+apps/macos/Sources/OpenClaw/AppState.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 173-174
+extensions/open-prose/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/stepfun/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/concepts/delegate-architecture.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 130
+.github/actions/setup-pnpm-store-cache/action.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-2,4-5,7-9,11-13,15,17,21-32,39-40,43-44,47-50,52-72,75,78,80,84,88-90,93-94,98-108
+apps/ios/Tests/RootTabsSourceGuardTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-812
+docs/.i18n/glossary.de.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+docs/providers/inworld.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 53,71-77
+docs/style.css
+  s_ee70570d53827a::t_7fe0b94c060fdd 108-109,121,134
+apps/ios/Sources/Design/IPadActivityScreen.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-244
+docs/automation/taskflow.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2
+extensions/amazon-bedrock/openclaw.plugin.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-4
+extensions/amazon-bedrock-mantle/api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+apps/ios/Sources/Design/AgentProDreamingDestination.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-709
+apps/android/gradle/wrapper/gradle-wrapper.properties
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,5-6
+.github/workflows/dependency-guard.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-109
+apps/ios/Sources/LiveActivity/OpenClawActivityAttributes.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 44-50
+apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel+SessionKeys.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-70
+docs/plugins/reference/acpx.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+extensions/media-understanding-core/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/android/README.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 212-213,217-218,220-222,256-258,262-263,289-291
+apps/android/app/src/main/java/ai/openclaw/app/gateway/BonjourEscapes.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-5,7,22
+apps/android/app/src/main/java/ai/openclaw/app/chat/ChatController.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 20,37-39,64-66,69-71,74,82,86,89-92,95,107-115,118,120-124,131,138,143-153,155-166,176,191,209,224,230,232-233,273-274,285,291,314,343-344,349-357,359,370,372,416,427-431,437-438,440-461,554,567,572-574,581-594,609,616,661-704,710-712,730-732,757-792,794-820,841
+apps/ios/Tests/RootTabsSidebarRegressionTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-65
+apps/ios/Sources/Design/OpenClawProComponents.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-818
+apps/android/app/src/main/java/ai/openclaw/app/VoiceCaptureMode.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-5
+docs/reference/code-mode.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 9,17-31,47-48,103-107,285-286,293-300,337-342,395-396,447-514,518-701,765-771,774,783-785,789,1002,1005-1009,1037-1048
+extensions/amazon-bedrock/setup-api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+apps/macos/Sources/OpenClaw/SettingsRootView.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 11,26-39,42,87-105,115
+docs/plugins/reference/googlechat.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+.agents/skills/openclaw-testing/SKILL.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 22,30,69,71,78-80,95-96,139-140,218,241-247
+docs/concepts/memory-builtin.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 22-24,42-47,67-80,129
+docs/plugins/plugin-permission-requests.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-193
+apps/android/app/src/main/java/ai/openclaw/app/node/PhotosHandler.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 32,39,48,59,84-85,181-182,226,244,251,314,322
+docs/index.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 46,64,138
+apps/android/app/src/main/java/ai/openclaw/app/SessionKey.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,9,17,28
+extensions/active-memory/doctor-contract-api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-151
+apps/macos/Sources/OpenClaw/CritterStatusLabel+Behavior.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 66-73,250-251,287-288,301-302
+.github/workflows/macos-release.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 16,76,96-99
+docs/plugins/reference/codex.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+docs/providers/novita.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-92
+.agents/skills/openclaw-secret-scanning-maintainer/scripts/secret-scanning.mjs
+  s_ee70570d53827a::t_7fe0b94c060fdd 2-5,7,44-46,62,71,79-81,193,197,217,219,226-228,256-258,297-299,306-308,311-313,321,325,358-360,404-406,442-444,520-522,541-546,577-579,589-591,606,608-611,629-634,762-764,822-827
+extensions/vydra/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/mattermost/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,11,16,19
+apps/android/app/src/test/java/ai/openclaw/app/ui/OnboardingFlowLogicTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-4,29-178
+apps/android/app/src/main/java/ai/openclaw/app/protocol/OpenClawCanvasA2UIAction.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 7,23,40,63
+docs/concepts/agent-workspace.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 102
+extensions/acpx/src/service.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,5-10,100-110,135,165-194,247-251,256,283,314,346,384-400,405,416,431-446,451,464,473,490,545,599,625-654,664,685,706,730,752,773,789,817,842,862
+apps/android/app/src/main/java/ai/openclaw/app/gateway/DeviceAuthPayload.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-5,7,39
+apps/ios/Tests/CommandCenterTabLayoutTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-27
+docs/cli/browser.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 145-147,197-198,201-205,214,225-228,283,287-290
+.github/workflows/docker-release.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 7,42-46,83,91-109,111,114,130-133,139-141,151-153,183,190,197-281,293,301-319,321,324,340-343,349-351,361-363,393,400,407-491,509,526-529,535-537,540-544,555-557,564,567-568,572-587,602-620,622,625,644-652,658-670,672-676
+docs/providers/index.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 44,57,59,67,82
+extensions/acpx/doctor-contract-api.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-280
+extensions/admin-http-rpc/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/gateway/prometheus.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 11,90-142,150,191-192
+.agents/skills/openclaw-pr-maintainer/SKILL.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 142,147,171,173-176,180-186,190,196-220,232,282-283
+docs/plugins/manifest.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 103-109,153-195,261-268,303-309,633-634,636,641,655-674,679-689,696,698-703,884-888,946-952,1095-1160,1278,1281,1293-1303,1449
+apps/ios/Sources/Onboarding/QRScannerView.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 7,76-79
+extensions/acpx/runtime-api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+src/config/sessions/transcript-write-context.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1,16,38,50,76-86,97
+docs/concepts/typebox.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 56-57,198,226,275
+apps/ios/Sources/Model/NodeAppModel.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 114-120,131,138,145,147,162-163,302,465-466,557-558,563,595-600,620-716,777,795-797,800,802,805-807,926-927,1059,1061,1065,1070,1119,1155,1855-1863,1869-1890,1892-1895,1898-1903,1918-1919,1924,1932,1937-1941,1943-1949,1973-1974,1984-1994,1998,2003,2010,2022,2034,2039,2047,2050,2054,2060-2070,2077,2094-2131,2231-2235,2311,2315-2318,2321-2323,2335-2339,2341,2343,2347,2358-2359,2361,2381-2405,2449,2453-2456,2476-2477,2484-2485,2487,2536,2582,2586,2627,2630,2635,2645-2649,2657-2658,2664-2665,2667-2669,2681-2716,2720-2722,2725-2727,2736,2759-2818,2927-2929,4161,4230,4346-4348,4353-4362,4647-4654,4671-4673,4678-4680,4691-4702,4796-4797,4802-4816,4825-4826
+extensions/anthropic/cli-migration.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,10-14,26-30,33-35,45,47,49-55,68,74-75,85,106,109,114,117,128-130,135,137,175,217,230,233
+apps/macos/Tests/OpenClawIPCTests/MenuSessionsInjectorTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 100
+extensions/amazon-bedrock/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11-16,31,34
+apps/macos/Sources/OpenClaw/VoiceWakeForwarder.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 37
+apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatModels.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 313-318,329,336,342
+apps/android/app/src/main/java/ai/openclaw/app/node/JpegSizeLimiter.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 7-9,17-19,21,37,40,42,46-47,53,63-65,68
+apps/ios/Sources/Design/AgentProModels.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-378
+docs/reference/transcript-hygiene.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 36,51,72,90,121,134-135,153-159,175-177
+docs/concepts/session.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 113-114
+apps/swabble/Package.resolved
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,27-28
+extensions/alibaba/index.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+apps/android/app/src/main/java/ai/openclaw/app/ui/OnboardingFlow.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,6,9-18,20-21,28,30,34-35,37,55-57,59,62-64,67-71,73-78,80-81,89,92,101,103-104,107,117,119-123,126,128,134-174,176,178-182,185-188,191-194,197-201,204-213,215-226,229-235,237-304,306-317,319-368,370,372-385,392-394,397-398,400-413,415-419,421,427-435,441-458,460-471,477,482-489,496-498,500-501,503-506,508-510,512-515,517-523,525-536,538-545,547-553,555-560,564-600,606-618,620-695,701-703,705-731,736-739,742-771,776-777,780,782-785,787-795,800,802-804,806-817,822-827,829-841,847,849-850,852-858,860-866,872-875,877-884,886,888-905,907-918,920-936,943,945-950,953-955,957-960,964-973,976-987,993-999,1001-1009,1013-1015,1017-1070,1072-1073,1077-1154,1156-1166,1168-1189,1191-1197,1201-1207,1210-1399,1403-1404
+.agents/skills/autoreview/scripts/test-review-harness.ps1
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-45
+apps/android/app/src/main/java/ai/openclaw/app/ui/CameraHudOverlay.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 17,33-34
+apps/android/scripts/voice-e2e.sh
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-230
+docs/concepts/context.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 24,125,182
+docs/cli/devices.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 74-78,85-114,177-178
+extensions/acpx/src/codex-auth-bridge.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,178,199,316-429
+docs/logging.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 79-81,236-238
+apps/macos/Sources/OpenClaw/PermissionsSettings.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 39
+apps/ios/Sources/Assets.xcassets/AppIcon.appiconset/Contents.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 1
+extensions/anthropic/index.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,8
+apps/android/app/src/test/java/ai/openclaw/app/ui/SettingsScreensTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-13
+extensions/browser/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,12-13
+docs/reference/session-management-compaction.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 53-55,81,128,166,207,251-254,272,274,281-289,299,308,312,319,326,345,360-361,365-366,385,430,451,455
+apps/android/app/src/test/java/ai/openclaw/app/voice/VoiceWakeManagerTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-55
+docs/concepts/agent.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 44-45,70-73,78-80
+extensions/discord/src/monitor/message-handler.process.test.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1,7,9-10,31-33,59-68,90-99,125,129,132-135,144,151,184,244,247,249,252-326,484,486-487,489,496-497,909-972,1159-1161,1163-1165,1350-1407,1501,1508,1533,1554-1556,1567,1594-1596,1756,1876,1897-1899,1924,1966-2054,2085-2149,2167,2169,2179,2467-2468,2470-2473,2477,2482-2484,2488-2601,2604-3076,3079,3083-3089,3093-3102,3106-3108,3110,3113,3117-3123,3127-3136,3140-3145,3148,3153-3155,3164,3172-3176,3179,3182-3187,3194,3202-3204,3207,3212-3213,3221,3229-3231,3234,3238-3267,3277,3286,3290,3294-3296,3306,3314-3316,3319,3323-3324,3341-3343,3346,3350-3352,3370,3374,3379-3380,3398,3400-3459,3468-3473,3491,3493,3519,3612-3661
+apps/ios/Sources/Model/NodeAppModel+Canvas.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 5,19-22,24-25,27
+extensions/migrate-hermes/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,12,15
+extensions/vllm/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/voyage/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/tools/steer.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 6,58-59
+src/config/sessions/transcript.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1,4-5,10,19,22-23,25,35,41-42,101,121,181-190,300-301,303,310-311,319-342,349,355-359,367-373,375,423
+apps/ios/Config/Version.xcconfig
+  s_ee70570d53827a::t_d60f5c7f9f351b 5-6
+docs/reference/templates/AGENTS.dev.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 40
+docs/gateway/protocol.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 107,150-152,159-166,171-178,350-352,354-355,387,392,408-410,413-415,447,571-578,585-587,620,622-624,661,677-678,725-730,734-735,740-741,750-752,783-795,834
+extensions/acpx/src/runtime-proxy.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-47
+apps/ios/Sources/Onboarding/OnboardingWizardSteps.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-186
+docs/help/faq-models.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 163,165,218,230-232,257,259,286,293,540-544
+apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewaySession.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 4,11,36-38,50-52,71-73,80-98,107,116-118,123,125,133,136-138,168-170,194-197,202,205,210,219-228,230,233,235-243,245-252,257,265,281,322,355,359,371,388,427-442,534-538,583,595,611,621-622,632,672,729-731,745,766,771,773,777-797,837,839,846,885,895-904,930-931,957-961,1016,1075-1082,1108-1112,1190,1224,1244,1268-1270,1275,1299-1302,1308,1318,1369
+docs/install/installer.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 71,74-75,78,122,124,157-169,191,194,260-270,288,292,319,321,372,419
+docs/plugins/codex-computer-use.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 80-81,133-134,182-185,284-286
+extensions/opencode-go/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/ios/Sources/Design/CommandCenterSupport.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-217
+extensions/qwen/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/android/app/src/main/java/ai/openclaw/app/ui/ShellScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-1221
+apps/android/app/src/main/java/ai/openclaw/app/voice/ChatEventText.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 9,12,24-25
+extensions/codex/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11-13,29,32,36-37
+extensions/active-memory/doctor-contract-api.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-100
+docs/plugins/building-plugins.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 109-116,241-244
+docs/plugins/reference/diffs.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+apps/android/app/src/main/java/ai/openclaw/app/VoiceWakeMode.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-5,15-17
+apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewayHostSecurity.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 7,22-23,27,51-52,67-68,117,130
+apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewayProtocol.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,5-6
+docs/gateway/external-apps.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-86
+docs/cli/migrate.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 49-52,97,189,239-240,244-285
+docs/plugins/hooks.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 123,130-133,145-148,155,175-179,187-188,203,219-220,226-238,240-262,325-331,419-420,430-434,445-451,461-465,468,503-506
+.github/workflows/mantis-discord-status-reactions.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 59,94,584
+extensions/amazon-bedrock/config-compat.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1
+extensions/amazon-bedrock-mantle/npm-shrinkwrap.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-805
+apps/shared/OpenClawKit/Tests/OpenClawKitTests/ChatViewModelTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,100-102,107-108,110,118-120,124-126,132,157-170,178,180-185,234-248,295-316,323-326,329,333,343-345,350-351,360-362,366-368,373-375,380-381,393-411,414-417,429,435,446,459,495-504,516-524,537-540,552-563,567-569,572-574,577-588,599-602,622-633,636-637,707,723,725,731,752-883,914,936,946,950,975,985,989,998-1006,1027-1120,1135,1151,1168,1196,1224,1226-1228,1236,1260,1262-1264,1272-1273,1279,1285-1286,1288-1294,1297,1299-1301,1304,1306-1323,1325-1326,1329,1331,1333-1557,1575,1601,1625,1673,1740-1844,1861,1874,1904,1927,1971,2008,2036,2069,2102,2135,2178,2231,2281,2330-3366,3411,3483,3512,3530,3574,3585,3637,3685,3741,3796,3826,3850,3858-3861,3863-3864,3879,3888
+docs/channels/matrix-migration.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 20-24
+docs/concepts/dreaming.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 110-136,247-249,256
+extensions/duckduckgo/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docker-compose.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 42-44,66,121-123
+apps/android/app/src/main/java/ai/openclaw/app/MainActivity.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 5,11-12,14-23,25-27,32,34,36-38,42,45-47,51,55-121,124,136,138-139,150-160,165-182
+apps/macos/Sources/OpenClaw/PeekabooBridgeHostCoordinator.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 166,179-185,191,193,196-202
+apps/android/app/src/test/java/ai/openclaw/app/node/JpegSizeLimiterTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 47-69
+apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatTheme.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 18-44,110-125,133,141,146,148-152,159,167,195,203,208,210-212
+docs/plugins/sdk-overview.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 17-18,97,108-125,141-161,190,238-241,266-267,272-277,396,412-417
+docs/tools/permission-modes.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-111
+apps/ios/Sources/Design/TalkProTab.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-763
+.github/codeql/codeql-network-runtime-boundary-critical-quality.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 10-20
+docs/nodes/images.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 40
+.github/workflows/update-migration.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 46
+docs/plugins/reference/codex-supervisor.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-27
+docs/gateway/authentication.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 90,96,111,113,196-238,247,261-263
+extensions/amazon-bedrock/discovery.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-8,12-15,21-25,32,62,64,140-145,160-176,285-287,332-334,349,357-358,467-469,473-476,481-483,490-499,509,515,540-546,548-549,623-629,635-636,638-643,660,667
+docs/concepts/usage-tracking.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 12-17,26,59-61
+apps/ios/Tests/OnboardingStateStoreTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 13-16,26-42,55-58,61-64,91-94
+.github/workflows/install-smoke.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 112,115,124,135,146,166,223,226,238,248,259,295,311,314,323,329,340,362,417,420,429,432,438,447,462-463,465,476-493,503,506,515,542,545
+apps/ios/Sources/Onboarding/GatewayOnboardingReset.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-45
+.agents/skills/clawdtributor/SKILL.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 101,145-146,153-154,161
+docs/gateway/configuration-reference.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 55,92,109-111,115-125,142-161,179-183,256-257,281,357,445-448,453-455,550,585-589,618-621,738-739,760-761,933,991,995,1103,1132-1133,1292,1305-1306,1308,1324,1328,1432,1435
+.agents/skills/autoreview/SKILL.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,6,8,10,13-14,25-38,40,42-43,51,55-58,64,67-71,77,83,89,102,105-108,111-129,131-141,143,147,153-186,188-190,193-194,197-202,204,209,215
+.agents/skills/openclaw-landable-bug-sweep/agents/openai.yaml
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+apps/ios/Sources/Design/AgentProTab.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-205
+docs/cli/message.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 89,95
+apps/macos/Sources/OpenClaw/NodeMode/MacNodeRuntime.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 757,767-786
+docs/.generated/config-baseline.sha256
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+docs/gateway/heartbeat.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 55,66,102,230,278-281,384,388-390,475
+extensions/anthropic/register.runtime.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,6,13-14,31,33-34,36-38,50,61-63,66-68,125-127,267-303,308-315,328-330,336-340,344-372,376-379,416,420,423-424,430-438,452-497,499-599,719-735,826,834,841-845,847-857,859,872
+apps/android/app/src/test/java/ai/openclaw/app/chat/ChatMessageContentParsingTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-49
+apps/macos/Sources/OpenClaw/MenuBar.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 13,53-55,58-64,86-88,94,101-109,121-123,260-271
+extensions/anthropic/api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+extensions/memory-lancedb/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11-14,26,29,32,35
+apps/android/app/src/main/java/ai/openclaw/app/AssistantLaunch.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 5,7-11,14-16,25-27,34-48
+docs/web/webchat.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 27,29,53,56,58,60,65-67,71-73,86
+apps/android/app/src/main/java/ai/openclaw/app/voice/TalkSpeakClient.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 8,18,20,25,30,37,44,103-104,121,140
+apps/macos/Tests/OpenClawIPCTests/ExecApprovalPromptLayoutTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 8-124
+docs/gateway/secrets.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 17-24,39-65,153,159,186-192,229-233,326-379,408-495,687,689,699-704
+.github/workflows/live-media-runner-image.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 32,39
+docs/plugins/reference/zalo.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+src/agents/model-fallback.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1-5,14-21,24-25,29,31-32,35-36,48-52,70,82-125,203-216,294-295,321,338-340,366,374,390-392,445,447,449,456,458,466-473,475-481,488-499,501-504,506,508,528,532,550,567,601,618-621,623,673,695,731,739,751-752,758-867,881,889-901,905,911,916,920-924,928,932-936,949,960,964,972,976,1031-1051,1055,1063,1071-1080,1085-1098,1108,1148-1153,1157,1176-1178,1180,1232,1235,1284,1296-1347,1351,1527,1643-1659,1768-1781
+docs/channels/imessage.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 12,121-132,154-176,208-209,211-225,481-487,572,610-627,657,664,705-706,716,718-726,728,730,732-734,736,738,740,743,746,748,766-787
+docs/cli/update.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 22,39,80-109,125-126,133-140,155-174,179-181,190-194,205-206,261,263
+docs/nodes/index.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 221,252,254,334,347,354,384,404,411
+docs/automation/hooks.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 18-29,116,123-128,273-276
+docs/reference/memory-config.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 49-80,84,132-133,150,174-175,193,196,277,284,294,407,478,487-488,501-502,551,586-591
+apps/android/app/src/test/java/ai/openclaw/app/CronJobStatusParsingTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-40
+src/agents/session-write-lock.test.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1-3,7-8,10,13,26,93-105,114,141,147,166,182,305,313,323-360,375,392,433-623,636,659,730-778,863,865,928,940-975,977,980,983-987,989-1015,1304-1332,1349,1412-1413,1437,1479
+Dockerfile
+  s_ee70570d53827a::t_7fe0b94c060fdd 12-14,16-17,22-23,51,64,81,83-86,125-126,130-131,133,139,187,223-235,295-308
+docs/providers/deepinfra.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 37,46-59,73,75,77,85
+docs/concepts/queue-steering.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 13,18,22-25,30,58,81-82
+extensions/acpx/src/config.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,87,218,231
+docs/reference/token-use.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 18-21,23,30-33,57-61,75-76,79-80,130-133,207,209-211,218,221-223,229-230
+extensions/acpx/src/process-lease.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,6-10,12,14,16,18,21,24,38,46,51,83-89,94-100,103-106,109,111,117,119-122,127-128,131-132,139-141,144-153,158,163,186
+extensions/imessage/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,15-17,46,49
+docs/gateway/sandboxing.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 101-114,321
+docs/providers/bedrock-mantle.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 41-53
+extensions/web-readability/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/android/app/src/test/java/ai/openclaw/app/ui/VoiceScreenLogicTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-75
+docs/platforms/mac/voicewake.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 10-15,56,72
+apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel+Attachments.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-84
+docs/cli/policy.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-929
+extensions/acpx/register.runtime.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,10-23,40-42,87,96-123,129-147
+extensions/amazon-bedrock-mantle/openclaw.plugin.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-4
+apps/android/app/src/test/java/ai/openclaw/app/node/DeviceHandlerTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 4,324-425,433-441
+docs/plugins/reference/amazon-bedrock.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+extensions/active-memory/config.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,3-6
+apps/macos/Sources/OpenClaw/Resources/Info.plist
+  s_ee70570d53827a::t_d60f5c7f9f351b 18,20
+extensions/msteams/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,12-13,15,19-20,23,59,62
+.github/workflows/qa-live-transports-convex.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 55,68,162,189,202,208,219,235,270,292-293,324,355,377,400,440,461,483,523,533,560,578,618,654,672,715,751,769,809,821,846
+extensions/amazon-bedrock/discovery.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,169-227,258-361,371-392,524,526,662-663,695
+extensions/moonshot/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/cli/status.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 24,29
+apps/android/app/src/main/java/ai/openclaw/app/ui/SkillsSettingsScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-156
+docs/plugins/reference/google-meet.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+docs/help/debugging.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 281,284,287,293,298
+.github/CODEOWNERS
+  s_ee70570d53827a::t_7fe0b94c060fdd 14-23,34
+.github/workflows/codeql-android-critical-security.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 38,49
+.crabbox.yaml
+  s_ee70570d53827a::t_7fe0b94c060fdd 2-4,7,9-11,15-18,26-45,47-48,51-54,74-134
+.github/workflows/codeql.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 22-30,88-94,98-101,104,110
+extensions/amazon-bedrock/provider-policy-api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,8-13,17
+extensions/admin-http-rpc/index.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+apps/android/app/src/main/java/ai/openclaw/app/node/NodePresenceAliveBeacon.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 9,11-12,16-18,30-32,42,54,64,86,89-90,106
+apps/macos/Sources/OpenClaw/ConfigSettings.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 22,121-122,133-134,157-158
+docs/tools/subagents.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 37,65-67,71-72,74,79,83-84,94,105-106,142-144,147-150,185,191-194,216,230-232,239-240,277-278,280-281,291-296,340,343,359,362-368,375,394,437,500,504,534-535,541,624-629,643
+docs/plugins/sdk-channel-message.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,6,8-14,16-18
+apps/ios/ActivityWidget/OpenClawLiveActivity.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 16,18,26,34-37,41,45-46,52,56-74,76-77,82,85-86,92,94
+docs/tools/tokenjuice.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,6,10,16,22-28
+.github/codex/prompts/mantis-telegram-desktop-proof.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 21-24,49-57,93-95,122-125
+docs/plugins/adding-capabilities.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 18-19,117-127
+extensions/amazon-bedrock-mantle/register.sync.runtime.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,22
+apps/android/app/src/main/java/ai/openclaw/app/voice/TalkDefaults.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3
+docs/concepts/memory-qmd.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 18,65-70,75-78
+src/agents/model-fallback.test.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1,10,13-14,16,20-21,23,25-26,30,32,37-38,48-53,55-56,66-67,184-187,190,198-201,206-277,326-350,541-571,573-586,588-607,706,736-815,984-1045,1264-1299,1342,1366,1375,1381-1429,1435,1447,1465,1472,1478,1490,1502-1503,1511,1520-1521,1529,1542,1551,1559,1570,1579,1590,1600,1787,1800-1860,1874,1899,1924,1935-1964,2267,2394,2410,2434,2447-2522,2535,2563-2619,2738,2781-2784,2817,2833,2843,2845,2921,2959,2984-2985,2995,2997,3000,3016-3017,3023,3031
+docs/cli/agents.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 24,54-60,64-71,74,78,81-86,91,94
+apps/android/app/src/test/java/ai/openclaw/app/chat/ChatControllerSessionPolicyTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 4-5,34-60
+docs/plugins/reference/nextcloud-talk.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+extensions/amazon-bedrock-mantle/README.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-11
+apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewayEndpoint.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,17
+THIRD_PARTY_NOTICES.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-37
+.agents/skills/technical-documentation/agents/inventory-agent.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-31
+apps/ios/Sources/Info.plist
+  s_ee70570d53827a::t_7fe0b94c060fdd 46-47,55-56,59-60,70,78,81-82
+docs/tools/thinking.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 16-18,26-28,36,58,73,84,87-88,107-108,122,128-129,138
+extensions/admin-http-rpc/src/handler.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1
+extensions/openai/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,8
+extensions/deepseek/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/android/app/src/main/java/ai/openclaw/app/ui/NodesDevicesSettingsScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-270
+apps/android/app/src/test/java/ai/openclaw/app/ui/SettingsSheetNotificationAppsTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 35-76
+docs/tools/goal.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-217
+extensions/anthropic/stream-wrappers.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-2,5,10,93-94,96-99,102-103,105-106,118-173,188
+apps/android/app/src/main/java/ai/openclaw/app/ui/CommandPalette.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-323
+apps/android/app/src/main/java/ai/openclaw/app/voice/VoiceWakeManager.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 18,37,40,45,68,106-107,119-120,130
+docs/.i18n/glossary.fa.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+docs/reference/RELEASING.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 18-43,47-50,56,72-75,81,102-103,131,140-147,169-174,191,194,199-203,220-221,224-228,230-231,233-241,255,262-270,304,308,311,314,326,330-332,335-337,340-341,362,390,394,405-408,443,459,474,478-479,500-506,515-517,529-531,534-535,586-589,611-618,631-635,706-707,716-717,726-727,733-738,760,807-808,811,815-816
+apps/ios/Sources/Design/IPadSidebarScreenChrome.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-71
+extensions/feishu/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11-12,17,20,32-34,51,54,57
+extensions/admin-http-rpc/index.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1
+apps/android/app/src/main/java/ai/openclaw/app/DeviceNames.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 8,19-20
+apps/ios/Sources/Gateway/GatewayQuickSetupSheet.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 98,138-152
+docs/reference/secret-placeholder-conventions.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-33
+.github/actionlint.yaml
+  s_ee70570d53827a::t_7fe0b94c060fdd 17-20
+apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatComposer.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 63,70,96,121-122,127-128,151
+docs/auth-credential-semantics.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 69
+apps/macos/Sources/OpenClaw/ExecApprovals.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,88,233-238,253-441,477-484,529-536,576-583
+extensions/amazon-bedrock/stream.runtime.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-503
+docs/channels/matrix.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 235-248
+docs/providers/bedrock.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 9,31,313-331,391-392
+docs/tools/exec.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 50,55-59,75,78,87-91,117,121,146,158,177-180,189-191,222
+docs/gateway/operator-scopes.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 72-74,83-91,113-115
+apps/ios/Sources/Design/SettingsProTabSections.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-1011
+apps/shared/OpenClawKit/Sources/OpenClawKit/Resources/CanvasA2UI/a2ui.bundle.js
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-12489
+docs/providers/qwen-oauth.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-115
+extensions/voice-call/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,12-13,18,21,38,41
+docs/plugins/codex-native-plugins.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 30,34-37,88-116,144-147,265-268
+extensions/xai/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,8,12
+apps/android/app/src/main/java/ai/openclaw/app/ui/SessionsScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-352
+.github/workflows/stale.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 512,515-556,561-562,566-567,583-586
+apps/ios/Sources/Gateway/GatewayConnectionController.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 23-109,132-138,190-191,222-226,255-256,264-281,295-299,331-332,339,341-345,352-357,362,370,398-405,545-552,587-624,637-676,698-699,702-706,708,716-717,908,910,938,942,949,996-999,1090,1095-1099,1126-1133,1136,1138,1165-1170,1215-1221
+docs/channels/index.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 44
+docs/plugins/reference/policy.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-79
+extensions/slack/src/monitor.tool-result.test.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1,5,522,527
+apps/macos/Sources/OpenClaw/NodeMode/MacNodeModeCoordinator.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 5-41,51,180-183,309-312,320-324
+extensions/acpx/README.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-33
+docs/providers/gradium.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 60,70-74,94
+VISION.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 41-49
+extensions/amazon-bedrock/discovery-shared.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,8,17
+.github/pull_request_template.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-20,24,26,28,30,32,34,36,38-41,43-45,53,56-57,59,61,63,65,67,69,71,73,75,77,79-80,82,84,86,88,90,92,94,96,98-99,101,103,105,107,109,111,113-114,116,118
+apps/ios/Sources/SessionKey.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 17-25
+apps/android/app/src/play/java/ai/openclaw/app/SensitiveFeatureConfig.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 6
+docs/plugins/reference/amazon-bedrock-mantle.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+extensions/anthropic/provider-policy-api.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,73,102-127,130,139,142-157,159-175,177-183
+apps/ios/Sources/Design/IPadSkillWorkshopScreen.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-1218
+docs/concepts/active-memory.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 813-822
+apps/ios/Sources/Design/AgentProNodesDestination.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-367
+apps/ios/CHANGELOG.md
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,5-53
+docs/providers/elevenlabs.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 37
+extensions/acpx/src/runtime.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,13,59,118-121,187-189,215,223-257,261-276,345,357-362,399,410,633,644,665-666,678,699,706-707,712-713,715,722,746,754,779,789,813,844,951,971,978,983-988,990,993,998,1002-1003,1017,1024,1026,1036,1068,1537-1619
+apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatTransport.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 13-17,33,42-52,55-57
+apps/android/app/src/main/java/ai/openclaw/app/node/SystemHandler.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 20,28,38,49,76-77,106,112,150-151,180
+docs/channels/feishu.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 18,45,407-550,555-590
+docs/tools/skill-workshop.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-278
+extensions/exa/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/ios/Sources/Design/CommandCenterTab.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-789
+docs/cli/tui.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 43,47,92
+apps/android/app/src/main/java/ai/openclaw/app/node/LocationHandler.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 13-15,75,78,82,99,102,116-117,126,165
+extensions/slack/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11,14,19,22,63,67-70,73
+docs/platforms/mac/skills.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 21-23
+extensions/anthropic/cli-auth-seam.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,7,12,17
+apps/android/app/src/main/java/ai/openclaw/app/voice/TalkModeGatewayConfig.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 17,28
+.github/workflows/labeler.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 92,95,606,609,763
+apps/ios/Sources/Design/ChatProTab.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-313
+.github/workflows/openclaw-cross-os-release-checks-reusable.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 341,351,358-365,454,540,547-554,556-564,572-573,579-603,654-655
+docs/providers/ollama-cloud.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-115
+extensions/nextcloud-talk/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,12,15,47,50
+extensions/together/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+.github/workflows/test-performance-agent.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 132
+extensions/inworld/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+appcast.xml
+  s_ee70570d53827a::t_7fe0b94c060fdd 6-7,9-10,12-13,15-24,28-39,43-79,83,86-87,89-90,92-131,134-206,210,213-214,216-217,219,222-229,233-245,249-270,274
+docs/concepts/soul.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 108,111
+extensions/acpx/src/process-reaper.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,9-10,32,36,43,50,57,76-98,120,170,213,276-281,308,322,393
+extensions/amazon-bedrock/npm-shrinkwrap.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-700
+extensions/amazon-bedrock-mantle/index.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1
+apps/shared/OpenClawKit/Tests/OpenClawKitTests/GatewayErrorsTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 73-85
+docs/plugins/install-overrides.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 74-75
+apps/ios/README.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,76,78-79,122,248
+docs/reference/full-release-validation.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 20,37,41-46,90-98,154,175-182
+apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewayTls.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 28,36,43,49,55,90-92,118,144,167-168,217
+docs/providers/fireworks.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 85
+apps/macos/Package.resolved
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,45-46,54-55,81-82
+extensions/groq/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+.github/workflows/openclaw-npm-release.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 23-26,38-39,50-51,54-55,260-261,374,377-381,394,400-401,404,412-420,424-446,531,534,541,556-574,590,597,663
+apps/ios/Sources/OpenClawApp.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 605-606,621-622,628-629,632-635,641,645-661,665-676
+extensions/acpx/src/codex-auth-bridge.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,15,535-563,731
+apps/android/app/build.gradle.kts
+  s_ee70570d53827a::t_7fe0b94c060fdd 44,68-69
+docs/cli/plugins.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 106,126,160,162,164,170-172,174,178-179,186,195-198,212,222,268-271,325,331-336,338-350,358,408,420,461
+docs/providers/openrouter.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 17-62,181,218-231,326-377
+extensions/tokenjuice/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-8,11-19,22-23,28-45
+docs/cli/transcripts.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-151
+docs/plugins/reference/diffs-language-pack.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-31
+apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatView+Previews.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-256
+docs/plugins/sdk-testing.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 23-24,50-51
+docs/tools/skills.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2-4,11-47,49-62,64,66-67,69-75,77,79-81,87,91,100,102-106,113-115,117-120,122,126-192,197-199,202-223,225-226,230,237-238,241-246,251-252,254,256,258,261-262,264,266-267,269,273,275-277,280,282-284,302,304,306,308,312-314,316,318,320,322,324,326,328,330,332,336,338,342-345,350-351,379-388,391-406,412-413,421-422,436-439,441,443-444,446,448-449,451,453,455,457-458,462-464,471-487,489-494,497-498,502-504,506,508-509,511-513,515-531,533-535,537-542,544-545,547-548,552-553,556,559-562,564,568-587
+extensions/volcengine/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+.oxlintrc.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 11,23,25,30-31,37-40,45,50,52-53,60,62,81,83-85,87-88,107,115-116,130,136-137,141,151-152,212-213,217,241
+.agents/skills/openclaw-landable-bug-sweep/SKILL.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-165
+docs/tools/exec-approvals-advanced.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 118,163-167,172-174,219-220,285-294,312-315,329-330,333-342,388-450
+docs/providers/vllm.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 148-173,186-187
+src/agents/failover-error.test.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1-4,6,8-9,86-87,499,555-597,997-1027,1149,1249-1315
+extensions/acpx/src/manifest.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,10-13,18-19
+extensions/tts-local-cli/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/plugins/sdk-runtime.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 59,95,147,156-163,167,474-480,534
+apps/macos/Tests/OpenClawIPCTests/ExecApprovalsStoreRefactorTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 19-35,50-90
+extensions/openrouter/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/tools/grok-search.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 5,13-17,30-33,41,44-56,77,94-97
+docs/plugins/cli-backend-plugins.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 211,216-231
+docs/plugins/reference/voice-call.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+apps/ios/Sources/Gateway/GatewaySettingsStore.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 37-47,124-130,132,146-150,152,171-177,179
+docs/.i18n/glossary.th.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+docs/plugins/reference/copilot.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-23
+apps/android/app/src/main/java/ai/openclaw/app/ui/ChatSheet.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 7
+apps/android/app/src/main/java/ai/openclaw/app/node/NodeUtils.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 11,14,22,35,45,51,57,63,69,82,90,100,107,113
+apps/android/app/src/main/java/ai/openclaw/app/ui/NotificationAppPicker.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-82
+apps/android/scripts/build-release-aab.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 2-5
+docs/plugins/reference/tlon.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10,19
+docs/providers/fal.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 47-55,60-62,65-86,102-109
+docs/nav-tabs-underline.js
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+docs/plugins/manage-plugins.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 156-159
+docs/start/openclaw.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 175,199,201-205,208,212-213,215,217,238
+.agents/skills/technical-documentation/agents/synthesis-agent.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-28
+extensions/amazon-bedrock/README.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-11
+apps/ios/Sources/Design/RootTabsPhoneControlHub.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-417
+.github/workflows/website-installer-sync.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 78,81,85,93
+docs/plugins/copilot.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-355
+docs/tools/trajectory.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 181
+docs/concepts/compaction.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 57,109,114-116
+docs/plugins/sdk-channel-outbound.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-113
+extensions/amazon-bedrock/index.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+.agents/skills/technical-documentation/references/build.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-116
+apps/android/app/src/test/java/ai/openclaw/app/voice/TalkModeManagerTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 14,17,143-352,441-453,468,484,487,508-514
+.github/workflows/mantis-telegram-desktop-proof.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 51-52,82,128,228,270-274,314-324,326,328-335,338-343,429,431,448,458-459,469,488-534,712
+extensions/openshell/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,26,29
+.github/codeql/codeql-mcp-process-tool-boundary-critical-security.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 27-35
+docs/gateway/opentelemetry.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 73-77,79-81,110,119-126,131-138,157,160-169,200,202-203,211-214,275-282,287-291,298-299,321
+.agents/skills/technical-documentation/agents/docs-framework-agent.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-32
+docs/reference/test.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 11-14,21-22,24,27-28,30,47,49-50,52,136-222
+docs/tools/exec-approvals.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 18-21,26,76-78,81-82,86-89,129-142,155-163,170-171,221,223-225,245-253,292,327-330,435,467-473,481-486
+docs/plugins/reference/anthropic-vertex.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10,20-29
+apps/android/app/src/main/java/ai/openclaw/app/ui/CanvasSettingsScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-142
+apps/android/gradlew
+  s_ee70570d53827a::t_7fe0b94c060fdd 60
+docs/.i18n/glossary.es.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+docs/gateway/local-models.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 318
+docs/providers/pixverse.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-165
+docs/plugins/reference/nostr.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+docs/.i18n/glossary.pt-BR.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+apps/android/app/src/main/java/ai/openclaw/app/ui/SettingsSheet.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 75,135-136,215,252-256,350-351,359-363,995-1021,1225,1238,1246,1256,1266,1276,1286,1293,1296
+docs/help/faq.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 178,182,185-210,257,352,354,360-364,440,551-554,559-561,634-675,803-804,816,894,1070,1155-1157,1353-1355,1656-1658,1660-1663,1679,1694,1813,1826,1869-1931
+docs/install/development-channels.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 40-43,46-47,67-68,72-74,82-85,126-131
+docs/start/onboarding.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 49-52
+apps/android/app/src/main/java/ai/openclaw/app/ui/ConnectTabScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,64,69,151-154,292-299,329,578-583
+docs/plugins/reference/novita.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-23
+extensions/diagnostics-otel/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,37,40
+.agents/skills/technical-documentation/agents/openai.yaml
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-10
+apps/android/app/src/test/java/ai/openclaw/app/PermissionRequesterTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-129
+apps/ios/Sources/RootView.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 4-6,8-13
+.github/workflows/clawsweeper-dispatch.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 27-34
+SECURITY.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 51,102,107,166,187
+apps/ios/Sources/Design/SettingsProTab.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-229
+apps/android/app/src/test/java/ai/openclaw/app/ui/chat/ChatMarkdownTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 5,36-51,59-73
+apps/android/app/src/test/java/ai/openclaw/app/ui/chat/ChatSheetContentTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 74-94
+docs/concepts/agent-runtimes.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 5,17-22,35-36,38,43-46,54,61,96,98-100,115,126-134,156,168,177,179,198-201,205,208-235,238,250,271
+docs/platforms/windows.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,5-6,10-14,16,18-19,21,23-25,27-29,31,33-42,44,46-49,51-52,54-57,59-60,62-78,81-83,86-88,90,92-94,96-97,99,101-113,116,118-121,123-130,132,135,137-139,142,144-146,148-154,157,159-164,166,168-172,175-176,179-182,187,203,210,212-214,216,235-239,241,243,245-247,249,251,254,257-258,260,262,264-266,269-270,272,274-275,277,279-281,283,285-286,288,301-304
+extensions/acpx/src/runtime-internals/mcp-command-line.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1
+extensions/xiaomi/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+.github/labeler.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 13-17,44-55,140-144,207,215,301-304,321-325,372-376,427-437,458-462,541,586-589
+docs/cli/skills.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,5-6,13-14,19,30-32,35,37,40-45,57-64,67-75,77-84,91-97,100-101,104-120,128-151
+.github/workflows/docs-agent.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 152
+src/agents/failover-error.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1-7,15-18,23,32,51,67,74,87,148-149,167-171,184-223,271,277-278,290-292,297,330,346,356,367,390,476,542,552-606,644
+docs/plugins/sdk-channel-inbound.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-70
+apps/macos/Sources/OpenClaw/ExecApprovalsSocket.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 17-89,303,311-319,322-351,495,504-512,768,777,919
+extensions/amazon-bedrock/aws-credential-refresh.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,15,33,44
+docs/.i18n/glossary.id.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+extensions/amazon-bedrock/provider-policy-api.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,19,24-59,70-94
+apps/ios/Tests/GatewayStatusBuilderTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 36-43
+docs/providers/groq.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 78-88
+extensions/deepinfra/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/plan/codex-context-engine-harness.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 7,17,19-20,39,47,56,68,76,78-80,150,153,161,163-165,167-168,183,185,326-330,475,529,537,602-604,622
+apps/macos/Sources/OpenClaw/CritterStatusLabel.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 13
+docs/plugins/reference/lobster.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+docs/cli/sessions.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 50-63,121,127
+.github/codeql/codeql-channel-runtime-boundary-critical-security.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 22
+README.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 28,33-34,96,117-118,121-122,124-127,129-131,133,149-150,168,176,189-190,310
+apps/macos/Sources/OpenClaw/CronSettings+Layout.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 12
+apps/ios/Sources/Design/OpenClawProScreens.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-3
+extensions/anthropic/index.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,76-77,127-146,188,208,222,226,240,242,250,283,292-471,475,478-479,493,498,500-508,530-625,629-688,713-809,813,816-817,844-944
+extensions/amazon-bedrock/api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+docs/gateway/tailscale.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 70-88,136-140
+docs/.i18n/glossary.ar.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+extensions/fal/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/shared/OpenClawKit/Sources/OpenClawKit/ElevenLabsKitShim.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,11
+apps/android/app/src/test/java/ai/openclaw/app/node/InvokeCommandRegistryTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 43,76,100,118-126,138,159,163,228-238,271,275,285,289
+extensions/bonjour/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,7
+docs/plugins/reference/memory-lancedb.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+docs/install/macos-vm.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 108,110-111
+docs/install/uninstall.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 22-30,58
+extensions/qqbot/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,5,15,21,24,53,56
+docs/channels/discord.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 355-357,699,712,1143,1200,1220,1230,1234,1237-1239,1243,1245,1252,1257,1265,1267-1286,1289,1291-1298,1300,1302-1310,1328-1330,1334,1356-1360,1378,1382,1401,1409,1419-1420,1436,1440,1727
+apps/ios/Sources/Voice/TalkPermissionPromptView.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-173
+apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatImageCodec.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 16,29,39-41,78,108,125
+extensions/acpx/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11-13,29,32,46-47
+docs/reference/templates/HEARTBEAT.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 8-13,20
+apps/macos/Tests/OpenClawIPCTests/ControlChannelStateDebouncerTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-60
+apps/ios/Sources/Gateway/GatewayProblemView.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 6-7,62-70,114,230,232
+extensions/anthropic/setup-api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,8
+.agents/skills/technical-documentation/agents/governance-agent.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-30
+apps/android/app/src/main/java/ai/openclaw/app/ui/VoiceTabScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 78-80,121,408-410,416-418,451-453,475-477,499-501,508-510,518-520
+docs/cli/infer.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 132,166,175,199,275
+apps/android/app/src/main/java/ai/openclaw/app/AppearanceThemeMode.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-25
+apps/android/app/src/test/java/ai/openclaw/app/ui/chat/ChatTimelineTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-94
+apps/ios/Sources/Design/AgentProTab+DetailComponents.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-35
+docs/start/wizard-cli-reference.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 153,156-164,166-167,185,222
+docs/plugins/sdk-subpaths.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 32,36-44,46-48,52-53,75,79,86-89,91-95,108-109,114,117-120,130-137,148,152,154,163-167,174-180,192-193,205,221,223,233,242,249,252,263,270,297,304,330-331,338,360,362
+apps/ios/Sources/Onboarding/OnboardingStateStore.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 27-32,34-36
+extensions/amazon-bedrock/config-api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+extensions/acpx/src/process-reaper.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1
+docs/refactor/database-first.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-2263
+apps/macos/Sources/OpenClaw/SessionsSettings.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 27
+docs/plugins/workboard.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-402
+apps/macos/Sources/OpenClaw/ControlChannel.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 42-83,130-169,190,194,202,205,209,215,231,235,258,262,471,473
+.agents/skills/autoreview/scripts/test-review-harness
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-16
+docs/reference/prompt-caching.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 107-108
+extensions/acpx/src/runtime-internals/mcp-command-line.mjs
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,113
+extensions/anthropic/doctor-contract-api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-7,9-20
+docs/start/wizard.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 10-12
+docs/tools/plugin.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 43-45,131-157,188-190,204,225-247
+docs/.i18n/glossary.zh-CN.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 7-13,104,170-189,258-301,306-317,614-617,786-793,1086-1093,1097-1180
+apps/ios/Sources/Gateway/ExecApprovalPromptDialog.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 147-148
+extensions/kimi-coding/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/plugins/sdk-agent-harness.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 50,62,110,112,115-116,163-164,167-168,173-174,192,202,207-208,211-212,242,244,308,321,326
+apps/android/app/src/test/java/ai/openclaw/app/node/InvokeDispatcherTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 7,10,174-187,220-228,267-268,313-314
+apps/android/app/src/main/java/ai/openclaw/app/tools/ToolDisplay.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 34,43,52,57,65,94-95,132-133
+.agents/skills/openclaw-parallels-smoke/SKILL.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 61,96-97,143-144
+extensions/chutes/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/comfy/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/plugins/reference/tokenjuice.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 15
+.github/workflows/opengrep-precise.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 47,61,64-65,77,87
+extensions/alibaba/openclaw.plugin.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 7-13
+docs/install/podman.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 65,85-89
+extensions/amazon-bedrock-mantle/index.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+docs/plugins/reference/msteams.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+docs/cli/sandbox.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 169,174
+docs/providers/openai.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 11-12,24,39,41,49-56,59-62,74-78,84-117,179,185-186,193,203,216,227,233,239,253,266-267,272,274-276,280,283-284,315,334,343,346,354,358-359,362-372,378-379,383,385,402,432-433,510-511,549,552-555,572,574,576,622,639,647,698,701,718,740-743,962,968,1036
+extensions/amazon-bedrock/thinking-policy.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-12,22-34,36-47,52-105,107-116,122-140
+docs/plugins/reference/zalouser.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+apps/ios/Tests/CommandCenterTabSessionFilterTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-41
+extensions/amazon-bedrock-mantle/mantle-anthropic.runtime.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-2,9,24-25,52,116-176
+apps/android/app/src/main/java/ai/openclaw/app/node/InvokeCommandRegistry.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 19,27,31,35,44,47,51,58,63,69,77,101-104,117,198-201,210,256,259,269,275,287,290
+apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatTimeline.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-69
+docs/gateway/security/audit-checks.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 42,67,96
+.github/workflows/openclaw-release-publish.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 49,51,54,123-127,139,141,160-178,194,263,274,294,302,338,357,459,471,477,479,507,516-523,530,577-712,758,764-768,801,804-805,822,824-828,843-913,920,923,927,934-938,964,973,979-985,1015-1028
+docs/concepts/timezone.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 15
+docs/providers/models.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 49
+docs/tools/media-overview.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 55-79,102-107
+docs/tools/pdf.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 56-59,73,100,117,123-124,199-206
+apps/android/app/src/main/java/ai/openclaw/app/ui/CanvasScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 29,155-156,190
+apps/android/app/src/main/java/ai/openclaw/app/ui/design/ClawTheme.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-300
+apps/ios/project.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 18-20,63,100,140,150,154,186,223
+.agents/skills/crabbox/SKILL.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 47-53,87-103,152,163,166-170,179,214,226-240,567,574,608-609,615,641,704
+apps/android/app/src/main/java/ai/openclaw/app/node/LocationCaptureManager.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 17-19,41,88,110
+extensions/acpx/index.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,48,52,61,63-67,72-86,97,100
+apps/ios/Sources/RootTabs.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,4,11-30,33,35-115,118-134,136-199,201,203-205,207-231,234-250,252-271,274-308,311,314-333,335-512,514-751,754,758-942,946-947,953-954,956-964,966-1044,1047-1215
+docs/channels/imessage-from-bluebubbles.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 68,224-239,251
+docs/concepts/message-lifecycle-refactor.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 5,10,23,29-30,70,80,560,673,675,677,682,688,697-698,707,710,903,911,913,951,956,977,979,1003,1006,1076,1095,1103,1126
+apps/android/app/src/main/java/ai/openclaw/app/ui/design/ClawComponents.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-561
+docs/reference/secretref-credential-surface.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 41,54,78-79
+docs/cli/crestodian.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 4,15-19,98-100,160-161,176,315,321-325
+docs/reference/AGENTS.default.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 45,71,94
+docs/concepts/personal-agent-benchmark-pack.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 6,26-28
+docs/plugins/reference/discord.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10,19
+extensions/anthropic/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/android/app/src/main/java/ai/openclaw/app/node/CameraHandler.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 19-21,24-26,35,63,103,136,165
+.github/workflows/openclaw-scheduled-live-checks.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 41
+docs/concepts/oauth.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 20-26,30-31,56,106,118,133-144,154,170
+extensions/github-copilot/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+.github/actions/setup-node-env/action.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 22-29,33-41,43-49,51-52,55-56,60-63,80,82,116-132,134-138,141,144-145
+apps/android/app/src/main/java/ai/openclaw/app/ui/GatewayDiagnostics.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 10,20,23,29,35,59,75
+apps/android/app/src/main/java/ai/openclaw/app/SecurePrefs.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 18-20,43,45,50-51,55,120-123,185-188,266-270,277,336,381,390,396,402,434,438,448,454,491,501,509,533-537,563,575
+apps/macos/Sources/OpenClaw/SoundEffects.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 6,11
+apps/android/gradle/libs.versions.toml
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,6-7,16-17,19,22-23
+extensions/arcee/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/macos/Tests/OpenClawIPCTests/VoiceWakeForwarderTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 17,41
+apps/android/app/src/main/java/ai/openclaw/app/NodeRuntime.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 15,50,68,78-99,105-107,225,227,265-266,278-280,288-299,307-308,314-317,345-350,353-415,433-434,437-440,442,457-458,460-476,482,493-494,520,554,661,715-731,759-820,897,905,910,928,976,1066-1067,1122-1127,1165-1170,1230,1269-1377,1411,1424,1455-1462,1468-1472,1572,1644,1669,1803-1805,1811-1824,1853,1889-1891,1898-2529,2613,2618,2623,2627-2628,2742,2748-2986
+docs/reference/release-performance-sweep.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-347
+docs/gateway/background-process.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 45-46,48
+extensions/anthropic/provider-contract-api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,9
+extensions/amazon-bedrock/embedding-provider.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,11-14,27,312,373,379,381,386,392,395,472
+apps/ios/Sources/Voice/TalkModeManager+Permissions.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-100
+extensions/alibaba/video-generation-provider.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,32
+apps/android/app/src/test/java/ai/openclaw/app/chat/ChatControllerMessageIdentityTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-4,10-41,115-256
+docs/plugins/memory-lancedb.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 128-129,241-242,245-246
+apps/ios/Sources/Design/AgentProTab+GatewayData.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-244
+extensions/qa-channel/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,14,19,22
+docs/plugins/reference/qqbot.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+docs/providers/minimax.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 9,29-30,83,135,144-152,179,183,256-259,289-296,306,367,403-405,407,453-455,458,471,481-482
+apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatMessageListCard.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 13,18,21,31,35,43-51,53-55,69-74,77,79-83,86-87,89-103
+apps/ios/Tests/GatewayConnectionControllerTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 4,55-70,100-104,107,112,115-178,186,196,201-356,376-380,406-430
+apps/ios/Sources/Push/PushRegistrationManager.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 20,111,143
+extensions/qianfan/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/providers/anthropic.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 11,14-19,21-23,27-31,68-69,105-112,121,123,136-152,154-157,163-168,170,179-180,300,308-311,318,325-328,331-333,336,341-342
+docs/providers/azure-speech.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 48,72
+docs/plugins/reference/twitch.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+extensions/memory-core/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,10,14,17
+docs/concepts/mantis-slack-desktop-runbook.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 119-146,170-172,190-191
+apps/android/app/src/main/java/ai/openclaw/app/voice/TalkModeManager.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 34,43,56-58,65-67,88-90,112,115-116,171-172,177-178,182-183,186-187,189-193,223,230,243,249,289,324,341,358,409,421,500-513,523,528,549,554-555,597-609,771,773,797,813-815,818-821,824-825,841,865-877,880-907,917-922,940,945-957,960,986-991,1035-1036,1065,1071-1077,1178,1186,1196-1250,1255-1256,1261-1280,1283-1284,1286,1290-1294,1297-1341,1360,1368,1370-1371,1373,1375-1406,1409-1473,1706,1718-1721
+apps/ios/fastlane/Fastfile
+  s_ee70570d53827a::t_7fe0b94c060fdd 32-39,325,333-336,340-344,346-347
+docs/reference/templates/AGENTS.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 55,65
+extensions/amazon-bedrock/index.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,13,193,239,277,316-349,372-433,531-609,658-687,740-769,800-875,949,965,984,1004,1026,1050,1072,1131-1163,1188,1317,1324,1345,1353
+apps/android/app/src/main/java/ai/openclaw/app/node/CanvasActionTrust.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-5,7,10-14,18-19
+apps/android/app/src/main/java/ai/openclaw/app/node/InvokeDispatcher.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 18,25-27,60-62,87-88,95,107,115,196,244-248,257,315,330-347,360-362,364,367,370,373
+docs/plugins/sdk-setup.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 537
+extensions/active-memory/index.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,6-10,12,36,39-42,49-52,67,120,125-160,165-169,222-225,231-236,285,331-332,375,378-379,386,436-449,499,525,600,635,763,784,799,829,845,860,890,909,928,950,977,998,1025,1051,1073,1096,1119,1145,1168,1192,1220,1247,1271,1296,1323,1348,1369,1825,1898,1930,1953,2015,2024,2073,2133,2175,2199-2200,2225-2226,2258-2259,2283-2284,2311-2312,2334,2355-2356,2359,2370,2415-2417,2431,2462-2463,2476,2496-2497,2510,2527-2528,2540,2574,2587,2632,2671,2698,2734,2740,2744,2753,2760,2768,2775,2789,2812,2821,2825,2832,2835,2841-2842,2850,2892-2922,2949,2961-2962,2969-2972,3004-3006,3014-3017,3040-3043,3051,3076-3079,3088,3121-3122,3125,3134,3147-3149,3165,3167-3168,3177,3188-3189,3219-3220,3223,3226-3230,3240-3242,3428,3444,3881,3906,4099,4126-4127,4143-4144,4151-4152,4162-4205,4208-4209,4218,4241,4254,4264-4265,4276,4288,4300,4303-4304,4310,4322,4325,4337,4341,4347-4349,4351,4355,4363-4376
+extensions/alibaba/video-generation-provider.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1
+docs/concepts/messages.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 197-202
+extensions/acpx/src/runtime-turn.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-200
+.agents/skills/technical-documentation/references/tooling.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-32
+apps/ios/Sources/Status/VoiceWakeToast.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 4-5,20-25
+docs/plugins/sdk-channel-turn.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2-3,6,8-9
+extensions/whatsapp/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,12-13,17,20,63,66
+apps/macos/Sources/OpenClaw/ExecApprovalsGatewayPrompter.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 73-75
+LICENSE
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,22-24
+apps/ios/Sources/Onboarding/GatewayOnboardingView.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 112,211-212,223-227,231-232,258-264,274-276,278-279,282,284-289,291
+extensions/parallel/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 1-15
+docs/channels/groups.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,5,10,51-52,57-59,61,65-69,366-444,448-450
+extensions/acpx/src/config.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,11-16,172-175,190-193
+extensions/anthropic/cli-constants.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-5,7-9,12,17,20-25,27-28,32
+extensions/amazon-bedrock/embedding-provider.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,3,70,76,82,88,94,100,107
+apps/android/app/src/main/java/ai/openclaw/app/node/CalendarHandler.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 23-25,32-34,46-48,59-61,93,171,176,227,361,374,411
+apps/android/app/src/main/java/ai/openclaw/app/ui/chat/Base64ImageState.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 14,20
+docs/plugins/sdk-provider-plugins.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 64-70,96,208-344,432-435,497,509,517-525,599-605,629-633,662-663,674-676,695,818-867,887
+extensions/gradium/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/nodes/audio.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 29,33
+.github/ISSUE_TEMPLATE/bug_report.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 14-15
+docs/plugins/voice-call.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 118,233,325,458,489,508,531,602,611
+docs/plugins/sdk-migration.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 33,39,51,146,196,297-298,303,307,316,321-324,411-412,415,479-490,529,531-532,534-537,573,580,621,634,648-649,657,798-826,854-858,864-866,869,903-919,954-955
+docs/providers/claude-max-api-proxy.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 15-20,25-28,30-33,38-39,52,168
+extensions/amazon-bedrock/memory-embedding-adapter.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1
+extensions/qa-lab/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,8,19,22,34
+src/agents/embedded-agent-runner/run/attempt.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1-5428
+apps/android/app/src/test/java/ai/openclaw/app/NodeForegroundServiceTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 37,41,45
+.github/workflows/windows-node-release.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-126
+extensions/microsoft-foundry/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+src/agents/session-write-lock.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1-5,10,14-17,54,61-63,65-70,123-128,146-148,270,273,399-416,420,426-437,563-566,592-619,624,629-631,638,645-697,728-746,828,867,899,905,908-924,928,955-962,964-968,981-987,992,995-1031,1036,1042,1060
+docs/tools/tool-search.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,5-7,10,14,19,44,52,73,154,161,177,233
+docs/plugins/reference/synology-chat.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+docs/platforms/easyrunner.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-109
+docs/concepts/memory.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 58-97,147-150
+docs/docs.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 64-65,68-69,75-98,253,259-262,759-766,1079-1080,1085,1244,1247,1252,1267,1275,1301,1343,1355,1426,1439,1442,1448,1451,1482-1483,1580,1582,1722-1728,1753,1762,1794-1795,1817,1837,1849
+extensions/amazon-bedrock/memory-embedding-adapter.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,15
+.github/workflows/mantis-telegram-live.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 47-48,71,108,276-286,288,290-297,300-305,330,380,389-390,576
+.agents/skills/openclaw-test-heap-leaks/scripts/heapsnapshot-delta.mjs
+  s_ee70570d53827a::t_7fe0b94c060fdd 2-4
+apps/ios/fastlane/metadata/en-US/description.txt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,6,8-9,11-12,14,19
+docs/tools/image-generation.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,14-19,25,49-51,80,83,86,91-92,101-113,130-136,155-156,162-164,187-189,252-257,267-270,278-279,286,328-329,340-380,406-445,511-515,532
+apps/ios/Sources/Voice/TalkModeGatewayConfig.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 4-250,255,260-262,274,298,300-314,326,331-333,339-385
+docs/cli/gateway.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 45-46,59,79-81,135-137,307,337,382
+apps/android/app/src/main/java/ai/openclaw/app/WakeWords.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-5,10,13,22
+docs/plugins/reference/qwen.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10,19,24
+apps/android/app/src/main/java/ai/openclaw/app/node/CameraCaptureManager.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 44-46,50,55,62,74,76,80,82,86,121,137,195,320,383,438-440
+apps/android/app/src/main/java/ai/openclaw/app/gateway/InvokeErrorParser.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 8,13-16,38
+apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatView.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 13-17,19,27,32-40,66,71-80,83,89-97,102,107,118-159,182-184,186-190,192,217-220,264-285,292-296,303-309,324-328,349-354,357,359,393-399,418-457,647-687,697-702,704-706,708-715,723,725,728-730
+apps/shared/OpenClawKit/Sources/OpenClawKit/Resources/CanvasA2UI/index.html
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-311
+docs/cli/configure.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 30-31
+docs/cli/uninstall.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 38
+docs/cli/setup.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 25,37,46
+extensions/image-generation-core/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/lobster/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11-12,27,30
+docs/cli/doctor.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 43,48-49,70,73-74,92,194-203,210,215,219,229,233-234
+apps/ios/Tests/RealtimeTalkRelaySessionTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-107
+docs/channels/zalouser.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 169-186
+extensions/searxng/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/android/app/src/main/java/ai/openclaw/app/ui/ChannelsSettingsScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-163
+apps/android/app/src/main/java/ai/openclaw/app/voice/TalkDirectiveParser.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 10-12,30-32,40,50,99,228
+docs/cli/agent.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 16,28,49-50,64,68
+apps/shared/OpenClawKit/Sources/OpenClawKit/Resources/tool-display.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 364-383,392-400,473-514
+docs/nodes/camera.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 62,64,129,133-134,155
+extensions/acpx/src/claude-agent-acp-completion.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,72-102,106,136
+docs/plugins/plugin-inventory.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 31-33,50-51,54-234,238-308,312-318
+apps/android/app/src/test/java/ai/openclaw/app/gateway/GatewaySessionInvokeTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 13,31,128-179,269-388,512,541,803-807,811,822,828,840-841,857-858,868
+.agents/skills/openclaw-test-performance/SKILL.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 101
+docs/cli/node.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 165-166
+apps/ios/Sources/RootTabsNavigation.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-308
+.github/workflows/codeql-critical-quality.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 36,75-77,110,116,213-215,230-238,250,257,307-309,345,351,368,374,391,397,414,420,436-460,462-463,470-471,477,521,527,544,550,567,573,590,596,613,619,636,642,658,664,680,686,703,709,726,732
+docs/date-time.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 14,17,48,54,60
+docs/plugins/reference/feishu.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+extensions/brave/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,24,27
+apps/macos/Sources/OpenClaw/TalkModeRuntime.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 390
+apps/android/app/src/test/java/ai/openclaw/app/node/ConnectionManagerTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 7,12,15,113,123-137,261-265,384-397,462,470,475,479-487,500,506,514,518,557,559,579,581
+docs/channels/group-messages.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 25
+apps/macos/Sources/OpenClaw/VoiceWakeSettings.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 23,50,55-56,58,63,88-107,122,124-137,140-146,158-183,186-189,191-196,198-202,204-211,213,215-218,222,226-227,232-233,238,241,246,251-294,305-316,318-321,323,326,328-358,362-365,589-594,596,598,600,603-633,635,637,639,645-664,706,768-777,780-783,791-796,798,804-907,939
+docs/plugins/reference/whatsapp.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+extensions/fireworks/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/matrix/CHANGELOG.md
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-75
+.github/workflows/mantis-discord-smoke.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 40
+docs/gateway/doctor.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 146,151,174,237,258,268,296,329,331,334,376,378-380,386,418-419,522
+apps/ios/Sources/Design/SettingsProTabSupport.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-327
+docs/gateway/logging.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 22
+apps/android/app/src/test/java/ai/openclaw/app/ui/GatewayConfigResolverTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 102,104-113,158,160-164,265-274,295-297,299-315,456,472-474
+docs/platforms/mac/permissions.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 5,26-43
+docs/tools/web.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 87-92,106-121,134,189,195,199-205,207-210,216,247-248,279
+docs/concepts/agent-loop.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 28,30,32-33,37,100,123,154-156,166
+extensions/azure-speech/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/ios/Sources/Design/OpenClawBrand.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-145
+apps/ios/Sources/Gateway/GatewayConnectConfig.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 28-76
+apps/ios/Sources/Assets.xcassets/OpenClawIcon.imageset/Contents.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-12
+docs/concepts/mantis.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 205-208
+docs/gateway/secrets-plan-contract.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 41-85
+.agents/skills/technical-documentation/references/openclaw.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-128
+docs/plugins/reference/memory-core.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10,19
+extensions/acpx/src/runtime-internals/mcp-proxy.mjs
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-6,13-19,77
+docs/providers/xai.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 9-13,15-21,24-41,43-45,51-76,89-92,94-95,103-124,132,137-139,142-143,195-197,207-208,211,230-231,271-272,322,501-506
+docs/providers/gmi.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-92
+extensions/amazon-bedrock/register.sync.runtime.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-5,7,9-12,16-17,21,24-31,52-74,137-141,143-147,171-172,177,179,189,192,195,202-203,225,228,261,266,303,312,335,369,385,403-411,424-437,448-449,452-457,465,506,508,531,560,563-570,573-581,587-591,594-597,599-603,618-619,633,637-643,654,677,679-681,684,695,709,712,735-736
+apps/android/app/src/main/java/ai/openclaw/app/protocol/OpenClawProtocolConstants.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,23,39,53,67,80,95,107,115,123,136,148,160,173,186,199
+apps/ios/Tests/RootTabsPresentationTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-471
+apps/ios/Tests/SettingsNetworkingHelpersTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 5-32
+apps/ios/Sources/Voice/TalkDefaults.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-2,5-13
+docs/install/docker.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 112-114,132,154-156,299-300,432-434,439
+apps/ios/Tests/TalkProStateTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-98
+.github/workflows/crabbox-hydrate.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 34-39,44-560,572,579-584,591-595,597,603-610,614-616,626-659,668,695,714
+docs/reference/secretref-user-supplied-credentials-matrix.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 341-353,592-598,662-665
+apps/android/app/src/main/java/ai/openclaw/app/ui/chat/SessionFilters.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 22,37,62,68-97
+docs/gateway/openai-http-api.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 81-88,147-148,215,222-225,227,239-240,301-314
+extensions/acpx/src/runtime-internals/mcp-proxy.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1
+apps/android/app/src/main/res/drawable/openclaw_logo.xml
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-67
+apps/android/app/src/main/java/ai/openclaw/app/chat/ChatModels.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-5,11,14-16,25-27,36-38,45-47,55-57
+docs/gateway/tools-invoke-http-api.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 131,138-142
+docs/tools/acp-agents.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 14,186,551-555,557-561,564-570,579-581,806,848-854
+apps/macos/Sources/OpenClaw/SkillsSettings.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 30
+extensions/anthropic/config-defaults.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,6-13,17,157-187,213,218-221,224-261,281,292,350,391-394,397
+docs/install/updating.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 37-41,74-80,112-140
+docs/concepts/features.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 23-24
+docs/install/bun.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 53
+docs/concepts/qa-e2e-automation.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 37,51,87,93-101,103-140,144-146,172,178,181,211-229,271-274,281,284,303-305,313,315,321-331,472-476,478,487-493,500-502,674-745,916-918,928,934,965,971
+extensions/anthropic-vertex/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11,26,29
+docs/reference/wizard.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 40-41,50
+apps/android/app/src/main/java/ai/openclaw/app/NodeApp.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 6-8,14-16,24-26
+apps/shared/OpenClawKit/Sources/OpenClawKit/ShareToAgentSettings.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 17
+extensions/synology-chat/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,33,36
+extensions/tencent/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+.github/actions/ensure-base-commit/action.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 41-46,49,59
+.github/workflows/openclaw-live-and-e2e-checks-reusable.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 71-75,105-109,186-190,216-220,232-233,483-511,516,566,588-590,598,668-669,672,676,683,731,744,752,759-762,830-841,843,845-858,890,900,906,914,935,947,994,1006,1013,1019-1022,1090-1101,1103,1105-1118,1150,1160,1167,1194-1197,1277,1287,1293,1452-1455,1500,1506-1533,1537-1565,1571,1596-1598,1600,1604-1607,1623,1635,1644-1645,1647,1651,1721-1724,1729-1730,1747,1758,1772,1896-1899,1945,1959,1973,1981,1988,1994,2000,2079,2247,2267,2275-2276,2281-2282,2287-2288,2293-2294,2300-2301,2308-2309,2316-2317,2425-2428,2466,2486,2654
+apps/android/benchmark/build.gradle.kts
+  s_ee70570d53827a::t_7fe0b94c060fdd 8
+.github/actions/detect-docs-changes/action.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 38-54,60
+.github/workflows/sandbox-common-smoke.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 38,45,66
+apps/android/app/src/main/java/ai/openclaw/app/node/ConnectionManager.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 11,15-17,29,31,35-37,46-51,54,94,115,119,123,126,129-131,141,148-150,161,177,189,193-198,206
+src/agents/session-tool-result-guard-wrapper.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1-5,12-17,19,44,47,51-57,66-67,116-128,145,147,149
+docs/prose.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2-4,6,8,11-55,59,61,71-80,105-120,125,139,143-172,176-191
+apps/android/app/src/main/java/ai/openclaw/app/ui/design/ClawPreview.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-17
+apps/android/app/src/test/java/ai/openclaw/app/SecurePrefsTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 66-104
+docs/cli/security.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 35-46
+docs/.i18n/glossary.ko.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+extensions/opencode/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/anthropic/cli-migration.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,24,39-83,186,199-259,272,278,288-304,322,343,361,506
+.agents/skills/security-triage/SKILL.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,90,95-101
+.github/actions/setup-pnpm-store-cache/ensure-node.sh
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-223
+docs/tools/browser.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 191-241,247-249,274,303,499-502,538-573,692-694
+extensions/acpx/skills/acp-router/SKILL.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,9,17
+apps/android/app/src/test/java/ai/openclaw/app/GatewayBootstrapAuthTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 18,124-148,297-328,419,423-462
+apps/android/gradlew.bat
+  s_ee70570d53827a::t_7fe0b94c060fdd 26-27,54,68,76-78,80-82
+docs/tools/web-fetch.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 60-74
+apps/macos/Sources/OpenClaw/InstancesSettings.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 35
+.github/codex/prompts/docs-agent.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 15
+apps/shared/OpenClawKit/Sources/OpenClawProtocol/GatewayModels.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 559,598-600,619-621,626,639-641,661-663,768,771-772,774,781,810,813-814,816,851,854-855,857,894,897-898,900,912,985,990-991,996,1003,1617,1631,1640,1644,1659,1764,1848,1858,1867,1878,1887,1890-1891,1894,1899,1905,1910,1914,1920,1927,1932,1936,1942,1949,1954,1958,1964,2089,2121,2130,2138,2148,2159,2162-2163,2166,2171,2177,2180-2181,2184,2189,2217,2233,2244,2260,2270,2286,2298,2314,2379,2384,2388,2394,2401,2407,2412,2419,2427,2432,2436,2442,2450,2464,2477,2492,2534,2608,2780,2788-2789,2797,2807,2856,2864,2871,2880,3257-3352,3759-3784,4128-4130,4138-4141,4149-4151,4161-4163,4704,4713,4721,4731,4818,4855,4870,5004,5089-5110,5115,5120-5121,5126,5133,5149,5319-5320,5323,5325,5329,5333-5336,5339-5341,5343-5345,5349-5351,5355-5357,5360-5361,5363-5364,5368-5369,5373-5376,5379-5883,5941-5942,5953-5954,5957,5964-5965,5977-5978,6003,6109,6133,6156,6181,6373-6374,6391,6398-6399,6422-6423,6448-6449,6498,6959,6965,6970,6977,6983-7044,7047,7061,7066,7080,7084,7098,7104,7118,7125,7130,7134,7140,7147,7153,7158,7165,7174,7186,7197,7210,7224,7235,7245,7257,7270,7280,7289,7300,7312,7325,7337,7351
+.github/workflows/tui-pty.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-43
+docs/.i18n/glossary.tr.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+extensions/diffs/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11-13,15,32-35,38
+apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatMarkdown.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 78-79,84,101,238,555-562,576-586,624-625,628-629,644,672-675
+src/agents/embedded-agent-runner/run/attempt.test.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1-3500
+src/agents/session-tool-result-guard.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1-7,24-25,29-30,37,56-58,62,68-83,537,547-548,584,588-594,634,650-658,784-792,808-814,828,841-848,855
+docs/web/tui.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 50,57,71-81,130
+docs/providers/nvidia.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 6,12-14,30,62,68-107,118-122,130-157
+docs/tools/diffs.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 139-140,142,205-222,408
+apps/android/app/src/main/java/ai/openclaw/app/ui/HealthLogsSettingsScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-225
+apps/ios/Sources/Design/TalkRuntimeIssueBanner.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-142
+docs/gateway/security/shrinkwrap.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-111
+apps/android/app/src/main/java/ai/openclaw/app/ui/RootScreen.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 10,20
+apps/shared/OpenClawKit/Sources/OpenClawKit/AudioStreamingProtocols.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,18
+docs/clawhub/cli.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-82
+docs/providers/github-copilot.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 6,12,14,50-81,135-137,217,219-221
+docs/plugins/compatibility.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 133-135
+extensions/nostr/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,11,16,19,57,60
+.oxfmtrc.jsonc
+  s_ee70570d53827a::t_7fe0b94c060fdd 33
+extensions/amazon-bedrock/stream.runtime.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-1112
+docs/cli/models.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 31-32,40,43-44,46,79,132,172-173,184,190,195-196,203,209-215,222-223,225-226,229-231
+.github/workflows/plugin-clawhub-release.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 23-31,43,109-114,206-242,334-335,412,420-439,441-478
+apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewayDiscovery.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 52-67,74,82-83,87-88,153-154,193,281,315,397,483,578
+docs/.i18n/zh-Hans-navigation.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 140-151
+apps/android/app/src/test/java/ai/openclaw/app/ui/ProviderModelStatusTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-67
+apps/macos/Tests/OpenClawIPCTests/GatewayConnectionControlTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 176,180-226,237-246
+extensions/acpx/register.runtime.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,7,12,44-45,55-66,69,90-94
+apps/android/app/src/main/java/ai/openclaw/app/node/CanvasController.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 26-28,51-52,67,70,76,83,91-97,131,197,226,267-269,276,282,312,316
+extensions/anthropic/provider-policy-api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-8,10,16,21,26-35,38-40,42-47
+.github/actions/docker-e2e-plan/action.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 126,133,143-154,156,158-171
+apps/ios/Sources/Design/SettingsChannelsDestination.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-726
+extensions/signal/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,8
+docs/automation/tasks.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 105,109,260,349
+extensions/acpx/src/process-lease.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,5-9,12,36-56,58-77
+docs/tools/creating-skills.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-4,6,8,13,19-20,26-33,37-38,43,46-48,50-52,55-59,63-66,68-70,73,89-90,95,97,99-102,104-118,120-167,169-242,244-251,255-271
+.github/codeql/codeql-gateway-runtime-boundary-critical-quality.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 18
+apps/android/app/src/main/java/ai/openclaw/app/voice/MicCaptureManager.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 29-31,37,45,107-108,156,197-207,229,255,277-282,627-628,724,790-793
+docs/openclaw-agent-runtime.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-82
+apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatSheetContent.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 49,60,76-87,91,105-108,112-113,140-141,176,276-278
+.github/codeql/codeql-core-auth-secrets-critical-security.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 33
+.agents/skills/control-ui-e2e/agents/openai.yaml
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+docs/channels/pairing.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 126-132
+apps/ios/fastlane/metadata/review_information/notes.txt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-3
+docs/tools/code-execution.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-43,46-61,86-88,146
+.github/codeql/codeql-network-ssrf-boundary-critical-security.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 25
+extensions/anthropic/claude-model-refs.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-233
+extensions/minimax/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/help/testing.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 87,90-92,102-105,158-163,252,262-274,513-514,539-541,561-564,635,638-647,665-678,742-743,747-749,753-754,763,786,838,840,845
+docs/plugins/reference/sms.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-23
+docs/cli/logs.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 27-28,53,60,62
+extensions/google-meet/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3-4,12,16,19,36,39
+extensions/irc/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/perplexity/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/ios/Sources/Voice/RealtimeTalkRelaySession.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-971
+apps/android/app/src/main/java/ai/openclaw/app/ui/SettingsScreens.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-1437
+docs/cli/approvals.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 30,86,140-141,186-188
+docs/gateway/cli-backends.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 164-171,174-182,375-398,427-441
+.agents/skills/technical-documentation/references/review.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-121
+src/infra/outbound/source-delivery-plan.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1-2,7,15,25,33,46,53,61,93-97,99,102-125,136,152-154,169,232,242
+docs/channels/signal.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 48-54,309-323,384
+.agents/skills/autoreview/scripts/autoreview
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-2,4-17,20-25,29-79,83-95,98-137,140-161,163-168,170-177,179-186,188-207,209-1261,1264-1265
+apps/android/app/src/main/java/ai/openclaw/app/ui/design/ClawNavigation.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-167
+extensions/webhooks/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/macos/Sources/OpenClaw/SettingsWindowOpener.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 16,18,21-25
+apps/ios/Sources/Screen/ScreenController.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 13,30,79-111,272-276,285-289,292
+docs/plugins/reference/diagnostics-prometheus.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+extensions/kilocode/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/vercel-ai-gateway/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/plugins/codex-harness-runtime.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 7,16,23-40,52-58,67-69,77,103-112,132-144,153-154,180-182,219-230,239-241,255
+docs/cli/path.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 200-205,251-255
+docs/automation/cron-jobs.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 18,43-45,52,56,92,99-106,125-151,174-175,197,207-221,245-246,268-286,354,459,465-466,473,487,500,502,514
+docs/providers/qwen.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 11-12,15,127-164,175,203
+docs/gateway/trusted-proxy-auth.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 56-65,72-73,324-326,341,425-440
+extensions/anthropic-vertex/README.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-11
+apps/android/app/src/main/java/ai/openclaw/app/CameraHudState.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,11
+.github/workflows/full-release-validation.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 61,83,92-96,117,138,159,185-189,222-224,227-252,255-256,258,279-301,303,314,332-354,365,370-372,375,381-382,387,403-404,406,427-449,451,462,480-502,513,518-520,523,529-530,535,551-552,554,576,584-607,609,620,638-703,714,719-721,724,730-737,742-748,775-777,806-808,814-815,830,908-931,949,954,979-993,996,1001-1003,1006,1012-1013,1018,1022-1139,1142-1151,1163,1168-1170,1176-1238,1243,1255,1269-1274,1288,1302,1324,1338,1355,1384,1407,1425-1447,1452,1458,1464-1466,1483,1494,1496,1504,1507-1508,1512-1519,1522,1527,1536,1553,1555,1557-1566,1581,1600,1616-1617
+apps/shared/OpenClawKit/Tests/OpenClawKitTests/ElevenLabsTTSValidationTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,21
+extensions/anthropic/openclaw.plugin.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 9-133,141-142,144,173-179,229
+extensions/document-extract/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,8
+docs/channels/bot-loop-protection.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 16
+apps/android/app/src/main/java/ai/openclaw/app/PermissionRequester.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 20,25,29-32,34,36-52,54,57-58,60-62,66-74,77-84,88-97,100-107,109-121,123-124,126-138,140-170,172,200
+docs/cli/index.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 33,38,127-131,136-139,376-377
+extensions/cloudflare-ai-gateway/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/amazon-bedrock/config-compat.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,66
+extensions/venice/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/nvidia/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/concepts/progress-drafts.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 56,98,101-120,181-223
+docs/concepts/model-failover.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 70-90,111,113-114,130,144,180,186-187,207,232,256
+.github/workflows/mantis-slack-desktop-smoke.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 20-24,38-45,84,183,243,247,268-276,292-307,317,325-327,357,361-409,413-416,418,423,426,429-431,439
+docs/platforms/ios.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 10,78-80,103,114,133,241-242,279
+src/logging/diagnostic-stuck-session-recovery.runtime.test.ts
+  s_ee70570d53827a::t_d60f5c7f9f351b 1,6,9-13,17,19,21-22,29-30,37,39,43,47-50,52-53,55-57,60,65,74-77,79,84-88,99-100,102,104,106-108,135-137,145-186,189-190,199-201,207-209,229-256,259-284,293-309,320-321,346-347,357,367,377-378,396,403-404,413-414,424-428,438-441,443-444,448-483,487-491,524-525,542-543,553,571,591,609-610,617,635-636,641,649,660-661,676
+extensions/elevenlabs/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/android/app/src/main/java/ai/openclaw/app/ui/GatewayConfigResolver.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,13,21,29,39,45,52,58,66,68,70,88-89,134,137,158-162,165-166,181,209,212,227,250
+docs/providers/vydra.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 147
+docs/platforms/android.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 201,206,218,222,224
+docs/diagnostics/flags.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 53-96
+docs/help/testing-live.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 74,76-77,79-81,108,112-113,116,123,302,335,345-353,358,386,392,395,406,428,567
+.github/workflows/workflow-sanity.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 29-56,88-174,195-203,215-242
+apps/ios/Sources/Voice/TalkModeManager.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 36,40,44,53-76,84-91,93,109-113,128-143,159,180-187,206-208,212-214,232,236,241-264,266-268,271-275,277-280,283,287-294,297,299-301,307-327,336,339,345-349,360-395,398,400,404-408,413,450,455-456,462,478-484,493-496,507,512,522,558,581,721,731,935,946,969,976,984,1015,1079-1294,1341,1372-1418,1440,1485,1490,1493,1501-1508,1522-1527,1532,1541,1551-1556,1574-1581,1591-1599,1609-1652,1675,1682,1715,1836-1837,1881,1887,1893,1907,1924,1945,1982,1994,2007,2014,2040,2135,2168,2206,2269,2330,2345,2356,2387-2547,2551,2553,2555,2558,2564-2581,2583-2588,2590-2592,2594-2596,2598-2599,2603-2841,2844-2848,2850,2854-2881,2899-2909,2981-3037,3044-3104
+apps/android/app/src/main/java/ai/openclaw/app/node/DebugHandler.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 11-13,18-20,25,34,38,82-84,92,134,145
+apps/ios/Sources/Design/IPadWorkboardScreen.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-1395
+extensions/file-transfer/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,8
+docs/concepts/multi-agent.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 248,250,360-364,466-467,474,502,504
+docs/channels/slack.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 30,225-226,235-236,256-257,458,467,745-749,870,1051-1053,1060,1067-1091,1123-1124,1147-1164,1338,1342-1347,1362-1367,1398-1399,1485,1555
+docs/cli/memory.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 13-15,173
+docs/plugins/reference/workboard.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-23
+docs/tools/index.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 24-32,58,81-92,95,124,164,175-176
+apps/ios/fastlane/metadata/en-US/keywords.txt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1
+extensions/anthropic/cli-shared.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,80-93,288-292
+apps/ios/Tests/ScreenControllerTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 48-64,86-87,92-105,108-109,111,113-116
+apps/android/app/src/play/AndroidManifest.xml
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-15
+apps/macos/Sources/OpenClaw/DebugSettings.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 59
+docs/channels/googlechat.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 165,218,220
+extensions/anthropic/provider-runtime.contract.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1
+docs/plugins/architecture.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 40,45
+AGENTS.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 12-14,16,24-41,44,46-52,65-68,70-87,89-91,94-97,100-104,118,120-121,131,137,141,146,148-149,152-155,157,159,164-166,169-172,174,183-205,227,230-232,238,241,243,250-251,253-256,258,266-267,270,272-273
+apps/macos/Package.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 22
+docs/gateway/index.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 170-173
+docs/gateway/configuration-examples.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 85,89,387
+docs/plugins/reference/openshell.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+extensions/admin-http-rpc/src/methods.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,61,66
+extensions/tavily/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,8
+docs/concepts/experimental-features.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 24-29,33,43,59-60,75-92,99
+docs/plugins/sdk-channel-plugins.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 38,45,71,75,102-106,127-129,160-161,163,262,264-267,747
+docs/tools/tts.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 111,133,152,173,192,231,254,278,283,305,325,343,364,375-378,402,426,445,475-478,513,516,518,616,632,743,758,833,842,855,866,875,891,905,914,926,936,945,954-955,957,974-976
+docs/providers/google.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 306,370
+.agents/skills/autoreview/scripts/test-review-harness.py
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-199
+.github/codeql/codeql-agent-runtime-boundary-critical-quality.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 20-21
+apps/android/app/src/main/java/ai/openclaw/app/ui/OpenClawTheme.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 3,12,18-22,24-27,29,33-44,48-51,54,59-61,65,67,71-73
+apps/android/app/src/main/java/ai/openclaw/app/ui/design/ClawSurfaces.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-123
+apps/ios/Sources/Onboarding/OnboardingWizardView.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 74-76,177-179,216-219,284,296,300-308,313-314,332,353-395,488,615-654,663,694-723,725-733,736,738-742,744-749,751,756-765,939,948,1003-1012,1027-1028,1032-1044
+docs/.i18n/glossary.zh-TW.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 8,14-17,20,24,28,32,36,40-56,62-65,68-72,84-100,106-109,118-129,132-140,144-160
+docs/plugins/llama-cpp.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-58
+extensions/anthropic/contract-api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+docs/help/troubleshooting.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 37-61,108-158,367
+extensions/acpx/npm-shrinkwrap.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-2246
+extensions/amazon-bedrock-mantle/discovery.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,7-10,29,104,107,136-139,160,188-189,192,195,250,270,344,407-417,430
+docs/providers/ollama.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 12-17,31,176-182,276-294,662-668,670,695,951-962
+.github/workflows/npm-telegram-beta-e2e.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 129,221
+extensions/anthropic/stream-wrappers.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-6,25-36,40,43,50,97-108,111,116-118,122-124,129-131,136,144,146-149,157,165,192,203,212,225,230-233,238-239,251-252,256
+apps/ios/fastlane/metadata/en-US/release_notes.txt
+  s_ee70570d53827a::t_d60f5c7f9f351b 1-3
+docs/tools/llm-task.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 50,53
+docs/cli/qr.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 38-39
+apps/ios/Sources/Chat/AppleReviewDemoChatTransport.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-253
+extensions/canvas/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,15-16
+docs/cli/workboard.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-228
+apps/ios/version.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 2
+docs/providers/venice.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 169
+docs/channels/mattermost.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 292
+apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatComposer.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 10-37,43-50,62,73-96,102,112-117,121-144,204-225,228-251,293,295-302,306-309,312-314,325,328,333-461,465,467,471-478,488,490,492-493,500,502,505,512-515,517-521,525-528,530,537,550-555,559,570-580,597,605,609,613,617-618,622-623,626-672,677,690,707-710,726-730,740,776-777,779,782-783
+docs/.i18n/glossary.it.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+docs/concepts/context-engine.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 94,227-267,270,274,277,338
+docs/gateway/config-channels.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 56,59,353,503,600-601,618,641,644,792,794,798-806,817,834,922
+docs/gateway/security/exposure-runbook.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-212
+extensions/firecrawl/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,8
+apps/android/app/src/test/java/ai/openclaw/app/node/CanvasActionTrustTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 10,14-15,19,22,28,31,37-38,40,46,49,55,58,61
+apps/android/app/src/main/java/ai/openclaw/app/node/ContactsHandler.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 20-22,33-35,41-43,53-55,97,135,185,348-350,357,391,441,459,483
+apps/macos/Sources/OpenClaw/OnboardingView+Actions.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 34
+apps/ios/Sources/Design/AgentProTab+Usage.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-81
+docs/gateway/sandbox-vs-tool-policy-vs-elevated.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 70,104-108,138
+extensions/memory-wiki/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,8,14,17
+docs/plugins/reference/ollama.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10,19,24
+docs/tools/skills-config.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 3-8,11-12,20,27,30-35,39-40,49-277,279-282,284-287,289-291,293,295,302,305-306,313-345,348-349,351,364-366,368-370,372,374-379,381,383-395,397-401,403,405-412,414-415,420-421,424,426-427,429-430
+apps/shared/OpenClawKit/Sources/OpenClawKit/ShareToAgentDeepLink.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 34-35,37-42,52-53
+docs/start/getting-started.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 20-21
+docs/reference/rich-output-protocol.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,5,11,16,20,24-37,42-43,45-48,67
+docs/providers/zai.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 9-11,13-22,28,74-96,125,128-133,208,210,221-222
+apps/shared/OpenClawKit/Sources/OpenClawKit/Resources/CanvasScaffold/scaffold.html
+  s_ee70570d53827a::t_7fe0b94c060fdd 27-37,51-52,57,65-66,68,72-73,75,77,121-122,131-133,172-174,242,299
+docs/concepts/session-tool.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 6,22,52-57,123-135,141-142
+apps/ios/Sources/Design/AgentProTab+Cron.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-178
+docs/plugins/reference/brave.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,10
+docs/.i18n/glossary.fr.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+extensions/acpx/src/codex-trust-config.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,121,269,301
+.github/workflows/real-behavior-proof.yml
+  s_ee70570d53827a::t_7fe0b94c060fdd 21,29-45,47-49
+apps/shared/OpenClawKit/Tests/OpenClawKitTests/GatewayNodeSessionTests.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 14-49,232-250
+apps/ios/Sources/Design/AgentProTab+Destinations.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-201
+extensions/anthropic/test-api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4
+apps/android/app/src/thirdParty/java/ai/openclaw/app/SensitiveFeatureConfig.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 6
+docs/gateway/configuration.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 340,342,376-377,390,423,434,465,517,530,604-605,637-643
+docs/.i18n/glossary.uk.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+docs/reference/api-usage-costs.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 18-20,28-33,137
+apps/android/app/src/main/java/ai/openclaw/app/ui/PostOnboardingTabs.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 71,154-155,168-169,192,214,305
+.agents/skills/technical-documentation/references/principles.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-54
+apps/android/app/src/main/java/ai/openclaw/app/NotificationForwardingPolicy.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 6,15,20,32,44,72,79,88,94,102-103
+apps/ios/Sources/Voice/TalkRealtimeWebRTCSession.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-994
+apps/shared/OpenClawKit/Sources/OpenClawKit/GatewayChannel.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 17-32,67,69-73,200,239,446-447,484-486,562-563,574-584,587-588,618-701
+docs/cli/cron.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 17-57,94-95,116-119,146,183,216-218,227,232,270-271,280-294,335
+apps/ios/Sources/Voice/TalkRealtimeClientSession.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-86
+extensions/mistral/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+extensions/ollama/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,8
+extensions/amazon-bedrock-mantle/discovery.test.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1,234-259,480,485-494,577-591
+extensions/synthetic/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+docs/channels/clickclack.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 62-69
+extensions/acpx/doctor-contract-api.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-207
+docs/gateway/multiple-gateways.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 172
+docs/nodes/talk.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 24-28,118-119
+apps/macos/Sources/OpenClaw/MicLevelMonitor.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 11-14,21-22,65-69,71
+extensions/acpx/src/config-schema.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,8,12,15,18,25,33,49,90
+docs/help/testing-updates-plugins.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 33-35,165-173,178,279-281
+extensions/lmstudio/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3
+apps/shared/OpenClawKit/Package.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 16-19,35
+extensions/qa-matrix/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,13,16,28
+.gitattributes
+  s_ee70570d53827a::t_7fe0b94c060fdd 4-6
+docs/agent-runtime-architecture.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-48
+docs/tools/video-generation.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 65-70,127,142-157,229
+apps/android/app/src/test/java/ai/openclaw/app/protocol/OpenClawProtocolConstantsTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 60
+extensions/clickclack/package.json
+  s_ee70570d53827a::t_d60f5c7f9f351b 3,13,18,21
+apps/ios/Sources/Voice/TalkGatewayPermissionState.swift
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-63
+docs/plugins/sdk-entrypoints.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 249-257,262-264
+apps/android/app/src/thirdParty/java/ai/openclaw/app/node/CallLogHandler.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 72-73,77-78,152-169
+docs/web/control-ui.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 2,59-60,77,104,106,126,152,157-178,183,187,204,245
+docs/cli/config.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 34,76,80,87
+docs/tools/acp-agents-setup.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 81,289-291,312-314
+extensions/anthropic/cli-shared.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,24,75-81,96,106,155,190,235,246
+apps/android/app/src/main/java/ai/openclaw/app/node/A2UIHandler.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 9-11,16,18-20,23-24,26,32-38,56,90
+docs/platforms/mac/peekaboo.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 72-75
+.github/codeql/openclaw-boundary/queries/raw-socket-callsite-classification.ql
+  s_ee70570d53827a::t_7fe0b94c060fdd 79-80
+docs/tools/reactions.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 44-50
+apps/android/app/src/test/java/ai/openclaw/app/ui/chat/SessionFiltersTest.kt
+  s_ee70570d53827a::t_7fe0b94c060fdd 35-59
+docs/cli/mcp.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 14,19,23-39,368-369,373,378-384,386-394,400,421-424,426-430,437-440,442-446,455-458,460,462-465,469-628,641-655,676,685-695,705-706,716-768,774-787,798-799,810,813-834
+docs/start/hubs.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 138
+extensions/acpx/index.ts
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-4,17
+docs/plugins/reference/gmi.md
+  s_ee70570d53827a::t_7fe0b94c060fdd 1-23
+docs/.i18n/glossary.vi.json
+  s_ee70570d53827a::t_7fe0b94c060fdd 39-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "9422e7107d162c5abe1cfc5d52bc12a4b632e330",
+  "prompts": {},
+  "sessions": {
+    "s_ee70570d53827a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaf79b13-6f75-41c1-8d69-0521694cfe19",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
