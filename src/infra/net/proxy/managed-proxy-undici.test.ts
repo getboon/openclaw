@@ -1,9 +1,11 @@
+// Verifies managed proxy CA trust is attached only to matching Undici proxy
+// options, including child-process env inheritance.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  _resetActiveManagedProxyStateForTests,
+  resetActiveManagedProxyStateForTests,
   registerActiveManagedProxyUrl,
 } from "./active-proxy-state.js";
 import {
@@ -24,14 +26,14 @@ describe("managed proxy undici TLS options", () => {
   const tempDirs: string[] = [];
 
   beforeEach(() => {
-    _resetActiveManagedProxyStateForTests();
+    resetActiveManagedProxyStateForTests();
     for (const key of envKeys) {
       vi.stubEnv(key, "");
     }
   });
 
   afterEach(() => {
-    _resetActiveManagedProxyStateForTests();
+    resetActiveManagedProxyStateForTests();
     for (const dir of tempDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }

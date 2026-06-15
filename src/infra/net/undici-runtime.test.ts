@@ -1,6 +1,8 @@
+// Undici runtime tests cover managed proxy TLS, IP-SNI stripping, and proxy
+// client factory installation.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  _resetActiveManagedProxyStateForTests,
+  resetActiveManagedProxyStateForTests,
   registerActiveManagedProxyUrl,
   stopActiveManagedProxyRegistration,
 } from "./proxy/active-proxy-state.js";
@@ -109,7 +111,7 @@ afterEach(() => {
   poolCtor.mockReset();
   proxyAgentCtor.mockReset();
   proxyConnect.mockReset();
-  _resetActiveManagedProxyStateForTests();
+  resetActiveManagedProxyStateForTests();
 });
 
 describe("createHttp1ProxyAgent", () => {

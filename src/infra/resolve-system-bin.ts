@@ -1,3 +1,4 @@
+// Resolves trusted system binaries from platform-managed directories.
 import fs from "node:fs";
 import path from "node:path";
 import { getWindowsInstallRoots, getWindowsProgramFilesRoots } from "./windows-install-roots.js";
@@ -205,12 +206,12 @@ export function resolveSystemBin(
 }
 
 /** Visible for tests: the computed trusted directories. */
-export function _getTrustedDirs(trust: SystemBinTrust = "strict"): readonly string[] {
+export function getTrustedDirsForTest(trust: SystemBinTrust = "strict"): readonly string[] {
   return getTrustedDirs(trust);
 }
 
 /** Reset cache and optionally override the executable-check function (for tests). */
-export function _resetResolveSystemBin(overrideIsExecutable?: (p: string) => boolean): void {
+export function resetResolveSystemBin(overrideIsExecutable?: (p: string) => boolean): void {
   resolvedCacheStrict.clear();
   resolvedCacheStandard.clear();
   trustedDirsStrict = null;

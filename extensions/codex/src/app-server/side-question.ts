@@ -1,3 +1,4 @@
+// Codex plugin module implements side question behavior.
 import {
   buildAgentHookContextChannelFields,
   embeddedAgentLog,
@@ -16,10 +17,25 @@ import {
   type NativeHookRelayEvent,
   type NativeHookRelayRegistrationHandle,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
+import { loadExecApprovals } from "openclaw/plugin-sdk/exec-approvals-runtime";
+import { resolveCodexAppServerForModelProvider } from "./app-server-policy.js";
 import { handleCodexAppServerApprovalRequest } from "./approval-bridge.js";
 import { refreshCodexAppServerAuthTokens } from "./auth-bridge.js";
 import { isCodexAppServerApprovalRequest, type CodexAppServerClient } from "./client.js";
-import { readCodexPluginConfig, resolveCodexAppServerRuntimeOptions } from "./config.js";
+import {
+  canUseCodexModelBackedApprovalsReviewerForModel,
+  readCodexPluginConfig,
+  resolveOpenClawExecPolicyForCodexAppServer,
+  resolveCodexAppServerRuntimeOptions,
+  resolveCodexModelBackedReviewerPolicyContext,
+  shouldAutoApproveCodexAppServerApprovals,
+  type CodexAppServerRuntimeOptions,
+} from "./config.js";
+import {
+  emitDynamicToolErrorDiagnostic,
+  emitDynamicToolStartedDiagnostic,
+  emitDynamicToolTerminalDiagnostic,
+} from "./dynamic-tool-diagnostics.js";
 import {
   filterCodexDynamicTools,
   resolveCodexDynamicToolsLoading,
@@ -31,12 +47,16 @@ import {
   buildCodexNativeHookRelayDisabledConfig,
   CODEX_NATIVE_HOOK_RELAY_EVENTS,
 } from "./native-hook-relay.js";
+import {
+  readCodexNotificationThreadId,
+  readCodexNotificationTurnId,
+} from "./notification-correlation.js";
 import { mergeCodexThreadConfigs } from "./plugin-thread-config.js";
 import {
   assertCodexThreadForkResponse,
   assertCodexTurnStartResponse,
   readCodexDynamicToolCallParams,
-  readCodexTurnCompletedNotification,
+  readCodexTurn,
 } from "./protocol-validators.js";
 import {
   isJsonObject,
@@ -50,17 +70,25 @@ import {
 } from "./protocol.js";
 import { rememberCodexRateLimits, readRecentCodexRateLimits } from "./rate-limit-cache.js";
 import { formatCodexUsageLimitErrorMessage } from "./rate-limits.js";
-import { readCodexAppServerBinding } from "./session-binding.js";
-import { getSharedCodexAppServerClient } from "./shared-client.js";
+import { resolveCodexNativeExecutionBlock } from "./sandbox-guard.js";
+import { isCodexAppServerNativeAuthProfile, readCodexAppServerBinding } from "./session-binding.js";
+import {
+  getLeasedSharedCodexAppServerClient,
+  releaseLeasedSharedCodexAppServerClient,
+} from "./shared-client.js";
 import {
   buildCodexRuntimeThreadConfig,
+  CODEX_NATIVE_PERSONALITY_NONE,
+  resolveCodexAppServerRequestModelSelection,
   resolveCodexAppServerModelProvider,
+  resolveCodexBindingModelProviderFallback,
   resolveReasoningEffort,
 } from "./thread-lifecycle.js";
 import { filterToolsForVisionInputs } from "./vision-tools.js";
 
-const CODEX_SIDE_DYNAMIC_TOOL_TIMEOUT_MS = 30_000;
+const CODEX_SIDE_DYNAMIC_TOOL_TIMEOUT_MS = 90_000;
 const CODEX_SIDE_DYNAMIC_TOOL_MAX_TIMEOUT_MS = 600_000;
+const CODEX_SIDE_DYNAMIC_IMAGE_GENERATION_TOOL_TIMEOUT_MS = 120_000;
 const CODEX_SIDE_DYNAMIC_IMAGE_TOOL_TIMEOUT_MS = 60_000;
 const SIDE_QUESTION_COMPLETION_TIMEOUT_MS = 600_000;
 const CODEX_SIDE_NATIVE_HOOK_RELAY_MIN_TTL_MS = 30 * 60_000;
@@ -115,11 +143,68 @@ export async function runCodexAppServerSideQuestion(
       "Codex /btw needs an active Codex thread. Send a normal message first, then try /btw again.",
     );
   }
+  const nativeExecutionBlock = resolveCodexNativeExecutionBlock({
+    config: params.cfg,
+    sessionKey: params.sessionKey,
+    sessionId: params.sessionId,
+    surface: "/btw side-question mode",
+  });
+  if (nativeExecutionBlock) {
+    throw new Error(nativeExecutionBlock);
+  }
 
   const pluginConfig = readCodexPluginConfig(options.pluginConfig);
-  const appServer = resolveCodexAppServerRuntimeOptions({ pluginConfig });
+  const { sessionAgentId } = resolveSessionAgentIds({
+    sessionKey: params.sessionKey,
+    config: params.cfg,
+    agentId: params.agentId,
+  });
+  const execPolicy = resolveOpenClawExecPolicyForCodexAppServer({
+    approvals: loadExecApprovals(),
+    config: params.cfg,
+    agentId: sessionAgentId,
+  });
   const authProfileId = params.authProfileId ?? binding.authProfileId;
-  const client = await getSharedCodexAppServerClient({
+  const modelProvider =
+    resolveCodexAppServerModelProvider({
+      provider: params.provider,
+      authProfileId,
+      agentDir: params.agentDir,
+      config: params.cfg,
+    }) ??
+    resolveCodexBindingModelProviderFallback({
+      provider: params.provider,
+      currentModel: params.model,
+      bindingModel: binding.model,
+      bindingModelProvider: binding.modelProvider,
+    });
+  const modelSelection = resolveCodexAppServerRequestModelSelection({
+    model: params.model,
+    modelProvider,
+    authProfileId,
+    agentDir: params.agentDir,
+    config: params.cfg,
+  });
+  const reviewerPolicyContext = resolveCodexModelBackedReviewerPolicyContext({
+    provider: params.provider,
+    model: params.model,
+    bindingModelProvider: binding.modelProvider,
+    bindingModel: binding.model,
+    nativeAuthProfile: isCodexAppServerNativeAuthProfile({
+      authProfileId,
+      agentDir: params.agentDir,
+      config: params.cfg,
+    }),
+  });
+  const appServer = resolveCodexAppServerRuntimeOptions({
+    pluginConfig,
+    execPolicy,
+    modelProvider: reviewerPolicyContext.modelProvider,
+    model: reviewerPolicyContext.model,
+    config: params.cfg,
+    agentDir: params.agentDir,
+  });
+  const client = await getLeasedSharedCodexAppServerClient({
     startOptions: appServer.start,
     timeoutMs: appServer.requestTimeoutMs,
     authProfileId,
@@ -146,11 +231,27 @@ export async function runCodexAppServerSideQuestion(
   try {
     const cwd = binding.cwd || params.workspaceDir || process.cwd();
     const sideRunParams = buildSideRunAttemptParams(params, { cwd, authProfileId });
-    const { sessionAgentId } = resolveSessionAgentIds({
-      sessionKey: params.sessionKey,
+    const modelScopedAppServer = resolveCodexAppServerForModelProvider({
+      appServer,
+      provider: reviewerPolicyContext.modelProvider,
+      model: reviewerPolicyContext.model,
       config: params.cfg,
-      agentId: params.agentId,
+      env: process.env,
+      agentDir: params.agentDir,
     });
+    const useModelScopedPolicy = !canUseCodexModelBackedApprovalsReviewerForModel({
+      modelProvider: reviewerPolicyContext.modelProvider,
+      model: reviewerPolicyContext.model,
+      config: params.cfg,
+      env: process.env,
+      agentDir: params.agentDir,
+    });
+    const approvalPolicy = useModelScopedPolicy
+      ? modelScopedAppServer.approvalPolicy
+      : (binding.approvalPolicy ?? modelScopedAppServer.approvalPolicy);
+    const sandbox = useModelScopedPolicy
+      ? modelScopedAppServer.sandbox
+      : (binding.sandbox ?? modelScopedAppServer.sandbox);
     const toolBridge = await createCodexSideToolBridge({
       params,
       cwd,
@@ -192,6 +293,10 @@ export async function runCodexAppServerSideQuestion(
           threadId: childThreadId,
           turnId,
           nativeHookRelay,
+          execPolicy,
+          execReviewerAgentId: sessionAgentId,
+          internalExecAutoReview: modelScopedAppServer.approvalsReviewer === "user",
+          autoApprove: shouldAutoApproveCodexAppServerApprovals({ approvalPolicy, sandbox }),
           signal: runAbortController.signal,
         });
       }
@@ -206,16 +311,39 @@ export async function runCodexAppServerSideQuestion(
         call,
         config: params.cfg,
       });
-      return (await handleSideDynamicToolCallWithTimeout({
+      const toolStartedAt = Date.now();
+      const diagnosticContext = {
         call,
-        toolBridge,
-        signal: runAbortController.signal,
-        timeoutMs,
-      })) as unknown as JsonValue;
+        runId: sideRunParams.runId,
+        sessionId: params.sessionId,
+        sessionKey: params.sessionKey,
+      };
+      emitDynamicToolStartedDiagnostic(diagnosticContext);
+      try {
+        const response = await handleSideDynamicToolCallWithTimeout({
+          call,
+          toolBridge,
+          signal: runAbortController.signal,
+          timeoutMs,
+        });
+        emitDynamicToolTerminalDiagnostic({
+          ...diagnosticContext,
+          response,
+          durationMs: Math.max(0, Date.now() - toolStartedAt),
+        });
+        return {
+          contentItems: response.contentItems,
+          success: response.success,
+        } as JsonValue;
+      } catch (error) {
+        emitDynamicToolErrorDiagnostic({
+          ...diagnosticContext,
+          durationMs: Math.max(0, Date.now() - toolStartedAt),
+        });
+        throw error;
+      }
     });
 
-    const approvalPolicy = binding.approvalPolicy ?? appServer.approvalPolicy;
-    const sandbox = binding.sandbox ?? appServer.sandbox;
     const serviceTier = binding.serviceTier ?? appServer.serviceTier;
     const nativeHookRelayEvents = resolveCodexSideNativeHookRelayEvents({
       configuredEvents: options.nativeHookRelay?.events,
@@ -254,25 +382,22 @@ export async function runCodexAppServerSideQuestion(
       : options.nativeHookRelay?.enabled === false
         ? buildCodexNativeHookRelayDisabledConfig()
         : undefined;
-    const runtimeThreadConfig = buildCodexRuntimeThreadConfig(undefined);
+    const runtimeThreadConfig = buildCodexRuntimeThreadConfig(undefined, {
+      nativeCodeModeOnlyEnabled: appServer.codeModeOnly,
+    });
     const threadConfig =
       mergeCodexThreadConfigs(nativeHookRelayConfig, runtimeThreadConfig) ?? runtimeThreadConfig;
-    const modelProvider = resolveCodexAppServerModelProvider({
-      provider: params.provider,
-      authProfileId,
-      agentDir: params.agentDir,
-      config: params.cfg,
-    });
     const forkResponse = assertCodexThreadForkResponse(
       await forkCodexSideThread(
         client,
         {
           threadId: binding.threadId,
-          model: params.model,
-          ...(modelProvider ? { modelProvider } : {}),
+          model: modelSelection.model,
+          ...(modelSelection.modelProvider ? { modelProvider: modelSelection.modelProvider } : {}),
+          personality: CODEX_NATIVE_PERSONALITY_NONE,
           cwd,
           approvalPolicy,
-          approvalsReviewer: appServer.approvalsReviewer,
+          approvalsReviewer: modelScopedAppServer.approvalsReviewer,
           sandbox,
           ...(serviceTier ? { serviceTier } : {}),
           config: threadConfig,
@@ -294,7 +419,7 @@ export async function runCodexAppServerSideQuestion(
       { timeoutMs: appServer.requestTimeoutMs, signal: params.opts?.abortSignal },
     );
 
-    const effort = resolveReasoningEffort(params.resolvedThinkLevel ?? "off", params.model);
+    const effort = resolveReasoningEffort(params.resolvedThinkLevel ?? "off", modelSelection.model);
     const turnResponse = assertCodexTurnStartResponse(
       await client.request(
         "turn/start",
@@ -302,13 +427,14 @@ export async function runCodexAppServerSideQuestion(
           threadId: childThreadId,
           input: [{ type: "text", text: params.question.trim(), text_elements: [] }],
           cwd,
-          model: params.model,
+          model: modelSelection.model,
+          personality: CODEX_NATIVE_PERSONALITY_NONE,
           ...(serviceTier ? { serviceTier } : {}),
           effort,
           collaborationMode: {
             mode: "default",
             settings: {
-              model: params.model,
+              model: modelSelection.model,
               reasoning_effort: effort,
               developer_instructions: null,
             },
@@ -347,6 +473,7 @@ export async function runCodexAppServerSideQuestion(
         timeoutMs: appServer.requestTimeoutMs,
       });
     } finally {
+      releaseLeasedSharedCodexAppServerClient(client);
       nativeHookRelay?.unregister();
     }
   }
@@ -354,7 +481,7 @@ export async function runCodexAppServerSideQuestion(
 
 function resolveCodexSideNativeHookRelayEvents(params: {
   configuredEvents?: readonly NativeHookRelayEvent[];
-  approvalPolicy: ReturnType<typeof resolveCodexAppServerRuntimeOptions>["approvalPolicy"];
+  approvalPolicy: CodexAppServerRuntimeOptions["approvalPolicy"];
 }): readonly NativeHookRelayEvent[] {
   if (params.configuredEvents?.length) {
     return params.configuredEvents;
@@ -520,6 +647,7 @@ async function createCodexSideToolBridge(input: {
         currentChannelId: input.params.currentChannelId,
       }).channelId,
       sandbox,
+      emitBeforeToolCallDiagnostics: false,
       modelHasVision: runtimeModel.input?.includes("image") ?? false,
       requireExplicitMessageTarget: true,
     });
@@ -607,10 +735,16 @@ async function handleSideDynamicToolCallWithTimeout(params: {
 }
 
 function failedSideDynamicToolResponse(message: string): CodexDynamicToolCallResponse {
-  return {
-    success: false,
+  const response: CodexDynamicToolCallResponse = {
     contentItems: [{ type: "inputText", text: message }],
+    success: false,
   };
+  Object.defineProperty(response, "diagnosticTerminalType", {
+    configurable: true,
+    enumerable: false,
+    value: "error",
+  });
+  return response;
 }
 
 function emptySideUserInputResponse(): JsonObject {
@@ -632,7 +766,8 @@ function resolveSideDynamicToolCallTimeoutMs(params: {
   const configured =
     readSideDynamicToolCallTimeoutMs(params.call.arguments) ??
     (params.call.tool === "image_generate"
-      ? readSideImageGenerationModelTimeoutMs(params.config)
+      ? (readSideImageGenerationModelTimeoutMs(params.config) ??
+        CODEX_SIDE_DYNAMIC_IMAGE_GENERATION_TOOL_TIMEOUT_MS)
       : undefined) ??
     (params.call.tool === "image"
       ? (readSideTimeoutSecondsAsMs(params.config?.tools?.media?.image?.timeoutSeconds) ??
@@ -673,7 +808,7 @@ function clampSideDynamicToolTimeoutMs(timeoutMs: number): number {
   return Math.max(1, Math.min(CODEX_SIDE_DYNAMIC_TOOL_MAX_TIMEOUT_MS, Math.floor(timeoutMs)));
 }
 
-export const __testing = {
+export const testing = {
   resolveSideDynamicToolCallTimeoutMs,
 } as const;
 
@@ -872,8 +1007,7 @@ class CodexSideQuestionCollector {
   }
 
   private completeFromTurn(params: JsonObject): void {
-    const notification = readCodexTurnCompletedNotification(params);
-    const turn = notification?.turn;
+    const turn = readCodexTurn(params.turn);
     if (!turn || turn.id !== this.turnId) {
       return;
     }
@@ -922,16 +1056,13 @@ function collectAssistantText(turn: CodexTurn): string {
 }
 
 function isNotificationForTurn(params: JsonObject, threadId: string, turnId: string): boolean {
-  return readString(params, "threadId") === threadId && readNotificationTurnId(params) === turnId;
+  return (
+    readCodexNotificationThreadId(params) === threadId && readNotificationTurnId(params) === turnId
+  );
 }
 
 function readNotificationTurnId(record: JsonObject): string | undefined {
-  return readString(record, "turnId") ?? readNestedTurnId(record);
-}
-
-function readNestedTurnId(record: JsonObject): string | undefined {
-  const turn = record.turn;
-  return isJsonObject(turn) ? readString(turn, "id") : undefined;
+  return readCodexNotificationTurnId(record);
 }
 
 function readBooleanAlias(record: JsonObject, keys: readonly string[]): boolean | undefined {
@@ -965,3 +1096,4 @@ function formatCodexErrorMessage(
     "Codex /btw side thread failed.";
   return new Error(formatErrorMessage(message));
 }
+export { testing as __testing };

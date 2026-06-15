@@ -1,3 +1,4 @@
+// Slack plugin module implements threading tool context behavior.
 import type {
   ChannelThreadingContext,
   ChannelThreadingToolContext,
@@ -39,5 +40,6 @@ export function buildSlackThreadingToolContext(params: {
     currentThreadTs,
     replyToMode: effectiveReplyToMode,
     hasRepliedRef: params.hasRepliedRef,
+    sameChannelThreadRequired: hasExplicitThreadTarget,
   };
 }

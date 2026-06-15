@@ -1,6 +1,8 @@
+// Proxy fetch tests cover explicit/env proxy dispatchers, managed proxy TLS,
+// FormData conversion, metadata markers, and proxy env recovery.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  _resetActiveManagedProxyStateForTests,
+  resetActiveManagedProxyStateForTests,
   registerActiveManagedProxyUrl,
   stopActiveManagedProxyRegistration,
 } from "./proxy/active-proxy-state.js";
@@ -27,10 +29,10 @@ const {
   getLastAgent,
   loadUndiciRuntimeDeps,
 } = vi.hoisted(() => {
-  const undiciFetch = vi.fn();
-  const proxyAgentSpy = vi.fn();
-  const envAgentSpy = vi.fn();
-  class MockUndiciFormData {
+  const undiciFetchLocal = vi.fn();
+  const proxyAgentSpyLocal = vi.fn();
+  const envAgentSpyLocal = vi.fn();
+  class MockUndiciFormDataLocal {
     readonly [Symbol.toStringTag] = "FormData";
     readonly entriesList: [string, unknown, string | undefined][] = [];
 
@@ -48,32 +50,32 @@ const {
     constructor(public readonly options: { uri?: string; proxyTls?: unknown } | string) {
       this.proxyUrl = typeof options === "string" ? options : options.uri;
       ProxyAgent.lastCreated = this;
-      proxyAgentSpy(options);
+      proxyAgentSpyLocal(options);
     }
   }
-  class EnvHttpProxyAgent {
-    static lastCreated: EnvHttpProxyAgent | undefined;
+  class EnvHttpProxyAgentLocal {
+    static lastCreated: EnvHttpProxyAgentLocal | undefined;
     constructor(public readonly options?: Record<string, unknown>) {
-      EnvHttpProxyAgent.lastCreated = this;
-      envAgentSpy(options);
+      EnvHttpProxyAgentLocal.lastCreated = this;
+      envAgentSpyLocal(options);
     }
   }
-  const loadUndiciRuntimeDeps = vi.fn(() => ({
+  const loadUndiciRuntimeDepsLocal = vi.fn(() => ({
     ProxyAgent,
-    EnvHttpProxyAgent,
-    FormData: MockUndiciFormData,
-    fetch: undiciFetch,
+    EnvHttpProxyAgent: EnvHttpProxyAgentLocal,
+    FormData: MockUndiciFormDataLocal,
+    fetch: undiciFetchLocal,
   }));
 
   return {
     ProxyAgent,
-    EnvHttpProxyAgent,
-    MockUndiciFormData,
-    undiciFetch,
-    proxyAgentSpy,
-    envAgentSpy,
+    EnvHttpProxyAgent: EnvHttpProxyAgentLocal,
+    MockUndiciFormData: MockUndiciFormDataLocal,
+    undiciFetch: undiciFetchLocal,
+    proxyAgentSpy: proxyAgentSpyLocal,
+    envAgentSpy: envAgentSpyLocal,
     getLastAgent: () => ProxyAgent.lastCreated,
-    loadUndiciRuntimeDeps,
+    loadUndiciRuntimeDeps: loadUndiciRuntimeDepsLocal,
   };
 });
 
@@ -147,11 +149,11 @@ describe("makeProxyFetch", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    _resetActiveManagedProxyStateForTests();
+    resetActiveManagedProxyStateForTests();
   });
 
   afterEach(() => {
-    _resetActiveManagedProxyStateForTests();
+    resetActiveManagedProxyStateForTests();
   });
 
   it("uses undici fetch with ProxyAgent dispatcher", async () => {
@@ -336,12 +338,12 @@ describe("resolveProxyFetchFromEnv", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
-    _resetActiveManagedProxyStateForTests();
+    resetActiveManagedProxyStateForTests();
     clearProxyEnv();
   });
   afterEach(() => {
     vi.unstubAllEnvs();
-    _resetActiveManagedProxyStateForTests();
+    resetActiveManagedProxyStateForTests();
     restoreProxyEnv();
   });
 

@@ -1,25 +1,26 @@
+// Windows exec tests cover command invocation behavior on Windows paths.
 import type { execFile as execFileType } from "node:child_process";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  _resetWindowsInstallRootsForTests,
+  resetWindowsInstallRootsForTests,
   getWindowsInstallRoots,
 } from "../infra/windows-install-roots.js";
 import { withMockedWindowsPlatform, withRestoredMocks } from "../test-utils/vitest-spies.js";
 
 const { spawnMock, spawnSyncMock, execFileMock, execFilePromisifyMock } = vi.hoisted(() => {
-  const execFilePromisifyMock = vi.fn();
-  const execFileMock = Object.assign(vi.fn(), {
-    [Symbol.for("nodejs.util.promisify.custom")]: execFilePromisifyMock,
-    __promisify__: execFilePromisifyMock,
+  const execFilePromisifyMockLocal = vi.fn();
+  const execFileMockLocal = Object.assign(vi.fn(), {
+    [Symbol.for("nodejs.util.promisify.custom")]: execFilePromisifyMockLocal,
+    __promisify__: execFilePromisifyMockLocal,
   });
   return {
     spawnMock: vi.fn(),
     spawnSyncMock: vi.fn(),
-    execFileMock,
-    execFilePromisifyMock,
+    execFileMock: execFileMockLocal,
+    execFilePromisifyMock: execFilePromisifyMockLocal,
   };
 });
 
@@ -149,7 +150,7 @@ describe("windows command wrapper behavior", () => {
     // Stub the registry probe so install-root resolution is fully driven by
     // process.env in tests; on real Windows runners the registry returns the
     // canonical SystemRoot and would shadow the test's env setup.
-    _resetWindowsInstallRootsForTests({ queryRegistryValue: () => null });
+    resetWindowsInstallRootsForTests({ queryRegistryValue: () => null });
     spawnMock.mockReset();
     spawnSyncMock.mockReset();
     spawnSyncMock.mockReturnValue({ stdout: "Active code page: 936", stderr: "" });
@@ -243,7 +244,7 @@ describe("windows command wrapper behavior", () => {
           "\\Windows",
           "relative\\path",
         ]) {
-          _resetWindowsInstallRootsForTests({ queryRegistryValue: () => null });
+          resetWindowsInstallRootsForTests({ queryRegistryValue: () => null });
           // Set every install-root env source to the unsafe value so the
           // resolver rejects each one and falls through to the safe default.
           // Deleting WINDIR here is unreliable on real Windows runners, so
@@ -458,7 +459,7 @@ describe("windows command wrapper behavior", () => {
         child.emit("close", null, "SIGKILL");
         const result = await resultPromise;
         expect(result.termination).toBe("timeout");
-        expect(result.code).not.toBe(0);
+        expect(result.code).toBe(124);
       });
     } finally {
       vi.useRealTimers();

@@ -1,3 +1,4 @@
+// Codex tests cover thread lifecycle.user mcp servers plugin behavior.
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -54,6 +55,7 @@ function createAppServerOptions(): CodexAppServerRuntimeOptions {
       args: ["app-server"],
       headers: {},
     },
+    codeModeOnly: false,
     requestTimeoutMs: 60_000,
     turnCompletionIdleTimeoutMs: 60_000,
     approvalPolicy: "never",

@@ -1,3 +1,4 @@
+// Onboarding plugin install tests cover install sources, trust checks, and install records.
 import fs from "node:fs/promises";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -48,6 +49,7 @@ vi.mock("../plugins/clawhub.js", () => ({
   CLAWHUB_INSTALL_ERROR_CODE: {
     PACKAGE_NOT_FOUND: "package_not_found",
     VERSION_NOT_FOUND: "version_not_found",
+    ARTIFACT_UNAVAILABLE: "artifact_unavailable",
     ARTIFACT_DOWNLOAD_UNAVAILABLE: "artifact_download_unavailable",
   },
   installPluginFromClawHub,
@@ -61,6 +63,7 @@ const enablePluginInConfig = vi.hoisted(() =>
   })),
 );
 vi.mock("../plugins/enable.js", () => ({
+  enableExplicitlySelectedPluginInConfig: enablePluginInConfig,
   enablePluginInConfig,
 }));
 
@@ -77,9 +80,24 @@ const recordPluginInstall = vi.hoisted(() =>
   })),
 );
 const buildNpmResolutionInstallFields = vi.hoisted(() => vi.fn(() => ({})));
+const resolveNpmInstallRecordSpec = vi.hoisted(() =>
+  vi.fn(
+    (params: {
+      requestedSpec?: string;
+      resolution?: { resolvedSpec?: string };
+      pinResolvedRegistrySpec?: boolean;
+    }) => {
+      if (params.pinResolvedRegistrySpec && params.resolution?.resolvedSpec) {
+        return params.resolution.resolvedSpec;
+      }
+      return params.requestedSpec;
+    },
+  ),
+);
 vi.mock("../plugins/installs.js", () => ({
   recordPluginInstall,
   buildNpmResolutionInstallFields,
+  resolveNpmInstallRecordSpec,
 }));
 
 const withTimeout = vi.hoisted(() => vi.fn(async <T>(promise: Promise<T>) => await promise));
@@ -761,11 +779,11 @@ describe("ensureOnboardingPluginInstalled", () => {
     expect(captured?.initialValue).toBe("clawhub");
   });
 
-  it("falls back from ClawHub to npm when the ClawHub package is unavailable", async () => {
+  it("falls back from ClawHub to npm when the ClawHub artifact is unavailable", async () => {
     installPluginFromClawHub.mockResolvedValueOnce({
       ok: false,
-      code: "package_not_found",
-      error: "Package not found on ClawHub.",
+      code: "artifact_unavailable",
+      error: "ClawHub artifact download is not available yet.",
     });
     installPluginFromNpmSpec.mockResolvedValueOnce({
       ok: true,

@@ -16,7 +16,7 @@ We serialize inbound auto-reply runs (all channels) through a tiny in-process qu
 ## How it works
 
 - A lane-aware FIFO queue drains each lane with a configurable concurrency cap (default 1 for unconfigured lanes; main defaults to 4, subagent to 8).
-- `runEmbeddedPiAgent` enqueues by **session key** (lane `session:<key>`) to guarantee only one active run per session.
+- `runEmbeddedAgent` enqueues by **session key** (lane `session:<key>`) to guarantee only one active run per session.
 - Each session run is then queued into a **global lane** (`main` by default) so overall parallelism is capped by `agents.defaults.maxConcurrent`.
 - When verbose logging is enabled, queued runs emit a short notice if they waited more than ~2s before starting.
 - Typing indicators still fire immediately on enqueue (when supported by the channel) so user experience is unchanged while we wait our turn.
@@ -40,7 +40,7 @@ active run to finish before starting the prompt.
 `/queue` controls what normal inbound messages do while a session already has
 an active run:
 
-- `steer`: inject messages into the active runtime. Pi delivers all pending steering messages **after the current assistant turn finishes executing its tool calls**, before the next LLM call; Codex app-server receives one batched `turn/steer`. If the run is not actively streaming or steering is unavailable, OpenClaw waits until the active run ends before starting the prompt.
+- `steer`: inject messages into the active runtime. OpenClaw delivers all pending steering messages **after the current assistant turn finishes executing its tool calls**, before the next LLM call; Codex app-server receives one batched `turn/steer`. If the run is not actively streaming or steering is unavailable, OpenClaw waits until the active run ends before starting the prompt.
 - `followup`: do not steer. Enqueue each message for a later agent turn after the current run ends.
 - `collect`: do not steer. Coalesce queued messages into a **single** followup turn after the quiet window. If messages target different channels/threads, they drain individually to preserve routing.
 - `interrupt`: abort the active run for that session, then run the newest message.
@@ -77,6 +77,20 @@ quiet window in `steer` mode:
 - `drop: "new"`: reject the newest message when the queue is already full.
 
 Defaults: `debounceMs: 500`, `cap: 20`, `drop: summarize`.
+
+## Steer and streaming
+
+When channel streaming is `partial` or `block`, steering can look like several
+short visible replies while the active run reaches runtime boundaries:
+
+- `partial`: the preview may finalize early, then a new preview starts after
+  steering is accepted.
+- `block`: draft-sized blocks can create the same sequential appearance.
+- Without streaming, steering falls back to a followup after the active run when
+  the runtime cannot accept same-turn steering.
+
+`steer` does not abort in-flight tools. Use `/queue interrupt` when the newest
+message should abort the current run.
 
 ## Precedence
 
