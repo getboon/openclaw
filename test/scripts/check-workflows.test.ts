@@ -72,7 +72,6 @@ describe("check-workflows", () => {
       const preCommitArgs = readFileSync(preCommitMarkerPath, "utf8");
       expect(preCommitArgs).toContain("run --config .pre-commit-config.yaml zizmor --files");
       expect(preCommitArgs).toContain(".github/workflows/ci.yml");
-      expect(preCommitArgs).toContain(".github/workflows/windows-testbox-probe.yml");
     } finally {
       rmSync(tempDir, { force: true, recursive: true });
     }

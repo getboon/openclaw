@@ -14,7 +14,6 @@ const RELEASE_PUBLISH_WORKFLOW = ".github/workflows/openclaw-release-publish.yml
 const FULL_RELEASE_VALIDATION_WORKFLOW = ".github/workflows/full-release-validation.yml";
 const QA_LIVE_TRANSPORTS_WORKFLOW = ".github/workflows/qa-live-transports-convex.yml";
 const UPDATE_MIGRATION_WORKFLOW = ".github/workflows/update-migration.yml";
-const CI_CHECK_TESTBOX_WORKFLOW = ".github/workflows/ci-check-testbox.yml";
 const CRABBOX_HYDRATE_WORKFLOW = ".github/workflows/crabbox-hydrate.yml";
 const CRABBOX_CONFIG = ".crabbox.yaml";
 const SCHEDULED_LIVE_CHECKS_WORKFLOW = ".github/workflows/openclaw-scheduled-live-checks.yml";
@@ -967,7 +966,6 @@ describe("package artifact reuse", () => {
     const releaseChecksWorkflow = readFileSync(RELEASE_CHECKS_WORKFLOW, "utf8");
     const scheduledWorkflow = readFileSync(SCHEDULED_LIVE_CHECKS_WORKFLOW, "utf8");
     const packageAcceptanceWorkflow = readFileSync(PACKAGE_ACCEPTANCE_WORKFLOW, "utf8");
-    const testboxWorkflow = readFileSync(CI_CHECK_TESTBOX_WORKFLOW, "utf8");
     const dockerPlanAction = readFileSync(DOCKER_E2E_PLAN_ACTION, "utf8");
     const hydrateScript = readFileSync(CI_HYDRATE_LIVE_AUTH_SCRIPT, "utf8");
 
@@ -992,7 +990,6 @@ describe("package artifact reuse", () => {
       releaseChecksWorkflow,
       scheduledWorkflow,
       packageAcceptanceWorkflow,
-      testboxWorkflow,
     ]) {
       expect(workflow).toContain("FACTORY_API_KEY: ${{ secrets.FACTORY_API_KEY }}");
     }
@@ -1008,19 +1005,6 @@ describe("package artifact reuse", () => {
       'if [[ "$credentials" == *",opencode,"* ]]; then',
       "require_any OpenCode OPENCODE_API_KEY OPENCODE_ZEN_API_KEY",
     ]);
-  });
-
-  it("fails Testbox changed-check delegation when the remote command fails", () => {
-    const workflow = readFileSync(CI_CHECK_TESTBOX_WORKFLOW, "utf8");
-    const runTestboxStep = workflowJob(CI_CHECK_TESTBOX_WORKFLOW, "check").steps?.find(
-      (step) => step.name === "Run Testbox",
-    );
-
-    expect(workflow).toContain('PNPM_CONFIG_STORE_DIR: "/tmp/openclaw-pnpm-store"');
-    expect(workflow).not.toContain("PNPM_CONFIG_MODULES_DIR");
-    expect(workflow).not.toContain("PNPM_CONFIG_VIRTUAL_STORE_DIR");
-    expect(runTestboxStep?.uses).toContain("useblacksmith/run-testbox@");
-    expect(runTestboxStep?.["continue-on-error"]).toBeUndefined();
   });
 
   it("allows the Telegram lane to run from reusable package acceptance artifacts", () => {
