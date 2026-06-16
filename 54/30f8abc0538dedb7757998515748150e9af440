@@ -1,0 +1,19 @@
+pnpm-lock.yaml
+  s_ee70570d53827a::t_bb82ab5fd3cf2c 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "5430f8abc0538dedb7757998515748150e9af440",
+  "prompts": {},
+  "sessions": {
+    "s_ee70570d53827a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaf79b13-6f75-41c1-8d69-0521694cfe19",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
