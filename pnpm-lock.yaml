@@ -36,9 +36,7 @@ overrides:
 packageExtensionsChecksum: sha256-zZ8fyodhMTumshonC7kktCqTPsiHL3UAyS9vltFAlMo=
 
 patchedDependencies:
-  '@agentclientprotocol/claude-agent-acp@0.39.0':
-    hash: 8ce79a079ca223290aeaa8d61063853d8e021ce5d35690f28ac998dbca9bcb4b
-    path: patches/@agentclientprotocol__claude-agent-acp@0.39.0.patch
+  '@agentclientprotocol/claude-agent-acp@0.39.0': 8ce79a079ca223290aeaa8d61063853d8e021ce5d35690f28ac998dbca9bcb4b
 
 importers:
 
