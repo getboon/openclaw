@@ -31,8 +31,9 @@ describe("dispatchCapture", () => {
     expect(client.captureMessage).not.toHaveBeenCalled();
     expect(client.captureException).toHaveBeenCalledOnce();
     const call = client.captureException.mock.lastCall;
-    expect(call?.[0]).toBeInstanceOf(Error);
-    expect((call?.[0] as Error).message).toBe("boom");
+    const firstArg = call?.[0];
+    expect(firstArg).toBeInstanceOf(Error);
+    expect((firstArg as Error).message).toBe("boom");
     expect(call?.[1]).toEqual({
       tags: { hook: "model_call_ended" },
       contexts: { run: { run_id: "r1" } },
