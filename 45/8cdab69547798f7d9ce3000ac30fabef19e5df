@@ -1,0 +1,19 @@
+npm-shrinkwrap.json
+  s_ee70570d53827a::t_a01a6e0d2994b7 3,9,28,446-1171,1207-1253,1260-1274,1300-1320,1586-1591,2256-2261,2646-2657,2682-2696,3008-3013,3254-3259,3286-3316,3347-3385,3630-3643,3650-3670,3722-3733,3818-3823,4082-4093,4263-4268,4408-4414
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.7",
+  "base_commit_sha": "458cdab69547798f7d9ce3000ac30fabef19e5df",
+  "prompts": {},
+  "sessions": {
+    "s_ee70570d53827a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaf79b13-6f75-41c1-8d69-0521694cfe19",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
