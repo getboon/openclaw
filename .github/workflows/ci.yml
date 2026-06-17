@@ -1306,7 +1306,7 @@ jobs:
               NODE_OPTIONS=--max-old-space-size=8192 pnpm build:plugin-sdk:strict-smoke
               ;;
             shrinkwrap)
-              pnpm deps:shrinkwrap:check
+              OPENCLAW_SHRINKWRAP_DIFF=1 pnpm deps:shrinkwrap:check
               ;;
             prod-types)
               pnpm tsgo:prod
