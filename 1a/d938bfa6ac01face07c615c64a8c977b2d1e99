@@ -1,0 +1,23 @@
+pnpm-lock.yaml
+  s_ee70570d53827a::t_a6cf42c8891e9b 12,2788,5773-5774,8996,8998,9261,9271,12143
+.github/workflows/ci.yml
+  s_ee70570d53827a::t_cbd02365d49fa0 1309
+pnpm-workspace.yaml
+  s_ee70570d53827a::t_c59422d9a78689 73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "1ad938bfa6ac01face07c615c64a8c977b2d1e99",
+  "prompts": {},
+  "sessions": {
+    "s_ee70570d53827a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaf79b13-6f75-41c1-8d69-0521694cfe19",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
