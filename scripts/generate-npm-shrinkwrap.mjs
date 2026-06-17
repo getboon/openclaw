@@ -1282,18 +1282,6 @@ function updateOrCheckPackage(packageDir, check, changedPaths = []) {
     );
   }
   if (current !== generated) {
-    if (process.env.OPENCLAW_SHRINKWRAP_DIFF === "1") {
-      const currentLines = current.split("\n");
-      const generatedLines = generated.split("\n");
-      const max = Math.max(currentLines.length, generatedLines.length);
-      let shown = 0;
-      for (let i = 0; i < max && shown < 60; i += 1) {
-        if (currentLines[i] !== generatedLines[i]) {
-          process.stderr.write(`@${i + 1}\n- ${currentLines[i] ?? ""}\n+ ${generatedLines[i] ?? ""}\n`);
-          shown += 1;
-        }
-      }
-    }
     throw new Error(
       `${label}: npm-shrinkwrap.json is stale. Run \`pnpm deps:shrinkwrap:generate\`.`,
     );
