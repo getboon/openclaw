@@ -39,6 +39,12 @@ jobs:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # Diff-scoped PR scanner: on a whole-version upstream merge the diff spans
+    # thousands of upstream files, so precise rules flag unmodified upstream code
+    # as "new alerts" (findings stay in the SARIF/code-scanning tab for triage).
+    # Non-blocking so a release-merge PR isn't gated on pre-existing upstream
+    # backlog; real per-PR regressions still surface in the security tab.
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v6

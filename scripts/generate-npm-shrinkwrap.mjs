@@ -987,6 +987,31 @@ function dependencySpecForLockPath(packages, lockPath, dependencyName) {
   );
 }
 
+// Package names that pnpm locks at more than one version. npm's hoist of a
+// multi-version transitive to the top-level slot is order-sensitive and can
+// differ between runners (e.g. @opentelemetry/api-logs 0.56.0 vs 0.52.1 under
+// @sentry/node), so the regenerated shrinkwrap is nondeterministic for these.
+function collectMultiVersionPnpmLockNames(pnpmLockPackages) {
+  const versionsByName = new Map();
+  for (const entry of pnpmLockPackages) {
+    const at = entry.lastIndexOf("@");
+    if (at <= 0) {
+      continue;
+    }
+    const name = entry.slice(0, at);
+    const set = versionsByName.get(name) ?? new Set();
+    set.add(entry.slice(at + 1));
+    versionsByName.set(name, set);
+  }
+  const multi = new Set();
+  for (const [name, versions] of versionsByName) {
+    if (versions.size > 1) {
+      multi.add(name);
+    }
+  }
+  return multi;
+}
+
 function restoreCurrentPnpmLockedPackages(
   generated,
   current,
@@ -995,6 +1020,7 @@ function restoreCurrentPnpmLockedPackages(
   if (!current) {
     return generated;
   }
+  const multiVersionLockNames = collectMultiVersionPnpmLockNames(pnpmLockPackages);
   const generatedPackages = generated?.packages;
   const currentPackages = current?.packages;
   if (
@@ -1017,12 +1043,20 @@ function restoreCurrentPnpmLockedPackages(
 
     const currentMetadata = currentPackages[lockPath];
     const currentPackageName = currentMetadata?.name ?? packageNameForLockPath(lockPath);
+    // Restore the committed entry when npm floated to a different lock-valid
+    // version: either a same-line patch drift, or an ambiguous hoist of a
+    // package pnpm locks at multiple versions. Both must still satisfy the path
+    // spec and be present in the canonical pnpm lock, so this only stabilizes
+    // runner-nondeterministic choices — it never introduces an unlocked version.
+    const driftIsRestorable =
+      isStablePatchDrift(metadata.version, currentMetadata?.version ?? "") ||
+      multiVersionLockNames.has(packageName);
     if (
       !currentMetadata ||
       typeof currentMetadata !== "object" ||
       !currentMetadata.version ||
       currentPackageName !== packageName ||
-      !isStablePatchDrift(metadata.version, currentMetadata.version) ||
+      !driftIsRestorable ||
       !versionSatisfiesSimpleSpec(
         currentMetadata.version,
         dependencySpecForLockPath(generatedPackages, lockPath, packageName),
@@ -1032,9 +1066,9 @@ function restoreCurrentPnpmLockedPackages(
       continue;
     }
 
-    // npm can float transitive patch ranges beyond pnpm's lock when one package
-    // name has multiple locked major lines. Keep the existing shrinkwrap entry
-    // when it still matches the canonical pnpm lock.
+    // npm can float transitive ranges beyond pnpm's lock when one package name
+    // has multiple locked lines. Keep the existing shrinkwrap entry when it
+    // still matches the canonical pnpm lock so output stays deterministic.
     generatedPackages[lockPath] = currentMetadata;
   }
 

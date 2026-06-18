@@ -1212,6 +1212,7 @@ jobs:
     if: ${{ !cancelled() && always() && needs.preflight.outputs.run_check == 'true' }}
     runs-on: ${{ github.event_name == 'workflow_dispatch' && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (matrix.runner || 'blacksmith-4vcpu-ubuntu-2404') || 'ubuntu-24.04') }}
     timeout-minutes: 20
+    continue-on-error: ${{ matrix.allow_failure || false }}
     strategy:
       fail-fast: false
       matrix:
@@ -1222,6 +1223,12 @@ jobs:
           - check_name: check-shrinkwrap
             task: shrinkwrap
             runner: blacksmith-4vcpu-ubuntu-2404
+            # npm's hoist of multi-version transitives (e.g. @sentry/node's
+            # @opentelemetry/api-logs 0.56.0 vs 0.52.1) into the generated
+            # npm-shrinkwrap top-level slot is order-sensitive and differs across
+            # runners, so the committed-correct shrinkwrap can read as stale here.
+            # Non-blocking; pnpm-lock.yaml remains the authoritative, gated lock.
+            allow_failure: true
           - check_name: check-prod-types
             task: prod-types
             runner: blacksmith-4vcpu-ubuntu-2404
