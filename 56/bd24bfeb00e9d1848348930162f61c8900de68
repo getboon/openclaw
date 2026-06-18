@@ -1,0 +1,27 @@
+src/infra/npm-registry-spec.ts
+  s_ee70570d53827a::t_1abdcb2485b052 158
+  s_ee70570d53827a::t_c0b0ab1bb9d892 210-219
+  s_ee70570d53827a::t_aad1eb09ddc188 13-19
+src/commands/doctor/shared/missing-configured-plugin-install.ts
+  s_ee70570d53827a::t_115041da7c86b7 18
+  s_ee70570d53827a::t_4c087327272712 615
+  s_ee70570d53827a::t_8af15b1e2377a8 1311
+src/commands/doctor/shared/missing-configured-plugin-install.test.ts
+  s_ee70570d53827a::t_16b2aa21144e16 28-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "56bd24bfeb00e9d1848348930162f61c8900de68",
+  "prompts": {},
+  "sessions": {
+    "s_ee70570d53827a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaf79b13-6f75-41c1-8d69-0521694cfe19",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
