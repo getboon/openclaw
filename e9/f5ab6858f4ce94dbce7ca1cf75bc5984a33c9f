@@ -1,0 +1,27 @@
+.github/workflows/codeql-critical-quality.yml
+  s_ee70570d53827a::t_97eb83209fa23e 438-443
+.github/workflows/ci.yml
+  s_ee70570d53827a::t_248c95a3abe8a3 1226-1231
+  s_ee70570d53827a::t_9f4c4b9f22be36 1215
+scripts/generate-npm-shrinkwrap.mjs
+  s_ee70570d53827a::t_53bf157f5a07da 1046-1053,1059,1069-1071
+  s_ee70570d53827a::t_dacf27a27ec82e 990-1014,1023
+.github/workflows/opengrep-precise.yml
+  s_ee70570d53827a::t_9ea7cef2b32dd7 42-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.8",
+  "base_commit_sha": "e9f5ab6858f4ce94dbce7ca1cf75bc5984a33c9f",
+  "prompts": {},
+  "sessions": {
+    "s_ee70570d53827a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eaf79b13-6f75-41c1-8d69-0521694cfe19",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
