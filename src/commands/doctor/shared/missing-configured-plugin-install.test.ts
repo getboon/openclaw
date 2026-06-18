@@ -25,7 +25,9 @@ function expectedClawHubInstallSpec(spec: string): string {
 }
 
 function currentOpenClawReleaseBase(): string {
-  return VERSION.replace(/-(?:alpha|beta)\.[1-9]\d*$/u, "");
+  // Strip the Boon fork suffix (`-boon.N`) as well as alpha/beta prerelease tags
+  // so derived test versions stay valid release strings on fork builds.
+  return VERSION.replace(/-boon\.[1-9]\d*$/u, "").replace(/-(?:alpha|beta)\.[1-9]\d*$/u, "");
 }
 
 function expectRecordFields(record: unknown, expected: Record<string, unknown>) {

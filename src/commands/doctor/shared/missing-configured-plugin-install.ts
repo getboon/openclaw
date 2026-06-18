@@ -15,6 +15,7 @@ import {
   compareOpenClawReleaseVersions,
   isOpenClawOrgNpmSpec,
   parseRegistryNpmSpec,
+  stripBoonForkVersionSuffix,
 } from "../../../infra/npm-registry-spec.js";
 import {
   normalizeUpdateChannel,
@@ -611,7 +612,7 @@ function collectInstalledPluginIdsWithStaleVersionBoundRuntimePackages(params: {
   updateChannel: UpdateChannel;
 }): Set<string> {
   const pluginIds = new Set<string>();
-  const currentVersion = normalizeOptionalLowercaseString(VERSION);
+  const currentVersion = normalizeOptionalLowercaseString(stripBoonForkVersionSuffix(VERSION));
   if (!currentVersion) {
     return pluginIds;
   }
@@ -1307,7 +1308,7 @@ async function repairMissingPluginInstalls(params: {
   const records = params.baselineRecords ?? (await loadInstalledPluginIndexInstallRecords({ env }));
   const updateChannel = resolveRegistryUpdateChannel({
     configChannel: normalizeUpdateChannel(params.cfg.update?.channel),
-    currentVersion: VERSION,
+    currentVersion: stripBoonForkVersionSuffix(VERSION),
   });
   const installedPluginIdsWithRepairablePackageDiagnostics =
     collectInstalledPluginIdsWithRepairablePackageDiagnostics({

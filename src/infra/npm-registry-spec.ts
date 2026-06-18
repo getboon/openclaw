@@ -10,6 +10,13 @@ const OPENCLAW_ALPHA_VERSION_RE =
   /^(?<year>\d{4})\.(?<month>[1-9]\d?)\.(?<patch>[1-9]\d*)-alpha\.(?<alpha>[1-9]\d*)$/;
 const OPENCLAW_BETA_VERSION_RE =
   /^(?<year>\d{4})\.(?<month>[1-9]\d?)\.(?<patch>[1-9]\d*)-beta\.(?<beta>[1-9]\d*)$/;
+// Boon fork builds tag the base upstream release with a trailing `-boon.N`
+// (e.g. `2026.6.6-boon.1`). For release-version ordering a fork build IS its
+// base release, so strip the suffix before channel parsing. Without this,
+// compareOpenClawReleaseVersions returns null for fork builds and callers fall
+// back to raw string inequality — which made `openclaw doctor` treat
+// newer/converged managed runtime plugins as stale and re-install them.
+const OPENCLAW_BOON_FORK_SUFFIX_RE = /-boon\.[1-9]\d*$/;
 const DIST_TAG_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /** Parsed monthly patch OpenClaw release version used for channel-aware ordering. */
@@ -148,7 +155,7 @@ export function isExactSemverVersion(value: string): boolean {
 
 /** Parses OpenClaw's monthly patch stable/alpha/beta/correction version format. */
 function parseOpenClawReleaseVersion(value: string): OpenClawReleaseVersion | null {
-  const trimmed = value.trim();
+  const trimmed = value.trim().replace(OPENCLAW_BOON_FORK_SUFFIX_RE, "");
   const candidates = [
     { match: OPENCLAW_STABLE_VERSION_RE.exec(trimmed), channel: "stable" as const },
     { match: OPENCLAW_STABLE_CORRECTION_VERSION_RE.exec(trimmed), channel: "stable" as const },
@@ -198,6 +205,16 @@ function parseOpenClawReleaseVersion(value: string): OpenClawReleaseVersion | nu
     alphaNumber,
     betaNumber,
   };
+}
+
+/**
+ * Strips a trailing Boon fork suffix (`-boon.N`) so fork builds compare as their
+ * base upstream release. Callers that match version strings against release/
+ * companion patterns must normalize through this first, or a fork build's
+ * `currentVersion` fails those patterns and version-bound logic misfires.
+ */
+export function stripBoonForkVersionSuffix(value: string): string {
+  return value.replace(OPENCLAW_BOON_FORK_SUFFIX_RE, "");
 }
 
 /** Returns whether a version is an OpenClaw monthly patch stable correction release. */
