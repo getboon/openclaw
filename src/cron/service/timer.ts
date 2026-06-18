@@ -409,8 +409,36 @@ function isAbortError(err: unknown): boolean {
   return err.name === "AbortError" || err.message === timeoutErrorMessage();
 }
 
+// The stable prefix every timeout variant shares (bare, with-phase, setup, and
+// pre-execution forms all start with this). Used to recognize a cron timeout
+// regardless of the trailing "(last phase: …)" detail.
+const CRON_TIMEOUT_SIGNATURE = "cron: job execution timed out";
+
+// A timed-out cron run that aborts mid-prompt gets its session takeover error
+// SYNTHESIZED during cleanup (see EmbeddedAttemptPromptErrorWithCleanupTakeoverError
+// in attempt.ts): the surfaced error's name becomes
+// "EmbeddedAttemptSessionTakeoverError" and the timeout text lives in either the
+// message ("aborted | cron: job execution timed out …") or the cause chain.
+// `isAbortError` misses these because the name isn't "AbortError" and the message
+// isn't byte-equal to the bare timeout string, so the raw internal error (incl.
+// the absolute session-file path) used to leak to the customer channel via
+// String(err). Walk the cause chain (bounded) looking for the timeout signature.
+// We deliberately do NOT normalize a takeover with no timeout anywhere in the
+// chain — that is a different, unconfirmed failure mode and collapsing every
+// takeover into "timed out" would hide it. ENG-14120 / ENG-13437.
+function isTimeoutInducedError(err: unknown): boolean {
+  let current: unknown = err;
+  for (let depth = 0; depth < 8 && current instanceof Error; depth += 1) {
+    if (current.message.includes(CRON_TIMEOUT_SIGNATURE)) {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 export function normalizeCronRunErrorText(err: unknown): string {
-  if (isAbortError(err)) {
+  if (isAbortError(err) || isTimeoutInducedError(err)) {
     return timeoutErrorMessage();
   }
   if (typeof err === "string") {
