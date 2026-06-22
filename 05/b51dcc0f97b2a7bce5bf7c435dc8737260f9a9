@@ -1,0 +1,19 @@
+src/config/types.msteams.ts
+  s_7c3c6f92a42e95::t_db7414f0499e95 153-160
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.9",
+  "base_commit_sha": "05b51dcc0f97b2a7bce5bf7c435dc8737260f9a9",
+  "prompts": {},
+  "sessions": {
+    "s_7c3c6f92a42e95": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf12b6c0-a061-4c67-a951-54db711703df",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
