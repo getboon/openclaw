@@ -73,7 +73,15 @@ export function buildMSTeamsGraphMessageUrls(params: {
   const replyToId = normalizeOptionalString(params.replyToId) ?? "";
 
   if (conversationType === "channel") {
+    // Graph `/teams/{id}` requires the AAD group GUID, not the Teams thread-style
+    // ID (`19:...thread.tacv2`) that Bot Framework puts on `channelData.team.id`.
+    // Both forms ride along on the activity; prefer aadGroupId. Fall through to
+    // the legacy keys so older payloads (or alternate channelData shapes) keep
+    // working — Graph just rejects those with 400, but the fallback path stays
+    // in place rather than masking the regression.
     const teamId =
+      readNestedString(params.channelData, ["team", "aadGroupId"]) ??
+      readNestedString(params.channelData, ["teamAadGroupId"]) ??
       readNestedString(params.channelData, ["team", "id"]) ??
       readNestedString(params.channelData, ["teamId"]);
     const channelId =

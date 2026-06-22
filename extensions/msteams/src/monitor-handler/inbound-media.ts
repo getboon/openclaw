@@ -33,6 +33,14 @@ export async function resolveMSTeamsInboundMedia(params: {
   log: MSTeamsLogger;
   /** When true, embeds original filename in stored path for later extraction. */
   preserveFilenames?: boolean;
+  /**
+   * When true, always run the Graph re-fetch fallback for channel/group
+   * messages even when the inbound HTML body has no `<attachment id=...>`
+   * stub. Workaround for tenants where Bot Framework strips file refs from
+   * inbound activities (ENG-14349). Has no effect on personal-chat
+   * conversations. Default false (upstream behavior).
+   */
+  alwaysFetchGraphMessage?: boolean;
 }): Promise<MSTeamsInboundMedia[]> {
   const {
     attachments,
@@ -47,6 +55,7 @@ export async function resolveMSTeamsInboundMedia(params: {
     activity,
     log,
     preserveFilenames,
+    alwaysFetchGraphMessage,
   } = params;
 
   let mediaList = await downloadMSTeamsAttachments({
@@ -99,8 +108,15 @@ export async function resolveMSTeamsInboundMedia(params: {
       }
     }
 
+    // Bot Framework normally embeds an `<attachment id=...>` HTML stub on
+    // channel-message activities that carry a file. Some tenants strip those
+    // stubs from delivery despite RSC consent, leaving the bot blind to
+    // attachments that DO exist server-side. The opt-in
+    // `alwaysFetchGraphMessage` flag forces the Graph re-fetch path even
+    // without a stub, recovering the file refs through Graph's view of the
+    // message. See ENG-14349.
     if (
-      hasHtmlFileAttachment &&
+      (hasHtmlFileAttachment || alwaysFetchGraphMessage === true) &&
       mediaList.length === 0 &&
       !isBotFrameworkPersonalChatId(conversationId)
     ) {

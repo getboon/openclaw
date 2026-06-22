@@ -167,6 +167,91 @@ describe("resolveMSTeamsInboundMedia graph fallback trigger", () => {
       attachmentIdCount: 1,
     });
   });
+
+  it("triggers Graph fallback even with no <attachment> tags when alwaysFetchGraphMessage is true", async () => {
+    // Workaround for tenants where Bot Framework strips file refs from inbound
+    // activities — see ENG-14349. The opt-in flag forces the Graph re-fetch
+    // path so the bot can recover the file refs through Graph's view.
+    vi.mocked(downloadMSTeamsAttachments).mockResolvedValue([]);
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce([]);
+    vi.mocked(downloadMSTeamsGraphMedia).mockClear();
+    vi.mocked(buildMSTeamsGraphMessageUrls).mockClear();
+    vi.mocked(downloadMSTeamsGraphMedia).mockResolvedValue({
+      media: [{ path: "/tmp/doc.pdf", contentType: "application/pdf", placeholder: "[file]" }],
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "text/html",
+          content: '<div><at id="0">Bot</at> can you see my file?</div>',
+        },
+      ],
+      alwaysFetchGraphMessage: true,
+    });
+
+    expect(buildMSTeamsGraphMessageUrls).toHaveBeenCalled();
+    expect(downloadMSTeamsGraphMedia).toHaveBeenCalled();
+    expect(result).toEqual([
+      { path: "/tmp/doc.pdf", contentType: "application/pdf", placeholder: "[file]" },
+    ]);
+  });
+
+  it("does NOT trigger Graph fallback when alwaysFetchGraphMessage is true but conversation is a personal BF chat", async () => {
+    // The flag is a workaround for channel/group delivery quirks; personal
+    // chats use the Bot Framework v3 attachments endpoint (Graph rejects 'a:'
+    // chat IDs anyway), so the alwaysFetchGraphMessage gate must remain
+    // scoped to non-personal conversations.
+    vi.mocked(downloadMSTeamsAttachments).mockResolvedValue([]);
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce([]);
+    vi.mocked(downloadMSTeamsGraphMedia).mockClear();
+    vi.mocked(buildMSTeamsGraphMessageUrls).mockClear();
+
+    await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "personal",
+      conversationId: "a:bf-dm-id",
+      attachments: [
+        {
+          contentType: "text/html",
+          content: '<div>Hello</div>',
+        },
+      ],
+      alwaysFetchGraphMessage: true,
+    });
+
+    expect(downloadMSTeamsGraphMedia).not.toHaveBeenCalled();
+    expect(buildMSTeamsGraphMessageUrls).not.toHaveBeenCalled();
+  });
+
+  it("does NOT trigger Graph fallback when alwaysFetchGraphMessage is undefined (upstream default)", async () => {
+    // Default-off is the upstream behavior — tenants where Bot Framework
+    // delivers the HTML stub correctly should not pay an extra Graph round
+    // trip on every channel message.
+    vi.mocked(downloadMSTeamsAttachments).mockResolvedValue([]);
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce([]);
+    vi.mocked(downloadMSTeamsGraphMedia).mockClear();
+    vi.mocked(buildMSTeamsGraphMessageUrls).mockClear();
+
+    await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "text/html",
+          content: '<div><at id="0">Bot</at> hello</div>',
+        },
+      ],
+      // alwaysFetchGraphMessage omitted intentionally
+    });
+
+    expect(downloadMSTeamsGraphMedia).not.toHaveBeenCalled();
+    expect(buildMSTeamsGraphMessageUrls).not.toHaveBeenCalled();
+  });
 });
 
 describe("resolveMSTeamsInboundMedia bot framework DM routing", () => {

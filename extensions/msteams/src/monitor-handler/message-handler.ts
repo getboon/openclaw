@@ -602,6 +602,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         channelData: activity.channelData,
       },
       log,
+      alwaysFetchGraphMessage: msteamsCfg?.alwaysFetchGraphMessage,
       preserveFilenames: (cfg as { media?: { preserveFilenames?: boolean } }).media
         ?.preserveFilenames,
     });
