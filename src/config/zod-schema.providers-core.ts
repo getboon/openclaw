@@ -1609,6 +1609,14 @@ export const MSTeamsConfigSchema = z
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
     mediaAllowHosts: z.array(z.string()).optional(),
     mediaAuthAllowHosts: z.array(z.string()).optional(),
+    /**
+     * Always re-fetch the Teams channel/group message via Graph (instead of
+     * relying on the inbound Bot Framework activity) when the local media list
+     * is empty. Workaround for tenants where Bot Framework strips file refs
+     * (`<attachment id=...>` tags AND `reference`-typed entries) from inbound
+     * activities even with RSC consent — see ENG-14349. Default false.
+     */
+    alwaysFetchGraphMessage: z.boolean().optional(),
     requireMention: z.boolean().optional(),
     historyLimit: z.number().int().min(0).optional(),
     dmHistoryLimit: z.number().int().min(0).optional(),

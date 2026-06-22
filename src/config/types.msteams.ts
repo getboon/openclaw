@@ -150,6 +150,14 @@ export type MSTeamsConfig = {
    * Use specific hosts only; avoid multi-tenant suffixes.
    */
   mediaAuthAllowHosts?: Array<string>;
+  /**
+   * Always re-fetch the Teams channel/group message via Graph (instead of
+   * relying on the inbound Bot Framework activity) when the local media list
+   * is empty. Workaround for tenants where Bot Framework strips file refs
+   * (`<attachment id=...>` tags AND `reference`-typed entries) from inbound
+   * activities even with RSC consent — see ENG-14349. Default false.
+   */
+  alwaysFetchGraphMessage?: boolean;
   /** Default: require @mention to respond in channels/groups. */
   requireMention?: boolean;
   /** Max group/channel messages to keep as history context (0 disables). */

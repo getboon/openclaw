@@ -226,6 +226,60 @@ describe("msteams attachment helpers", () => {
       expect(urls).toHaveLength(1);
       expect(urls[0]).toContain("/chats/a%3A1dRsHCobZ1AxURzY/messages/msg-1");
     });
+
+    it("prefers channelData.team.aadGroupId over team.id (Graph requires AAD group GUID)", () => {
+      // Graph `/teams/{id}` rejects the Teams thread-style ID (`19:...thread.tacv2`)
+      // that Bot Framework puts on `channelData.team.id` with HTTP 400. The AAD
+      // group GUID rides along on `channelData.team.aadGroupId`; the URL builder
+      // must prefer it. ENG-14349.
+      const urls = buildMSTeamsGraphMessageUrls({
+        conversationType: "channel",
+        messageId: "msg-1",
+        channelData: {
+          team: {
+            id: "19:thread-style-team-id@thread.tacv2",
+            aadGroupId: "d3dcd271-746f-4e9d-940e-dad3ff26447c",
+          },
+          channel: { id: "19:chan@thread.tacv2" },
+        },
+      });
+      expect(urls).toHaveLength(1);
+      expect(urls[0]).toContain("/teams/d3dcd271-746f-4e9d-940e-dad3ff26447c/channels/");
+      expect(urls[0]).not.toContain("19%3Athread-style-team-id");
+    });
+
+    it("falls through to team.id when aadGroupId is absent (back-compat)", () => {
+      // Older payloads / alternate channelData shapes may carry only team.id.
+      // The fallback chain keeps them working — Graph just rejects with 400,
+      // but masking that as an empty-URL list would silently drop the path.
+      const urls = buildMSTeamsGraphMessageUrls({
+        conversationType: "channel",
+        messageId: "msg-1",
+        channelData: {
+          team: { id: "team-id-only" },
+          channel: { id: "chan-id" },
+        },
+      });
+      expect(urls).toHaveLength(1);
+      expect(urls[0]).toContain("/teams/team-id-only/channels/chan-id/messages/msg-1");
+    });
+
+    it("reads channelData.teamAadGroupId as a top-level alias", () => {
+      // Some channelData shapes carry the AAD group GUID at the top level
+      // (`teamAadGroupId`) rather than nested under `team`. The resolver must
+      // accept that form too — covered before falling through to team.id.
+      const urls = buildMSTeamsGraphMessageUrls({
+        conversationType: "channel",
+        messageId: "msg-1",
+        channelData: {
+          teamAadGroupId: "11111111-2222-3333-4444-555555555555",
+          team: { id: "19:thread-form@thread.tacv2" },
+          channel: { id: "chan-id" },
+        },
+      });
+      expect(urls).toHaveLength(1);
+      expect(urls[0]).toContain("/teams/11111111-2222-3333-4444-555555555555/channels/");
+    });
   });
 
   describe("buildMSTeamsMediaPayload", () => {
