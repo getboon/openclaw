@@ -1,0 +1,19 @@
+package.json
+  s_7c3c6f92a42e95::t_e753e5c5e014ca 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.10",
+  "base_commit_sha": "504736107bf9e7598c66332f7ddbdf5081111e38",
+  "prompts": {},
+  "sessions": {
+    "s_7c3c6f92a42e95": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bf12b6c0-a061-4c67-a951-54db711703df",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
