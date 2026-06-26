@@ -3510,7 +3510,7 @@ describe("runAgentTurnWithFallback", () => {
       await vi.runAllTimersAsync();
       const result = await resultPromise;
 
-      // Initial attempt + 3 backoff retries = 4 invocations.
+      // Initial attempt + MAX_TRANSIENT_BUSY_RETRIES backoff retries.
       expect(state.runWithModelFallbackMock).toHaveBeenCalledTimes(1 + MAX_TRANSIENT_BUSY_RETRIES);
       expect(result.kind).toBe("final");
       if (result.kind === "final") {
@@ -5264,13 +5264,44 @@ describe("buildRateLimitCooldownMessage", () => {
 });
 
 describe("resolveTransientRetryBackoffMs", () => {
-  it("grows exponentially: 2s, 4s, 8s for attempts 0, 1, 2", () => {
-    expect(resolveTransientRetryBackoffMs(0)).toBe(2_000);
-    expect(resolveTransientRetryBackoffMs(1)).toBe(4_000);
-    expect(resolveTransientRetryBackoffMs(2)).toBe(8_000);
+  it("grows exponentially with base 5s, doubling, capped at 60s/step (un-jittered upper bound)", () => {
+    // rng()→1 yields just under the full `temp` (half fixed + floor(~1 * half)).
+    // Integer flooring means the max is temp-1, so assert a tight window.
+    const max = () => 0.999_999;
+    const near = (actual: number, temp: number) => {
+      expect(actual).toBeGreaterThanOrEqual(temp - 2);
+      expect(actual).toBeLessThanOrEqual(temp);
+    };
+    near(resolveTransientRetryBackoffMs(0, max), 5_000);
+    near(resolveTransientRetryBackoffMs(1, max), 10_000);
+    near(resolveTransientRetryBackoffMs(2, max), 20_000);
+    near(resolveTransientRetryBackoffMs(3, max), 40_000);
+    // attempt 4: 5s*2^4 = 80s, capped to 60s.
+    near(resolveTransientRetryBackoffMs(4, max), 60_000);
+    near(resolveTransientRetryBackoffMs(5, max), 60_000);
   });
 
-  it("caps the number of transient busy retries at 3", () => {
-    expect(MAX_TRANSIENT_BUSY_RETRIES).toBe(3);
+  it("applies equal jitter: never fires before half the step (no early re-trip of the limiter)", () => {
+    // rng()=0 yields exactly the fixed half — the minimum possible delay.
+    const min = () => 0;
+    expect(resolveTransientRetryBackoffMs(0, min)).toBe(2_500); // half of 5s
+    expect(resolveTransientRetryBackoffMs(1, min)).toBe(5_000); // half of 10s
+    expect(resolveTransientRetryBackoffMs(4, min)).toBe(30_000); // half of capped 60s
+  });
+
+  it("keeps every jittered value within [half, full] of the un-jittered step", () => {
+    for (const attempt of [0, 1, 2, 3, 4, 5]) {
+      const lo = resolveTransientRetryBackoffMs(attempt, () => 0);
+      const hi = resolveTransientRetryBackoffMs(attempt, () => 0.999_999);
+      for (const frac of [0.1, 0.5, 0.9]) {
+        const v = resolveTransientRetryBackoffMs(attempt, () => frac);
+        expect(v).toBeGreaterThanOrEqual(lo);
+        expect(v).toBeLessThanOrEqual(hi);
+      }
+    }
+  });
+
+  it("retries up to 5 times for a robust recovery window", () => {
+    expect(MAX_TRANSIENT_BUSY_RETRIES).toBe(5);
   });
 });

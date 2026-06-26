@@ -117,16 +117,39 @@ export const MAX_LIVE_SWITCH_RETRIES = 2;
 // Maximum automatic retries of the full primary→fallback chain when it
 // exhausts on a *pure transient* condition (every attempt was rate_limit or
 // overloaded — e.g. an upstream gateway/edge block that 429s every hop because
-// they share one host). A single retry is not enough for a brief edge-throttle
-// window, so we retry up to 3 times with exponential backoff before surfacing
-// the transient-busy message to the user.
-export const MAX_TRANSIENT_BUSY_RETRIES = 3;
+// they share one upstream host). The trigger is usually an edge rate-limiter /
+// WAF (Cloudflare in front of the gateway), so the recovery window must be long
+// enough to outlast a typical rate-limit window — a few fast retries would both
+// give up too early AND re-feed the very counter that is blocking us. We retry
+// up to 5 times with long, jittered backoff (~67–135s total) before surfacing
+// the transient-busy message.
+export const MAX_TRANSIENT_BUSY_RETRIES = 5;
 
-// Exponential backoff for transient busy retries: 2s, 4s, 8s for attempts
-// 0, 1, 2. Bounded by MAX_TRANSIENT_BUSY_RETRIES.
-export function resolveTransientRetryBackoffMs(attempt: number): number {
+// Backoff tuning for transient busy retries. Base 5s, double each attempt,
+// capped at 60s/step. Chosen so the FIRST retry already waits past a typical
+// edge rate-limit window (rather than hammering it 2s later), and the total
+// window (~67–135s with jitter) outlasts a short WAF/edge block.
+const TRANSIENT_RETRY_BASE_MS = 5_000;
+const TRANSIENT_RETRY_CAP_MS = 60_000;
+
+// Equal-jitter exponential backoff (AWS "equal jitter": half fixed + half
+// random). Two properties matter against a shared edge rate-limiter:
+//   1. The fixed half guarantees a retry never fires *too soon* and re-trips
+//      the limiter (a pure-random [0, temp) backoff can pick ~0ms).
+//   2. The random half de-synchronizes retries across many concurrent sessions
+//      that all hit the same gateway host, avoiding a thundering herd that
+//      would itself keep the rate-limiter tripped.
+// `rng` is injectable so tests are deterministic; defaults to Math.random.
+export function resolveTransientRetryBackoffMs(
+  attempt: number,
+  rng: () => number = Math.random,
+): number {
   const clamped = Math.max(0, Math.trunc(attempt));
-  return 2_000 * 2 ** clamped;
+  const temp = Math.min(TRANSIENT_RETRY_CAP_MS, TRANSIENT_RETRY_BASE_MS * 2 ** clamped);
+  const half = Math.floor(temp / 2);
+  // Clamp rng into [0,1) so a misbehaving stub can't exceed `temp`.
+  const jitterFraction = Math.min(0.999_999, Math.max(0, rng()));
+  return half + Math.floor(jitterFraction * half);
 }
 
 function readApprovalScopeValue(value: unknown): "turn" | "session" | undefined {
@@ -2349,8 +2372,9 @@ export async function runAgentTurnWithFallback(params: {
       // (e.g. a Cloudflare/Render HTML 429) that 429s every hop because they
       // share one upstream host — so model-level fallback can't help and
       // surfacing "all models rate-limited" is both inaccurate and premature.
-      // Retry the whole chain with exponential backoff (2s/4s/8s) to ride out
-      // a brief edge-throttle window before telling the user anything. A real
+      // Retry the whole chain with long, jittered exponential backoff
+      // (~67–135s total over 5 attempts) to outlast a typical edge/WAF
+      // rate-limit window without re-feeding it via fast retries. A real
       // cooldown or Codex usage-limit is excluded (see predicate) so its
       // actionable detail surfaces immediately instead of being retried away.
       if (
