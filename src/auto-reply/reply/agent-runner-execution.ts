@@ -114,6 +114,21 @@ import type { TypingSignaler } from "./typing-mode.js";
 // See: https://github.com/openclaw/openclaw/issues/58348
 export const MAX_LIVE_SWITCH_RETRIES = 2;
 
+// Maximum automatic retries of the full primary→fallback chain when it
+// exhausts on a *pure transient* condition (every attempt was rate_limit or
+// overloaded — e.g. an upstream gateway/edge block that 429s every hop because
+// they share one host). A single retry is not enough for a brief edge-throttle
+// window, so we retry up to 3 times with exponential backoff before surfacing
+// the transient-busy message to the user.
+export const MAX_TRANSIENT_BUSY_RETRIES = 3;
+
+// Exponential backoff for transient busy retries: 2s, 4s, 8s for attempts
+// 0, 1, 2. Bounded by MAX_TRANSIENT_BUSY_RETRIES.
+export function resolveTransientRetryBackoffMs(attempt: number): number {
+  const clamped = Math.max(0, Math.trunc(attempt));
+  return 2_000 * 2 ** clamped;
+}
+
 function readApprovalScopeValue(value: unknown): "turn" | "session" | undefined {
   return value === "turn" || value === "session" ? value : undefined;
 }
@@ -371,16 +386,29 @@ function rollbackFallbackSelectionStateIfUnchanged(
 }
 
 /**
+ * User-facing copy for a transient busy/cooldown condition when no concrete
+ * cooldown expiry is known. The previous wording ("All models are temporarily
+ * rate-limited") was inaccurate: the common trigger is an upstream gateway/edge
+ * block (e.g. a Render/Cloudflare HTML 429) that classifies as `rate_limit` on
+ * every fallback hop because they share one upstream host — the models
+ * themselves were never rate-limited. This copy is honest about the transient
+ * nature and signals that the agent retries automatically (see the
+ * pure-transient backoff-retry loop in runAgentTurnWithFallback).
+ */
+const TRANSIENT_BUSY_RETRY_MESSAGE =
+  "⚠️ The AI service is briefly busy — retrying automatically… If it persists, please try again in a few minutes.";
+
+/**
  * Build a human-friendly rate-limit message from a FallbackSummaryError.
  * Includes a countdown when the soonest cooldown expiry is known.
  */
-function buildRateLimitCooldownMessage(err: unknown): string {
+export function buildRateLimitCooldownMessage(err: unknown): string {
   const codexUsageLimitMessage = extractCodexUsageLimitErrorMessage(err);
   if (codexUsageLimitMessage) {
     return codexUsageLimitMessage;
   }
   if (!isFallbackSummaryError(err)) {
-    return "⚠️ All models are temporarily rate-limited. Please try again in a few minutes.";
+    return TRANSIENT_BUSY_RETRY_MESSAGE;
   }
   const expiry = err.soonestCooldownExpiry;
   const now = Date.now();
@@ -392,7 +420,7 @@ function buildRateLimitCooldownMessage(err: unknown): string {
     const minsLeft = Math.ceil(secsLeft / 60);
     return `⚠️ Rate-limited — ready in ~${minsLeft} min. Please try again shortly.`;
   }
-  return "⚠️ All models are temporarily rate-limited. Please try again in a few minutes.";
+  return TRANSIENT_BUSY_RETRY_MESSAGE;
 }
 
 function extractCodexUsageLimitErrorMessage(err: unknown): string | undefined {
@@ -445,6 +473,30 @@ function isPureTransientRateLimitSummary(err: unknown): boolean {
       return reason === "rate_limit" || reason === "overloaded";
     })
   );
+}
+
+/**
+ * An *unexplained* pure-transient exhaustion worth auto-retrying with backoff:
+ * every hop failed transiently (rate_limit/overloaded) AND we have no concrete
+ * explanation to show the user — no known cooldown expiry and no extractable
+ * subscription-usage-limit message. This is the upstream gateway/edge-block
+ * shape (e.g. a Cloudflare/Render HTML 429 that 429s every same-host hop): a
+ * blind retry can genuinely ride it out. When a real cooldown expiry or a
+ * Codex/usage-limit message IS present, retrying is futile and hides
+ * actionable info — those surface immediately instead.
+ */
+function isUnexplainedTransientEdgeBlock(err: unknown): boolean {
+  if (!isFallbackSummaryError(err) || !isPureTransientRateLimitSummary(err)) {
+    return false;
+  }
+  const expiry = err.soonestCooldownExpiry;
+  if (typeof expiry === "number" && expiry > Date.now()) {
+    return false;
+  }
+  if (extractCodexUsageLimitErrorMessage(err) !== undefined) {
+    return false;
+  }
+  return true;
 }
 
 function isPureBillingSummary(err: unknown): boolean {
@@ -1262,6 +1314,7 @@ export async function runAgentTurnWithFallback(params: {
   let fallbackAttempts: RuntimeFallbackAttempt[] = [];
   let didResetAfterCompactionFailure = false;
   let didRetryTransientHttpError = false;
+  let transientBusyRetries = 0;
   let liveModelSwitchRetries = 0;
   let bootstrapPromptWarningSignaturesSeen = resolveBootstrapWarningSignaturesSeen(
     params.getActiveSessionEntry()?.systemPromptReport,
@@ -2286,6 +2339,32 @@ export async function runAgentTurnWithFallback(params: {
         );
         await new Promise<void>((resolve) => {
           setTimeout(resolve, TRANSIENT_HTTP_RETRY_DELAY_MS);
+        });
+        continue;
+      }
+
+      // Unexplained pure-transient chain exhaustion: every fallback hop failed
+      // with rate_limit/overloaded and we have no cooldown expiry or usage-limit
+      // detail to show. The common cause is an upstream gateway/edge block
+      // (e.g. a Cloudflare/Render HTML 429) that 429s every hop because they
+      // share one upstream host — so model-level fallback can't help and
+      // surfacing "all models rate-limited" is both inaccurate and premature.
+      // Retry the whole chain with exponential backoff (2s/4s/8s) to ride out
+      // a brief edge-throttle window before telling the user anything. A real
+      // cooldown or Codex usage-limit is excluded (see predicate) so its
+      // actionable detail surfaces immediately instead of being retried away.
+      if (
+        isUnexplainedTransientEdgeBlock(err) &&
+        transientBusyRetries < MAX_TRANSIENT_BUSY_RETRIES
+      ) {
+        const backoffMs = resolveTransientRetryBackoffMs(transientBusyRetries);
+        transientBusyRetries += 1;
+        defaultRuntime.error(
+          `Pure-transient chain exhaustion before reply (${message}). ` +
+            `Retry ${transientBusyRetries}/${MAX_TRANSIENT_BUSY_RETRIES} in ${backoffMs}ms.`,
+        );
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, backoffMs);
         });
         continue;
       }

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LiveSessionModelSwitchError } from "../../agents/live-model-switch-error.js";
+import { FallbackSummaryError } from "../../agents/model-fallback.js";
+import type { FallbackAttempt } from "../../agents/model-fallback.types.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import type { ModelDefinitionConfig } from "../../config/types.models.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
@@ -9,8 +11,11 @@ import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import {
   buildContextOverflowRecoveryText,
+  buildRateLimitCooldownMessage,
   MAX_LIVE_SWITCH_RETRIES,
+  MAX_TRANSIENT_BUSY_RETRIES,
   resolveRunAfterAutoFallbackPrimaryProbeRecheck,
+  resolveTransientRetryBackoffMs,
 } from "./agent-runner-execution.js";
 import { HEARTBEAT_EXTERNAL_RUN_FAILURE_TEXT } from "./agent-runner-failure-copy.js";
 import { PROVIDER_CONVERSATION_STATE_ERROR_USER_MESSAGE } from "./provider-request-error-classifier.js";
@@ -51,13 +56,26 @@ vi.mock("../../agents/cli-runner.js", () => ({
   runCliAgent: (params: unknown) => state.runCliAgentMock(params),
 }));
 
-vi.mock("../../agents/model-fallback.js", () => ({
-  runWithModelFallback: (params: unknown) => state.runWithModelFallbackMock(params),
-  isFallbackSummaryError: (err: unknown) =>
-    err instanceof Error &&
-    err.name === "FallbackSummaryError" &&
-    Array.isArray((err as { attempts?: unknown[] }).attempts),
-}));
+vi.mock("../../agents/model-fallback.js", () => {
+  class FallbackSummaryError extends Error {
+    readonly attempts: unknown[];
+    readonly soonestCooldownExpiry: number | null;
+    constructor(message: string, attempts: unknown[], soonestCooldownExpiry: number | null) {
+      super(message);
+      this.name = "FallbackSummaryError";
+      this.attempts = attempts;
+      this.soonestCooldownExpiry = soonestCooldownExpiry;
+    }
+  }
+  return {
+    runWithModelFallback: (params: unknown) => state.runWithModelFallbackMock(params),
+    isFallbackSummaryError: (err: unknown) =>
+      err instanceof Error &&
+      err.name === "FallbackSummaryError" &&
+      Array.isArray((err as { attempts?: unknown[] }).attempts),
+    FallbackSummaryError,
+  };
+});
 
 vi.mock("../../agents/model-selection.js", async () => {
   const actual = await vi.importActual<typeof import("../../agents/model-selection.js")>(
@@ -3413,6 +3431,144 @@ describe("runAgentTurnWithFallback", () => {
     }
   });
 
+  function makePureTransientSummaryError(): Error {
+    return Object.assign(
+      new Error(
+        "All models failed (2): boon-llm-gateway/claude-opus-4-6: 429 (rate_limit) | " +
+          "boon-llm-gateway/claude-sonnet-4-6: 429 (rate_limit)",
+      ),
+      {
+        name: "FallbackSummaryError",
+        attempts: [
+          {
+            provider: "boon-llm-gateway",
+            model: "claude-opus-4-6",
+            error: "429 <!doctype html><html><title>Blocked</title></html>",
+            reason: "rate_limit",
+            status: 429,
+          },
+          {
+            provider: "boon-llm-gateway",
+            model: "claude-sonnet-4-6",
+            error: "429 <!doctype html><html><title>Blocked</title></html>",
+            reason: "rate_limit",
+            status: 429,
+          },
+        ],
+        soonestCooldownExpiry: null,
+      },
+    );
+  }
+
+  it("auto-recovers after a transient edge block: retries the chain and succeeds without surfacing an error", async () => {
+    vi.useFakeTimers();
+    try {
+      // First two full-chain attempts exhaust on a pure-transient (edge-block)
+      // 429; the third succeeds. The user should never see a failure.
+      state.runWithModelFallbackMock
+        .mockRejectedValueOnce(makePureTransientSummaryError())
+        .mockRejectedValueOnce(makePureTransientSummaryError())
+        .mockImplementationOnce(async (params: FallbackRunnerParams) => ({
+          result: await params.run("boon-llm-gateway", "claude-opus-4-6"),
+          provider: "boon-llm-gateway",
+          model: "claude-opus-4-6",
+          attempts: [],
+        }));
+      state.runEmbeddedPiAgentMock.mockResolvedValueOnce({
+        payloads: [{ text: "recovered reply" }],
+        meta: {},
+      });
+
+      const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+      const resultPromise = runAgentTurnWithFallback({
+        ...createMinimalRunAgentTurnParams({ followupRun: createFollowupRun() }),
+        sessionKey: "main",
+        getActiveSessionEntry: () => undefined,
+      });
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(state.runWithModelFallbackMock).toHaveBeenCalledTimes(3);
+      expect(result.kind).toBe("success");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("surfaces a generic, non-revealing busy message after retries are exhausted", async () => {
+    vi.useFakeTimers();
+    try {
+      // Every attempt (initial + MAX_TRANSIENT_BUSY_RETRIES) exhausts.
+      state.runWithModelFallbackMock.mockRejectedValue(makePureTransientSummaryError());
+
+      const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+      const resultPromise = runAgentTurnWithFallback({
+        ...createMinimalRunAgentTurnParams({ followupRun: createFollowupRun() }),
+        sessionKey: "main",
+        getActiveSessionEntry: () => undefined,
+      });
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      // Initial attempt + 3 backoff retries = 4 invocations.
+      expect(state.runWithModelFallbackMock).toHaveBeenCalledTimes(1 + MAX_TRANSIENT_BUSY_RETRIES);
+      expect(result.kind).toBe("final");
+      if (result.kind === "final") {
+        const text = result.payload.text ?? "";
+        expect(text).toBe(
+          "⚠️ The AI service is briefly busy — retrying automatically… If it persists, please try again in a few minutes.",
+        );
+        // Must NOT divulge the underlying cause (LLM rate-limit vs WAF vs Render edge).
+        expect(text).not.toMatch(/rate.?limit/i);
+        expect(text).not.toContain("429");
+        expect(text).not.toMatch(/blocked|cloudflare|render|gateway|waf/i);
+        expect(text).not.toContain("All models");
+        expect(text).not.toContain("boon-llm-gateway");
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does NOT auto-retry when a real cooldown expiry is known — surfaces the countdown immediately", async () => {
+    vi.useFakeTimers();
+    try {
+      // A genuine provider rate-limit with a known cooldown: retrying is futile
+      // and would hide the countdown. Should surface once, no backoff retries.
+      const err = Object.assign(new Error("All models failed (1)"), {
+        name: "FallbackSummaryError",
+        attempts: [
+          {
+            provider: "anthropic",
+            model: "claude",
+            error: "429",
+            reason: "rate_limit",
+            status: 429,
+          },
+        ],
+        soonestCooldownExpiry: Date.now() + 30_000,
+      });
+      state.runWithModelFallbackMock.mockRejectedValue(err);
+
+      const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+      const resultPromise = runAgentTurnWithFallback({
+        ...createMinimalRunAgentTurnParams({ followupRun: createFollowupRun() }),
+        sessionKey: "main",
+        getActiveSessionEntry: () => undefined,
+      });
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(state.runWithModelFallbackMock).toHaveBeenCalledTimes(1);
+      expect(result.kind).toBe("final");
+      if (result.kind === "final") {
+        expect(result.payload.text ?? "").toMatch(/ready in ~\d+s/);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("surfaces Codex usage-limit reset details for pure fallback exhaustion", async () => {
     const codexMessage =
       "You've reached your Codex subscription usage limit. Next reset in 42 minutes (2026-05-04T21:34:00.000Z). Run /codex account for current usage details.";
@@ -5065,5 +5221,56 @@ describe("runAgentTurnWithFallback", () => {
       modelOverrideFallbackOriginProvider: "anthropic",
       modelOverrideFallbackOriginModel: "claude-opus",
     });
+  });
+});
+
+describe("buildRateLimitCooldownMessage", () => {
+  function makeAttempt(reason: FallbackAttempt["reason"]): FallbackAttempt {
+    return {
+      provider: "boon-llm-gateway",
+      model: "claude-opus-4-6",
+      error: "429 <!doctype html><html><title>Blocked</title></html>",
+      reason,
+      status: 429,
+    };
+  }
+
+  it("surfaces honest 'briefly busy, retrying automatically' copy when no cooldown expiry is known", () => {
+    const err = new FallbackSummaryError(
+      "All models failed (2)",
+      [makeAttempt("rate_limit"), makeAttempt("rate_limit")],
+      null,
+    );
+
+    const message = buildRateLimitCooldownMessage(err);
+
+    expect(message).toBe(
+      "⚠️ The AI service is briefly busy — retrying automatically… If it persists, please try again in a few minutes.",
+    );
+    // The old wording falsely claimed every model was rate-limited.
+    expect(message).not.toContain("All models are temporarily rate-limited");
+  });
+
+  it("keeps the existing countdown when a cooldown expiry is known", () => {
+    const now = Date.now();
+    const err = new FallbackSummaryError(
+      "All models failed (1)",
+      [makeAttempt("rate_limit")],
+      now + 30_000,
+    );
+
+    expect(buildRateLimitCooldownMessage(err)).toMatch(/ready in ~\d+s/);
+  });
+});
+
+describe("resolveTransientRetryBackoffMs", () => {
+  it("grows exponentially: 2s, 4s, 8s for attempts 0, 1, 2", () => {
+    expect(resolveTransientRetryBackoffMs(0)).toBe(2_000);
+    expect(resolveTransientRetryBackoffMs(1)).toBe(4_000);
+    expect(resolveTransientRetryBackoffMs(2)).toBe(8_000);
+  });
+
+  it("caps the number of transient busy retries at 3", () => {
+    expect(MAX_TRANSIENT_BUSY_RETRIES).toBe(3);
   });
 });
