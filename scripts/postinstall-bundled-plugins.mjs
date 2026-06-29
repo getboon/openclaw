@@ -102,6 +102,10 @@ const BAILEYS_MEDIA_UPLOAD_WITH_FETCH_DISPATCHER_REPLACEMENT = [
   "        ...(typeof agent?.dispatch === 'function' ? { dispatcher: agent } : {}),",
   "        method: 'POST',",
 ].join("\n");
+// baileys >=7.0.0-rc13 native dispatcher guard: a hoisted local const + a
+// conditional spread. Matches both `agent` and `fetchAgent` variable names.
+const BAILEYS_MEDIA_NATIVE_DISPATCHER_GUARD_RE =
+  /const\s+dispatcher\s*=\s*typeof\s+(?:fetchA|a)gent\?\.dispatch\s*===\s*'function'\s*\?\s*(?:fetchA|a)gent\s*:\s*undefined;[\s\S]*?\.\.\.\(dispatcher\s*\?\s*\{\s*dispatcher\s*\}\s*:\s*\{\}\),/u;
 const BAILEYS_MEDIA_ONCE_IMPORT_RE = /import\s+\{\s*once\s*\}\s+from\s+['"]events['"]/u;
 const BAILEYS_MEDIA_ASYNC_CONTEXT_RE =
   /async\s+function\s+encryptedStream|encryptedStream\s*=\s*async/u;
@@ -651,7 +655,14 @@ export function applyBaileysEncryptedStreamFinishHotfix(params = {}) {
       ) ||
       patchedText.includes(
         "...(typeof agent?.dispatch === 'function' ? { dispatcher: agent } : {}),",
-      );
+      ) ||
+      // baileys >=7.0.0-rc13 ships an equivalent guard natively, hoisting the
+      // check into a local `dispatcher` const instead of inlining the spread:
+      //   const dispatcher = typeof agent?.dispatch === 'function' ? agent : undefined;
+      //   ...(dispatcher ? { dispatcher } : {}),
+      // Recognize that form so the hotfix is a no-op rather than failing with
+      // "unexpected_content" on an already-safe upstream.
+      BAILEYS_MEDIA_NATIVE_DISPATCHER_GUARD_RE.test(patchedText);
     const legacyDispatcherPatchable =
       patchedText.includes(BAILEYS_MEDIA_DISPATCHER_NEEDLE) &&
       patchedText.includes(BAILEYS_MEDIA_DISPATCHER_HEADER_NEEDLE);
