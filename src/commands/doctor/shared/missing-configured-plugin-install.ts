@@ -99,8 +99,12 @@ const REPAIRABLE_PACKAGE_ENTRY_DIAGNOSTIC_MARKERS = [
 ] as const;
 const VERSION_BOUND_RUNTIME_PLUGIN_IDS = new Set(["codex"]);
 const OPENCLAW_BETA_COMPANION_VERSION_RE = /^(\d{4}\.[1-9]\d?\.[1-9]\d?)-beta\.[1-9]\d*$/;
+// The Boon fork ships a `-boon.N` suffix on top of the upstream stable/beta base
+// (e.g. 2026.6.11-boon.1). Tolerate it so the current fork version still maps to
+// its release base — otherwise the Codex beta-companion convergence check below
+// never matches and doctor re-refreshes an already-converged runtime every pass.
 const OPENCLAW_STABLE_OR_BETA_COMPANION_VERSION_RE =
-  /^(\d{4}\.[1-9]\d?\.[1-9]\d?)(?:-beta\.[1-9]\d*)?$/;
+  /^(\d{4}\.[1-9]\d?\.[1-9]\d?)(?:-beta\.[1-9]\d*)?(?:-boon\.[1-9]\d*)?$/;
 
 function shouldFallbackClawHubToNpm(params: {
   result: { ok: false; code?: string };

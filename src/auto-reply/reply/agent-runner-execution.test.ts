@@ -137,7 +137,7 @@ vi.mock("../../agents/cli-runner.js", () => ({
 }));
 
 vi.mock("../../agents/model-fallback.js", () => {
-  class FallbackSummaryError extends Error {
+  class MockFallbackSummaryError extends Error {
     readonly attempts: unknown[];
     readonly soonestCooldownExpiry: number | null;
     constructor(message: string, attempts: unknown[], soonestCooldownExpiry: number | null) {
@@ -153,7 +153,7 @@ vi.mock("../../agents/model-fallback.js", () => {
       err instanceof Error &&
       err.name === "FallbackSummaryError" &&
       Array.isArray((err as { attempts?: unknown[] }).attempts),
-    FallbackSummaryError,
+    FallbackSummaryError: MockFallbackSummaryError,
   };
 });
 

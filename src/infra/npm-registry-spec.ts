@@ -5,6 +5,12 @@ const EXACT_SEMVER_VERSION_RE =
   /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$/;
 const OPENCLAW_STABLE_CORRECTION_VERSION_RE =
   /^(?<year>\d{4})\.(?<month>[1-9]\d?)\.(?<patch>[1-9]\d*)-(?<correction>[1-9]\d*)$/;
+// The Boon fork ships stable releases as `<base>-boon.N` (e.g. 2026.6.11-boon.1).
+// Rank it as a stable correction of its upstream base so version comparison,
+// channel resolution, and doctor convergence treat the fork build as the stable
+// base plus an ordered fork correction — never an unparseable version.
+const OPENCLAW_BOON_FORK_VERSION_RE =
+  /^(?<year>\d{4})\.(?<month>[1-9]\d?)\.(?<patch>[1-9]\d*)-boon\.(?<correction>[1-9]\d*)$/;
 const OPENCLAW_STABLE_VERSION_RE = /^(?<year>\d{4})\.(?<month>[1-9]\d?)\.(?<patch>[1-9]\d*)$/;
 const OPENCLAW_ALPHA_VERSION_RE =
   /^(?<year>\d{4})\.(?<month>[1-9]\d?)\.(?<patch>[1-9]\d*)-alpha\.(?<alpha>[1-9]\d*)$/;
@@ -152,6 +158,7 @@ function parseOpenClawReleaseVersion(value: string): OpenClawReleaseVersion | nu
   const candidates = [
     { match: OPENCLAW_STABLE_VERSION_RE.exec(trimmed), channel: "stable" as const },
     { match: OPENCLAW_STABLE_CORRECTION_VERSION_RE.exec(trimmed), channel: "stable" as const },
+    { match: OPENCLAW_BOON_FORK_VERSION_RE.exec(trimmed), channel: "stable" as const },
     { match: OPENCLAW_ALPHA_VERSION_RE.exec(trimmed), channel: "alpha" as const },
     { match: OPENCLAW_BETA_VERSION_RE.exec(trimmed), channel: "beta" as const },
   ];

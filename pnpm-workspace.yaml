@@ -127,7 +127,10 @@ overrides:
   # targets where possible (no major bumps). See PR for advisory list.
   "@grpc/grpc-js": 1.14.4
   linkify-it: 5.0.1
-  undici: 7.28.0
+  # 6.11 extensions pin undici 8.5.0 directly; the override must match or exceed
+  # that (npm shrinkwrap EOVERRIDEs a lower override vs a direct dep). 8.5.0 is
+  # newer than the original 7.28.0 security target, so the advisory intent holds.
+  undici: 8.5.0
   vite: 8.0.16
   ws: 8.21.0
   "@vitest/browser": 4.1.9
