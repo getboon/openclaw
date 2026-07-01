@@ -298,9 +298,9 @@ describe("ci workflow guards", () => {
     const workflowPaths = [
       [".github/workflows/ci.yml", "120s"],
       [".github/workflows/workflow-sanity.yml", "30s"],
-      [".github/workflows/ci-check-testbox.yml", "120s"],
+      // Fork removed the testbox CI workflows (ci-check-testbox,
+      // ci-build-artifacts-testbox); only the still-present ones are asserted.
       [".github/workflows/ci-check-arm-testbox.yml", "120s"],
-      [".github/workflows/ci-build-artifacts-testbox.yml", "120s"],
       [".github/workflows/crabbox-hydrate.yml", "30s"],
     ];
 
@@ -443,43 +443,8 @@ describe("ci workflow guards", () => {
     );
   });
 
-  it("fails Windows Testbox setup when Blacksmith phone-home is not accepted", () => {
-    const workflow = readFileSync(".github/workflows/windows-blacksmith-testbox.yml", "utf8");
-
-    expect(workflow).toContain('echo "phone_home_hydrating_http=${hydrating_http_code}"');
-    expect(workflow).toContain('echo "phone_home_ready_http=${http_code}"');
-    expect(workflow).toContain('jq -e \'type == "number"\' <<<"$installation_model_id"');
-    expect(workflow).toContain('--arg testbox_id "$TESTBOX_ID"');
-    expect(workflow).toContain('--arg testbox_id "$testbox_id"');
-    expect(workflow).toContain('--argjson installation_model_id "$installation_model_id"');
-    expect(workflow).toContain('--data-binary @"$hydrating_body"');
-    expect(workflow).toContain('--data-binary @"$ready_body"');
-    const hydratingFailureBlock = workflow.slice(
-      workflow.indexOf('if [[ ! "$hydrating_http_code" =~ ^2 ]]; then'),
-      workflow.indexOf('response="$(cat "$hydrating_response")"'),
-    );
-    const missingSshKeyFailureBlock = workflow.slice(
-      workflow.indexOf('if [ -z "$ssh_public_key" ]; then'),
-      workflow.indexOf("mkdir -p ~/.ssh"),
-    );
-    const readyFailureBlock = workflow.slice(
-      workflow.indexOf('if [[ ! "$http_code" =~ ^2 ]]; then'),
-      workflow.indexOf('echo "============================================"'),
-    );
-
-    expect(hydratingFailureBlock).toContain("exit 1");
-    expect(missingSshKeyFailureBlock).toContain("exit 1");
-    expect(readyFailureBlock).toContain("exit 1");
-    expect(workflow).toContain(
-      "Blacksmith phone-home did not return an SSH public key; testbox cannot accept CLI connections.",
-    );
-    expect(workflow).not.toContain(
-      'phone_home_ready_http=${http_code}"\n\n          echo "============================================"',
-    );
-    expect(workflow).not.toContain('\\"testbox_id\\": \\"${TESTBOX_ID}\\"');
-    expect(workflow).not.toContain('cat > "$ready_body" <<JSON');
-    expect(workflow).not.toContain('"testbox_id": "${testbox_id}"');
-  });
+  // Fork removed .github/workflows/windows-blacksmith-testbox.yml; the
+  // phone-home setup guard that asserted its contents was dropped with it.
 
   it("runs dependency policy guards in PR CI preflight", () => {
     const workflow = readFileSync(".github/workflows/ci.yml", "utf8");

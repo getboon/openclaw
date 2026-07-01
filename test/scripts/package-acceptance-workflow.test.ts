@@ -1149,7 +1149,6 @@ describe("package artifact reuse", () => {
     const releaseChecksWorkflow = readFileSync(RELEASE_CHECKS_WORKFLOW, "utf8");
     const scheduledWorkflow = readFileSync(SCHEDULED_LIVE_CHECKS_WORKFLOW, "utf8");
     const packageAcceptanceWorkflow = readFileSync(PACKAGE_ACCEPTANCE_WORKFLOW, "utf8");
-    const testboxWorkflow = readFileSync(CI_CHECK_TESTBOX_WORKFLOW, "utf8");
     const dockerPlanAction = readFileSync(DOCKER_E2E_PLAN_ACTION, "utf8");
     const hydrateScript = readFileSync(CI_HYDRATE_LIVE_AUTH_SCRIPT, "utf8");
     const providerVerifier = readFileSync(VERIFY_PROVIDER_SECRETS_SCRIPT, "utf8");
@@ -1202,16 +1201,10 @@ describe("package artifact reuse", () => {
       "FIREWORKS_API_KEY",
     ];
     const githubBackedTestboxProviderSteps = [
-      workflowStep(
-        workflowJob(CI_CHECK_TESTBOX_WORKFLOW, "check"),
-        "Hydrate Testbox provider env helper",
-      ),
+      // Fork removed ci-check-testbox / ci-build-artifacts-testbox workflows;
+      // only the still-present arm-testbox and crabbox-hydrate lanes remain.
       workflowStep(
         workflowJob(CI_CHECK_ARM_TESTBOX_WORKFLOW, "check-arm"),
-        "Hydrate Testbox provider env helper",
-      ),
-      workflowStep(
-        workflowJob(CI_BUILD_ARTIFACTS_TESTBOX_WORKFLOW, "build-artifacts"),
         "Hydrate Testbox provider env helper",
       ),
       workflowStep(
@@ -1245,7 +1238,6 @@ describe("package artifact reuse", () => {
       releaseChecksWorkflow,
       scheduledWorkflow,
       packageAcceptanceWorkflow,
-      testboxWorkflow,
     ]) {
       expect(workflow).toContain("FACTORY_API_KEY: ${{ secrets.FACTORY_API_KEY }}");
     }
@@ -1275,34 +1267,16 @@ describe("package artifact reuse", () => {
   });
 
   it("finalizes Testbox delegation even when setup or the remote command fails", () => {
-    const workflow = readFileSync(CI_CHECK_TESTBOX_WORKFLOW, "utf8");
-    const checkTestboxJob = workflowJob(CI_CHECK_TESTBOX_WORKFLOW, "check");
-    const runTestboxStep = workflowStep(checkTestboxJob, "Run Testbox");
+    // Fork removed the ci-check-testbox, ci-build-artifacts-testbox, and
+    // windows-blacksmith-testbox workflows; only the arm-testbox lane remains.
     const runArmTestboxStep = workflowStep(
       workflowJob(CI_CHECK_ARM_TESTBOX_WORKFLOW, "check-arm"),
       "Run Testbox",
     );
-    const runBuildArtifactsTestboxStep = workflowStep(
-      workflowJob(CI_BUILD_ARTIFACTS_TESTBOX_WORKFLOW, "build-artifacts"),
-      "Run Testbox",
-    );
-    const runWindowsTestboxStep = workflowStep(
-      workflowJob(WINDOWS_BLACKSMITH_TESTBOX_WORKFLOW, "windows"),
-      "Run Testbox",
-    );
 
-    expect(workflow).toContain('PNPM_CONFIG_STORE_DIR: "/tmp/openclaw-pnpm-store"');
-    expect(workflow).not.toContain("PNPM_CONFIG_MODULES_DIR");
-    expect(workflow).not.toContain("PNPM_CONFIG_VIRTUAL_STORE_DIR");
-    expect(checkTestboxJob["timeout-minutes"]).toBe(
-      "${{ fromJSON(inputs.timeout_minutes || '120') }}",
-    );
-    expect(runTestboxStep.uses).toContain("useblacksmith/run-testbox@");
-    expect(runTestboxStep.if).toBe("always()");
+    expect(runArmTestboxStep.uses).toContain("useblacksmith/run-testbox@");
     expect(runArmTestboxStep.if).toBe("always()");
-    expect(runBuildArtifactsTestboxStep.if).toBe("always()");
-    expect(runWindowsTestboxStep.if).toBe("always()");
-    expect(runTestboxStep["continue-on-error"]).toBeUndefined();
+    expect(runArmTestboxStep["continue-on-error"]).toBeUndefined();
   });
 
   it("allows the Telegram lane to run from reusable package acceptance artifacts", () => {

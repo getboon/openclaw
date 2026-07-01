@@ -76,7 +76,9 @@ describe("check-workflows", () => {
     const preCommitArgs = readFileSync(preCommitMarkerPath, "utf8");
     expect(preCommitArgs).toContain("run --config .pre-commit-config.yaml zizmor --files");
     expect(preCommitArgs).toContain(".github/workflows/ci.yml");
-    expect(preCommitArgs).toContain(".github/workflows/windows-testbox-probe.yml");
+    // Fork removed windows-testbox-probe.yml; assert another present workflow
+    // is still passed to the zizmor audit instead.
+    expect(preCommitArgs).toContain(".github/workflows/workflow-sanity.yml");
   });
 
   it("bootstraps pinned pre-commit in a temporary Python venv when needed", () => {
@@ -210,46 +212,6 @@ describe("check-workflows", () => {
     expect(existsSync(readFileSync(markerPath, "utf8").trim())).toBe(false);
   });
 
-  it("keeps Windows WSL2 probe output normalized through the shared wrapper", () => {
-    const workflow = readFileSync(".github/workflows/windows-testbox-probe.yml", "utf8");
-
-    expect(workflow).toContain(
-      '$import = Invoke-WslText -Arguments @("--import", "UbuntuProbe", $wslRoot, $rootfs, "--version", "2")',
-    );
-    expect(workflow).toContain("function Resolve-UbuntuWslRootfsUrl");
-    expect(workflow).toContain('"x64" { $wslArch = "amd64" }');
-    expect(workflow).toContain('"arm64" { $wslArch = "arm64" }');
-    expect(workflow).toContain("ubuntu-noble-wsl-$wslArch-wsl.rootfs.tar.gz");
-    expect(workflow).toContain("ubuntu_wsl_rootfs_arch=$wslArch");
-    expect(workflow).toContain('Write-Host "wsl_import_exit=$($import.Code)"');
-    expect(workflow).toContain("wsl2_restart_required=true");
-    expect(workflow).toContain("import_ubuntu_wsl2=skipped_restart_required");
-    expect(workflow).toContain("wsl_exec_skipped=restart_required");
-    expect(workflow).toContain(
-      '"wsl2_restart_required=$($restartRequired.ToString().ToLowerInvariant())"',
-    );
-    expect(workflow).toContain(
-      '$exec = Invoke-WslText -Arguments @("-d", $distro, "--exec", "bash", "-lc"',
-    );
-    expect(workflow).toContain('Write-Host "wsl_exec_exit=$($exec.Code)"');
-    expect(workflow).not.toContain("wsl.exe --import UbuntuProbe");
-    expect(workflow).not.toContain("Microsoft-Hyper-V-All");
-  });
-
-  it("keeps the Windows probe CI shard opt-in and dependency-backed", () => {
-    const workflow = readFileSync(".github/workflows/windows-testbox-probe.yml", "utf8");
-
-    expect(workflow).toContain("run_windows_ci:");
-    expect(workflow).toContain(
-      'description: "Run the focused Windows-native CI test shard after probing"',
-    );
-    expect(workflow).toContain("default: false");
-    expect(workflow).toContain("if: ${{ inputs.run_windows_ci }}");
-    expect(workflow).toContain("source .github/actions/setup-pnpm-store-cache/ensure-node.sh");
-    expect(workflow).toContain("uses: ./.github/actions/setup-pnpm-store-cache");
-    expect(workflow).toContain("pnpm install --frozen-lockfile --prefer-offline");
-    expect(workflow).toContain("pnpm test:windows:ci");
-    expect(workflow).toContain("if: ${{ always() && !cancelled() }}");
-    expect(workflow).toContain("if: ${{ always() && !cancelled() && inputs.require_wsl2 }}");
-  });
+  // Fork removed .github/workflows/windows-testbox-probe.yml; the two probe
+  // workflow-content guards that read it were dropped with it.
 });
