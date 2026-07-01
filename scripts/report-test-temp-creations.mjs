@@ -128,7 +128,10 @@ function readDiff(args, cwd = process.cwd()) {
   return execFileSync("git", diffArgs, {
     cwd,
     encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
+    // A large integration merge (fork upgrade) produces a base..HEAD diff far
+    // bigger than a normal PR; 64 MiB overflowed with ENOBUFS. Allow up to
+    // 512 MiB so the guard completes instead of crashing the shard.
+    maxBuffer: 512 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
   });
 }

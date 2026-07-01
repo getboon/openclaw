@@ -127,10 +127,13 @@ overrides:
   # targets where possible (no major bumps). See PR for advisory list.
   "@grpc/grpc-js": 1.14.4
   linkify-it: 5.0.1
-  # 6.11 extensions pin undici 8.5.0 directly; the override must match or exceed
-  # that (npm shrinkwrap EOVERRIDEs a lower override vs a direct dep). 8.5.0 is
-  # newer than the original 7.28.0 security target, so the advisory intent holds.
-  undici: 8.5.0
+  # Scope the undici security pin to the 7.x line only. A flat `undici` override
+  # would force 8.x consumers (jsdom needs `undici@^7.25.0` and imports
+  # lib/handler/wrap-handler.js, removed in 8.x) onto an incompatible major and
+  # crash the jsdom test workers, while a flat 7.x pin EOVERRIDEs the 6.11
+  # extensions that depend on undici 8.5.0 directly. Pinning `undici@7` keeps the
+  # 7.x tree on the secure 7.28.0 patch and leaves the extensions' 8.5.0 alone.
+  "undici@7": 7.28.0
   vite: 8.0.16
   ws: 8.21.0
   "@vitest/browser": 4.1.9
