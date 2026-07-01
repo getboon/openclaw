@@ -1,3 +1,4 @@
+// Slack plugin module implements media behavior.
 import fs from "node:fs/promises";
 import type { WebClient as SlackWebClient } from "@slack/web-api";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
@@ -81,7 +82,7 @@ function isMockedFetch(fetchImpl: typeof fetch | undefined): boolean {
     mock?: unknown;
     _isMockFunction?: unknown;
   };
-  return candidate.mock !== undefined || candidate._isMockFunction === true;
+  return candidate.mock !== undefined || candidate["_isMockFunction"] === true;
 }
 
 function createSlackMediaFetch(): FetchLike {
@@ -101,6 +102,12 @@ function createSlackMediaFetch(): FetchLike {
 
 function resolveSlackFetchForRuntime(): typeof fetch {
   return isMockedFetch(globalThis.fetch) ? globalThis.fetch : fetchWithRuntimeDispatcher;
+}
+
+async function cancelUnreadResponseBody(response: Response): Promise<void> {
+  if (!response.bodyUsed) {
+    await response.body?.cancel().catch(() => undefined);
+  }
 }
 
 /**
@@ -135,6 +142,7 @@ export async function fetchWithSlackAuth(url: string, token: string): Promise<Re
   if (resolvedUrl.protocol !== "https:") {
     return initialRes;
   }
+  await cancelUnreadResponseBody(initialRes);
   if (resolvedUrl.origin === parsed.origin) {
     return fetchImpl(resolvedUrl.toString(), {
       headers: authHeaders,
@@ -209,7 +217,7 @@ async function saveSlackMedia(params: {
           },
         }
       : {}),
-  }).catch((error) => {
+  }).catch((error: unknown) => {
     if (timedOut) {
       return new Promise<never>(() => {});
     }
