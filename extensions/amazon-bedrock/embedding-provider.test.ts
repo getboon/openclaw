@@ -1,5 +1,6 @@
+// Amazon Bedrock tests cover embedding provider plugin behavior.
 import { describe, expect, it, vi } from "vitest";
-import { __testing, hasAwsCredentials } from "./embedding-provider.js";
+import { testing, hasAwsCredentials } from "./embedding-provider.js";
 
 describe("hasAwsCredentials", () => {
   it("accepts static AWS key credentials without loading the credential chain", async () => {
@@ -66,44 +67,88 @@ describe("hasAwsCredentials", () => {
 
 describe("bedrock embedding response parsers", () => {
   it("wraps malformed single embedding JSON", () => {
-    expect(() => __testing.parseSingle("titan-v2", "{not json")).toThrow(
+    expect(() => testing.parseSingle("titan-v2", "{not json")).toThrow(
       "Amazon Bedrock embedding response returned malformed JSON",
     );
   });
 
   it("wraps malformed batch embedding JSON", () => {
-    expect(() => __testing.parseCohereBatch("cohere-v3", "{not json")).toThrow(
+    expect(() => testing.parseCohereBatch("cohere-v3", "{not json")).toThrow(
       "Amazon Bedrock embedding response returned malformed JSON",
     );
   });
 
   it("rejects non-object embedding JSON", () => {
-    expect(() => __testing.parseSingle("titan-v2", "[]")).toThrow(
+    expect(() => testing.parseSingle("titan-v2", "[]")).toThrow(
       "Amazon Bedrock embedding response returned malformed JSON",
     );
   });
 
   it("rejects missing single embedding vectors", () => {
-    expect(() => __testing.parseSingle("titan-v2", "{}")).toThrow(
+    expect(() => testing.parseSingle("titan-v2", "{}")).toThrow(
       "Amazon Bedrock embedding response returned malformed JSON",
     );
   });
 
   it("rejects wrong single embedding vector element types", () => {
-    expect(() => __testing.parseSingle("titan-v2", '{"embedding":[1,"bad"]}')).toThrow(
+    expect(() => testing.parseSingle("titan-v2", '{"embedding":[1,"bad"]}')).toThrow(
       "Amazon Bedrock embedding response returned malformed JSON",
     );
   });
 
   it("rejects missing batch embedding vectors", () => {
-    expect(() => __testing.parseCohereBatch("cohere-v3", "{}")).toThrow(
+    expect(() => testing.parseCohereBatch("cohere-v3", "{}")).toThrow(
       "Amazon Bedrock embedding response returned malformed JSON",
     );
   });
 
   it("rejects wrong batch embedding vector shapes", () => {
     expect(() =>
-      __testing.parseCohereBatch("cohere-v3", '{"embeddings":[[1],{"bad":true}]}'),
+      testing.parseCohereBatch("cohere-v3", '{"embeddings":[[1],{"bad":true}]}'),
     ).toThrow("Amazon Bedrock embedding response returned malformed JSON");
+  });
+});
+
+describe("stripInferenceProfilePrefix", () => {
+  it("strips global prefix", () => {
+    expect(testing.stripInferenceProfilePrefix("global.cohere.embed-v4:0")).toBe(
+      "cohere.embed-v4:0",
+    );
+  });
+
+  it("strips us prefix", () => {
+    expect(testing.stripInferenceProfilePrefix("us.cohere.embed-v4:0")).toBe("cohere.embed-v4:0");
+  });
+
+  it("strips eu prefix", () => {
+    expect(testing.stripInferenceProfilePrefix("eu.cohere.embed-v4:0")).toBe("cohere.embed-v4:0");
+  });
+
+  it("strips ap prefix", () => {
+    expect(testing.stripInferenceProfilePrefix("ap.cohere.embed-v4:0")).toBe("cohere.embed-v4:0");
+  });
+
+  it("strips apac prefix", () => {
+    expect(testing.stripInferenceProfilePrefix("apac.cohere.embed-v4:0")).toBe(
+      "cohere.embed-v4:0",
+    );
+  });
+
+  it("strips au prefix", () => {
+    expect(testing.stripInferenceProfilePrefix("au.cohere.embed-v4:0")).toBe("cohere.embed-v4:0");
+  });
+
+  it("strips jp prefix", () => {
+    expect(testing.stripInferenceProfilePrefix("jp.cohere.embed-v4:0")).toBe("cohere.embed-v4:0");
+  });
+
+  it("returns unchanged model ID without prefix", () => {
+    expect(testing.stripInferenceProfilePrefix("cohere.embed-v4:0")).toBe("cohere.embed-v4:0");
+  });
+
+  it("returns unchanged model ID for amazon.titan-embed-text-v2:0", () => {
+    expect(testing.stripInferenceProfilePrefix("amazon.titan-embed-text-v2:0")).toBe(
+      "amazon.titan-embed-text-v2:0",
+    );
   });
 });

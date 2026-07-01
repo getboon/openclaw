@@ -1,10 +1,14 @@
+/**
+ * Integration tests for QA runner runtime public surface loading.
+ */
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { setTestEnvValue } from "../test-utils/env.js";
 import * as activationCheckRuntime from "./facade-activation-check.runtime.js";
 import {
-  __testing as facadeRuntimeTesting,
+  testing as facadeRuntimeTesting,
   resetFacadeRuntimeStateForTest,
 } from "./facade-runtime.js";
 import { listQaRunnerCliContributions } from "./qa-runner-runtime.js";
@@ -45,7 +49,7 @@ describe("plugin-sdk qa-runner-runtime linked plugin smoke", () => {
       if (value === undefined) {
         delete process.env[key];
       } else {
-        process.env[key] = value;
+        setTestEnvValue(key, value);
       }
     }
   });
@@ -118,7 +122,7 @@ describe("plugin-sdk qa-runner-runtime linked plugin smoke", () => {
     if (!contribution || contribution.status !== "available") {
       throw new Error("Expected linked QA runner contribution to be available");
     }
-    const register = contribution.registration.register;
+    const register = contribution.registration["register"];
     expect(typeof register).toBe("function");
     expect(contributions).toEqual([
       {

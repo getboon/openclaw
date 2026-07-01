@@ -1,3 +1,8 @@
+// Routing session key helpers build stable session keys from route targets.
+import {
+  normalizeLowercaseStringOrEmpty,
+  normalizeOptionalString,
+} from "@openclaw/normalization-core/string-coerce";
 import type { ChatType } from "../channels/chat-type.js";
 import {
   isCronRunSessionKey,
@@ -5,7 +10,6 @@ import {
   normalizeSessionKeyPreservingOpaquePeerIds,
   parseAgentSessionKey,
 } from "../sessions/session-key-utils.js";
-import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { normalizeAccountId } from "./account-id.js";
 
 export {
@@ -92,6 +96,20 @@ export function toAgentRequestSessionKey(storeKey: string | undefined | null): s
   return parseAgentSessionKey(raw)?.rest ?? raw;
 }
 
+export function agentSessionKeysMatchByRequestKey(
+  left: string | undefined | null,
+  right: string | undefined | null,
+): boolean {
+  const leftRaw = (left ?? "").trim();
+  const rightRaw = (right ?? "").trim();
+  if (!leftRaw || !rightRaw) {
+    return false;
+  }
+  return (
+    leftRaw === rightRaw || toAgentRequestSessionKey(leftRaw) === toAgentRequestSessionKey(rightRaw)
+  );
+}
+
 export function toAgentStoreSessionKey(params: {
   agentId: string;
   requestKey: string | undefined | null;
@@ -131,6 +149,31 @@ export function classifySessionKeyShape(sessionKey: string | undefined | null): 
     : "legacy_or_alias";
 }
 
+export function isUnscopedSessionKeySentinel(sessionKey: string | undefined | null): boolean {
+  const lowered = normalizeLowercaseStringOrEmpty(sessionKey);
+  return lowered === "global" || lowered === "unknown";
+}
+
+export function scopeLegacySessionKeyToAgent(params: {
+  agentId?: string | undefined;
+  sessionKey?: string | undefined;
+  mainKey?: string | undefined;
+}): string | undefined {
+  const raw = (params.sessionKey ?? "").trim();
+  if (!raw) {
+    return undefined;
+  }
+  const agentId = params.agentId?.trim();
+  if (!agentId || classifySessionKeyShape(raw) !== "legacy_or_alias") {
+    return raw;
+  }
+  return toAgentStoreSessionKey({
+    agentId,
+    requestKey: raw,
+    mainKey: params.mainKey,
+  });
+}
+
 export function normalizeAgentId(value: string | undefined | null): string {
   const trimmed = (value ?? "").trim();
   if (!trimmed) {
@@ -149,6 +192,11 @@ export function normalizeAgentId(value: string | undefined | null): string {
       .replace(TRAILING_DASH_RE, "")
       .slice(0, 64) || DEFAULT_AGENT_ID
   );
+}
+
+export function normalizeOptionalAgentId(value: unknown): string | undefined {
+  const trimmed = normalizeOptionalString(value);
+  return trimmed ? normalizeAgentId(trimmed) : undefined;
 }
 
 export function isValidAgentId(value: string | undefined | null): boolean {

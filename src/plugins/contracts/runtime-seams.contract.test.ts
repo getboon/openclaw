@@ -1,3 +1,4 @@
+// Runtime seam contract tests cover allowed plugin runtime entrypoints and import boundaries.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -132,7 +133,7 @@ describe("shared runtime seam contracts", () => {
       }).allowed,
     ).toBe(true);
     expect(
-      facadeRuntime.__testing.loadFacadeModuleAtLocationSync<{ marker: string }>({
+      facadeRuntime.testing.loadFacadeModuleAtLocationSync<{ marker: string }>({
         location,
         trackedPluginId: pluginId,
       }).marker,

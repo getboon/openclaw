@@ -1,9 +1,11 @@
+// Memory Core plugin module implements session search visibility behavior.
 import type { OpenClawConfig } from "openclaw/plugin-sdk/memory-core-host-runtime-core";
 import type { MemorySearchResult } from "openclaw/plugin-sdk/memory-core-host-runtime-files";
 import { resolveSessionAgentId } from "openclaw/plugin-sdk/memory-host-core";
 import {
   extractTranscriptIdentityFromSessionsMemoryHit,
   loadCombinedSessionStoreForGateway,
+  resolveSessionTranscriptMemoryHitKeyToSessionKeys,
   resolveTranscriptStemToSessionKeys,
 } from "openclaw/plugin-sdk/session-transcript-hit";
 import {
@@ -11,6 +13,7 @@ import {
   createSessionVisibilityGuard,
   resolveEffectiveSessionToolsVisibility,
 } from "openclaw/plugin-sdk/session-visibility";
+import { readQmdSessionArtifactIdentity } from "./qmd-session-artifacts.js";
 
 function normalizeAgentIdForCompare(value: string | undefined): string | undefined {
   return value?.trim().toLowerCase() || undefined;
@@ -83,10 +86,43 @@ export async function filterMemorySearchHitsBySessionVisibility(params: {
     if (!params.requesterSessionKey || !guard) {
       continue;
     }
+    const artifactIdentity = readQmdSessionArtifactIdentity(hit);
+    if (artifactIdentity) {
+      const normalizedScopedAgentId = normalizeAgentIdForCompare(scopedAgentId);
+      const normalizedOwnerAgentId = normalizeAgentIdForCompare(artifactIdentity.agentId);
+      if (
+        normalizedScopedAgentId &&
+        normalizedOwnerAgentId &&
+        normalizedOwnerAgentId !== normalizedScopedAgentId
+      ) {
+        continue;
+      }
+      const keys = filterSessionKeysByScopedAgent({
+        cfg: params.cfg,
+        scopedAgentId,
+        keys: resolveSessionTranscriptMemoryHitKeyToSessionKeys({
+          store: combinedSessionStore,
+          key: artifactIdentity.memoryKey,
+          includeSyntheticFallback: artifactIdentity.archived,
+        }),
+      });
+      if (keys.length === 0) {
+        continue;
+      }
+      const allowed = keys.some((key) => guard.check(key).allowed);
+      if (!allowed) {
+        continue;
+      }
+      next.push(hit);
+      continue;
+    }
+    // Deprecated migration compatibility for older QMD/session rows that were
+    // indexed before memory-core stored artifact-to-transcript identity.
     const identity = extractTranscriptIdentityFromSessionsMemoryHit(hit.path);
     if (!identity) {
       continue;
     }
+    const isQmdSessionHit = hit.path.replace(/\\/g, "/").startsWith("qmd/");
     const normalizedScopedAgentId = normalizeAgentIdForCompare(scopedAgentId);
     const normalizedOwnerAgentId = normalizeAgentIdForCompare(identity.ownerAgentId);
     if (
@@ -98,20 +134,34 @@ export async function filterMemorySearchHitsBySessionVisibility(params: {
     }
     const archivedOwnerMatchesScope = Boolean(
       identity.archived &&
-      identity.ownerAgentId &&
-      (!scopedAgentId ||
-        normalizeAgentIdForCompare(identity.ownerAgentId) ===
-          normalizeAgentIdForCompare(scopedAgentId)),
+      ((identity.ownerAgentId &&
+        (!scopedAgentId ||
+          normalizeAgentIdForCompare(identity.ownerAgentId) ===
+            normalizeAgentIdForCompare(scopedAgentId))) ||
+        (isQmdSessionHit && scopedAgentId)),
     );
-    const archivedOwnerAgentId = archivedOwnerMatchesScope ? identity.ownerAgentId : undefined;
+    const archivedOwnerAgentId = archivedOwnerMatchesScope
+      ? (identity.ownerAgentId ?? scopedAgentId)
+      : undefined;
+    const liveKeys = identity.liveStem
+      ? resolveTranscriptStemToSessionKeys({
+          store: combinedSessionStore,
+          stem: identity.liveStem,
+          allowQmdSlugFallback: false,
+        })
+      : [];
     const keys = filterSessionKeysByScopedAgent({
       cfg: params.cfg,
       scopedAgentId,
-      keys: resolveTranscriptStemToSessionKeys({
-        store: combinedSessionStore,
-        stem: identity.stem,
-        ...(archivedOwnerAgentId ? { archivedOwnerAgentId } : {}),
-      }),
+      keys:
+        liveKeys.length > 0
+          ? liveKeys
+          : resolveTranscriptStemToSessionKeys({
+              store: combinedSessionStore,
+              stem: identity.stem,
+              allowQmdSlugFallback: isQmdSessionHit && !identity.archived,
+              ...(archivedOwnerAgentId ? { archivedOwnerAgentId } : {}),
+            }),
     });
     if (keys.length === 0) {
       continue;
