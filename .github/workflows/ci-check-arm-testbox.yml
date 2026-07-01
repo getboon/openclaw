@@ -24,7 +24,11 @@ env:
 
 jobs:
   check-arm:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    # Fork skip: the Boon fork runs only on Ubuntu x86 (no ARM Blacksmith runner
+    # capacity), so the ARM testbox lane sits queued forever and blocks the PR
+    # board. Keep the workflow (upstream/tests still reference it) but let the
+    # job no-op on the fork; upstream `openclaw/openclaw` still runs it.
+    if: ${{ github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     permissions:
       contents: read
     name: "check-arm"
