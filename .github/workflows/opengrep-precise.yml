@@ -93,7 +93,17 @@ jobs:
       - name: Upload SARIF to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e
         # Only upload if the scan actually produced a SARIF file.
-        if: always() && hashFiles('.opengrep-out/precise.sarif') != ''
+        # Skip on pull_request events: GitHub Advanced Security turns each new
+        # SARIF finding into an "Opengrep OSS" check-run failure, and on the
+        # 6.11 integration merge the "PR diff" spans the whole tree, so upstream
+        # advisories (bonjour/browser/discord/feishu test files) get reported as
+        # PR-introduced. Non-PR runs (push to boon, scheduled) still upload so
+        # Code Scanning stays populated. Revisit with the other merge-scale
+        # relaxations in ENG-14959.
+        if: >-
+          always()
+          && github.event_name != 'pull_request'
+          && hashFiles('.opengrep-out/precise.sarif') != ''
         with:
           sarif_file: .opengrep-out/precise.sarif
           category: opengrep-pr-diff
