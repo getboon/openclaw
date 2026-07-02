@@ -48,6 +48,27 @@ describe("package-changelog", () => {
       "2026.5.28",
       "Unreleased",
     ]);
+    // Boon fork stable-correction suffix `-boon.N` is ranked as a stable release
+    // (see src/infra/npm-registry-spec.ts OPENCLAW_BOON_FORK_VERSION_RE), not a
+    // prerelease — so it resolves only to its own heading.
+    expect(resolvePackageChangelogVersions("2026.6.11-boon.1")).toEqual(["2026.6.11-boon.1"]);
+  });
+
+  it("extracts exact boon fork release sections", () => {
+    const source = changelog`
+# Changelog
+## 2026.6.11-boon.1
+- Boon fork correction release notes with enough detail.
+## 2026.6.11
+- Stable.
+`;
+
+    expect(extractCurrentPackageChangelog(source, "2026.6.11-boon.1")).toBe(changelog`
+# Changelog
+
+## 2026.6.11-boon.1
+- Boon fork correction release notes with enough detail.
+`);
   });
 
   it("extracts only the package version stable release section", () => {
