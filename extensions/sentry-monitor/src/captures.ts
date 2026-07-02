@@ -151,7 +151,8 @@ export function buildCronChangedCapture(
   const hasRunError = event.status === "error";
   // A run can also succeed yet have its output silently dropped; "not-delivered"
   // is a failure even when no deliveryError string is attached.
-  const hasDeliveryFailure = event.deliveryStatus === "not-delivered" || !!event.deliveryError;
+  const hasDeliveryFailure =
+    event.deliveryStatus === "not-delivered" || Boolean(event.deliveryError);
   if (!hasRunError && !hasDeliveryFailure) {
     return null;
   }

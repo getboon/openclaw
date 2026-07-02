@@ -1,3 +1,4 @@
+// Msteams tests cover inbound media plugin behavior.
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../attachments.js", () => ({
@@ -217,7 +218,7 @@ describe("resolveMSTeamsInboundMedia graph fallback trigger", () => {
       attachments: [
         {
           contentType: "text/html",
-          content: '<div>Hello</div>',
+          content: "<div>Hello</div>",
         },
       ],
       alwaysFetchGraphMessage: true,

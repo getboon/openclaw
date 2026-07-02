@@ -1,3 +1,4 @@
+// Covers global update/install command orchestration.
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -28,7 +29,6 @@ import {
   isMainPackageTarget,
   OPENCLAW_MAIN_PACKAGE_SPEC,
   resolveGlobalInstallCommand,
-  resolveGlobalPackageRoot,
   resolveGlobalInstallTarget,
   resolveGlobalInstallSpec,
   resolveGlobalRoot,
@@ -38,7 +38,17 @@ import {
   type CommandRunner,
 } from "./update-global.js";
 
+const execFileSyncMock = vi.hoisted(() => vi.fn(() => "/tmp/openclaw-test-global-npmrc\n"));
 const TELEGRAM_RUNTIME_API = bundledDistPluginFile("telegram", "runtime-api.js");
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    execFileSync: execFileSyncMock,
+  };
+});
+
 async function writeGlobalPackageJson(packageRoot: string, version = "1.0.0") {
   await fs.writeFile(
     path.join(packageRoot, "package.json"),
@@ -84,6 +94,7 @@ describe("update global helpers", () => {
   let envSnapshot: ReturnType<typeof captureEnv> | undefined;
 
   afterEach(() => {
+    execFileSyncMock.mockClear();
     envSnapshot?.restore();
     envSnapshot = undefined;
   });
@@ -120,9 +131,6 @@ describe("update global helpers", () => {
     await expect(resolveGlobalRoot("bun", runCommand, 1000)).resolves.toContain(
       path.join(".bun", "install", "global", "node_modules"),
     );
-    await expect(resolveGlobalPackageRoot("npm", runCommand, 1000)).resolves.toBe(
-      path.join("/tmp/npm-root", "openclaw"),
-    );
   });
 
   it("maps main and explicit install specs for global installs", () => {
@@ -148,7 +156,8 @@ describe("update global helpers", () => {
     expect(defaultEnv?.COREPACK_ENABLE_DOWNLOAD_PROMPT).toBe("0");
     expect(defaultEnv?.NPM_CONFIG_BEFORE).toBe("");
     expect(defaultEnv?.npm_config_before).toBe("");
-    expect(defaultEnv?.["npm_config_min-release-age"]).toBe("0");
+    expect(defaultEnv?.["npm_config_min-release-age"]).toBe("");
+    expect(defaultEnv?.npm_config_min_release_age).toBe("0");
 
     const explicitEnv = await createGlobalInstallEnv({
       COREPACK_ENABLE_DOWNLOAD_PROMPT: "1",
@@ -237,12 +246,15 @@ describe("update global helpers", () => {
     expect(isExplicitPackageInstallSpec("github:openclaw/openclaw#main")).toBe(true);
     expect(isExplicitPackageInstallSpec("https://example.com/openclaw-main.tgz")).toBe(true);
     expect(isExplicitPackageInstallSpec("file:/tmp/openclaw-main.tgz")).toBe(true);
+    expect(isExplicitPackageInstallSpec("/tmp/openclaw-main.tgz")).toBe(true);
+    expect(isExplicitPackageInstallSpec("openclaw-main.tgz")).toBe(true);
     expect(isExplicitPackageInstallSpec("beta")).toBe(false);
 
     expect(canResolveRegistryVersionForPackageTarget("latest")).toBe(true);
     expect(canResolveRegistryVersionForPackageTarget("2026.3.22")).toBe(true);
     expect(canResolveRegistryVersionForPackageTarget("main")).toBe(false);
     expect(canResolveRegistryVersionForPackageTarget("github:openclaw/openclaw#main")).toBe(false);
+    expect(canResolveRegistryVersionForPackageTarget("/tmp/openclaw-main.tgz")).toBe(false);
   });
 
   it("detects install managers from resolved roots and on-disk presence", async () => {
@@ -302,9 +314,6 @@ describe("update global helpers", () => {
           "npm",
         );
         await expect(resolveGlobalRoot("npm", runCommand, 1000, pkgRoot)).resolves.toBe(brewRoot);
-        await expect(resolveGlobalPackageRoot("npm", runCommand, 1000, pkgRoot)).resolves.toBe(
-          pkgRoot,
-        );
         await expect(
           resolveGlobalInstallTarget({
             manager: "npm",
@@ -353,6 +362,100 @@ describe("update global helpers", () => {
           "--loglevel=error",
           "--min-release-age=0",
         ]);
+      });
+    });
+  });
+
+  it("keeps npm ownership but avoids per-Node npm commands for reinstall", async () => {
+    await withMockedPlatform("darwin", async () => {
+      await withTempDir({ prefix: "openclaw-update-node-version-prefix-" }, async (base) => {
+        const pathNpmRoot = path.join(base, "path-npm", "lib", "node_modules");
+        const layouts = [
+          {
+            name: "homebrew-cellar",
+            prefix: path.join(base, "opt", "homebrew", "Cellar", "node", "24.5.0"),
+          },
+          {
+            name: "nvm",
+            prefix: path.join(base, "home", ".nvm", "versions", "node", "v24.5.0"),
+          },
+          {
+            name: "asdf",
+            prefix: path.join(base, "home", ".asdf", "installs", "nodejs", "24.5.0"),
+          },
+          {
+            name: "volta",
+            prefix: path.join(base, "home", ".volta", "tools", "image", "node", "24.5.0"),
+          },
+          {
+            name: "fnm",
+            prefix: path.join(
+              base,
+              "home",
+              ".local",
+              "share",
+              "fnm",
+              "node-versions",
+              "v24.5.0",
+              "installation",
+            ),
+          },
+          {
+            name: "n",
+            prefix: path.join(base, "usr", "local", "n", "versions", "node", "24.5.0"),
+          },
+        ];
+
+        for (const layout of layouts) {
+          const nodeManagedRoot = path.join(layout.prefix, "lib", "node_modules");
+          const pkgRoot = path.join(nodeManagedRoot, "openclaw");
+          const nodeManagedNpm = path.join(layout.prefix, "bin", "npm");
+          await fs.mkdir(pkgRoot, { recursive: true });
+          await fs.mkdir(path.dirname(nodeManagedNpm), { recursive: true });
+          await fs.writeFile(nodeManagedNpm, "", "utf8");
+
+          const runCommand = createNpmRootRunner({
+            defaultNpmRoot: pathNpmRoot,
+            overrideCommand: nodeManagedNpm,
+            overrideNpmRoot: nodeManagedRoot,
+          });
+
+          await expect(
+            detectGlobalInstallManagerForRoot(runCommand, pkgRoot, 1000),
+            layout.name,
+          ).resolves.toBe("npm");
+          await expect(
+            resolveGlobalRoot("npm", runCommand, 1000, pkgRoot),
+            layout.name,
+          ).resolves.toBe(pathNpmRoot);
+          expect(resolveGlobalInstallCommand("npm", pkgRoot), layout.name).toEqual({
+            manager: "npm",
+            command: "npm",
+          });
+          expect(globalInstallArgs("npm", "openclaw@latest", pkgRoot), layout.name).toEqual([
+            "npm",
+            "i",
+            "-g",
+            "openclaw@latest",
+            "--no-fund",
+            "--no-audit",
+            "--loglevel=error",
+            "--min-release-age=0",
+          ]);
+          expect(globalInstallFallbackArgs("npm", "openclaw@latest", pkgRoot), layout.name).toEqual(
+            [
+              "npm",
+              "i",
+              "-g",
+              "openclaw@latest",
+              "--omit=optional",
+              "--no-fund",
+              "--no-audit",
+              "--loglevel=error",
+              "--min-release-age=0",
+            ],
+          );
+        }
       });
     });
   });
@@ -502,7 +605,7 @@ describe("update global helpers", () => {
           "--no-fund",
           "--no-audit",
           "--loglevel=error",
-          "--min-release-age=0",
+          expect.stringMatching(/^--before=/),
         ]);
       });
     });
