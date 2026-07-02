@@ -724,8 +724,31 @@ export function installSessionToolResultGuard(
     // "unexpected tool_use_id found in tool_result blocks"
     // This matches the behavior in repairToolUseResultPairing (session-transcript-repair.ts)
     const stopReason = (nextMessage as { stopReason?: string }).stopReason;
+    const aborted = stopReason === "aborted" || stopReason === "error";
+
+    // Do not persist an aborted/errored assistant turn that carries a
+    // tool_use/toolCall block. The turn was interrupted (e.g. a run-timeout mid
+    // stream), so no tool_result will ever be produced for it. Persisting it
+    // poisons the session: every subsequent replay sends a tool_use with no
+    // following tool_result, which Anthropic/Bedrock reject with a 400
+    // ("tool_use ids were found without tool_result blocks"), dead-ending the
+    // session permanently. Dropping the partial turn at the write is the fix
+    // (the gateway's ingress sanitizer is the defense-in-depth complement).
+    // Aborted turns WITHOUT a tool_use (plain text) are harmless and preserved.
+    if (nextRole === "assistant" && aborted) {
+      const interrupted = extractToolCallsFromAssistant(
+        nextMessage as Extract<AgentMessage, { role: "assistant" }>,
+      );
+      if (interrupted.length > 0) {
+        if (pendingState.shouldFlushForSanitizedDrop()) {
+          flushPendingToolResults();
+        }
+        return undefined;
+      }
+    }
+
     const toolCalls =
-      nextRole === "assistant" && stopReason !== "aborted" && stopReason !== "error"
+      nextRole === "assistant" && !aborted
         ? extractToolCallsFromAssistant(nextMessage as Extract<AgentMessage, { role: "assistant" }>)
         : [];
 
