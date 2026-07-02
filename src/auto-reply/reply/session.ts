@@ -854,6 +854,7 @@ async function initSessionStateAttempt(
     retiredEntry: retiredLegacyMainDelivery,
     sessionEntry,
     sessionKey,
+    snapshotEntry: initializationSnapshot.currentEntry,
     storePath,
   });
   if (!committed.ok) {
