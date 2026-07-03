@@ -1056,8 +1056,8 @@ function commandNeedsAwsMacosPackageManager(commandArgs, options = {}) {
     return true;
   }
   if (commandArgs.length === 1) {
-    return shellCommandWordCandidates(commandArgs[0]).some(
-      (words) => commandWordsNeedAwsMacosPackageManager(words, options),
+    return shellCommandWordCandidates(commandArgs[0]).some((words) =>
+      commandWordsNeedAwsMacosPackageManager(words, options),
     );
   }
   return commandWordsNeedAwsMacosPackageManager(normalizedCommandWords(commandArgs), options);
@@ -2280,11 +2280,7 @@ function scopedAwsMacosEnvCommand(commandArgs) {
     commandWordsNeedAwsMacosPackageManager(targetWords);
   const needsRuntime = jsRuntimeEntrypoints.has(targetEntrypoint);
   const needsBun = awsMacosBunEntrypoints.has(targetEntrypoint);
-  if (
-    !needsRuntime &&
-    !needsPackageManager &&
-    !needsBun
-  ) {
+  if (!needsRuntime && !needsPackageManager && !needsBun) {
     return null;
   }
 
@@ -2531,12 +2527,10 @@ function injectRemoteAwsMacosJsBootstrap(commandArgs, providerName) {
       ? scopedAwsMacosShellEnvCommand(runArgs[0])
       : null;
   const scopedEnvCommand = directScopedEnvCommand ?? shellScopedEnvCommand;
-  const packageManagerFallbackNeeded =
-    scopedEnvCommand
-      ? commandNeedsAwsMacosPackageManager(runArgs)
-      : commandNeedsAwsMacosPackageManager(runArgs, { canShimIgnoreEnvironment: false });
-  const packageManagerNeeded =
-    scopedEnvCommand?.packageManager || packageManagerFallbackNeeded;
+  const packageManagerFallbackNeeded = scopedEnvCommand
+    ? commandNeedsAwsMacosPackageManager(runArgs)
+    : commandNeedsAwsMacosPackageManager(runArgs, { canShimIgnoreEnvironment: false });
+  const packageManagerNeeded = scopedEnvCommand?.packageManager || packageManagerFallbackNeeded;
   const bunNeeded = scopedEnvCommand?.bun || commandNeedsAwsMacosBun(runArgs);
   const runtimeEntrypoint =
     scopedEnvCommand?.runtimeEntrypoint || commandRuntimeEntrypoint(runArgs);

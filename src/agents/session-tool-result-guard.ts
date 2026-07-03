@@ -66,6 +66,41 @@ function isUserAgentMessage(message: AgentMessage): message is UserAgentMessage 
   return message.role === "user";
 }
 
+// Tool-call/tool-use block type tags, in BOTH the internal camelCase form
+// (toolCall/toolUse/functionCall — what extractToolCallsFromAssistant matches)
+// AND the native-provider snake_case form (tool_use/tool_call) that the
+// transcript sanitizer preserves for native Anthropic turns
+// (session-transcript-repair.ts). The abort drop-guard must recognize both, or
+// an aborted native-Anthropic turn carrying a snake_case `tool_use` block would
+// slip through and re-introduce the orphan-tool_use replay dead-end.
+const ABORT_GUARD_TOOL_USE_BLOCK_TYPES = new Set([
+  "toolCall",
+  "toolUse",
+  "functionCall",
+  "tool_use",
+  "tool_call",
+]);
+
+// assistantHasToolUseBlock reports whether an assistant message's content array
+// contains any tool-call/tool-use block (camelCase or snake_case). Used only by
+// the abort drop-guard — it must not miss the snake_case variant.
+function assistantHasToolUseBlock(message: AgentMessage): boolean {
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return false;
+  }
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const type = (block as { type?: unknown }).type;
+    if (typeof type === "string" && ABORT_GUARD_TOOL_USE_BLOCK_TYPES.has(type)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function isExpectedCompactionAppend(entryId: string, appendedText: string): boolean {
   const lines = appendedText
     .trimEnd()
@@ -802,8 +837,26 @@ export function installSessionToolResultGuard(
     // "unexpected tool_use_id found in tool_result blocks"
     // This matches the behavior in repairToolUseResultPairing (session-transcript-repair.ts)
     const stopReason = (nextMessage as { stopReason?: string }).stopReason;
+    const aborted = stopReason === "aborted" || stopReason === "error";
+
+    // Do not persist an aborted/errored assistant turn that carries a
+    // tool_use/toolCall block. The turn was interrupted (e.g. a run-timeout mid
+    // stream), so no tool_result will ever be produced for it. Persisting it
+    // poisons the session: every subsequent replay sends a tool_use with no
+    // following tool_result, which Anthropic/Bedrock reject with a 400
+    // ("tool_use ids were found without tool_result blocks"), dead-ending the
+    // session permanently. Dropping the partial turn at the write is the fix
+    // (the gateway's ingress sanitizer is the defense-in-depth complement).
+    // Aborted turns WITHOUT a tool_use (plain text) are harmless and preserved.
+    if (nextRole === "assistant" && aborted && assistantHasToolUseBlock(nextMessage)) {
+      if (pendingState.shouldFlushForSanitizedDrop()) {
+        flushPendingToolResults();
+      }
+      return undefined;
+    }
+
     const toolCalls =
-      nextRole === "assistant" && stopReason !== "aborted" && stopReason !== "error"
+      nextRole === "assistant" && !aborted
         ? extractToolCallsFromAssistant(nextMessage as Extract<AgentMessage, { role: "assistant" }>)
         : [];
 

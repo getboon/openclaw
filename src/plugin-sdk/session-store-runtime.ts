@@ -1,5 +1,6 @@
 // Narrow session-store helpers for channel hot paths.
 
+import { resolveStorePath as resolveSessionStorePath } from "../config/sessions/paths.js";
 import {
   cleanupSessionLifecycleArtifacts as cleanupAccessorSessionLifecycleArtifacts,
   listSessionEntries as listAccessorSessionEntries,
@@ -10,7 +11,6 @@ import {
   type SessionAccessScope,
   updateSessionEntry,
 } from "../config/sessions/session-accessor.js";
-import { resolveStorePath as resolveSessionStorePath } from "../config/sessions/paths.js";
 import { loadSessionStore as loadSessionStoreImpl } from "../config/sessions/store-load.js";
 import type { ResolvedSessionMaintenanceConfig } from "../config/sessions/store.js";
 import type { SessionEntry } from "../config/sessions/types.js";

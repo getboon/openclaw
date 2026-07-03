@@ -779,10 +779,14 @@ describe("installSessionToolResultGuard", () => {
       }),
     );
 
-    // Should only have assistant + user, NO synthetic toolResult
+    // The aborted assistant turn carried a dangling toolCall, so it is dropped
+    // (persisting it would poison the session — see the dedicated dangling-tool_use
+    // test above). Only the user message survives; still NO synthetic toolResult.
+    // (Previously this asserted ["assistant","user"], which encoded the very
+    // orphan-tool_use bug this change fixes.)
     const messages = getPersistedMessages(sm);
     const roles = messages.map((m) => m.role);
-    expect(roles).toEqual(["assistant", "user"]);
+    expect(roles).toEqual(["user"]);
     expect(roles).not.toContain("toolResult");
   });
 
@@ -809,5 +813,83 @@ describe("installSessionToolResultGuard", () => {
       (m) => (m as { toolCallId?: string }).toolCallId === "call_error",
     );
     expect(syntheticForError).toHaveLength(0);
+  });
+
+  it("does NOT persist an aborted assistant turn that carries a dangling tool_use", () => {
+    // A run-timeout aborts the turn mid-tool_use: the assistant message has a
+    // tool_use block but no tool_result will ever be produced. Persisting it
+    // poisons the session — every replay hits Anthropic/Bedrock 400
+    // "tool_use ids were found without tool_result blocks". Drop it at the write.
+    const sm = SessionManager.inMemory();
+    installSessionToolResultGuard(sm);
+
+    sm.appendMessage(
+      asAppendMessage({ role: "user", content: [{ type: "text", text: "write a file" }] }),
+    );
+    sm.appendMessage(
+      asAppendMessage({
+        role: "assistant",
+        content: [{ type: "toolCall", id: "call_aborted", name: "write", arguments: {} }],
+        stopReason: "aborted",
+      }),
+    );
+
+    const messages = getPersistedMessages(sm);
+    // The aborted tool_use turn must not be on disk.
+    expect(messages.map((m) => m.role)).toEqual(["user"]);
+    const hasDangling = messages.some(
+      (m) =>
+        m.role === "assistant" &&
+        Array.isArray((m as { content?: unknown }).content) &&
+        (m as { content: Array<{ id?: string }> }).content.some((b) => b?.id === "call_aborted"),
+    );
+    expect(hasDangling).toBe(false);
+  });
+
+  it("does NOT persist an aborted native-Anthropic turn with a snake_case tool_use block", () => {
+    // Native Anthropic turns carry snake_case `tool_use` blocks (preserved by the
+    // transcript sanitizer). extractToolCallsFromAssistant only knows camelCase,
+    // so the drop-guard must detect snake_case too — otherwise an aborted native
+    // turn slips through and re-introduces the orphan-tool_use dead-end.
+    const sm = SessionManager.inMemory();
+    installSessionToolResultGuard(sm);
+
+    sm.appendMessage(asAppendMessage({ role: "user", content: [{ type: "text", text: "go" }] }));
+    sm.appendMessage(
+      asAppendMessage({
+        role: "assistant",
+        content: [{ type: "tool_use", id: "toolu_bdrk_native", name: "write", input: {} }],
+        stopReason: "aborted",
+      }),
+    );
+
+    const messages = getPersistedMessages(sm);
+    expect(messages.map((m) => m.role)).toEqual(["user"]);
+    const hasDangling = messages.some(
+      (m) =>
+        m.role === "assistant" &&
+        Array.isArray((m as { content?: unknown }).content) &&
+        (m as { content: Array<{ id?: string }> }).content.some(
+          (b) => b?.id === "toolu_bdrk_native",
+        ),
+    );
+    expect(hasDangling).toBe(false);
+  });
+
+  it("still persists an aborted assistant turn that has NO tool_use (plain text)", () => {
+    // Only interrupted tool_use turns are the poison. An aborted text-only turn
+    // is harmless and must be preserved (no context loss).
+    const sm = SessionManager.inMemory();
+    installSessionToolResultGuard(sm);
+
+    sm.appendMessage(
+      asAppendMessage({
+        role: "assistant",
+        content: [{ type: "text", text: "partial answer before abort" }],
+        stopReason: "aborted",
+      }),
+    );
+
+    expect(getPersistedMessages(sm).map((m) => m.role)).toEqual(["assistant"]);
   });
 });

@@ -1570,7 +1570,16 @@ describe.concurrent("scripts/crabbox-wrapper", () => {
   it("preflights Swift and JS tooling for raw AWS macOS dist package scripts", () => {
     const result = runWrapper(
       "provider: hetzner, aws, local-container, blacksmith-testbox, or cloudflare\n",
-      ["run", "--provider", "aws", "--target", "macos", "--", "bash", "scripts/package-mac-dist.sh"],
+      [
+        "run",
+        "--provider",
+        "aws",
+        "--target",
+        "macos",
+        "--",
+        "bash",
+        "scripts/package-mac-dist.sh",
+      ],
     );
 
     const output = parseFakeCrabboxOutput(result);
@@ -1602,7 +1611,16 @@ describe.concurrent("scripts/crabbox-wrapper", () => {
   it("keeps raw AWS macOS build-and-run scripts Swift-only", () => {
     const result = runWrapper(
       "provider: hetzner, aws, local-container, blacksmith-testbox, or cloudflare\n",
-      ["run", "--provider", "aws", "--target", "macos", "--", "bash", "scripts/build-and-run-mac.sh"],
+      [
+        "run",
+        "--provider",
+        "aws",
+        "--target",
+        "macos",
+        "--",
+        "bash",
+        "scripts/build-and-run-mac.sh",
+      ],
     );
 
     const output = parseFakeCrabboxOutput(result);

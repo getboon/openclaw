@@ -292,7 +292,9 @@ describe("session-store-runtime compatibility surface", () => {
       sessionId: "regular",
     });
     expect(
-      fs.readdirSync(tempDir).filter((file) => file.startsWith("lifecycle-owned-old.jsonl.deleted.")),
+      fs
+        .readdirSync(tempDir)
+        .filter((file) => file.startsWith("lifecycle-owned-old.jsonl.deleted.")),
     ).toHaveLength(1);
   });
 });

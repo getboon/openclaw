@@ -546,11 +546,10 @@ function renderScoreBands(): string[] {
     "## Score bands",
     "",
     '<div className="maturity-band-list">',
-    ...QA_MATURITY_SCORE_LABEL_BANDS.toReversed()
-      .map(
-        ([label, low, high]) =>
-          `  <div className="maturity-band ${maturityBandClass(label)}"><span className="maturity-band-title">${maturityLabelPill(label)}</span><span>${low}-${high}%</span></div>`,
-      ),
+    ...QA_MATURITY_SCORE_LABEL_BANDS.toReversed().map(
+      ([label, low, high]) =>
+        `  <div className="maturity-band ${maturityBandClass(label)}"><span className="maturity-band-title">${maturityLabelPill(label)}</span><span>${low}-${high}%</span></div>`,
+    ),
     "</div>",
     "",
   ];
@@ -907,14 +906,11 @@ function renderEvidenceSection(
     );
     for (const [surfaceId, rows] of grouped) {
       const surfaceName = surfaceNames.get(surfaceId) ?? familyTitle(surfaceId);
-      const statusCounts = rows.reduce<Record<string, number>>(
-        (counts, row) => {
-          counts[readinessStatusText(row.category.status)] =
-            (counts[readinessStatusText(row.category.status)] ?? 0) + 1;
-          return counts;
-        },
-        {},
-      );
+      const statusCounts = rows.reduce<Record<string, number>>((counts, row) => {
+        counts[readinessStatusText(row.category.status)] =
+          (counts[readinessStatusText(row.category.status)] ?? 0) + 1;
+        return counts;
+      }, {});
       const summary = Object.entries(statusCounts)
         .map(([status, count]) => `${count} ${status.toLowerCase()}`)
         .join(" / ");

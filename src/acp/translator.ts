@@ -801,8 +801,7 @@ export class AcpGatewayAgent implements Agent {
         const promptKey = this.pendingPromptKey(params.sessionId, runId);
         if (
           isGatewayCloseError(err) &&
-          (this.getPendingPrompt(params.sessionId, runId) ||
-            this.settlingPromptKeys.has(promptKey))
+          (this.getPendingPrompt(params.sessionId, runId) || this.settlingPromptKeys.has(promptKey))
         ) {
           return;
         }
