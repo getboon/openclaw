@@ -360,6 +360,28 @@ function coerceDelivery(delivery: UnknownRecord) {
   } else if ("accountId" in next) {
     delete next.accountId;
   }
+  // Pass through turn source fields for cross-channel contamination prevention (ENG-14833)
+  if ("turnSourceChannel" in delivery && delivery.turnSourceChannel === null) {
+    next.turnSourceChannel = null;
+  } else if (parsed.turnSourceChannel !== undefined) {
+    next.turnSourceChannel = parsed.turnSourceChannel;
+  } else if ("turnSourceChannel" in next) {
+    delete next.turnSourceChannel;
+  }
+  if ("turnSourceTo" in delivery && delivery.turnSourceTo === null) {
+    next.turnSourceTo = null;
+  } else if (parsed.turnSourceTo !== undefined) {
+    next.turnSourceTo = parsed.turnSourceTo;
+  } else if ("turnSourceTo" in next) {
+    delete next.turnSourceTo;
+  }
+  if ("turnSourceThreadId" in delivery && delivery.turnSourceThreadId === null) {
+    next.turnSourceThreadId = null;
+  } else if (parsed.turnSourceThreadId !== undefined) {
+    next.turnSourceThreadId = parsed.turnSourceThreadId;
+  } else if ("turnSourceThreadId" in next) {
+    delete next.turnSourceThreadId;
+  }
   if ("failureDestination" in next) {
     // Null is an explicit clear signal in patches; invalid objects are dropped.
     if (next.failureDestination === null) {

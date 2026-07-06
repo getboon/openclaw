@@ -142,6 +142,12 @@ export async function resolveDeliveryTarget(
     /** Explicit accountId from job.delivery — overrides session-derived and binding-derived values. */
     accountId?: string;
     sessionKey?: string;
+    /** Originating channel for cross-channel contamination prevention (ENG-14833). */
+    turnSourceChannel?: ChannelId;
+    /** Originating target for cross-channel contamination prevention (ENG-14833). */
+    turnSourceTo?: string;
+    /** Originating thread for cross-channel contamination prevention (ENG-14833). */
+    turnSourceThreadId?: string | number;
   },
   options?: { dryRun?: boolean; inheritSessionThread?: boolean },
 ): Promise<DeliveryTargetResolution> {
@@ -192,6 +198,10 @@ export async function resolveDeliveryTarget(
     explicitTo,
     explicitThreadId: jobPayload.threadId,
     allowMismatchedLastTo,
+    // Pass stored turn source context to prevent cross-channel contamination (ENG-14833)
+    turnSourceChannel: jobPayload.turnSourceChannel,
+    turnSourceTo: jobPayload.turnSourceTo,
+    turnSourceThreadId: jobPayload.turnSourceThreadId,
   });
 
   let fallbackChannel: Exclude<OutboundChannel, "none"> | undefined;
@@ -222,6 +232,10 @@ export async function resolveDeliveryTarget(
         fallbackChannel,
         allowMismatchedLastTo,
         mode: preliminary.mode,
+        // Pass stored turn source context to prevent cross-channel contamination (ENG-14833)
+        turnSourceChannel: jobPayload.turnSourceChannel,
+        turnSourceTo: jobPayload.turnSourceTo,
+        turnSourceThreadId: jobPayload.turnSourceThreadId,
       })
     : preliminary;
 

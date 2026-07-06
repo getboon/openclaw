@@ -48,6 +48,17 @@ export type CronDelivery = {
   completionDestination?: CronCompletionDestination;
   /** Separate destination for failure notifications. */
   failureDestination?: CronFailureDestination;
+  /**
+   * Originating channel when job was created. Prevents cross-channel contamination
+   * in shared sessions (dmScope="main") where concurrent conversations update the
+   * session's lastChannel/lastTo fields. Reuses the turnSourceChannel pattern from
+   * agent-delivery.ts to override session history at delivery resolution time.
+   */
+  turnSourceChannel?: CronMessageChannel;
+  /** Originating target when job was created. */
+  turnSourceTo?: string;
+  /** Originating thread when job was created. */
+  turnSourceThreadId?: string | number;
 };
 
 /** Webhook completion destination used alongside chat delivery. */
@@ -81,6 +92,9 @@ export type CronDeliveryPatch = Partial<Pick<CronDelivery, "mode" | "bestEffort"
   accountId?: string | null;
   completionDestination?: CronCompletionDestination | null;
   failureDestination?: CronFailureDestinationPatch | null;
+  turnSourceChannel?: CronMessageChannel | null;
+  turnSourceTo?: string | null;
+  turnSourceThreadId?: string | number | null;
 };
 
 /** Execution outcome, separate from delivery outcome. */
