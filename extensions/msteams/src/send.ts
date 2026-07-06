@@ -6,7 +6,11 @@ import {
 } from "openclaw/plugin-sdk/channel-outbound";
 import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/markdown-table-runtime";
 import { convertMarkdownTables } from "openclaw/plugin-sdk/text-chunking";
-import { loadOutboundMediaFromUrl, type OpenClawConfig } from "../runtime-api.js";
+import {
+  loadOutboundMediaFromUrl,
+  type MSTeamsReplyStyle,
+  type OpenClawConfig,
+} from "../runtime-api.js";
 import {
   classifyMSTeamsSendError,
   formatMSTeamsSendErrorHint,
@@ -44,6 +48,12 @@ type SendMSTeamsMessageParams = {
   filename?: string;
   mediaLocalRoots?: readonly string[];
   mediaReadFile?: (filePath: string) => Promise<Buffer>;
+  /**
+   * Per-send replyStyle override (ENG-14117). When set, overrides the resolved
+   * channel/global replyStyle for this send only — lets a scheduled cron post a
+   * fresh top-level channel message while interactive conversations stay threaded.
+   */
+  replyStyleOverride?: MSTeamsReplyStyle;
 };
 
 type SendMSTeamsMessageResult = {
@@ -149,13 +159,14 @@ type SendMSTeamsCardResult = {
 export async function sendMessageMSTeams(
   params: SendMSTeamsMessageParams,
 ): Promise<SendMSTeamsMessageResult> {
-  const { cfg, to, text, mediaUrl, filename, mediaLocalRoots, mediaReadFile } = params;
+  const { cfg, to, text, mediaUrl, filename, mediaLocalRoots, mediaReadFile, replyStyleOverride } =
+    params;
   const tableMode = resolveMarkdownTableMode({
     cfg,
     channel: "msteams",
   });
   const messageText = convertMarkdownTables(text ?? "", tableMode);
-  const ctx = await resolveMSTeamsSendContext({ cfg, to });
+  const ctx = await resolveMSTeamsSendContext({ cfg, to, replyStyleOverride });
   const {
     app,
     conversationId,

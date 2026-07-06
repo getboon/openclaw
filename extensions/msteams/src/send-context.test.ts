@@ -201,4 +201,43 @@ describe("resolveMSTeamsProactiveReplyStyle", () => {
       }),
     ).toBe("top-level");
   });
+
+  // ENG-14117: a per-send override (e.g. a scheduled cron told to post a fresh
+  // top-level channel message) must win over the resolved/global replyStyle,
+  // WITHOUT changing the global "thread" default that keeps conversations threaded.
+  it("honors an explicit top-level override on a thread-default channel", () => {
+    expect(
+      resolveMSTeamsProactiveReplyStyle({
+        cfg: { replyStyle: "thread" },
+        conversationId: "19:channel@thread.tacv2",
+        ref: channelRef({ threadId: "thread-root-1" }),
+        conversationType: "channel",
+        replyStyleOverride: "top-level",
+      }),
+    ).toBe("top-level");
+  });
+
+  it("honors an explicit thread override even when config resolves to top-level", () => {
+    expect(
+      resolveMSTeamsProactiveReplyStyle({
+        cfg: { replyStyle: "top-level" },
+        conversationId: "19:channel@thread.tacv2",
+        ref: channelRef({ threadId: "thread-root-1" }),
+        conversationType: "channel",
+        replyStyleOverride: "thread",
+      }),
+    ).toBe("thread");
+  });
+
+  it("ignores an undefined override (no behavior change)", () => {
+    expect(
+      resolveMSTeamsProactiveReplyStyle({
+        cfg: { replyStyle: "thread" },
+        conversationId: "19:channel@thread.tacv2",
+        ref: channelRef({ threadId: "thread-root-1" }),
+        conversationType: "channel",
+        replyStyleOverride: undefined,
+      }),
+    ).toBe("thread");
+  });
 });
