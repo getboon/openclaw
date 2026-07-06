@@ -37,28 +37,10 @@ on:
       - "src/*.ts"
       - "src/**/*.ts"
       - "src/config/**"
-      - "extensions/discord/src/**"
-      - "extensions/feishu/src/**"
       - "extensions/googlechat/src/**"
-      - "extensions/imessage/src/**"
-      - "extensions/irc/src/**"
-      - "extensions/line/src/**"
-      - "extensions/matrix/src/**"
-      - "extensions/mattermost/src/**"
       - "extensions/msteams/src/**"
-      - "extensions/nextcloud-talk/src/**"
-      - "extensions/nostr/src/**"
       - "extensions/qa-channel/src/**"
-      - "extensions/qqbot/src/**"
-      - "extensions/signal/src/**"
       - "extensions/slack/src/**"
-      - "extensions/synology-chat/src/**"
-      - "extensions/telegram/src/**"
-      - "extensions/tlon/src/**"
-      - "extensions/twitch/src/**"
-      - "extensions/whatsapp/src/**"
-      - "extensions/zalo/src/**"
-      - "extensions/zalouser/src/**"
       - "src/agents/*auth*.ts"
       - "src/agents/**/*auth*.ts"
       - "src/agents/auth-health*.ts"
@@ -241,7 +223,7 @@ jobs:
                 src/auto-reply/reply/post-compaction-context.ts|src/auto-reply/reply/queue/*|src/auto-reply/reply/startup-context.ts|src/commands/doctor-session-*.ts|src/commands/session-store-targets.ts|src/commands/sessions*.ts|src/infra/diagnostic-*.ts|src/infra/diagnostics-timeline.ts|src/infra/session-delivery-queue*.ts|src/logging/diagnostic*.ts)
                   session_diagnostics=true
                   ;;
-                extensions/discord/src/*|extensions/feishu/src/*|extensions/googlechat/src/*|extensions/imessage/src/*|extensions/irc/src/*|extensions/line/src/*|extensions/matrix/src/*|extensions/mattermost/src/*|extensions/msteams/src/*|extensions/nextcloud-talk/src/*|extensions/nostr/src/*|extensions/qa-channel/src/*|extensions/qqbot/src/*|extensions/signal/src/*|extensions/slack/src/*|extensions/synology-chat/src/*|extensions/telegram/src/*|extensions/tlon/src/*|extensions/twitch/src/*|extensions/whatsapp/src/*|extensions/zalo/src/*|extensions/zalouser/src/*|src/channels/*)
+                extensions/googlechat/src/*|extensions/msteams/src/*|extensions/qa-channel/src/*|extensions/slack/src/*|src/channels/*)
                   channel=true
                   ;;
                 src/config/*)
@@ -306,7 +288,7 @@ jobs:
               case "${file}" in
                 src/**/*.test.ts|src/**/*.test.tsx|extensions/**/*.test.ts|extensions/**/*.test.tsx)
                   ;;
-                packages/net-policy/src/*|packages/net-policy/src/**/*|src/cli/gateway-cli/run-loop.ts|src/infra/net/*|src/infra/net/**/*|src/infra/ssh-tunnel.ts|src/infra/gateway-lock.ts|src/infra/jsonl-socket.ts|src/infra/push-apns-http2.ts|src/proxy-capture/*|src/proxy-capture/**/*|extensions/codex-supervisor/src/json-rpc-client.ts|extensions/irc/src/*|extensions/qa-lab/src/*)
+                packages/net-policy/src/*|packages/net-policy/src/**/*|src/cli/gateway-cli/run-loop.ts|src/infra/net/*|src/infra/net/**/*|src/infra/ssh-tunnel.ts|src/infra/gateway-lock.ts|src/infra/jsonl-socket.ts|src/infra/push-apns-http2.ts|src/proxy-capture/*|src/proxy-capture/**/*|extensions/codex-supervisor/src/json-rpc-client.ts|extensions/qa-lab/src/*)
                   network_runtime=true
                   ;;
               esac
@@ -450,7 +432,7 @@ jobs:
           added_lines="$(mktemp)"
           gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '
             .[]
-            | select(.filename | test("^(src/cli/gateway-cli/run-loop\\.ts|src/infra/(gateway-lock|jsonl-socket|push-apns-http2|ssh-tunnel)\\.ts|src/infra/net/|src/proxy-capture/|extensions/codex-supervisor/src/json-rpc-client\\.ts|extensions/irc/src/|extensions/qa-lab/src/|packages/net-policy/src/)"))
+            | select(.filename | test("^(src/cli/gateway-cli/run-loop\\.ts|src/infra/(gateway-lock|jsonl-socket|push-apns-http2|ssh-tunnel)\\.ts|src/infra/net/|src/proxy-capture/|extensions/codex-supervisor/src/json-rpc-client\\.ts|extensions/qa-lab/src/|packages/net-policy/src/)"))
             | .filename as $file
             | (.patch // "")
             | split("\n")[]

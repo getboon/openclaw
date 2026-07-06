@@ -15,7 +15,6 @@ paths:
   - src/infra/ssh-tunnel.ts
   - src/proxy-capture
   - extensions/codex-supervisor/src/json-rpc-client.ts
-  - extensions/irc/src
   - extensions/qa-lab/src
   - packages/net-policy/src
 

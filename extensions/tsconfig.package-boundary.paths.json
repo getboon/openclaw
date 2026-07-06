@@ -107,14 +107,8 @@
       "@openclaw/qa-channel/api.js": [
         "../dist/plugin-sdk/extensions/qa-channel/api.d.ts"
       ],
-      "@openclaw/discord/api.js": [
-        "../dist/plugin-sdk/extensions/discord/api.d.ts"
-      ],
       "@openclaw/slack/api.js": [
         "../dist/plugin-sdk/extensions/slack/api.d.ts"
-      ],
-      "@openclaw/whatsapp/api.js": [
-        "../dist/plugin-sdk/extensions/whatsapp/api.d.ts"
       ],
       "@openclaw/llm-core": [
         "../dist/plugin-sdk/packages/llm-core/src/index.d.ts"

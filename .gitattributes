@@ -4,3 +4,51 @@ src/gateway/server-methods/CLAUDE.md -text
 ui/src/i18n/.i18n/* linguist-generated
 ui/src/i18n/locales/*.ts linguist-generated
 ui/src/i18n/locales/en.ts -linguist-generated
+
+# boon fork: unused channel dirs — see scripts/boon-strip-unused-channels.sh.
+# When upstream reintroduces these dirs via a merge, prefer OUR (deleted)
+# side over theirs. After `git merge upstream/main`, run the strip script
+# to catch the modification-side files (workflows, catalogs, etc.) that
+# `merge=ours` cannot express.
+extensions/clickclack/**       merge=ours
+extensions/discord/**          merge=ours
+extensions/feishu/**           merge=ours
+extensions/imessage/**         merge=ours
+extensions/irc/**              merge=ours
+extensions/line/**             merge=ours
+extensions/matrix/**           merge=ours
+extensions/mattermost/**       merge=ours
+extensions/nextcloud-talk/**   merge=ours
+extensions/nostr/**            merge=ours
+extensions/qqbot/**            merge=ours
+extensions/raft/**             merge=ours
+extensions/signal/**           merge=ours
+extensions/sms/**              merge=ours
+extensions/synology-chat/**    merge=ours
+extensions/telegram/**         merge=ours
+extensions/tlon/**             merge=ours
+extensions/twitch/**           merge=ours
+extensions/whatsapp/**         merge=ours
+extensions/zalo/**             merge=ours
+extensions/zalouser/**         merge=ours
+docs/channels/clickclack.md    merge=ours
+docs/channels/discord.md       merge=ours
+docs/channels/feishu.md        merge=ours
+docs/channels/imessage.md      merge=ours
+docs/channels/irc.md           merge=ours
+docs/channels/line.md          merge=ours
+docs/channels/matrix.md        merge=ours
+docs/channels/mattermost.md    merge=ours
+docs/channels/nextcloud-talk.md merge=ours
+docs/channels/nostr.md         merge=ours
+docs/channels/qqbot.md         merge=ours
+docs/channels/raft.md          merge=ours
+docs/channels/signal.md        merge=ours
+docs/channels/sms.md           merge=ours
+docs/channels/synology-chat.md merge=ours
+docs/channels/telegram.md      merge=ours
+docs/channels/tlon.md          merge=ours
+docs/channels/twitch.md        merge=ours
+docs/channels/whatsapp.md      merge=ours
+docs/channels/zalo.md          merge=ours
+docs/channels/zalouser.md      merge=ours

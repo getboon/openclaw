@@ -1434,7 +1434,6 @@ rules:
       source-rule-id: openclaw-matrix-set-profile-missing-owner-guard
     paths:
       include:
-        - extensions/matrix/src/actions.ts
         - src/agents/tools/matrix-actions.ts
     patterns:
       - pattern: |
@@ -1924,7 +1923,6 @@ rules:
       source-rule-id: openclaw-webhook-signature-missing-auth-rate-limit
     paths:
       include:
-        - extensions/nextcloud-talk/src/monitor.ts
         - extensions/**/src/**/monitor*.ts
     patterns:
       - pattern: verifyNextcloudTalkSignature(...)
@@ -2050,7 +2048,6 @@ rules:
       source-rule-id: matrix-verification-notice-missing-dm-access-gate
     paths:
       include:
-        - extensions/matrix/src/matrix/monitor/verification-*.ts
     patterns:
       - pattern: sendVerificationNotice(...)
       - pattern-not-inside: |
@@ -2425,7 +2422,6 @@ rules:
       source-rule-id: openclaw-zalo-replay-dedupe-key-missing-target-scope
     paths:
       include:
-        - extensions/zalo/src/**/*.ts
     pattern-either:
       - pattern: const $KEY = `${$UPDATE.event_name}:${messageId}`
       - pattern: const $KEY = `${$UPDATE.event_name}:${$MESSAGE_ID}`
@@ -4656,7 +4652,6 @@ rules:
       source-rule-id: openclaw-discord-moderation-dispatch-missing-sender-permission-check
     paths:
       include:
-        - extensions/discord/src/actions/runtime.moderation.ts
         - src/agents/tools/discord-actions-moderation.ts
     patterns:
       - pattern-either:
@@ -4761,7 +4756,6 @@ rules:
       source-rule-id: discord-voice-ingress-missing-authorize-review
     paths:
       include:
-        - extensions/discord/src/voice/**
     patterns:
       - pattern: agentCommandFromIngress(...)
       - pattern-not-inside: |
@@ -4808,7 +4802,6 @@ rules:
       source-rule-id: nextcloud-talk-room-name-fallback-match
     paths:
       include:
-        - extensions/nextcloud-talk/src/**
     patterns:
       - pattern-either:
           - pattern: buildChannelKeyCandidates($TOKEN, $ROOM_NAME, ...)
