@@ -6,6 +6,7 @@ import { createTopLevelChannelConfigAdapter } from "openclaw/plugin-sdk/channel-
 import type {
   ChannelMessageActionAdapter,
   ChannelMessageToolDiscovery,
+  ChannelMessageToolSchemaContribution,
 } from "openclaw/plugin-sdk/channel-contract";
 import { createChatChannelPlugin } from "openclaw/plugin-sdk/channel-core";
 import {
@@ -29,7 +30,7 @@ import {
   normalizeOptionalString,
   normalizeStringEntries,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
 import type {
   ChannelMessageActionName,
   ChannelOutboundAdapter,
@@ -386,12 +387,12 @@ async function runWithRequiredActionPinnedMessageTarget<T>(params: {
   return await params.run(target);
 }
 
-function createMSTeamsTopLevelActionSchema(): Record<string, typeof Type.Optional> {
+function createMSTeamsTopLevelActionSchema(): Record<string, TSchema> {
   return {
     topLevel: Type.Optional(
       Type.Boolean({
         description:
-          "MS Teams-only opt-out from threaded same-channel context. Set true to post a new parent-channel message instead of inheriting the current thread; set false to force threading even when config is top-level. `threadId: null` is accepted as the same top-level request.",
+          "MS Teams-only opt-out from threaded same-channel context. Set true to post a new parent-channel message instead of inheriting the current thread; set false to force threading even when config is top-level. `threadId: null` is accepted as the same top-level request. Note: only supported for non-presentation sends; presentation cards ignore this parameter.",
       }),
     ),
   };
@@ -406,20 +407,20 @@ function describeMSTeamsMessageTool({
     cfg.channels?.msteams?.enabled !== false &&
     Boolean(resolveMSTeamsCredentials(cfg.channels?.msteams));
 
-  const schema = [];
+  const schema: ChannelMessageToolSchemaContribution[] = [];
 
   // ENG-14117: Add topLevel parameter for send and upload-file actions
   if (enabled) {
     schema.push({
       properties: createMSTeamsTopLevelActionSchema(),
-      actions: ["send", "upload-file"],
+      actions: ["send", "upload-file"] satisfies ChannelMessageActionName[],
     });
   }
 
   // Existing unpin schema
   if (enabled) {
     schema.push({
-      actions: ["unpin"],
+      actions: ["unpin"] satisfies ChannelMessageActionName[],
       properties: {
         pinnedMessageId: Type.Optional(
           Type.String({
