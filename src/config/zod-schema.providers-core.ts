@@ -1654,9 +1654,10 @@ export const MSTeamsConfigSchema = z
      * is empty. Workaround for tenants where Bot Framework strips file refs
      * (`<attachment id=...>` tags AND `reference`-typed entries) from inbound
      * activities even with RSC consent — see ENG-14349. Upstream default:
-     * `false`. Boon fork default: `true` (every Teams tenant in the Boon
-     * fleet observed the stub-stripping regression; see
-     * `extensions/msteams/src/monitor-handler/graph-fallback-default.ts`).
+     * `false`. Boon fork default: `true` — every Teams tenant in the Boon
+     * fleet observed the stub-stripping regression, so the fork consume-site
+     * in the `@openclaw/msteams` plugin applies the resolver default before
+     * calling into the inbound-media pipeline.
      */
     alwaysFetchGraphMessage: z.boolean().optional(),
     requireMention: z.boolean().optional(),
