@@ -391,7 +391,7 @@ function createMSTeamsTopLevelActionSchema(): Record<string, typeof Type.Optiona
     topLevel: Type.Optional(
       Type.Boolean({
         description:
-          'MS Teams-only opt-out from threaded same-channel context. Set true to post a new parent-channel message instead of inheriting the current thread; set false to force threading even when config is top-level. `threadId: null` is accepted as the same top-level request.',
+          "MS Teams-only opt-out from threaded same-channel context. Set true to post a new parent-channel message instead of inheriting the current thread; set false to force threading even when config is top-level. `threadId: null` is accepted as the same top-level request.",
       }),
     ),
   };
