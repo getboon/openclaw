@@ -1653,7 +1653,10 @@ export const MSTeamsConfigSchema = z
      * relying on the inbound Bot Framework activity) when the local media list
      * is empty. Workaround for tenants where Bot Framework strips file refs
      * (`<attachment id=...>` tags AND `reference`-typed entries) from inbound
-     * activities even with RSC consent — see ENG-14349. Default false.
+     * activities even with RSC consent — see ENG-14349. Upstream default:
+     * `false`. Boon fork default: `true` (every Teams tenant in the Boon
+     * fleet observed the stub-stripping regression; see
+     * `extensions/msteams/src/monitor-handler/graph-fallback-default.ts`).
      */
     alwaysFetchGraphMessage: z.boolean().optional(),
     requireMention: z.boolean().optional(),
