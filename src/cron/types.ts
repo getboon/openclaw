@@ -57,6 +57,8 @@ export type CronDelivery = {
   turnSourceChannel?: CronMessageChannel;
   /** Originating target when job was created. */
   turnSourceTo?: string;
+  /** Originating account when job was created (for multi-account setups). */
+  turnSourceAccountId?: string;
   /** Originating thread when job was created. */
   turnSourceThreadId?: string | number;
 };
@@ -94,6 +96,7 @@ export type CronDeliveryPatch = Partial<Pick<CronDelivery, "mode" | "bestEffort"
   failureDestination?: CronFailureDestinationPatch | null;
   turnSourceChannel?: CronMessageChannel | null;
   turnSourceTo?: string | null;
+  turnSourceAccountId?: string | null;
   turnSourceThreadId?: string | number | null;
 };
 

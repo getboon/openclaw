@@ -48,6 +48,7 @@ type ParsedDeliveryInput = {
   accountId?: string;
   turnSourceChannel?: string;
   turnSourceTo?: string;
+  turnSourceAccountId?: string;
   turnSourceThreadId?: string | number;
 };
 
@@ -65,6 +66,10 @@ export function parseDeliveryInput(input: Record<string, unknown>): ParsedDelive
       input.turnSourceChannel,
     ),
     turnSourceTo: parseOptionalField(TrimmedNonEmptyStringFieldSchema, input.turnSourceTo),
+    turnSourceAccountId: parseOptionalField(
+      TrimmedNonEmptyStringFieldSchema,
+      input.turnSourceAccountId,
+    ),
     turnSourceThreadId: parseOptionalField(DeliveryThreadIdFieldSchema, input.turnSourceThreadId),
   };
 }

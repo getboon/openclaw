@@ -1021,7 +1021,8 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
             }
 
             // Capture turn source context to prevent cross-channel contamination (ENG-14833)
-            // Only capture when delivery mode is announce and no explicit target is set
+            // Check explicitness from the ORIGINAL user-supplied delivery (not post-inference
+            // currentDelivery) to avoid skipping capture when inferred targets look explicit.
             if (opts.currentDeliveryContext) {
               const currentDelivery = (job as { delivery?: unknown }).delivery;
               if (isRecord(currentDelivery) && !currentDelivery.turnSourceChannel) {
@@ -1029,8 +1030,8 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
                   typeof currentDelivery.mode === "string" ? currentDelivery.mode : "",
                 );
                 const hasExplicitTarget =
-                  (typeof currentDelivery.channel === "string" && currentDelivery.channel.trim()) ||
-                  (typeof currentDelivery.to === "string" && currentDelivery.to.trim());
+                  (typeof delivery?.channel === "string" && delivery.channel.trim()) ||
+                  (typeof delivery?.to === "string" && delivery.to.trim());
                 const shouldCapture =
                   (deliveryMode === "" || deliveryMode === "announce") && !hasExplicitTarget;
                 if (shouldCapture) {
@@ -1038,6 +1039,7 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
                   if (ctx.channel) {
                     currentDelivery.turnSourceChannel = ctx.channel;
                     currentDelivery.turnSourceTo = ctx.to;
+                    currentDelivery.turnSourceAccountId = ctx.accountId;
                     currentDelivery.turnSourceThreadId = ctx.threadId;
                   }
                 }

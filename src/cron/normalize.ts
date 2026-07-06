@@ -375,6 +375,13 @@ function coerceDelivery(delivery: UnknownRecord) {
   } else if ("turnSourceTo" in next) {
     delete next.turnSourceTo;
   }
+  if ("turnSourceAccountId" in delivery && delivery.turnSourceAccountId === null) {
+    next.turnSourceAccountId = null;
+  } else if (parsed.turnSourceAccountId !== undefined) {
+    next.turnSourceAccountId = parsed.turnSourceAccountId;
+  } else if ("turnSourceAccountId" in next) {
+    delete next.turnSourceAccountId;
+  }
   if ("turnSourceThreadId" in delivery && delivery.turnSourceThreadId === null) {
     next.turnSourceThreadId = null;
   } else if (parsed.turnSourceThreadId !== undefined) {

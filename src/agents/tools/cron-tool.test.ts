@@ -1317,6 +1317,10 @@ describe("cron tool", () => {
       to: "room:!AbCdEf1234567890:example.org",
       accountId: "bot-a",
       threadId: "$RootEvent:Example.Org",
+      turnSourceChannel: "matrix",
+      turnSourceTo: "room:!AbCdEf1234567890:example.org",
+      turnSourceAccountId: "bot-a",
+      turnSourceThreadId: "$RootEvent:Example.Org",
     });
   });
 
@@ -1422,6 +1426,10 @@ describe("cron tool", () => {
       to: "!AbCdEf1234567890:example.org",
       accountId: "explicit-bot",
       threadId: "$ExplicitThread:Example.Org",
+      turnSourceChannel: "matrix",
+      turnSourceTo: "!AbCdEf1234567890:example.org",
+      turnSourceAccountId: "context-bot",
+      turnSourceThreadId: "$ContextThread:Example.Org",
     });
   });
 
@@ -1443,6 +1451,10 @@ describe("cron tool", () => {
       to: "!AbCdEf1234567890:Example.Org",
       accountId: "bot-a",
       threadId: "$RootEvent:Example.Org",
+      turnSourceChannel: " Matrix ",
+      turnSourceTo: "  !AbCdEf1234567890:Example.Org  ",
+      turnSourceAccountId: " Bot-A ",
+      turnSourceThreadId: "  $RootEvent:Example.Org  ",
     });
   });
 
@@ -1459,6 +1471,10 @@ describe("cron tool", () => {
       mode: "announce",
       channel: "matrix",
       to: "!AbCdEf1234567890:example.org",
+      turnSourceChannel: "matrix",
+      turnSourceTo: "!AbCdEf1234567890:example.org",
+      turnSourceAccountId: undefined,
+      turnSourceThreadId: undefined,
     });
   });
 
@@ -1477,6 +1493,10 @@ describe("cron tool", () => {
       mode: "announce",
       channel: "matrix",
       to: "!AbCdEf1234567890:example.org",
+      turnSourceChannel: "matrix",
+      turnSourceTo: "!AbCdEf1234567890:example.org",
+      turnSourceAccountId: undefined,
+      turnSourceThreadId: undefined,
     });
   });
 
@@ -1503,6 +1523,10 @@ describe("cron tool", () => {
       channel: "telegram",
       to: "-1001234567890",
       threadId: "99",
+      turnSourceChannel: "matrix",
+      turnSourceTo: "   ",
+      turnSourceAccountId: undefined,
+      turnSourceThreadId: undefined,
     });
   });
 
