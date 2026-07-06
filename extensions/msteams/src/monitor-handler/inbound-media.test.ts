@@ -228,10 +228,12 @@ describe("resolveMSTeamsInboundMedia graph fallback trigger", () => {
     expect(buildMSTeamsGraphMessageUrls).not.toHaveBeenCalled();
   });
 
-  it("does NOT trigger Graph fallback when alwaysFetchGraphMessage is undefined (upstream default)", async () => {
-    // Default-off is the upstream behavior — tenants where Bot Framework
-    // delivers the HTML stub correctly should not pay an extra Graph round
-    // trip on every channel message.
+  it("does NOT trigger Graph fallback when alwaysFetchGraphMessage is undefined at this call boundary", async () => {
+    // Callee-level contract: `resolveMSTeamsInboundMedia` treats an
+    // explicitly-`undefined` flag as off. The message handler is what applies
+    // the default (upstream: off; Boon fork: on via
+    // `resolveMSTeamsAlwaysFetchGraphMessage`) before calling in here, so
+    // this assertion stays valid regardless of the caller's default.
     vi.mocked(downloadMSTeamsAttachments).mockResolvedValue([]);
     vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce([]);
     vi.mocked(downloadMSTeamsGraphMedia).mockClear();
