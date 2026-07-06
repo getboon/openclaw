@@ -99,6 +99,7 @@ import {
   wasMSTeamsMessageSentWithPersistence,
 } from "../sent-message-cache.js";
 import { resolveMSTeamsSenderAccess } from "./access.js";
+import { resolveMSTeamsAlwaysFetchGraphMessage } from "./graph-fallback-default.js";
 import { resolveMSTeamsInboundMedia } from "./inbound-media.js";
 import { resolveMSTeamsRouteSessionKey } from "./thread-session.js";
 
@@ -614,7 +615,9 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         channelData: activity.channelData,
       },
       log,
-      alwaysFetchGraphMessage: msteamsCfg?.alwaysFetchGraphMessage,
+      alwaysFetchGraphMessage: resolveMSTeamsAlwaysFetchGraphMessage(
+        msteamsCfg?.alwaysFetchGraphMessage,
+      ),
       preserveFilenames: (cfg as { media?: { preserveFilenames?: boolean } }).media
         ?.preserveFilenames,
     });
