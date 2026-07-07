@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.3
+
+Fork ABI guard: plugin API version compatibility recognizes the `-boon.N` correction channel.
+
+- Root cause: `@openclaw/msteams@2026.6.11` (and every other `@openclaw/*` plugin that declares `openclaw >=2026.6.11` via `openclaw.compat.pluginApi`) failed to install on Boon fork hosts with `PLUGIN_INSTALL_ERROR_CODE.INCOMPATIBLE_PLUGIN_API` — `plugin requires plugin API >=2026.6.11, but this OpenClaw runtime exposes 2026.6.11-boon.2`. The pre-install gate in `src/plugins/clawhub.ts` and the discovery-time gate in `src/plugins/discovery.ts` both consult `satisfiesPluginApiRange`, and its normalization regexes in `src/infra/clawhub.ts` only recognized `-N` / `-alpha.N` / `-beta.N` / `-rc.N`. `-boon.N` fell through, was treated as an unrecognized prerelease, and `2026.6.11-boon.2 < 2026.6.11` under semver.
+- Fix: extend `OPENCLAW_RELEASE_SUFFIX_PATTERN` and `OPENCLAW_NUMERIC_CORRECTION_PATTERN` to also match `-boon.\d+`. This mirrors how `parseOpenClawReleaseVersion` in `src/infra/npm-registry-spec.ts` already treats `-boon.N` as a stable correction rank.
+- Effect: `@openclaw/msteams`, `@openclaw/slack`, and every other externalized plugin that pins `openclaw >=2026.6.11` installs cleanly on `2026.6.11-boon.N` hosts. Unblocks the fork Teams plugin bump on the fleet and every future fork correction release.
+
 ## 2026.6.11-boon.2
 
 Fork default: `channels.msteams.alwaysFetchGraphMessage` defaults to `true` on the Boon fork.
