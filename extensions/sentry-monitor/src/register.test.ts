@@ -62,8 +62,11 @@ describe("registerSentryMonitor", () => {
 
   afterEach(() => {
     for (const k of ENV_KEYS) {
-      if (saved[k] === undefined) delete process.env[k];
-      else process.env[k] = saved[k];
+      if (saved[k] === undefined) {
+        delete process.env[k];
+      } else {
+        process.env[k] = saved[k];
+      }
     }
   });
 

@@ -59,9 +59,13 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
   // touching the per-event builders.
   const deployTags: Record<string, string> = {};
   const boonSkillsRef = process.env.BOON_SKILLS_REF;
-  if (boonSkillsRef) deployTags.boon_skills_ref = boonSkillsRef;
+  if (boonSkillsRef) {
+    deployTags.boon_skills_ref = boonSkillsRef;
+  }
   const deployWave = process.env.DEPLOY_WAVE || process.env.WAVE;
-  if (deployWave) deployTags.wave = deployWave;
+  if (deployWave) {
+    deployTags.wave = deployWave;
+  }
   Sentry.init({
     dsn,
     environment,
