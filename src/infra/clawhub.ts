@@ -601,9 +601,15 @@ function satisfiesSemverRange(version: string, range: string): boolean {
   return tokens.every((token) => satisfiesComparator(version, token));
 }
 
+// The Boon fork adds a `-boon.N` correction channel on top of upstream's
+// stable / stable-numeric-correction / alpha / beta / rc channels. Recognize
+// it here so `@openclaw/*` plugin peer ranges like `>=2026.6.11` accept a
+// `2026.6.11-boon.N` host as a valid consumer (matching how
+// `parseOpenClawReleaseVersion` in `src/infra/npm-registry-spec.ts` treats
+// `-boon.N` as a stable correction rank).
 const OPENCLAW_RELEASE_SUFFIX_PATTERN =
-  /^[vV]?(\d{4}\.[1-9]\d?\.[1-9]\d*)(?:-\d+|-(?:alpha|beta|rc)\.\d+)$/i;
-const OPENCLAW_NUMERIC_CORRECTION_PATTERN = /^[vV]?(\d{4}\.[1-9]\d?\.[1-9]\d*)-\d+$/;
+  /^[vV]?(\d{4}\.[1-9]\d?\.[1-9]\d*)(?:-\d+|-(?:alpha|beta|rc|boon)\.\d+)$/i;
+const OPENCLAW_NUMERIC_CORRECTION_PATTERN = /^[vV]?(\d{4}\.[1-9]\d?\.[1-9]\d*)(?:-\d+|-boon\.\d+)$/;
 
 function normalizeOpenClawNumericCorrectionForPluginApi(
   pluginApiVersion: string,

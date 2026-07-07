@@ -154,6 +154,20 @@ describe("clawhub helpers", () => {
     expect(satisfiesPluginApiRange("2026.5.2-beta.1", ">=2026.5.3")).toBe(false);
   });
 
+  it("treats Boon fork -boon.N correction versions as stable plugin API hosts", () => {
+    // Fork correction channel: `2026.6.11-boon.2` must satisfy `>=2026.6.11`
+    // so `@openclaw/msteams@2026.6.11` can install on the fork build without
+    // tripping `PLUGIN_INSTALL_ERROR_CODE.INCOMPATIBLE_PLUGIN_API`.
+    expect(satisfiesPluginApiRange("2026.6.11-boon.1", ">=2026.6.11")).toBe(true);
+    expect(satisfiesPluginApiRange("2026.6.11-boon.2", ">=2026.6.11")).toBe(true);
+    expect(satisfiesPluginApiRange("2026.6.11-boon.10", ">=2026.6.11")).toBe(true);
+    expect(satisfiesPluginApiRange("2026.6.11-boon.2", "^2026.6.11")).toBe(true);
+    expect(satisfiesPluginApiRange("2026.6.10-boon.5", ">=2026.6.11")).toBe(false);
+    // Explicit prerelease floor is preserved (mirrors the numeric-correction rule).
+    expect(satisfiesPluginApiRange("2026.6.11-boon.2", ">=2026.6.11-beta.2")).toBe(true);
+    expect(satisfiesPluginApiRange("2026.6.11-beta.1", ">=2026.6.11-boon.1")).toBe(false);
+  });
+
   it("preserves prerelease ordering for explicit plugin API prerelease floors", () => {
     expect(satisfiesPluginApiRange("2026.3.24-beta.1", ">=2026.3.24-beta.2")).toBe(false);
     expect(satisfiesPluginApiRange("2026.3.24-beta.2", ">=2026.3.24-beta.2")).toBe(true);
