@@ -40,11 +40,16 @@ jobs:
         startsWith(github.event.comment.body, '/claude-review ')))
     runs-on: ubuntu-latest
     continue-on-error: true
-    # No id-token: the action authenticates with ANTHROPIC_API_KEY, so OIDC is
-    # not needed; withholding it shrinks the privileged surface of this job.
+    # `id-token: write` is required by anthropics/claude-code-action@v1 even
+    # when `anthropic_api_key` is supplied — the action's token bootstrap step
+    # always calls `getIDToken`, and without it the run fails immediately with
+    # "Unable to get ACTIONS_ID_TOKEN_REQUEST_URL env variable". The rest of
+    # the job stays read-only aside from the pull-request write scope used to
+    # post review comments.
     permissions:
       actions: read
       contents: read
+      id-token: write
       pull-requests: write
     steps:
       - name: Get PR head ref
