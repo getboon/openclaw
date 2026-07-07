@@ -7,6 +7,7 @@ vi.mock("@sentry/node", () => ({
   init: vi.fn(),
   captureException: vi.fn(),
   captureMessage: vi.fn(),
+  setTags: vi.fn(),
   close: vi.fn(async () => true),
   onUncaughtExceptionIntegration: vi.fn(() => ({ name: "OnUncaughtException" })),
   onUnhandledRejectionIntegration: vi.fn(() => ({ name: "OnUnhandledRejection" })),
@@ -46,18 +47,26 @@ function makeApi(pluginConfig?: Record<string, unknown>) {
 }
 
 describe("registerSentryMonitor", () => {
-  const savedDsn = process.env.BOON_SENTRY_DSN;
+  // Snapshot every env var the plugin reads so a test can set them without
+  // leaking into sibling tests or inheriting a value from the real shell.
+  const ENV_KEYS = ["BOON_SENTRY_DSN", "BOON_SKILLS_REF", "DEPLOY_WAVE", "WAVE"] as const;
+  const saved: Record<string, string | undefined> = {};
 
   beforeEach(() => {
     vi.clearAllMocks();
-    delete process.env.BOON_SENTRY_DSN;
+    for (const k of ENV_KEYS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
   });
 
   afterEach(() => {
-    if (savedDsn === undefined) {
-      delete process.env.BOON_SENTRY_DSN;
-    } else {
-      process.env.BOON_SENTRY_DSN = savedDsn;
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) {
+        delete process.env[k];
+      } else {
+        process.env[k] = saved[k];
+      }
     }
   });
 
@@ -100,6 +109,28 @@ describe("registerSentryMonitor", () => {
     expect(initArg?.environment).toBe("host-x");
     expect(initArg?.release).toBe("1.2.3");
     expect(initArg?.tracesSampleRate).toBe(0);
+  });
+
+  it("does NOT set deploy tags when no deploy env vars are present (ENG-15261)", () => {
+    const { api } = makeApi({ dsn: "https://abc@o1.ingest.sentry.io/8" });
+    registerSentryMonitor(api);
+    expect(Sentry.setTags).not.toHaveBeenCalled();
+  });
+
+  it("sets boon_skills_ref + wave deploy tags from env (ENG-15261)", () => {
+    process.env.BOON_SKILLS_REF = "main";
+    process.env.DEPLOY_WAVE = "wave-2";
+    const { api } = makeApi({ dsn: "https://abc@o1.ingest.sentry.io/9" });
+    registerSentryMonitor(api);
+    expect(Sentry.setTags).toHaveBeenCalledWith({ boon_skills_ref: "main", wave: "wave-2" });
+  });
+
+  it("falls back to WAVE when DEPLOY_WAVE is unset, and omits an absent tag", () => {
+    process.env.WAVE = "wave-1";
+    const { api } = makeApi({ dsn: "https://abc@o1.ingest.sentry.io/10" });
+    registerSentryMonitor(api);
+    // boon_skills_ref unset → only wave is tagged (no empty-string key emitted)
+    expect(Sentry.setTags).toHaveBeenCalledWith({ wave: "wave-1" });
   });
 
   it("falls through an empty-string config dsn to the env var (|| not ??)", () => {

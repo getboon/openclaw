@@ -48,6 +48,24 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
   // whenever an operator sets a custom environment.
   const hostname = os.hostname();
   const environment = cfg.environment || hostname;
+  // Deploy coordinates (ENG-15261): `release` (fork version, below) already lets
+  // Sentry cluster a post-deploy regression by build — the arguijo signature was
+  // the same error across every host on one release. These tags add the finer
+  // rollout dimensions so a spike also attributes to a boon-skills ref and a
+  // specific wave. Read from env (same source as BOON_SENTRY_DSN above) so the
+  // fleet standup/sweep can stamp them without a plugin-config change; each is
+  // applied only when non-empty, so hosts that don't set them behave exactly as
+  // before. Set as fleet-wide tags at init → attached to every capture without
+  // touching the per-event builders.
+  const deployTags: Record<string, string> = {};
+  const boonSkillsRef = process.env.BOON_SKILLS_REF;
+  if (boonSkillsRef) {
+    deployTags.boon_skills_ref = boonSkillsRef;
+  }
+  const deployWave = process.env.DEPLOY_WAVE || process.env.WAVE;
+  if (deployWave) {
+    deployTags.wave = deployWave;
+  }
   Sentry.init({
     dsn,
     environment,
@@ -71,6 +89,11 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
       Sentry.contextLinesIntegration(),
     ],
   });
+
+  // Fleet-wide deploy tags on every subsequent capture (no-op when unset).
+  if (Object.keys(deployTags).length > 0) {
+    Sentry.setTags(deployTags);
+  }
 
   api.logger.info(
     `${PLUGIN_ID}: Sentry initialized (environment=${environment}${api.version ? `, release=${api.version}` : ""})`,
