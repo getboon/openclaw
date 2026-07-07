@@ -762,6 +762,7 @@ Key settings (see `/gateway/configuration` for shared channel patterns):
 - `channels.msteams.useManagedIdentity`: enable managed identity auth (federated mode).
 - `channels.msteams.managedIdentityClientId`: client ID for user-assigned managed identity.
 - `channels.msteams.sharePointSiteId`: SharePoint site ID for file uploads in group chats/channels (see [Sending files in group chats](#sending-files-in-group-chats)).
+- `channels.msteams.alwaysFetchGraphMessage`: always re-fetch the channel/group message via Microsoft Graph (in addition to the inbound Bot Framework activity) when the local media list is empty. Workaround for tenants where Bot Framework strips file refs (`<attachment id=...>` tags and `reference`-typed entries) from inbound activities even with RSC consent — see ENG-14349. Default: `false`. Costs one extra Graph round-trip per channel/group message with empty media; personal-chat conversations are unaffected.
 
 ## Routing and sessions
 

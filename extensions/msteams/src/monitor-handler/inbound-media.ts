@@ -39,7 +39,10 @@ export async function resolveMSTeamsInboundMedia(params: {
    * messages even when the inbound HTML body has no `<attachment id=...>`
    * stub. Workaround for tenants where Bot Framework strips file refs from
    * inbound activities (ENG-14349). Has no effect on personal-chat
-   * conversations. Default false (upstream behavior).
+   * conversations. This param is the resolved runtime value; the message
+   * handler applies `resolveMSTeamsAlwaysFetchGraphMessage` before calling
+   * in. Upstream fork default: `false`. Boon fork default: `true` (see
+   * `graph-fallback-default.ts`).
    */
   alwaysFetchGraphMessage?: boolean;
 }): Promise<MSTeamsInboundMedia[]> {

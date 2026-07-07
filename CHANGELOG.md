@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.2
+
+Fork default: `channels.msteams.alwaysFetchGraphMessage` defaults to `true` on the Boon fork.
+
+- Every Teams tenant in the Boon fleet observed the ENG-14349 Bot Framework stub-stripping regression — inbound activities arrive without the `<attachment id=...>` HTML stub AND without `reference`-typed entries even with RSC consent granted, so attachments silently vanish unless the Graph re-fetch path fires. Fork default flips upstream's opt-in default (kept off upstream so tenants where BF delivers the stub correctly don't pay per-message Graph latency); the Boon fleet does not have such tenants.
+- Retires the host-local msteams SP-PATCH previously baked in via gandalf-manager `scripts/fleet-msteams5.22-bump.sh`. Explicit `alwaysFetchGraphMessage: false` still opts out per host.
+
 ## 2026.6.11-boon.1
 
 Fork upgrade: merges upstream `v2026.6.11` into the Boon fork (`boon` remains the production source of truth), moving the fork from `2026.5.18` to `2026.6.11`.
