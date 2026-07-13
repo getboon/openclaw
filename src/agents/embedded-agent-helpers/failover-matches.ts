@@ -54,6 +54,14 @@ const CJK_AUTH_ERROR_PATTERNS = [
   /\bce-011\b/i,
 ] as const satisfies readonly ErrorPattern[];
 
+// Boon LLM gateway token-allocation exhaustion. The gateway rejects an exhausted
+// plan with HTTP 429 + {"error":"allocation_exhausted","message":"Token
+// allocation exhausted. …"}. Match the structured code (and the deferred
+// allocation_exhausted -> balance_exhausted rename) plus the human phrase so
+// bare plain-text variants classify too. Without this the error falls through to
+// the raw-passthrough net and renders as bare "LLM request failed.".
+const BOON_GATEWAY_EXHAUSTED_RE =
+  /"error"\s*:\s*"(?:allocation|balance)_exhausted"|\btoken allocation exhausted\b/i;
 const ZAI_BILLING_CODE_1311_RE = /"code"\s*:\s*1311\b/;
 const ZAI_AUTH_CODE_1113_RE = /"code"\s*:\s*1113\b/;
 const VOLCENGINE_INVALID_SUBSCRIPTION_RE = /"code"\s*:\s*"InvalidSubscription"/i;
@@ -229,6 +237,8 @@ const ERROR_PATTERNS = {
     ZAI_BILLING_CODE_1311_RE,
     /\bcurrent\s+subscription\s+plan\b.*\b(?:does\s+not|doesn't|not)\b.*\binclude\s+access\b/i,
     /\bmodel\b.*\bnot\s+available\b.*\bcurrent\s+plan\b/i,
+    // Boon LLM gateway plan/token exhaustion.
+    BOON_GATEWAY_EXHAUSTED_RE,
   ],
   authPermanent: HIGH_CONFIDENCE_AUTH_PERMANENT_PATTERNS,
   auth: [
@@ -307,7 +317,8 @@ export function isBillingErrorMessage(raw: string): boolean {
     return (
       BILLING_ERROR_HARD_402_RE.test(value) ||
       ZAI_BILLING_CODE_1311_RE.test(value) ||
-      VOLCENGINE_INVALID_SUBSCRIPTION_RE.test(value)
+      VOLCENGINE_INVALID_SUBSCRIPTION_RE.test(value) ||
+      BOON_GATEWAY_EXHAUSTED_RE.test(value)
     );
   }
   if (matchesErrorPatterns(value, ERROR_PATTERNS.billing)) {

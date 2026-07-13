@@ -145,6 +145,71 @@ describe("Volcengine Coding Plan subscription errors", () => {
   });
 });
 
+describe("Boon LLM gateway token exhaustion", () => {
+  // The boon-llm-gateway rejects an exhausted allocation with HTTP 429 and body
+  // {"error":"allocation_exhausted","message":"Token allocation exhausted. Contact sales to upgrade your plan."}
+  // Without recognizing this vocabulary the error renders as bare "LLM request
+  // failed." instead of the curated billing copy.
+  const GATEWAY_429_BODY =
+    '{"error":"allocation_exhausted","message":"Token allocation exhausted. Contact sales to upgrade your plan."}';
+
+  it("classifies the allocation_exhausted 429 body as billing", () => {
+    expect(isBillingErrorMessage(GATEWAY_429_BODY)).toBe(true);
+  });
+
+  it("classifies the plain-string exhaustion message as billing", () => {
+    // Robustness: the phrase should classify even without the JSON envelope.
+    expect(
+      isBillingErrorMessage("Token allocation exhausted. Contact sales to upgrade your plan."),
+    ).toBe(true);
+  });
+
+  it("classifies the balance_exhausted rename variant as billing", () => {
+    // The gateway has a deferred rename allocation_exhausted -> balance_exhausted;
+    // match both codes so the fix survives it.
+    expect(isBillingErrorMessage('{"error":"balance_exhausted","message":"quota used up"}')).toBe(
+      true,
+    );
+  });
+
+  it("classifies a >512-char exhaustion body as billing", () => {
+    // A gateway/proxy may append a request id, trace, or aggregate the 429 into a
+    // larger envelope, pushing the body past BILLING_ERROR_MAX_LENGTH. The length
+    // guard must still recognize the structured exhaustion code, matching how the
+    // sibling ZAI 1311 / Volcengine codes are handled.
+    const raw = JSON.stringify({
+      error: "allocation_exhausted",
+      message: "Token allocation exhausted. Contact sales to upgrade your plan.",
+      requestId: "x".repeat(700),
+    });
+    expect(raw.length).toBeGreaterThan(512);
+    expect(isBillingErrorMessage(raw)).toBe(true);
+  });
+
+  it("classifies the structured code with whitespace around the colon", () => {
+    // The gateway body arrives compact, but proxies may pretty-print it.
+    expect(isBillingErrorMessage('{ "error" : "allocation_exhausted" }')).toBe(true);
+  });
+
+  it("does not misclassify the exhaustion body as rate_limit or auth", () => {
+    expect(isRateLimitErrorMessage(GATEWAY_429_BODY)).toBe(false);
+    expect(isAuthErrorMessage(GATEWAY_429_BODY)).toBe(false);
+  });
+
+  it("resolves the failover reason to billing", () => {
+    expect(classifyFailoverReason(GATEWAY_429_BODY)).toBe("billing");
+  });
+
+  it("does not treat an unrelated 'exhausted' error as billing", () => {
+    // Guard against over-matching: only the structured exhaustion code or the
+    // exact human phrase should route to billing, not any use of "exhausted".
+    expect(
+      isBillingErrorMessage('{"error":"resource_exhausted","message":"retries exhausted"}'),
+    ).toBe(false);
+    expect(isBillingErrorMessage("connection pool exhausted")).toBe(false);
+  });
+});
+
 describe("agent harness provider mismatch (#91710)", () => {
   it("classifies harness provider rejection as format error", () => {
     expect(

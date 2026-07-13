@@ -4,7 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { MALFORMED_STREAMING_FRAGMENT_ERROR_MESSAGE } from "../../shared/assistant-error-format.js";
 import { makeAssistantMessageFixture } from "../test-helpers/assistant-message-fixtures.js";
-import { formatAssistantErrorText, isLikelyContextOverflowError } from "./errors.js";
+import {
+  formatAssistantErrorText,
+  formatUserFacingAssistantErrorText,
+  isLikelyContextOverflowError,
+} from "./errors.js";
 
 const { toolPolicyAuditInfo } = vi.hoisted(() => ({
   toolPolicyAuditInfo: vi.fn(),
@@ -95,6 +99,52 @@ describe("formatAssistantErrorText streaming JSON parse classification", () => {
         sandboxMode: "non-main",
       },
     );
+  });
+});
+
+describe("formatUserFacingAssistantErrorText Boon gateway token exhaustion", () => {
+  const makeGatewayError = (errorMessage: string): AssistantMessage =>
+    makeAssistantMessageFixture({
+      provider: "boon-llm-gateway",
+      model: "claude-opus-4-8",
+      errorMessage,
+      content: [],
+    });
+  const opts = { provider: "boon-llm-gateway", model: "claude-opus-4-8" };
+
+  it("renders curated billing copy for the allocation_exhausted 429 body", () => {
+    // The customer must see actionable billing copy, not the bare generic string.
+    const msg = makeGatewayError(
+      '{"error":"allocation_exhausted","message":"Token allocation exhausted. Contact sales to upgrade your plan."}',
+    );
+    const text = formatUserFacingAssistantErrorText(msg, opts);
+    expect(text).toContain("billing error");
+    expect(text).not.toBe("LLM request failed.");
+  });
+
+  it("renders curated billing copy even for a bare plain-string exhaustion message", () => {
+    const msg = makeGatewayError("Token allocation exhausted. Contact sales to upgrade your plan.");
+    const text = formatUserFacingAssistantErrorText(msg, opts);
+    expect(text).toContain("billing error");
+    expect(text).not.toBe("LLM request failed.");
+  });
+
+  it("keeps the schema-rejection path producing its dedicated copy (regression guard)", () => {
+    const msg = makeGatewayError(
+      '{"type":"error","error":{"type":"invalid_request_error","message":"tool_use ids were found without tool_result blocks"}}',
+    );
+    expect(formatUserFacingAssistantErrorText(msg, opts)).toBe(
+      "LLM request failed: provider rejected the request schema or tool payload.",
+    );
+  });
+
+  it("preserves detail in the assistant-facing formatter for logs", () => {
+    // Internal/log fidelity must not regress: the detailed text stays available
+    // via formatAssistantErrorText even though the user sees curated copy.
+    const msg = makeGatewayError(
+      '{"error":"allocation_exhausted","message":"Token allocation exhausted. Contact sales to upgrade your plan."}',
+    );
+    expect(formatAssistantErrorText(msg, opts)).toContain("billing error");
   });
 });
 
