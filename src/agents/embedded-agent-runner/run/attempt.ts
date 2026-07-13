@@ -421,8 +421,10 @@ import {
   acquireEmbeddedAttemptSessionFileOwner,
   EmbeddedAttemptSessionTakeoverError,
   type EmbeddedAttemptSessionFileOwner,
+  type SessionFileFingerprint,
   createEmbeddedAttemptSessionLockController,
   installPromptSubmissionLockRelease,
+  readSessionFileFingerprintSync,
 } from "./attempt.session-lock.js";
 import {
   createYieldAbortedResponse,
@@ -2199,8 +2201,22 @@ export async function runEmbeddedAttempt(
         suppressTranscriptOnlyAssistantPersistence:
           params.suppressTranscriptOnlyAssistantPersistence,
         suppressAssistantErrorPersistence: params.suppressAssistantErrorPersistence,
-        onMessagePersisted: () => {
-          sessionLockController.refreshAfterOwnedSessionWrite();
+        // Capture the on-disk fingerprint immediately BEFORE pi's append so the
+        // controller can register the append as an owned write keyed on the real
+        // pre-append state (not the controller's stale fenceFingerprint). This is
+        // the fence-trust gate for the paired-lane session-takeover race on long
+        // turns (upstream #86572 / fork #86584 — dropped in the 6.11 merge).
+        beforeMessagePersist: () => readSessionFileFingerprintSync(params.sessionFile),
+        onMessagePersisted: (_message, { beforeWriteSnapshot }) => {
+          // publishOwnedPostMessageWrite fully supersedes refreshAfterOwnedSessionWrite
+          // here: on the fence-active path it registers the owned write keyed on the
+          // FRESH pre-append snapshot (not the stale fenceFingerprint), which both
+          // stops false takeovers on the run's own write AND stops a real external
+          // takeover from being laundered as owned. It also handles the pre-fence
+          // user-message trusted-state branch.
+          sessionLockController.publishOwnedPostMessageWrite(
+            beforeWriteSnapshot as SessionFileFingerprint | undefined,
+          );
         },
         withCompactionPersistence: (append, validateAppend) =>
           sessionLockController.withOwnedSessionFileWrite(append, validateAppend),

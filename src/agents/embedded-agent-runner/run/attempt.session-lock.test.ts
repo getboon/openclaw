@@ -31,6 +31,7 @@ import {
   createEmbeddedAttemptSessionLockController,
   EmbeddedAttemptSessionTakeoverError,
   installPromptSubmissionLockRelease,
+  readSessionFileFingerprintSync,
   resetEmbeddedAttemptSessionFileOwnersForTest,
 } from "./attempt.session-lock.js";
 
@@ -129,6 +130,89 @@ describe("embedded attempt session lock lifecycle", () => {
     });
     expect(await second.readTrustedCurrentSessionFileSnapshot()).toBeDefined();
     await second.dispose();
+  });
+
+  it("does not trip the fence on the lane's own append registered via publishOwnedPostMessageWrite (#86572 paired-lane race)", async () => {
+    // Reproduces the gandalf 6.11 regression: after the prompt lock is released,
+    // the run appends to its OWN transcript. The persist guard captures the
+    // pre-append fingerprint and calls publishOwnedPostMessageWrite so the
+    // subsequent write-lock fence accepts the append as owned instead of
+    // throwing EmbeddedAttemptSessionTakeoverError on the run's own write.
+    const sessionFile = await createTempSessionFile();
+    const release = vi.fn(async () => {});
+    const controller = await createEmbeddedAttemptSessionLockController({
+      acquireSessionWriteLock: vi.fn(async () => ({ release })),
+      lockOptions: { ...lockOptions, sessionFile },
+    });
+
+    await controller.releaseForPrompt();
+    // Emulate the persist guard: snapshot BEFORE the append, append, then publish.
+    const beforeWrite = readSessionFileFingerprintSync(sessionFile);
+    await fs.appendFile(sessionFile, '{"type":"message","id":"own-append"}\n', "utf8");
+    controller.publishOwnedPostMessageWrite(beforeWrite);
+
+    await expect(controller.withSessionWriteLock(() => "own-write")).resolves.toBe("own-write");
+    expect(controller.hasSessionTakeover()).toBe(false);
+
+    const cleanupLock = await controller.acquireForCleanup();
+    await cleanupLock.release();
+  });
+
+  it("still trips the fence when an external write precedes the lane's append (publish fails closed)", async () => {
+    // Fail-closed guard: if a FOREIGN write lands between prompt release and the
+    // lane's own append, the captured beforeWrite is untrusted, publish records
+    // nothing, and the fence correctly reports the takeover rather than laundering
+    // the external mutation as owned (the #86584 review risk: never suppress a
+    // real takeover into a silently dropped reply).
+    const sessionFile = await createTempSessionFile();
+    const release = vi.fn(async () => {});
+    const controller = await createEmbeddedAttemptSessionLockController({
+      acquireSessionWriteLock: vi.fn(async () => ({ release })),
+      lockOptions: { ...lockOptions, sessionFile },
+    });
+
+    await controller.releaseForPrompt();
+    // Foreign writer mutates the file first...
+    await fs.appendFile(sessionFile, '{"type":"message","id":"external"}\n', "utf8");
+    // ...then the lane snapshots (now-untrusted state) and appends its own line.
+    const beforeWrite = readSessionFileFingerprintSync(sessionFile);
+    await fs.appendFile(sessionFile, '{"type":"message","id":"own-append"}\n', "utf8");
+    controller.publishOwnedPostMessageWrite(beforeWrite);
+
+    await expect(controller.withSessionWriteLock(() => "late-write")).rejects.toBeInstanceOf(
+      EmbeddedAttemptSessionTakeoverError,
+    );
+    expect(controller.hasSessionTakeover()).toBe(true);
+  });
+
+  it("does not launder an external takeover when the persist hook only calls publishOwnedPostMessageWrite (production sequence)", async () => {
+    // Guards the Codex-found bug: the previous wiring called
+    // refreshAfterOwnedSessionWrite() (stale-fenceFingerprint keyed) BEFORE the
+    // fresh-snapshot publish, which recorded the combined external+own state as
+    // owned and advanced the fence — laundering a real takeover into a dropped
+    // reply. Production now calls ONLY publishOwnedPostMessageWrite. This test
+    // pins that: after an external write, the exact production hook sequence must
+    // still trip the takeover. If someone re-adds refreshAfterOwnedSessionWrite()
+    // to that callsite, this stays green only because we assert via the same
+    // fresh-snapshot method — so also keep the wiring assertion in attempt.ts review.
+    const sessionFile = await createTempSessionFile();
+    const release = vi.fn(async () => {});
+    const controller = await createEmbeddedAttemptSessionLockController({
+      acquireSessionWriteLock: vi.fn(async () => ({ release })),
+      lockOptions: { ...lockOptions, sessionFile },
+    });
+
+    await controller.releaseForPrompt();
+    await fs.appendFile(sessionFile, '{"type":"message","id":"external"}\n', "utf8");
+    // Exact production hook order: beforeMessagePersist snapshot → append → publish.
+    const beforeWrite = readSessionFileFingerprintSync(sessionFile);
+    await fs.appendFile(sessionFile, '{"type":"message","id":"own-append"}\n', "utf8");
+    controller.publishOwnedPostMessageWrite(beforeWrite);
+
+    await expect(controller.withSessionWriteLock(() => "late-write")).rejects.toBeInstanceOf(
+      EmbeddedAttemptSessionTakeoverError,
+    );
+    expect(controller.hasSessionTakeover()).toBe(true);
   });
 
   it("serializes embedded attempts that share a session file owner", async () => {
