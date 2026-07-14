@@ -82,6 +82,15 @@ const MODEL_NOT_FOUND_USER_TEXT =
 const MAX_FAILOVER_DETAIL_CANDIDATES = 12;
 const MAX_FAILOVER_DETAIL_CHARS = 1_000;
 
+// boon-llm-gateway rejects an exhausted token allocation with HTTP 429 +
+// {"error":"allocation_exhausted",...}. The OpenAI SDK collapses that body to
+// `429 "allocation_exhausted"` (status-prefixed, message dropped), so match the
+// bare code and reconstruct the user copy. `allocation_exhausted` is a provider
+// error-code contract (boon-llm-gateway middleware/quota.go).
+const BOON_GATEWAY_EXHAUSTED_RE = /\ballocation_exhausted\b/;
+const BOON_GATEWAY_EXHAUSTED_USER_TEXT =
+  "LLM error allocation_exhausted: Token allocation exhausted. Contact sales to upgrade your plan.";
+
 /** Detect provider errors that require reasoning to stay enabled. */
 export function isReasoningConstraintErrorMessage(raw: string): boolean {
   if (!raw) {
@@ -1372,6 +1381,12 @@ export function formatAssistantErrorText(
     return diskSpaceCopy;
   }
 
+  // Must run before the 429 rate-limit routing below: the SDK renders this as
+  // `429 "allocation_exhausted"`, which would otherwise classify as rate_limit.
+  if (BOON_GATEWAY_EXHAUSTED_RE.test(raw)) {
+    return BOON_GATEWAY_EXHAUSTED_USER_TEXT;
+  }
+
   if (providerRuntimeFailureKind === "auth_refresh") {
     return "Authentication refresh failed. Re-authenticate this provider and try again.";
   }
@@ -1552,16 +1567,7 @@ export function isRawAssistantErrorPassthrough(params: {
   if (!friendlyError || !rawError) {
     return false;
   }
-  const parsedInfo = parseApiErrorInfo(rawError);
-  // boon-llm-gateway token exhaustion: the raw "LLM error allocation_exhausted: …"
-  // text IS the intended user copy (pre-6.11 behavior), not a raw leak. Returning
-  // false keeps formatUserFacingAssistantErrorText from replacing it with the
-  // generic "LLM request failed.". allocation_exhausted is a provider error-code
-  // contract (cf. ZAI 1311 / Volcengine InvalidSubscription).
-  if (parsedInfo?.type === "allocation_exhausted") {
-    return false;
-  }
-  const parsedMessage = parsedInfo?.message?.trim();
+  const parsedMessage = parseApiErrorInfo(rawError)?.message?.trim();
   const leadingStatusRest = extractLeadingHttpStatus(rawError)?.rest?.trim();
   const hasRawDerivedProviderPrefix =
     friendlyError.startsWith("LLM request rejected:") ||

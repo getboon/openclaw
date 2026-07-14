@@ -5,12 +5,9 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { MALFORMED_STREAMING_FRAGMENT_ERROR_MESSAGE } from "../../shared/assistant-error-format.js";
 import { makeAssistantMessageFixture } from "../test-helpers/assistant-message-fixtures.js";
 import {
-  classifyFailoverReason,
   formatAssistantErrorText,
   formatUserFacingAssistantErrorText,
-  isBillingErrorMessage,
   isLikelyContextOverflowError,
-  isRawAssistantErrorPassthrough,
 } from "./errors.js";
 
 const { toolPolicyAuditInfo } = vi.hoisted(() => ({
@@ -116,50 +113,52 @@ describe("isLikelyContextOverflowError", () => {
 });
 
 describe("boon-llm-gateway token allocation exhausted", () => {
-  const GATEWAY_BODY =
+  // Real wire shape: the gateway sends HTTP 429 + {"error":"allocation_exhausted",
+  // "message":"..."}, but the OpenAI SDK collapses that to `429 "allocation_exhausted"`
+  // (status-prefixed, message dropped). Verified end-to-end against the installed
+  // SDK and boon-llm-gateway middleware/quota.go.
+  const SDK_SHAPE = '429 "allocation_exhausted"';
+  const HTTP_SHAPE = 'HTTP 429: {"error":"allocation_exhausted","message":"x"}';
+  const BARE_JSON =
     '{"error":"allocation_exhausted","message":"Token allocation exhausted. Contact sales to upgrade your plan."}';
   const EXPECTED =
     "LLM error allocation_exhausted: Token allocation exhausted. Contact sales to upgrade your plan.";
-  const makeGatewayError = (): AssistantMessage =>
+  const makeGatewayError = (errorMessage: string): AssistantMessage =>
     makeAssistantMessageFixture({
       provider: "boon-llm-gateway",
       model: "claude-opus-4-8",
-      errorMessage: GATEWAY_BODY,
+      errorMessage,
       content: [],
     });
   const opts = { provider: "boon-llm-gateway", model: "claude-opus-4-8" };
 
-  it("formatAssistantErrorText renders the raw legacy string (reaches the raw path)", () => {
-    // Guards that this error is NOT billing-classified; if it were, billing copy
-    // would return before the raw path and the passthrough exception never runs.
-    expect(formatAssistantErrorText(makeGatewayError(), opts)).toBe(EXPECTED);
+  it("renders the exhaustion copy for the real SDK-collapsed shape", () => {
+    // Core guard: this shape otherwise classifies as rate_limit → "API rate limit
+    // reached", never surfacing the exhaustion reason to the user.
+    expect(formatAssistantErrorText(makeGatewayError(SDK_SHAPE), opts)).toBe(EXPECTED);
   });
 
-  it("isRawAssistantErrorPassthrough does not suppress the allocation_exhausted string", () => {
-    expect(
-      isRawAssistantErrorPassthrough({ friendlyError: EXPECTED, rawError: GATEWAY_BODY }),
-    ).toBe(false);
-  });
-
-  it("formatUserFacingAssistantErrorText surfaces the legacy string instead of the generic fallback", () => {
-    // Core regression guard: without the exception this returns "LLM request failed.".
-    const text = formatUserFacingAssistantErrorText(makeGatewayError(), opts);
+  it("renders the exhaustion copy end-to-end (through the passthrough net)", () => {
+    const text = formatUserFacingAssistantErrorText(makeGatewayError(SDK_SHAPE), opts);
     expect(text).toBe(EXPECTED);
     expect(text).not.toBe("LLM request failed.");
+    expect(text).not.toContain("rate limit");
   });
 
-  it("stays unclassified for failover (legacy behavior: no billing lane)", () => {
-    expect(classifyFailoverReason(GATEWAY_BODY)).toBe(null);
-    expect(isBillingErrorMessage(GATEWAY_BODY)).toBe(false);
+  it("also handles the HTTP-prefixed and bare-JSON shapes", () => {
+    // Robustness across however the code is surfaced; the match is on the code, not the shape.
+    expect(formatAssistantErrorText(makeGatewayError(HTTP_SHAPE), opts)).toBe(EXPECTED);
+    expect(formatAssistantErrorText(makeGatewayError(BARE_JSON), opts)).toBe(EXPECTED);
   });
 
-  it("does not suppress-exempt an unrelated exhausted code", () => {
-    // The exception is keyed strictly to allocation_exhausted; a different code
-    // must still be governed by the normal passthrough rules.
-    const otherBody = '{"error":"resource_exhausted","message":"retries exhausted"}';
-    const otherFriendly = "LLM error resource_exhausted: retries exhausted";
-    expect(
-      isRawAssistantErrorPassthrough({ friendlyError: otherFriendly, rawError: otherBody }),
-    ).toBe(true);
+  it("does not match unrelated exhausted codes", () => {
+    // Guard against over-matching: resource_exhausted / connection pool exhausted
+    // must not hit the gateway branch.
+    expect(formatAssistantErrorText(makeGatewayError('429 "resource_exhausted"'), opts)).not.toBe(
+      EXPECTED,
+    );
+    expect(formatAssistantErrorText(makeGatewayError("connection pool exhausted"), opts)).not.toBe(
+      EXPECTED,
+    );
   });
 });
