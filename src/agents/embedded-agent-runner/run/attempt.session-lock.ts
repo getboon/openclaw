@@ -115,7 +115,7 @@ type PromptReleaseStreamFn = ((...args: unknown[]) => unknown) & {
   __openclawSessionLockPromptReleaseInstalled?: boolean;
 };
 
-type SessionFileFingerprint =
+export type SessionFileFingerprint =
   | { exists: false }
   | {
       exists: true;
@@ -1096,7 +1096,7 @@ async function readSessionFileFingerprint(sessionFile: string): Promise<SessionF
   }
 }
 
-function readSessionFileFingerprintSync(sessionFile: string): SessionFileFingerprint {
+export function readSessionFileFingerprintSync(sessionFile: string): SessionFileFingerprint {
   try {
     const stat = statSync(sessionFile, { bigint: true });
     return {
@@ -1132,6 +1132,7 @@ export type EmbeddedAttemptSessionLockController = {
   releaseForPrompt(): Promise<void>;
   releaseHeldLockForAbort(): Promise<void>;
   refreshAfterOwnedSessionWrite(): void;
+  publishOwnedPostMessageWrite(beforeWrite: SessionFileFingerprint | undefined): void;
   withOwnedSessionFileWrite<T>(
     run: () => T,
     validateAppend?: SessionFileWriteAppendValidator<T>,
@@ -1593,6 +1594,50 @@ export async function createEmbeddedAttemptSessionLockController(params: {
     }
   }
 
+  function publishOwnedPostMessageWrite(beforeWrite: SessionFileFingerprint | undefined): void {
+    // Called synchronously from the session-persistence guard's `onMessagePersisted`
+    // hook, right after pi's `sessionManager.appendMessage` → `appendFileSync`.
+    // `beforeWrite` is the file fingerprint captured immediately BEFORE that append
+    // (via `beforeMessagePersist`). Registers the post-write state as an OWNED write so
+    // the next `assertSessionFileFence` inside `withSessionWriteLock` / `reacquireAfterPrompt`
+    // accepts the lane's own append via the owned-write match path instead of tripping
+    // a takeover on it.
+    //
+    // This REPLACES `refreshAfterOwnedSessionWrite()` on the fence-active path. That
+    // method derived its `beforeWrite` from the controller's own stale `fenceFingerprint`
+    // field, not from a fingerprint read immediately before *this* append. On a long
+    // cron turn whose two nested async lanes each append (the paired-lane race,
+    // upstream #86572), the stale field can diverge from the real pre-append on-disk
+    // state, so either (a) the owned write is never registered and the peer lane's
+    // fence throws `EmbeddedAttemptSessionTakeoverError` on the run's OWN write, or —
+    // worse — (b) after a genuine external write it records the combined external+own
+    // state as owned and advances the fence, *laundering* a real takeover into a
+    // silently dropped reply. Keying on a fresh pre-append fingerprint closes both.
+    // This restores the fork [#86584] mechanism dropped in the 6.11 merge, reusing
+    // 6.11's hardened `publishOwnedSessionFileFenceSync` trust gate.
+    if (takeoverDetected) {
+      return;
+    }
+    if (!fenceActive) {
+      // User-message persistence occurs before the prompt fence activates. The
+      // retained session lock owns that write, so publish its exact state for the
+      // next attempt before release establishes the active fence (mirrors the
+      // pre-fence branch of the former `refreshAfterOwnedSessionWrite`).
+      const fingerprint = readSessionFileFingerprintSync(params.lockOptions.sessionFile);
+      setFenceGeneration(recordTrustedSessionFileState(sessionFileFenceKey, fingerprint));
+      return;
+    }
+    if (beforeWrite === undefined) {
+      return;
+    }
+    // Fail-closed: `publishOwnedSessionFileFenceSync` records nothing (and does NOT
+    // advance the fence) unless `beforeWrite` matches the active fence or a recorded
+    // trusted state. If an external mutation landed before pi's append, the freshly
+    // captured `beforeWrite` reflects that untrusted state → no publish → the
+    // subsequent fence still trips the genuine takeover.
+    publishOwnedSessionFileFenceSync({ beforeWrite, result: undefined });
+  }
+
   const noopLock: SessionLock = { release: async () => {} };
 
   async function releaseHeldLockWithFence(): Promise<void> {
@@ -1962,6 +2007,7 @@ export async function createEmbeddedAttemptSessionLockController(params: {
       fenceFingerprint = fingerprint;
       fenceSnapshot = { fingerprint };
     },
+    publishOwnedPostMessageWrite,
     withOwnedSessionFileWrite<T>(
       run: () => T,
       validateAppend?: SessionFileWriteAppendValidator<T>,
