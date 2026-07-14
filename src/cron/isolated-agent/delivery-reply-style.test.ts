@@ -16,15 +16,16 @@ function jobWithReplyStyle(replyStyle?: "thread" | "top-level"): CronJob {
 }
 
 describe("resolveCronDeliveryThreadSuppressed", () => {
-  it("suppresses threading when the job asks for a top-level completion post", () => {
+  it("suppresses threading (true) when the job asks for a top-level completion post", () => {
     expect(resolveCronDeliveryThreadSuppressed(jobWithReplyStyle("top-level"))).toBe(true);
   });
 
-  it("does not suppress threading when the job forces thread replies", () => {
+  it("forces threading (false) when the job asks for thread replies", () => {
+    // Distinct from unset: false forces threading even when the channel default is top-level.
     expect(resolveCronDeliveryThreadSuppressed(jobWithReplyStyle("thread"))).toBe(false);
   });
 
-  it("leaves threading to the channel default when replyStyle is unset", () => {
-    expect(resolveCronDeliveryThreadSuppressed(jobWithReplyStyle())).toBe(false);
+  it("returns undefined (keep channel default) when replyStyle is unset", () => {
+    expect(resolveCronDeliveryThreadSuppressed(jobWithReplyStyle())).toBeUndefined();
   });
 });

@@ -1064,7 +1064,9 @@ function mergeCronDelivery(
   }
   if ("replyStyle" in patch) {
     // null clears the override; a value sets it. undefined leaves existing intact.
-    next.replyStyle = patch.replyStyle ?? undefined;
+    // Webhook delivery never threads, so keep the override cleared in that mode
+    // even when the same patch sets both mode:webhook and replyStyle.
+    next.replyStyle = next.mode === "webhook" ? undefined : (patch.replyStyle ?? undefined);
   }
   if ("accountId" in patch) {
     next.accountId = normalizeOptionalString(patch.accountId);

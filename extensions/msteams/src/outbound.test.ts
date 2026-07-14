@@ -459,6 +459,24 @@ describe("msteamsOutbound cfg threading", () => {
     });
   });
 
+  it("forwards threadSuppressed:false as replyStyleOverride:thread to force threading", async () => {
+    // Bidirectional (ENG-14117): false must force threading even when the channel
+    // default is top-level, so it maps to an explicit "thread" override.
+    await requireSendText()({
+      cfg,
+      to: "conversation:abc",
+      text: "forced thread",
+      threadSuppressed: false,
+    });
+
+    expect(mocks.sendMessageMSTeams).toHaveBeenCalledWith({
+      cfg,
+      to: "conversation:abc",
+      text: "forced thread",
+      replyStyleOverride: "thread",
+    });
+  });
+
   it("omits replyStyleOverride when threadSuppressed is absent (no behavior change)", async () => {
     await requireSendText()({
       cfg,

@@ -68,6 +68,7 @@ const CRON_SCHEDULE_KINDS = ["at", "every", "cron"] as const;
 const CRON_WAKE_MODES = ["now", "next-heartbeat"] as const;
 const CRON_PAYLOAD_KINDS = ["systemEvent", "agentTurn"] as const;
 const CRON_DELIVERY_MODES = ["none", "announce", "webhook"] as const;
+const CRON_REPLY_STYLES = ["thread", "top-level"] as const;
 const CRON_RUN_MODES = ["due", "force"] as const;
 
 const REMINDER_CONTEXT_MESSAGES_MAX = 10;
@@ -105,6 +106,15 @@ function failureDestinationModeSchema(params: { nullableClears: boolean }) {
     ? [Type.Literal("announce"), Type.Literal("webhook"), Type.Null()]
     : [Type.Literal("announce"), Type.Literal("webhook")];
   return Type.Optional(Type.Union(variants));
+}
+
+function deliveryReplyStyleSchema(params: { nullableClears: boolean }) {
+  const description =
+    'Reply style: "top-level" posts a fresh channel message, "thread" forces threading (MS Teams)';
+  const variants = params.nullableClears
+    ? [...CRON_REPLY_STYLES.map((style) => Type.Literal(style)), Type.Null()]
+    : CRON_REPLY_STYLES.map((style) => Type.Literal(style));
+  return Type.Optional(Type.Union(variants, { description }));
 }
 
 function cronPayloadObjectSchema(params: { model: TSchema; toolsAllow: TSchema }) {
@@ -196,6 +206,7 @@ function cronDeliverySchema(params: { nullableClears: boolean }) {
           nullableClears: params.nullableClears,
         }),
         threadId: deliveryThreadIdSchema({ nullableClears: params.nullableClears }),
+        replyStyle: deliveryReplyStyleSchema({ nullableClears: params.nullableClears }),
         bestEffort: Type.Optional(Type.Boolean()),
         accountId: deliveryStringSchema({
           description: "Delivery account",
@@ -820,10 +831,11 @@ PAYLOAD TYPES (payload.kind):
   { "kind": "agentTurn", "message": "<prompt>", "model": "<optional>", "thinking": "<optional>", "timeoutSeconds": <optional, 0=no timeout> }
 
 DELIVERY (top-level):
-  { "mode": "none|announce|webhook", "channel": "<optional>", "to": "<optional>", "threadId": "<optional>", "bestEffort": <optional-bool> }
+  { "mode": "none|announce|webhook", "channel": "<optional>", "to": "<optional>", "threadId": "<optional>", "replyStyle": "thread|top-level (optional)", "bestEffort": <optional-bool> }
   - isolated agentTurn default when omitted: "announce"
   - announce: send to chat channel; isolated/current/session only; optional channel/to
   - threadId: chat thread/topic id
+  - replyStyle: "top-level" posts a fresh channel message (MS Teams); "thread" forces threading; omit for channel default
   - webhook: POST finished-run event to delivery.to URL
   - Specific chat/recipient: set announce delivery.channel/to; do not call messaging tools inside run.
 

@@ -14,6 +14,7 @@ import {
   type CronDeliveryPlan,
   resolveCronDeliveryPlan,
 } from "./delivery-plan.js";
+import { replyStyleToThreadSuppressed } from "./isolated-agent/delivery-reply-style.js";
 import {
   resolveDeliveryTarget,
   type DeliveryTargetResolution,
@@ -122,9 +123,10 @@ async function deliverCronAnnouncePayload(params: {
     to: params.delivery.resolvedTarget.to,
     accountId: params.delivery.resolvedTarget.accountId,
     threadId: params.delivery.resolvedTarget.threadId,
-    // ENG-14117: top-level posts a fresh channel-root message; channels that
-    // thread (MS Teams) map this to a per-send top-level override.
-    threadSuppressed: params.replyStyle === "top-level",
+    // ENG-14117: tri-state top-level intent; channels that thread (MS Teams) map
+    // it to a per-send override — top-level posts a fresh channel-root message,
+    // thread forces threading even when the channel default is top-level.
+    threadSuppressed: replyStyleToThreadSuppressed(params.replyStyle),
     payloads: [{ text: params.message }],
     session: params.delivery.session,
     identity: params.delivery.identity,

@@ -204,6 +204,7 @@ function makeBaseParams(overrides: {
   deliveryBestEffort?: boolean;
   runSessionKey?: string;
   resolvedDeliveryMode?: "explicit" | "implicit";
+  replyStyle?: "thread" | "top-level";
 }): Parameters<typeof dispatchCronDelivery>[0] {
   const resolvedDelivery = {
     ...makeResolvedDelivery(),
@@ -220,6 +221,9 @@ function makeBaseParams(overrides: {
       sessionTarget: overrides.sessionTarget ?? "isolated",
       deleteAfterRun: false,
       payload: { kind: "agentTurn", message: "hello" },
+      ...(overrides.replyStyle
+        ? { delivery: { mode: "announce", replyStyle: overrides.replyStyle } }
+        : {}),
     } as never,
     agentId: "main",
     agentSessionKey: "agent:main",
@@ -380,6 +384,45 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     });
     expect(state.deliveryAttempted).toBe(true);
     expect(state.delivered).toBe(true);
+  });
+
+  it("forwards delivery.replyStyle:top-level to the durable send as threadSuppressed (ENG-14117)", async () => {
+    const params = makeBaseParams({
+      synthesizedText: "Daily audit results.",
+      replyStyle: "top-level",
+    });
+
+    const state = await dispatchCronDelivery(params);
+
+    expect(deliverOutboundPayloads).toHaveBeenCalledTimes(1);
+    expectDeliveryCall(0, {
+      channel: "telegram",
+      to: "123456",
+      threadSuppressed: true,
+      skipQueue: true,
+    });
+    expect(state.delivered).toBe(true);
+  });
+
+  it("forwards delivery.replyStyle:thread to the durable send as threadSuppressed=false (ENG-14117)", async () => {
+    const params = makeBaseParams({
+      synthesizedText: "Daily audit results.",
+      replyStyle: "thread",
+    });
+
+    await dispatchCronDelivery(params);
+
+    expect(deliverOutboundPayloads).toHaveBeenCalledTimes(1);
+    expectDeliveryCall(0, { threadSuppressed: false });
+  });
+
+  it("omits threadSuppressed when no replyStyle is set (channel default preserved)", async () => {
+    const params = makeBaseParams({ synthesizedText: "Daily audit results." });
+
+    await dispatchCronDelivery(params);
+
+    expect(deliverOutboundPayloads).toHaveBeenCalledTimes(1);
+    expect(outboundDeliveryCall(0).threadSuppressed).toBeUndefined();
   });
 
   it("skips announce fallback after verified message-tool source delivery", async () => {

@@ -488,15 +488,19 @@ describe("cron cli", () => {
   });
 
   it("rejects --reply-style combined with webhook delivery on cron add", async () => {
+    // Isolated agentTurn job so it clears the delivery-object gate and reaches the
+    // webhook/chat-delivery conflict check.
     await expectCronCommandExit([
       "cron",
       "add",
       "--name",
       "Bad mix",
-      "--at",
-      "20m",
-      "--system-event",
-      "status",
+      "--cron",
+      "0 8 * * *",
+      "--session",
+      "isolated",
+      "--message",
+      "run the audit",
       "--webhook",
       "https://example.invalid/openclaw",
       "--reply-style",
@@ -504,6 +508,25 @@ describe("cron cli", () => {
     ]);
 
     expectRuntimeErrorContaining("--webhook cannot be combined with chat delivery options.");
+  });
+
+  it("rejects --reply-style on a main system-event job (no delivery object)", async () => {
+    await expectCronCommandExit([
+      "cron",
+      "add",
+      "--name",
+      "Main reply style",
+      "--at",
+      "20m",
+      "--system-event",
+      "status",
+      "--reply-style",
+      "top-level",
+    ]);
+
+    expectRuntimeErrorContaining(
+      "--reply-style require a non-main agentTurn or command job with delivery",
+    );
   });
 
   it("accepts positional cron create name with webhook delivery", async () => {

@@ -88,11 +88,15 @@ export async function resolveCronDeliveryPreview(params: {
     resolved: true,
     sessionKey: deliverySessionKey,
   });
+  // Only announce delivery consumes replyStyle; a mode:"none" job's explicit
+  // target is for agent message-tool sends, which do not read this override, so
+  // the suffix would claim a delivery behavior that never happens.
+  const showTopLevel = plan.mode === "announce" && plan.replyStyle === "top-level";
   return {
     label: `${plan.mode} -> ${formatTarget(resolved.channel, resolved.to)}`,
-    // Surface a top-level reply-style override once on the preview so operators
-    // confirm scheduled posts land at the channel root (ENG-14117 discoverability).
-    detail: plan.replyStyle === "top-level" ? `${detail}, top-level` : detail,
+    // Surface a top-level reply-style override so operators confirm scheduled
+    // posts land at the channel root (ENG-14117 discoverability).
+    detail: showTopLevel ? `${detail}, top-level` : detail,
   };
 }
 

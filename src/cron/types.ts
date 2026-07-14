@@ -29,13 +29,7 @@ export type CronMessageChannel = ChannelId;
 /** Delivery mode for job completion output. */
 export type CronDeliveryMode = "none" | "announce" | "webhook";
 
-/**
- * Reply-style preference for a cron completion send (ENG-14117). "top-level"
- * posts a fresh channel-root message (a scheduled report the whole channel
- * sees) instead of threading under the session's last message; "thread" forces
- * threading. Omitted keeps the channel/global default, so existing jobs are
- * unaffected. Only channels that thread (e.g. MS Teams) honor it.
- */
+/** Per-send reply-style override for a cron completion; omitted keeps the channel default. */
 export type CronReplyStyle = "thread" | "top-level";
 
 /** Completion delivery configuration for cron job output. */

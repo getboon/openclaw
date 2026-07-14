@@ -52,13 +52,20 @@ type MSTeamsMediaSendFn = (
   opts?: MSTeamsMediaSendOptions,
 ) => Promise<MSTeamsSendResult>;
 
-// ENG-14117: core outbound carries a portable `threadSuppressed` intent (set by
-// a scheduled cron told to post top-level, or the message tool's topLevel param).
-// The msteams adapter is the only place that knows this maps to a per-send
-// replyStyle:"top-level" override — core stays channel-agnostic. Absent/false
-// leaves the resolved channel/global replyStyle untouched so conversations thread.
+// ENG-14117: core outbound carries a portable tri-state `threadSuppressed` intent
+// (set by a scheduled cron's replyStyle, or the message tool's topLevel param).
+// The msteams adapter is the only place that maps it to a per-send replyStyle
+// override — core stays channel-agnostic. `true` forces a top-level channel post;
+// `false` forces threading even when the channel/global default is top-level;
+// `undefined` leaves the resolved default untouched.
 function resolveReplyStyleOverride(threadSuppressed?: boolean): MSTeamsReplyStyleOverride {
-  return threadSuppressed === true ? "top-level" : undefined;
+  if (threadSuppressed === true) {
+    return "top-level";
+  }
+  if (threadSuppressed === false) {
+    return "thread";
+  }
+  return undefined;
 }
 
 function resolveMSTeamsTextSend(params: {
