@@ -29,6 +29,15 @@ export type CronMessageChannel = ChannelId;
 /** Delivery mode for job completion output. */
 export type CronDeliveryMode = "none" | "announce" | "webhook";
 
+/**
+ * Reply-style preference for a cron completion send (ENG-14117). "top-level"
+ * posts a fresh channel-root message (a scheduled report the whole channel
+ * sees) instead of threading under the session's last message; "thread" forces
+ * threading. Omitted keeps the channel/global default, so existing jobs are
+ * unaffected. Only channels that thread (e.g. MS Teams) honor it.
+ */
+export type CronReplyStyle = "thread" | "top-level";
+
 /** Completion delivery configuration for cron job output. */
 export type CronDelivery = {
   mode: CronDeliveryMode;
@@ -36,6 +45,8 @@ export type CronDelivery = {
   to?: string;
   /** Explicit thread/topic id for channels that support threaded delivery. */
   threadId?: string | number;
+  /** Reply-style override for the completion send; see CronReplyStyle. */
+  replyStyle?: CronReplyStyle;
   /** Explicit channel account id for multi-account setups (e.g. multiple Telegram bots). */
   accountId?: string;
   bestEffort?: boolean;
@@ -72,6 +83,7 @@ export type CronDeliveryPatch = Partial<Pick<CronDelivery, "mode" | "bestEffort"
   channel?: CronMessageChannel | null;
   to?: string | null;
   threadId?: string | number | null;
+  replyStyle?: CronReplyStyle | null;
   accountId?: string | null;
   completionDestination?: CronCompletionDestination | null;
   failureDestination?: CronFailureDestinationPatch | null;

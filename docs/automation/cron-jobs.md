@@ -209,6 +209,8 @@ When announce delivery uses `channel: "last"` or omits `channel`, a provider-pre
 
 For isolated jobs, chat delivery is shared. If a chat route is available, the agent can use the `message` tool even when the job uses `--no-deliver`. If the agent sends to the configured/current target, OpenClaw skips the fallback announce. Otherwise `announce`, `webhook`, and `none` only control what the runner does with the final reply after the agent turn.
 
+On channels that thread agent replies, set `--reply-style top-level` (`delivery.replyStyle`) so a scheduled announce posts a fresh channel-root message the whole channel sees instead of threading under the session's last message; `--reply-style thread` forces threading. Omitting it keeps the channel default. MS Teams honors it today (it does not apply to presentation-card sends); other channels ignore it. See [Reply style](/cli/cron#reply-style-top-level-vs-threaded).
+
 When an agent creates an isolated reminder from an active chat, OpenClaw stores the preserved live delivery target for the fallback announce route. Internal session keys may be lowercase; provider delivery targets are not reconstructed from those keys when current chat context is available.
 
 Implicit announce delivery uses configured channel allowlists to validate and reroute stale targets. DM pairing-store approvals are not fallback automation recipients; set `delivery.to` or configure the channel `allowFrom` entry when a scheduled job should proactively send to a DM.

@@ -475,6 +475,9 @@ export function buildGatewayCronService(params: {
             to: plan.to,
             accountId: plan.accountId,
             sessionKey: resolveCronDeliverySessionKey(job),
+            // ENG-14117: honor the job's completion reply-style on the main/current
+            // announce path too (isolated jobs route through dispatchCronDelivery).
+            replyStyle: plan.replyStyle,
           },
           message,
           abortSignal: abortSignal ?? new AbortController().signal,

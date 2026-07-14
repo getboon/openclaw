@@ -7,7 +7,13 @@ import {
 } from "@openclaw/normalization-core/string-coerce";
 import type { CronFailureDestinationConfig } from "../config/types.cron.js";
 import { resolveTargetPrefixedChannel } from "../infra/outbound/channel-target-prefix.js";
-import type { CronDelivery, CronDeliveryMode, CronJob, CronMessageChannel } from "./types.js";
+import type {
+  CronDelivery,
+  CronDeliveryMode,
+  CronJob,
+  CronMessageChannel,
+  CronReplyStyle,
+} from "./types.js";
 
 /** Normalized routing plan for a cron job's primary delivery behavior. */
 export type CronDeliveryPlan = {
@@ -15,6 +21,8 @@ export type CronDeliveryPlan = {
   channel?: CronMessageChannel;
   to?: string;
   threadId?: string | number;
+  /** Reply-style override for the completion send (ENG-14117), if set. */
+  replyStyle?: CronReplyStyle;
   /** Explicit channel account id from the delivery config, if set. */
   accountId?: string;
   source: "delivery";
@@ -39,6 +47,14 @@ function normalizeChannel(value: unknown): CronMessageChannel | undefined {
 function normalizeThreadIdentity(value: unknown): string | undefined {
   const normalized = normalizeOptionalThreadValue(value);
   return normalized == null ? undefined : String(normalized);
+}
+
+function normalizeReplyStyle(value: unknown): CronReplyStyle | undefined {
+  const trimmed = normalizeOptionalLowercaseString(value);
+  if (trimmed === "thread" || trimmed === "top-level") {
+    return trimmed;
+  }
+  return undefined;
 }
 
 function resolveAnnounceChannel(params: {
@@ -86,6 +102,9 @@ export function resolveCronDeliveryPlan(job: CronJob): CronDeliveryPlan {
   const deliveryAccountId = normalizeOptionalString(
     (delivery as { accountId?: unknown } | undefined)?.accountId,
   );
+  const deliveryReplyStyle = normalizeReplyStyle(
+    (delivery as { replyStyle?: unknown } | undefined)?.replyStyle,
+  );
   if (hasDelivery) {
     const resolvedMode = mode ?? "announce";
     const channel =
@@ -97,6 +116,7 @@ export function resolveCronDeliveryPlan(job: CronJob): CronDeliveryPlan {
       channel: resolvedMode === "webhook" ? undefined : channel,
       to,
       threadId: resolvedMode === "webhook" ? undefined : deliveryThreadId,
+      replyStyle: resolvedMode === "webhook" ? undefined : deliveryReplyStyle,
       accountId: deliveryAccountId,
       source: "delivery",
       requested: resolvedMode === "announce",

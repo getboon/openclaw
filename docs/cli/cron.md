@@ -91,9 +91,26 @@ Isolated cron chat delivery is shared between the agent and the runner:
 - `webhook` posts the finished payload to a URL.
 - `none` disables runner fallback delivery.
 
-Use `cron add|create --webhook <url>` or `cron edit <job-id> --webhook <url>` to set webhook delivery. Do not combine `--webhook` with chat delivery flags such as `--announce`, `--no-deliver`, `--channel`, `--to`, `--thread-id`, or `--account`.
+Use `cron add|create --webhook <url>` or `cron edit <job-id> --webhook <url>` to set webhook delivery. Do not combine `--webhook` with chat delivery flags such as `--announce`, `--no-deliver`, `--channel`, `--to`, `--thread-id`, `--reply-style`, or `--account`.
 
-`cron edit <job-id>` can unset individual delivery routing fields with `--clear-channel`, `--clear-to`, `--clear-thread-id`, and `--clear-account` (each is rejected when combined with its matching set flag). Unlike `--no-deliver`, which only disables runner fallback delivery, these remove the stored field so the job resolves that part of its route from defaults again.
+`cron edit <job-id>` can unset individual delivery routing fields with `--clear-channel`, `--clear-to`, `--clear-thread-id`, `--clear-reply-style`, and `--clear-account` (each is rejected when combined with its matching set flag). Unlike `--no-deliver`, which only disables runner fallback delivery, these remove the stored field so the job resolves that part of its route from defaults again.
+
+### Reply style (top-level vs threaded)
+
+On channels that thread agent replies, a scheduled job's `announce` output threads under the session's last message by default, so a channel timeline can miss it. Set `--reply-style top-level` so the completion posts a fresh channel-root message the whole channel sees; `--reply-style thread` forces threading even when the channel default is top-level. Omitting the flag keeps the channel/global default, so existing jobs are unchanged.
+
+```bash
+openclaw cron add \
+  --name "Daily timecard audit" \
+  --cron "0 8 * * 1-5" \
+  --session isolated \
+  --message "run the timecard audit and post the results" \
+  --channel msteams \
+  --to "conversation:19:...@thread.tacv2" \
+  --reply-style top-level
+```
+
+This maps to `delivery.replyStyle` on the stored job. Today MS Teams honors it (posting a new parent-channel message); other channels ignore it and use their normal routing. It does not apply to presentation-card sends. It is the scheduled-delivery counterpart of the `message` tool's per-send `topLevel` parameter.
 
 `--announce` is runner fallback delivery for the final reply. `--no-deliver` disables that fallback but does not remove the agent's `message` tool when a chat route is available.
 

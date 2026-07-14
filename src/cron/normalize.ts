@@ -346,6 +346,13 @@ function coerceDelivery(delivery: UnknownRecord) {
   } else if ("threadId" in next) {
     delete next.threadId;
   }
+  if ("replyStyle" in delivery && delivery.replyStyle === null) {
+    next.replyStyle = null;
+  } else if (parsed.replyStyle !== undefined) {
+    next.replyStyle = parsed.replyStyle;
+  } else if ("replyStyle" in next) {
+    delete next.replyStyle;
+  }
   if ("accountId" in delivery && delivery.accountId === null) {
     next.accountId = null;
   } else if (parsed.accountId !== undefined) {

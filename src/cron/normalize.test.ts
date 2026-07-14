@@ -285,6 +285,40 @@ describe("normalizeCronJobCreate", () => {
     expect((numericThread.delivery as Record<string, unknown>).threadId).toBe(1008013);
   });
 
+  it("normalizes delivery replyStyle and drops invalid values", () => {
+    const topLevel = normalizeIsolatedAgentTurnCreateJob({
+      name: "reply style top-level",
+      delivery: {
+        mode: "announce",
+        channel: "msteams",
+        to: "conversation:19:channel@thread.tacv2",
+        replyStyle: " Top-Level ",
+      },
+    });
+    expect((topLevel.delivery as Record<string, unknown>).replyStyle).toBe("top-level");
+
+    const invalid = normalizeIsolatedAgentTurnCreateJob({
+      name: "reply style invalid",
+      delivery: {
+        mode: "announce",
+        channel: "msteams",
+        replyStyle: "sideways",
+      },
+    });
+    expect("replyStyle" in (invalid.delivery as Record<string, unknown>)).toBe(false);
+  });
+
+  it("clears delivery replyStyle when patched with null", () => {
+    const normalized = normalizeCronJobPatch({
+      delivery: {
+        replyStyle: null,
+      },
+    }) as unknown as Record<string, unknown>;
+
+    const delivery = normalized.delivery as Record<string, unknown>;
+    expect(delivery.replyStyle).toBeNull();
+  });
+
   it("strips empty accountId from delivery", () => {
     const normalized = normalizeIsolatedAgentTurnCreateJob({
       name: "empty account",

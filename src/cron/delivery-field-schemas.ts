@@ -30,6 +30,12 @@ export const DeliveryThreadIdFieldSchema = z.union([
   z.number().finite(),
 ]);
 
+/** Reply-style override for a cron completion send (ENG-14117). */
+export const DeliveryReplyStyleFieldSchema = z.preprocess(
+  trimLowercaseStringPreprocess,
+  z.enum(["thread", "top-level"]),
+);
+
 /** Accepts non-negative finite timeout seconds from cron delivery payloads. */
 export const TimeoutSecondsFieldSchema = z.number().finite().nonnegative();
 
@@ -38,6 +44,7 @@ type ParsedDeliveryInput = {
   channel?: string;
   to?: string;
   threadId?: string | number;
+  replyStyle?: "thread" | "top-level";
   accountId?: string;
 };
 
@@ -48,6 +55,7 @@ export function parseDeliveryInput(input: Record<string, unknown>): ParsedDelive
     channel: parseOptionalField(LowercaseNonEmptyStringFieldSchema, input.channel),
     to: parseOptionalField(TrimmedNonEmptyStringFieldSchema, input.to),
     threadId: parseOptionalField(DeliveryThreadIdFieldSchema, input.threadId),
+    replyStyle: parseOptionalField(DeliveryReplyStyleFieldSchema, input.replyStyle),
     accountId: parseOptionalField(TrimmedNonEmptyStringFieldSchema, input.accountId),
   };
 }

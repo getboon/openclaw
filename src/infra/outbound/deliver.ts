@@ -203,6 +203,7 @@ type ChannelHandlerParams = {
   replyToMode?: ReplyToMode;
   formatting?: OutboundDeliveryFormattingOptions;
   threadId?: string | number | null;
+  threadSuppressed?: boolean;
   identity?: OutboundIdentity;
   deps?: OutboundSendDeps;
   gifPlayback?: boolean;
@@ -579,6 +580,7 @@ function createChannelOutboundContextBase(
     replyToMode: params.replyToMode,
     formatting: params.formatting,
     threadId: params.threadId,
+    threadSuppressed: params.threadSuppressed,
     identity: params.identity,
     gifPlayback: params.gifPlayback,
     forceDocument: params.forceDocument,
@@ -642,6 +644,8 @@ type DeliverOutboundPayloadsCoreParams = {
   replyToMode?: ReplyToMode;
   formatting?: OutboundDeliveryFormattingOptions;
   threadId?: string | number | null;
+  /** Portable top-level intent forwarded to channel adapters (ENG-14117). */
+  threadSuppressed?: boolean;
   identity?: OutboundIdentity;
   deps?: OutboundSendDeps;
   mediaAccess?: OutboundMediaAccess;
@@ -1444,6 +1448,7 @@ async function deliverOutboundPayloadsCore(
       replyToMode: params.replyToMode,
       formatting: params.formatting,
       threadId: params.threadId,
+      threadSuppressed: params.threadSuppressed,
       identity: params.identity,
       gifPlayback: params.gifPlayback,
       forceDocument: params.forceDocument,

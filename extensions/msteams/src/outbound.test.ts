@@ -398,4 +398,78 @@ describe("msteamsOutbound cfg threading", () => {
 
     expect(chunker("alpha beta", 5)).toEqual(["alpha", "beta"]);
   });
+
+  // ENG-14117: a scheduled cron told to post top-level flows the portable
+  // `threadSuppressed` intent through core outbound; the msteams adapter must
+  // translate it into a per-send replyStyleOverride:"top-level" so the send
+  // posts a fresh channel-root message instead of threading under the stored ref.
+  it("forwards threadSuppressed as replyStyleOverride:top-level for text sends", async () => {
+    await requireSendText()({
+      cfg,
+      to: "conversation:abc",
+      text: "cron report",
+      threadSuppressed: true,
+    });
+
+    expect(mocks.sendMessageMSTeams).toHaveBeenCalledWith({
+      cfg,
+      to: "conversation:abc",
+      text: "cron report",
+      replyStyleOverride: "top-level",
+    });
+  });
+
+  it("forwards threadSuppressed as replyStyleOverride:top-level for media sends", async () => {
+    await requireSendMedia()({
+      cfg,
+      to: "conversation:abc",
+      text: "cron chart",
+      mediaUrl: "file:///tmp/chart.png",
+      mediaLocalRoots: ["/tmp"],
+      threadSuppressed: true,
+    });
+
+    expect(mocks.sendMessageMSTeams).toHaveBeenCalledWith({
+      cfg,
+      to: "conversation:abc",
+      text: "cron chart",
+      mediaUrl: "file:///tmp/chart.png",
+      mediaLocalRoots: ["/tmp"],
+      replyStyleOverride: "top-level",
+    });
+  });
+
+  it("forwards threadSuppressed as replyStyleOverride:top-level for text fallback payloads", async () => {
+    await requireSendPayload()({
+      cfg,
+      to: "conversation:abc",
+      text: "cron payload",
+      threadSuppressed: true,
+      payload: {
+        text: "cron payload",
+        channelData: { msteams: { traceId: "trace-1" } },
+      },
+    });
+
+    expect(mocks.sendMessageMSTeams).toHaveBeenCalledWith({
+      cfg,
+      to: "conversation:abc",
+      text: "cron payload",
+      replyStyleOverride: "top-level",
+    });
+  });
+
+  it("omits replyStyleOverride when threadSuppressed is absent (no behavior change)", async () => {
+    await requireSendText()({
+      cfg,
+      to: "conversation:abc",
+      text: "threaded reply",
+    });
+
+    expect(mocks.sendMessageMSTeams).toHaveBeenCalledWith({
+      cfg,
+      to: "conversation:abc",
+      text: "threaded reply",
+    });
+  });
 });

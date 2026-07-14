@@ -290,11 +290,42 @@ describe("cron edit command", () => {
     );
   });
 
+  it("sets a top-level completion reply style with --reply-style", async () => {
+    const program = createCronProgram();
+
+    await program.parseAsync(["edit", "job-1", "--reply-style", "top-level"], { from: "user" });
+
+    expect(callGatewayFromCli).toHaveBeenCalledWith(
+      "cron.update",
+      expect.objectContaining({ replyStyle: "top-level" }),
+      {
+        id: "job-1",
+        patch: { delivery: { replyStyle: "top-level" } },
+      },
+    );
+  });
+
+  it("clears the delivery reply style with --clear-reply-style", async () => {
+    const program = createCronProgram();
+
+    await program.parseAsync(["edit", "job-1", "--clear-reply-style"], { from: "user" });
+
+    expect(callGatewayFromCli).toHaveBeenCalledWith(
+      "cron.update",
+      expect.objectContaining({ clearReplyStyle: true }),
+      {
+        id: "job-1",
+        patch: { delivery: { replyStyle: null } },
+      },
+    );
+  });
+
   it.each([
     { set: "--channel", value: "telegram", clear: "--clear-channel" },
     { set: "--to", value: "12345", clear: "--clear-to" },
     { set: "--thread-id", value: "42", clear: "--clear-thread-id" },
     { set: "--account", value: "writer", clear: "--clear-account" },
+    { set: "--reply-style", value: "top-level", clear: "--clear-reply-style" },
   ])("rejects $set combined with $clear", async ({ set, value, clear }) => {
     const errorSpy = vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
     const exitSpy = vi.spyOn(defaultRuntime, "exit").mockImplementation((() => undefined) as never);

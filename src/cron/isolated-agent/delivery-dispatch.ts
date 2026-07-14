@@ -46,6 +46,7 @@ import { shouldAttemptTtsPayload } from "../../tts/tts-config.js";
 import { createCronExecutionId } from "../run-id.js";
 import { hasScheduledNextRunAtMs } from "../service/jobs.js";
 import type { CronJob, CronRunTelemetry } from "../types.js";
+import { resolveCronDeliveryThreadSuppressed } from "./delivery-reply-style.js";
 import type { DeliveryTargetResolution } from "./delivery-target.js";
 import { pickLastNonEmptyTextFromPayloads, pickSummaryFromOutput } from "./helpers.js";
 import type { RunCronAgentTurnResult } from "./run.types.js";
@@ -1106,6 +1107,10 @@ export async function dispatchCronDelivery(
           to: delivery.to,
           accountId: delivery.accountId,
           threadId: delivery.threadId,
+          // ENG-14117: a scheduled job set to post top-level suppresses threading
+          // so the completion lands as a fresh channel-root message; channels
+          // that thread (MS Teams) map this to a per-send top-level override.
+          threadSuppressed: resolveCronDeliveryThreadSuppressed(params.job),
           payloads: payloadsForDelivery,
           session: deliverySession,
           identity,

@@ -111,6 +111,7 @@ type CronAddParams = {
     channel?: string;
     to?: string;
     threadId?: number;
+    replyStyle?: string;
     accountId?: string;
   };
   deleteAfterRun?: boolean;
@@ -462,6 +463,47 @@ describe("cron cli", () => {
     const params = addCall?.[2] as { delivery?: { mode?: string } };
 
     expect(params?.delivery?.mode).toBe("announce");
+  });
+
+  it("sets a top-level completion reply style on cron add", async () => {
+    const params = await runCronAddAndGetParams([
+      "--name",
+      "Daily audit",
+      "--cron",
+      "0 8 * * 1-5",
+      "--session",
+      "isolated",
+      "--message",
+      "run the audit",
+      "--channel",
+      "msteams",
+      "--to",
+      "conversation:19:channel@thread.tacv2",
+      "--reply-style",
+      "top-level",
+    ]);
+
+    expect(params?.delivery?.mode).toBe("announce");
+    expect(params?.delivery?.replyStyle).toBe("top-level");
+  });
+
+  it("rejects --reply-style combined with webhook delivery on cron add", async () => {
+    await expectCronCommandExit([
+      "cron",
+      "add",
+      "--name",
+      "Bad mix",
+      "--at",
+      "20m",
+      "--system-event",
+      "status",
+      "--webhook",
+      "https://example.invalid/openclaw",
+      "--reply-style",
+      "top-level",
+    ]);
+
+    expectRuntimeErrorContaining("--webhook cannot be combined with chat delivery options.");
   });
 
   it("accepts positional cron create name with webhook delivery", async () => {

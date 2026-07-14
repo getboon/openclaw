@@ -83,13 +83,16 @@ export async function resolveCronDeliveryPreview(params: {
             }),
     };
   }
+  const detail = formatDeliveryDetail({
+    requestedChannel,
+    resolved: true,
+    sessionKey: deliverySessionKey,
+  });
   return {
     label: `${plan.mode} -> ${formatTarget(resolved.channel, resolved.to)}`,
-    detail: formatDeliveryDetail({
-      requestedChannel,
-      resolved: true,
-      sessionKey: deliverySessionKey,
-    }),
+    // Surface a top-level reply-style override once on the preview so operators
+    // confirm scheduled posts land at the channel root (ENG-14117 discoverability).
+    detail: plan.replyStyle === "top-level" ? `${detail}, top-level` : detail,
   };
 }
 

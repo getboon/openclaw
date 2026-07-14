@@ -14,6 +14,7 @@ import {
   parsePositiveIntOrUndefined,
   parseStrictPositiveIntOrUndefined,
 } from "../program/helpers.js";
+import { parseCronReplyStyleOption } from "./reply-style-shared.js";
 import { resolveCronCreateScheduleFromArgs } from "./schedule-options.js";
 import {
   getCronChannelOptions,
@@ -141,6 +142,10 @@ export function registerCronAddCommand(cron: Command) {
         "Delivery destination (E.164, Telegram chatId, or Discord channel/user)",
       )
       .option("--thread-id <id>", "Telegram forum topic thread id")
+      .option(
+        "--reply-style <style>",
+        'Completion reply style: "top-level" posts a fresh channel message, "thread" forces threading (MS Teams)',
+      )
       .option("--account <id>", "Channel account id for delivery (multi-account setups)")
       .option("--best-effort-deliver", "Do not fail the job if delivery fails", false)
       .option("--json", "Output JSON", false)
@@ -311,6 +316,7 @@ export function registerCronAddCommand(cron: Command) {
             const accountId = normalizeOptionalString(opts.account);
             const threadId = parseCronThreadIdOption(opts.threadId);
             const hasThreadId = typeof threadId === "number";
+            const replyStyle = parseCronReplyStyleOption(opts.replyStyle);
             const hasChatDeliveryTarget =
               optionSource("channel") === "cli" ||
               typeof opts.to === "string" ||
@@ -326,7 +332,7 @@ export function registerCronAddCommand(cron: Command) {
                 "--account and --thread-id require a non-main agentTurn or command job with delivery.",
               );
             }
-            if (hasWebhook && hasChatDeliveryTarget) {
+            if (hasWebhook && (hasChatDeliveryTarget || replyStyle)) {
               throw new Error("--webhook cannot be combined with chat delivery options.");
             }
 
@@ -383,6 +389,7 @@ export function registerCronAddCommand(cron: Command) {
                     channel: hasWebhook ? undefined : normalizeOptionalString(opts.channel),
                     to: hasWebhook ? webhookUrl : normalizeOptionalString(opts.to),
                     threadId: hasWebhook ? undefined : threadId,
+                    replyStyle: hasWebhook ? undefined : replyStyle,
                     accountId: hasWebhook ? undefined : accountId,
                     bestEffort: opts.bestEffortDeliver ? true : undefined,
                   }
