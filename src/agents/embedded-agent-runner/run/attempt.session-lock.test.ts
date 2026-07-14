@@ -185,29 +185,45 @@ describe("embedded attempt session lock lifecycle", () => {
     expect(controller.hasSessionTakeover()).toBe(true);
   });
 
-  it("does not launder an external takeover when the persist hook only calls publishOwnedPostMessageWrite (production sequence)", async () => {
-    // Guards the Codex-found bug: the previous wiring called
-    // refreshAfterOwnedSessionWrite() (stale-fenceFingerprint keyed) BEFORE the
-    // fresh-snapshot publish, which recorded the combined external+own state as
+  it("does not launder an external takeover through the real guard persist wiring (beforeMessagePersist → append → onMessagePersisted)", async () => {
+    // Guards the Codex-found bug via the ACTUAL production composition rather
+    // than a direct controller call: the guard's monkey-patched appendMessage
+    // fires beforeMessagePersist (fresh pre-append snapshot) → originalAppend →
+    // onMessagePersisted, exactly as attempt.ts wires them. The previous wiring
+    // additionally called refreshAfterOwnedSessionWrite() (stale-fenceFingerprint
+    // keyed) at this callsite, which recorded the combined external+own state as
     // owned and advanced the fence — laundering a real takeover into a dropped
-    // reply. Production now calls ONLY publishOwnedPostMessageWrite. This test
-    // pins that: after an external write, the exact production hook sequence must
-    // still trip the takeover. If someone re-adds refreshAfterOwnedSessionWrite()
-    // to that callsite, this stays green only because we assert via the same
-    // fresh-snapshot method — so also keep the wiring assertion in attempt.ts review.
+    // reply. Because this test drives the append through the guard hooks, adding
+    // refreshAfterOwnedSessionWrite() back into onMessagePersisted would flip it
+    // red (the laundered state would let withSessionWriteLock resolve).
     const sessionFile = await createTempSessionFile();
     const release = vi.fn(async () => {});
     const controller = await createEmbeddedAttemptSessionLockController({
       acquireSessionWriteLock: vi.fn(async () => ({ release })),
       lockOptions: { ...lockOptions, sessionFile },
     });
+    // Wire the guard exactly as runEmbeddedAttempt does: capture the on-disk
+    // fingerprint immediately before pi's append, then publish it as owned.
+    const sessionManager = guardSessionManager(SessionManager.open(sessionFile), {
+      beforeMessagePersist: () => readSessionFileFingerprintSync(sessionFile),
+      onMessagePersisted: (_message, { beforeWriteSnapshot }) => {
+        controller.publishOwnedPostMessageWrite(
+          beforeWriteSnapshot as ReturnType<typeof readSessionFileFingerprintSync> | undefined,
+        );
+      },
+    });
 
     await controller.releaseForPrompt();
+    // A FOREIGN writer mutates the transcript after prompt release...
     await fs.appendFile(sessionFile, '{"type":"message","id":"external"}\n', "utf8");
-    // Exact production hook order: beforeMessagePersist snapshot → append → publish.
-    const beforeWrite = readSessionFileFingerprintSync(sessionFile);
-    await fs.appendFile(sessionFile, '{"type":"message","id":"own-append"}\n', "utf8");
-    controller.publishOwnedPostMessageWrite(beforeWrite);
+    // ...then the lane persists its own message through the guard. The snapshot
+    // captured by beforeMessagePersist reflects the now-untrusted external state,
+    // so publish records nothing and the fence must still trip.
+    sessionManager.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "own append after foreign write" }],
+      timestamp: 1,
+    });
 
     await expect(controller.withSessionWriteLock(() => "late-write")).rejects.toBeInstanceOf(
       EmbeddedAttemptSessionTakeoverError,
