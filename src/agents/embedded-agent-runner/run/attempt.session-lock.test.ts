@@ -222,6 +222,18 @@ describe("embedded attempt session lock lifecycle", () => {
     sessionManager.appendMessage({
       role: "assistant",
       content: [{ type: "text", text: "own append after foreign write" }],
+      api: "messages",
+      provider: "openclaw",
+      model: "session-lock-test",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
       timestamp: 1,
     });
 
