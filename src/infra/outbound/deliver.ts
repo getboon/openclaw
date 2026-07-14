@@ -1268,6 +1268,7 @@ export async function deliverOutboundPayloadsInternal(
         payloads: queuePayloads,
         renderedBatchPlan: queueRenderedBatchPlan,
         threadId: params.threadId,
+        threadSuppressed: params.threadSuppressed,
         replyToId: params.replyToId,
         replyToMode: params.replyToMode,
         formatting: params.formatting,
