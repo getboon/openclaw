@@ -46,6 +46,19 @@ export {
   resolveChannelSourceReplyDeliveryMode,
 } from "./reply-pipeline.js";
 export { classifyDurableSendRecoveryState, createDurableMessageStateRecord } from "./state.js";
+export {
+  GATEWAY_FAILURE_CODES,
+  makeGatewayFailureOrigin,
+  messageOriginCodeCopy,
+  messageOriginCodeRetryAffordance,
+  resolveEmittableGatewayFailure,
+} from "./message-origin.js";
+export type {
+  GatewayFailureCode,
+  GatewayFailureOrigin,
+  MessageOrigin,
+  RetryAffordance,
+} from "./message-origin.js";
 export type {
   DurableInboundReceiveAcceptOptions,
   DurableInboundReceiveAcceptResult,
