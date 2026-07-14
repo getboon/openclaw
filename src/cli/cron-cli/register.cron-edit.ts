@@ -10,6 +10,7 @@ import { parseStrictPositiveInteger } from "../../infra/parse-finite-number.js";
 import { sanitizeAgentId } from "../../routing/session-key.js";
 import { defaultRuntime } from "../../runtime.js";
 import { addGatewayClientOptions, callGatewayFromCli } from "../gateway-rpc.js";
+import { parseCronReplyStyleOption } from "./reply-style-shared.js";
 import {
   applyExistingCronSchedulePatch,
   resolveCronEditScheduleRequest,
@@ -137,10 +138,15 @@ export function registerCronEditCommand(cron: Command) {
         "Delivery destination (E.164, Telegram chatId, or Discord channel/user)",
       )
       .option("--thread-id <id>", "Telegram forum topic thread id")
+      .option(
+        "--reply-style <style>",
+        'Completion reply style: "top-level" posts a fresh channel message, "thread" forces threading (MS Teams)',
+      )
       .option("--account <id>", "Channel account id for delivery (multi-account setups)")
       .option("--clear-channel", "Unset the delivery channel", false)
       .option("--clear-to", "Unset the delivery destination", false)
       .option("--clear-thread-id", "Unset the Telegram forum topic thread id", false)
+      .option("--clear-reply-style", "Unset the delivery reply-style override", false)
       .option("--clear-account", "Unset the per-job delivery account override", false)
       .option(
         "--best-effort-deliver",
@@ -329,13 +335,17 @@ export function registerCronEditCommand(cron: Command) {
             opts.announce || typeof opts.deliver === "boolean" || hasWebhookDelivery;
           const threadId = parseCronThreadIdOption(opts.threadId);
           const hasDeliveryThreadId = typeof threadId === "number";
+          const replyStyle = parseCronReplyStyleOption(opts.replyStyle);
+          const hasDeliveryReplyStyle = replyStyle !== undefined;
           const hasDeliveryTarget =
             typeof opts.channel === "string" ||
             typeof opts.to === "string" ||
             hasDeliveryThreadId ||
+            hasDeliveryReplyStyle ||
             Boolean(opts.clearChannel) ||
             Boolean(opts.clearTo) ||
-            Boolean(opts.clearThreadId);
+            Boolean(opts.clearThreadId) ||
+            Boolean(opts.clearReplyStyle);
           const hasDeliveryAccount = typeof opts.account === "string" || Boolean(opts.clearAccount);
           const hasBestEffort = typeof opts.bestEffortDeliver === "boolean";
           if (hasWebhookDelivery && (hasDeliveryTarget || hasDeliveryAccount)) {
@@ -349,6 +359,9 @@ export function registerCronEditCommand(cron: Command) {
           }
           if (hasDeliveryThreadId && opts.clearThreadId) {
             throw new Error("Use --thread-id or --clear-thread-id, not both");
+          }
+          if (hasDeliveryReplyStyle && opts.clearReplyStyle) {
+            throw new Error("Use --reply-style or --clear-reply-style, not both");
           }
           if (typeof opts.account === "string" && opts.clearAccount) {
             throw new Error("Use --account or --clear-account, not both");
@@ -494,6 +507,11 @@ export function registerCronEditCommand(cron: Command) {
               delivery.threadId = null;
             } else if (hasDeliveryThreadId) {
               delivery.threadId = threadId;
+            }
+            if (opts.clearReplyStyle) {
+              delivery.replyStyle = null;
+            } else if (hasDeliveryReplyStyle) {
+              delivery.replyStyle = replyStyle;
             }
             if (opts.clearAccount) {
               delivery.accountId = null;

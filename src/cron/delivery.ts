@@ -14,12 +14,13 @@ import {
   type CronDeliveryPlan,
   resolveCronDeliveryPlan,
 } from "./delivery-plan.js";
+import { replyStyleToThreadSuppressed } from "./isolated-agent/delivery-reply-style.js";
 import {
   resolveDeliveryTarget,
   type DeliveryTargetResolution,
 } from "./isolated-agent/delivery-target.js";
 import { resolveCronNotificationSessionKey } from "./session-target.js";
-import type { CronMessageChannel } from "./types.js";
+import type { CronMessageChannel, CronReplyStyle } from "./types.js";
 
 export {
   resolveCronDeliveryPlan,
@@ -39,6 +40,12 @@ export type CronAnnounceTarget = {
   accountId?: string;
   sessionKey?: string;
   inheritSessionThread?: boolean;
+  /**
+   * Reply-style override for this send (ENG-14117). "top-level" suppresses
+   * threading so a scheduled completion posts a fresh channel-root message;
+   * only completion announces set it — failure alerts keep channel defaults.
+   */
+  replyStyle?: CronReplyStyle;
 };
 
 type SuccessfulDeliveryTarget = Extract<DeliveryTargetResolution, { ok: true }>;
@@ -105,6 +112,8 @@ async function deliverCronAnnouncePayload(params: {
   };
   message: string;
   abortSignal: AbortSignal;
+  /** Reply-style override (ENG-14117); top-level posts a fresh channel-root message. */
+  replyStyle?: CronReplyStyle;
 }): Promise<void> {
   // Cron delivery is durable and non-best-effort for primary announces; partial
   // channel failure must surface as a cron run failure.
@@ -114,6 +123,10 @@ async function deliverCronAnnouncePayload(params: {
     to: params.delivery.resolvedTarget.to,
     accountId: params.delivery.resolvedTarget.accountId,
     threadId: params.delivery.resolvedTarget.threadId,
+    // ENG-14117: tri-state top-level intent; channels that thread (MS Teams) map
+    // it to a per-send override — top-level posts a fresh channel-root message,
+    // thread forces threading even when the channel default is top-level.
+    threadSuppressed: replyStyleToThreadSuppressed(params.replyStyle),
     payloads: [{ text: params.message }],
     session: params.delivery.session,
     identity: params.delivery.identity,
@@ -146,6 +159,7 @@ export async function sendCronAnnouncePayloadStrict(params: {
     delivery,
     message: params.message,
     abortSignal: params.abortSignal,
+    replyStyle: params.target.replyStyle,
   });
 }
 

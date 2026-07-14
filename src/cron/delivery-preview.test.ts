@@ -104,6 +104,43 @@ describe("resolveCronDeliveryPreview", () => {
     });
   });
 
+  it("appends the top-level suffix for announce jobs with replyStyle:top-level (ENG-14117)", async () => {
+    const job = makeCronJob({
+      agentId: "avery",
+      delivery: {
+        mode: "announce",
+        channel: "msteams",
+        to: "conversation:19:channel@thread.tacv2",
+        replyStyle: "top-level",
+      },
+      sessionTarget: "isolated",
+    });
+
+    const preview = await resolveCronDeliveryPreview({ cfg: {} as never, job });
+
+    expect(preview.detail).toBe("explicit, top-level");
+  });
+
+  it("omits the top-level suffix for no-delivery jobs even with replyStyle:top-level (ENG-14117)", async () => {
+    // mode:"none" jobs never post the completion; the suffix would claim a
+    // delivery behavior that never happens.
+    const job = makeCronJob({
+      agentId: "avery",
+      delivery: {
+        mode: "none",
+        channel: "msteams",
+        to: "conversation:19:channel@thread.tacv2",
+        replyStyle: "top-level",
+      },
+      sessionTarget: "isolated",
+    });
+
+    const preview = await resolveCronDeliveryPreview({ cfg: {} as never, job });
+
+    expect(preview.detail).toBe("explicit");
+    expect(preview.detail).not.toContain("top-level");
+  });
+
   it("does not describe unresolved no-delivery message-tool targets as fail-closed", async () => {
     mocks.resolveDeliveryTarget.mockResolvedValueOnce({
       ok: false,

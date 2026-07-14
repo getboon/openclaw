@@ -29,6 +29,9 @@ export type CronMessageChannel = ChannelId;
 /** Delivery mode for job completion output. */
 export type CronDeliveryMode = "none" | "announce" | "webhook";
 
+/** Per-send reply-style override for a cron completion; omitted keeps the channel default. */
+export type CronReplyStyle = "thread" | "top-level";
+
 /** Completion delivery configuration for cron job output. */
 export type CronDelivery = {
   mode: CronDeliveryMode;
@@ -36,6 +39,8 @@ export type CronDelivery = {
   to?: string;
   /** Explicit thread/topic id for channels that support threaded delivery. */
   threadId?: string | number;
+  /** Reply-style override for the completion send; see CronReplyStyle. */
+  replyStyle?: CronReplyStyle;
   /** Explicit channel account id for multi-account setups (e.g. multiple Telegram bots). */
   accountId?: string;
   bestEffort?: boolean;
@@ -72,6 +77,7 @@ export type CronDeliveryPatch = Partial<Pick<CronDelivery, "mode" | "bestEffort"
   channel?: CronMessageChannel | null;
   to?: string | null;
   threadId?: string | number | null;
+  replyStyle?: CronReplyStyle | null;
   accountId?: string | null;
   completionDestination?: CronCompletionDestination | null;
   failureDestination?: CronFailureDestinationPatch | null;

@@ -306,9 +306,13 @@ export const CronCompletionDestinationSchema = Type.Object(
   { additionalProperties: false },
 );
 
+/** Reply-style override for a cron completion send (ENG-14117). */
+export const CronReplyStyleSchema = Type.Union([Type.Literal("thread"), Type.Literal("top-level")]);
+
 const CronDeliverySharedProperties = {
   channel: Type.Optional(CronAnnounceChannelSchema),
   threadId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+  replyStyle: Type.Optional(CronReplyStyleSchema),
   accountId: Type.Optional(NonEmptyString),
   bestEffort: Type.Optional(Type.Boolean()),
   failureDestination: Type.Optional(CronFailureDestinationSchema),
@@ -317,6 +321,7 @@ const CronDeliverySharedProperties = {
 const CronDeliveryPatchSharedProperties = {
   channel: Type.Optional(Type.Union([CronAnnounceChannelSchema, Type.Null()])),
   threadId: Type.Optional(Type.Union([Type.String(), Type.Number(), Type.Null()])),
+  replyStyle: Type.Optional(Type.Union([CronReplyStyleSchema, Type.Null()])),
   accountId: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
   bestEffort: Type.Optional(Type.Boolean()),
   failureDestination: Type.Optional(Type.Union([CronFailureDestinationPatchSchema, Type.Null()])),

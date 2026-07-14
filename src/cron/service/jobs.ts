@@ -1028,6 +1028,7 @@ function mergeCronDelivery(
     channel: existing?.channel,
     to: existing?.to,
     threadId: existing?.threadId,
+    replyStyle: existing?.replyStyle,
     accountId: existing?.accountId,
     bestEffort: existing?.bestEffort,
     completionDestination: existing?.completionDestination,
@@ -1045,6 +1046,7 @@ function mergeCronDelivery(
     if (next.mode === "webhook") {
       next.channel = undefined;
       next.threadId = undefined;
+      next.replyStyle = undefined;
       next.accountId = undefined;
     }
     if (!hasCompletionDestinationPatch && (next.mode === "none" || next.mode === "webhook")) {
@@ -1059,6 +1061,12 @@ function mergeCronDelivery(
   }
   if ("threadId" in patch) {
     next.threadId = normalizeOptionalThreadValue(patch.threadId);
+  }
+  if ("replyStyle" in patch) {
+    // null clears the override; a value sets it. undefined leaves existing intact.
+    // Webhook delivery never threads, so keep the override cleared in that mode
+    // even when the same patch sets both mode:webhook and replyStyle.
+    next.replyStyle = next.mode === "webhook" ? undefined : (patch.replyStyle ?? undefined);
   }
   if ("accountId" in patch) {
     next.accountId = normalizeOptionalString(patch.accountId);

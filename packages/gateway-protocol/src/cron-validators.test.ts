@@ -162,6 +162,40 @@ describe("cron protocol validators", () => {
     ).toBe(true);
   });
 
+  it("accepts delivery replyStyle on add and update params (ENG-14117)", () => {
+    expect(
+      validateCronAddParams({
+        ...minimalAddParams,
+        delivery: {
+          mode: "announce",
+          channel: "msteams",
+          to: "conversation:19:channel@thread.tacv2",
+          replyStyle: "top-level",
+        },
+      }),
+    ).toBe(true);
+    expect(
+      validateCronUpdateParams({
+        id: "job-1",
+        patch: { delivery: { replyStyle: "thread" } },
+      }),
+    ).toBe(true);
+    // null clears the override on update.
+    expect(
+      validateCronUpdateParams({
+        id: "job-1",
+        patch: { delivery: { replyStyle: null } },
+      }),
+    ).toBe(true);
+    // Unknown reply styles are rejected.
+    expect(
+      validateCronAddParams({
+        ...minimalAddParams,
+        delivery: { mode: "announce", channel: "msteams", replyStyle: "sideways" },
+      }),
+    ).toBe(false);
+  });
+
   it("accepts nullable delivery clears on update params", () => {
     expect(
       validateCronUpdateParams({

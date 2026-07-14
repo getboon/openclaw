@@ -30,18 +30,43 @@ function asObjectRecord(value: unknown): Record<string, unknown> | undefined {
 const MSTEAMS_TEXT_CHUNK_LIMIT = 4000;
 
 type MSTeamsSendConfig = Parameters<typeof sendMessageMSTeams>[0]["cfg"];
+type MSTeamsReplyStyleOverride = Parameters<typeof sendMessageMSTeams>[0]["replyStyleOverride"];
 type MSTeamsSendResult = { messageId: string; conversationId: string };
+type MSTeamsTextSendOptions = {
+  replyStyleOverride?: MSTeamsReplyStyleOverride;
+};
 type MSTeamsMediaSendOptions = {
   mediaUrl?: string;
   mediaLocalRoots?: readonly string[];
   mediaReadFile?: (filePath: string) => Promise<Buffer>;
+  replyStyleOverride?: MSTeamsReplyStyleOverride;
 };
-type MSTeamsTextSendFn = (to: string, text: string) => Promise<MSTeamsSendResult>;
+type MSTeamsTextSendFn = (
+  to: string,
+  text: string,
+  opts?: MSTeamsTextSendOptions,
+) => Promise<MSTeamsSendResult>;
 type MSTeamsMediaSendFn = (
   to: string,
   text: string,
   opts?: MSTeamsMediaSendOptions,
 ) => Promise<MSTeamsSendResult>;
+
+// ENG-14117: core outbound carries a portable tri-state `threadSuppressed` intent
+// (set by a scheduled cron's replyStyle, or the message tool's topLevel param).
+// The msteams adapter is the only place that maps it to a per-send replyStyle
+// override — core stays channel-agnostic. `true` forces a top-level channel post;
+// `false` forces threading even when the channel/global default is top-level;
+// `undefined` leaves the resolved default untouched.
+function resolveReplyStyleOverride(threadSuppressed?: boolean): MSTeamsReplyStyleOverride {
+  if (threadSuppressed === true) {
+    return "top-level";
+  }
+  if (threadSuppressed === false) {
+    return "thread";
+  }
+  return undefined;
+}
 
 function resolveMSTeamsTextSend(params: {
   cfg: MSTeamsSendConfig;
@@ -49,7 +74,13 @@ function resolveMSTeamsTextSend(params: {
 }): MSTeamsTextSendFn {
   return (
     resolveOutboundSendDep<MSTeamsTextSendFn>(params.deps, "msteams") ??
-    ((to, text) => sendMessageMSTeams({ cfg: params.cfg, to, text }))
+    ((to, text, opts) =>
+      sendMessageMSTeams({
+        cfg: params.cfg,
+        to,
+        text,
+        ...(opts?.replyStyleOverride ? { replyStyleOverride: opts.replyStyleOverride } : {}),
+      }))
   );
 }
 
@@ -67,6 +98,7 @@ function resolveMSTeamsMediaSend(params: {
         mediaUrl: opts?.mediaUrl,
         mediaLocalRoots: opts?.mediaLocalRoots,
         mediaReadFile: opts?.mediaReadFile,
+        ...(opts?.replyStyleOverride ? { replyStyleOverride: opts.replyStyleOverride } : {}),
       }))
   );
 }
@@ -115,6 +147,7 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
     mediaReadFile,
     payload,
     deps,
+    threadSuppressed,
   }) => {
     const msteamsData = asObjectRecord(payload.channelData?.msteams);
     const presentationCard = msteamsData?.presentationCard;
@@ -123,6 +156,9 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
       typeof presentationCard === "object" &&
       !Array.isArray(presentationCard)
     ) {
+      // Presentation cards are sent as proactive Adaptive Cards and do not carry
+      // a per-send replyStyle override; threadSuppressed is intentionally ignored
+      // here (documented topLevel limitation for presentation sends).
       const result = await sendAdaptiveCardMSTeams({
         cfg,
         to,
@@ -130,6 +166,7 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
       });
       return attachChannelToResult("msteams", result);
     }
+    const replyStyleOverride = resolveReplyStyleOverride(threadSuppressed);
     const mediaUrls = normalizeStringEntries(
       resolvePayloadMediaUrls({
         ...payload,
@@ -142,7 +179,12 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
         text,
         mediaUrls,
         send: async ({ text: textLocal, mediaUrl: mediaUrlLocal }) =>
-          await send(to, textLocal, { mediaUrl: mediaUrlLocal, mediaLocalRoots, mediaReadFile }),
+          await send(to, textLocal, {
+            mediaUrl: mediaUrlLocal,
+            mediaLocalRoots,
+            mediaReadFile,
+            replyStyleOverride,
+          }),
       });
       if (result) {
         return attachChannelToResult("msteams", result);
@@ -156,7 +198,7 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
       );
       let result: Awaited<ReturnType<MSTeamsTextSendFn>>;
       for (const chunk of chunks) {
-        result = await send(to, chunk);
+        result = await send(to, chunk, { replyStyleOverride });
       }
       return attachChannelToResult("msteams", result!);
     }
@@ -164,13 +206,29 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
   },
   ...createAttachedChannelResultAdapter({
     channel: "msteams",
-    sendText: async ({ cfg, to, text, deps }) => {
+    sendText: async ({ cfg, to, text, deps, threadSuppressed }) => {
       const send = resolveMSTeamsTextSend({ cfg, deps });
-      return await send(to, text);
+      return await send(to, text, {
+        replyStyleOverride: resolveReplyStyleOverride(threadSuppressed),
+      });
     },
-    sendMedia: async ({ cfg, to, text, mediaUrl, mediaLocalRoots, mediaReadFile, deps }) => {
+    sendMedia: async ({
+      cfg,
+      to,
+      text,
+      mediaUrl,
+      mediaLocalRoots,
+      mediaReadFile,
+      deps,
+      threadSuppressed,
+    }) => {
       const send = resolveMSTeamsMediaSend({ cfg, deps });
-      return await send(to, text, { mediaUrl, mediaLocalRoots, mediaReadFile });
+      return await send(to, text, {
+        mediaUrl,
+        mediaLocalRoots,
+        mediaReadFile,
+        replyStyleOverride: resolveReplyStyleOverride(threadSuppressed),
+      });
     },
     sendPoll: async ({ cfg, to, poll }) => {
       const maxSelections = poll.maxSelections ?? 1;

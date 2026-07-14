@@ -545,6 +545,7 @@ describe("delivery-queue recovery", () => {
         payloads: [{ text: "a" }],
         replyToId: "root-message",
         replyToMode: "first",
+        threadSuppressed: true,
         formatting: {
           textLimit: 1234,
           maxLinesPerMessage: 7,
@@ -582,6 +583,7 @@ describe("delivery-queue recovery", () => {
       silent?: boolean;
       replyToId?: string;
       replyToMode?: string;
+      threadSuppressed?: boolean;
       formatting?: unknown;
       gatewayClientScopes?: string[];
       mirror?: unknown;
@@ -592,6 +594,8 @@ describe("delivery-queue recovery", () => {
     expect(deliverInput.silent).toBe(true);
     expect(deliverInput.replyToId).toBe("root-message");
     expect(deliverInput.replyToMode).toBe("first");
+    // ENG-14117: top-level intent must survive crash recovery replay.
+    expect(deliverInput.threadSuppressed).toBe(true);
     expect(deliverInput.formatting).toEqual({
       textLimit: 1234,
       maxLinesPerMessage: 7,
