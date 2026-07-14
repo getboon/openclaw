@@ -1552,7 +1552,16 @@ export function isRawAssistantErrorPassthrough(params: {
   if (!friendlyError || !rawError) {
     return false;
   }
-  const parsedMessage = parseApiErrorInfo(rawError)?.message?.trim();
+  const parsedInfo = parseApiErrorInfo(rawError);
+  // boon-llm-gateway token exhaustion: the raw "LLM error allocation_exhausted: …"
+  // text IS the intended user copy (pre-6.11 behavior), not a raw leak. Returning
+  // false keeps formatUserFacingAssistantErrorText from replacing it with the
+  // generic "LLM request failed.". allocation_exhausted is a provider error-code
+  // contract (cf. ZAI 1311 / Volcengine InvalidSubscription).
+  if (parsedInfo?.type === "allocation_exhausted") {
+    return false;
+  }
+  const parsedMessage = parsedInfo?.message?.trim();
   const leadingStatusRest = extractLeadingHttpStatus(rawError)?.rest?.trim();
   const hasRawDerivedProviderPrefix =
     friendlyError.startsWith("LLM request rejected:") ||
