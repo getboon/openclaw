@@ -566,6 +566,34 @@ describe("handleAssistantFailover", () => {
       expect(err.rawError).toBe(rawError.trim());
     });
 
+    it("never surfaces unclassified raw provider text as the user-facing message (ENG-15627 G2)", () => {
+      // A provider-internal string that no classifier branch recognizes must
+      // NOT reach the user as-is. Before ENG-15627 the ladder passed
+      // lastAssistant.errorMessage?.trim() through verbatim, leaking raw
+      // provider bodies. rawError still keeps it for operator debugging.
+      const rawError = "Kaboom: widget subsystem returned gibberish 0xDEADBEEF";
+      return handleAssistantFailover(
+        makeParams({
+          initialDecision: { action: "surface_error", reason: null },
+          failoverReason: null,
+          billingFailure: false,
+          authFailure: false,
+          rateLimitFailure: false,
+          lastAssistant: {
+            errorMessage: rawError,
+            model: "claude-haiku-4-5-20251001",
+            provider: "Anthropic",
+          } as Params["lastAssistant"],
+        }),
+      ).then((outcome) => {
+        const err = expectThrownFailoverError(outcome);
+        expect(err.message).not.toContain("Kaboom");
+        expect(err.message).not.toContain("0xDEADBEEF");
+        // The raw text is still preserved out-of-band for operators.
+        expect(err.rawError).toBe(rawError);
+      });
+    });
+
     it("coerces a null decision reason onto the most specific non-timeout failure signal", async () => {
       const outcome = await handleAssistantFailover(
         makeParams({

@@ -44,6 +44,7 @@ export {
   isImageSizeError,
   isOverloadedErrorMessage,
   isRawApiErrorPayload,
+  isRawAssistantErrorPassthrough,
   isRateLimitAssistantError,
   isRateLimitErrorMessage,
   isTransientHttpError,
