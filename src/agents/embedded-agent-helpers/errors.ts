@@ -79,6 +79,16 @@ const PROVIDER_SCHEMA_REJECTION_USER_TEXT =
   "LLM request failed: provider rejected the request schema or tool payload.";
 const MODEL_NOT_FOUND_USER_TEXT =
   "The selected model was not found by the provider. Check the model id or choose a different model.";
+// boon-llm-gateway allocation exhaustion (ENG-15627). Distinct from generic
+// API-key billing copy: a gateway customer authenticates with a single
+// BOON_API_KEY against an org-level allocation, so "switch to a different API
+// key" is meaningless — there is nothing to switch to. Give it dedicated copy.
+const ALLOCATION_EXHAUSTED_USER_TEXT =
+  "⚠️ This account has reached its usage allocation. Top up your allocation or contact your account team, then try again.";
+/** Detect the boon-llm-gateway token-allocation-exhausted signal. */
+export function isAllocationExhaustedErrorMessage(raw: string): boolean {
+  return /\ballocation[_ ]exhausted\b/i.test(raw) || /\btoken allocation exhausted\b/i.test(raw);
+}
 const MAX_FAILOVER_DETAIL_CANDIDATES = 12;
 const MAX_FAILOVER_DETAIL_CHARS = 1_000;
 
@@ -1483,6 +1493,12 @@ export function formatAssistantErrorText(
   const invalidRequest = raw.match(/"type":"invalid_request_error".*?"message":"([^"]+)"/);
   if (invalidRequest?.[1]) {
     return `LLM request rejected: ${invalidRequest[1]}`;
+  }
+
+  // boon-llm-gateway allocation exhaustion gets dedicated copy before the
+  // generic billing formatter (which talks about API keys) can claim it.
+  if (isAllocationExhaustedErrorMessage(raw)) {
+    return ALLOCATION_EXHAUSTED_USER_TEXT;
   }
 
   if (

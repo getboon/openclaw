@@ -718,14 +718,18 @@ describe("boon-llm-gateway allocation_exhausted (ENG-15627 G1)", () => {
       content: [{ type: "text", text: errorMessage }],
     });
 
-  it("classifies the gateway allocation_exhausted body as a billing error", () => {
+  it("returns dedicated allocation copy, not the generic API-key billing wording", () => {
     const msg = makeAllocationError(GATEWAY_ALLOCATION_EXHAUSTED_BODY);
     const out = formatAssistantErrorText(msg, { provider: "boon-llm-gateway" });
-    // Must be the classified billing copy, never the raw JSON or the generic fallback.
+    // Never the raw JSON or the generic fallback.
     expect(out).toBeDefined();
     expect(out).not.toContain("allocation_exhausted");
     expect(out).not.toBe("LLM request failed.");
-    expect(out).toMatch(/billing|allocation|limit|account/i);
+    // A boon-llm-gateway customer has ONE BOON_API_KEY and an org-level
+    // allocation — there is no other API key to "switch" to, so the generic
+    // billing copy is misleading here. Use allocation-specific wording.
+    expect(out).toMatch(/usage allocation/i);
+    expect(out).not.toMatch(/switch to a different api key/i);
   });
 
   it("user-facing text never leaks the raw allocation_exhausted JSON", () => {
@@ -734,6 +738,7 @@ describe("boon-llm-gateway allocation_exhausted (ENG-15627 G1)", () => {
     expect(out).not.toContain("allocation_exhausted");
     expect(out).not.toContain("{");
     expect(out).not.toBe("LLM request failed.");
+    expect(out).toMatch(/usage allocation/i);
   });
 });
 
