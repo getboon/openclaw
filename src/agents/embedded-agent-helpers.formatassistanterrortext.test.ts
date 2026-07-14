@@ -705,6 +705,43 @@ describe("formatBillingErrorMessage — authMode neutral copy (#80877)", () => {
   });
 });
 
+describe("boon-llm-gateway allocation_exhausted (ENG-15627 G1)", () => {
+  // The boon-llm-gateway returns this 429 body when an org's token allocation
+  // is spent. Before ENG-15627 it fell through the classifier to the bare
+  // "LLM request failed." — the string in the customer (Arguijo) screenshot.
+  const GATEWAY_ALLOCATION_EXHAUSTED_BODY =
+    '{"error":"allocation_exhausted","message":"Token allocation exhausted. Contact sales to increase your limit."}';
+
+  const makeAllocationError = (errorMessage: string): AssistantMessage =>
+    makeAssistantMessageFixture({
+      errorMessage,
+      content: [{ type: "text", text: errorMessage }],
+    });
+
+  it("returns dedicated allocation copy, not the generic API-key billing wording", () => {
+    const msg = makeAllocationError(GATEWAY_ALLOCATION_EXHAUSTED_BODY);
+    const out = formatAssistantErrorText(msg, { provider: "boon-llm-gateway" });
+    // Never the raw JSON or the generic fallback.
+    expect(out).toBeDefined();
+    expect(out).not.toContain("allocation_exhausted");
+    expect(out).not.toBe("LLM request failed.");
+    // A boon-llm-gateway customer has ONE BOON_API_KEY and an org-level
+    // allocation — there is no other API key to "switch" to, so the generic
+    // billing copy is misleading here. Use allocation-specific wording.
+    expect(out).toMatch(/usage allocation/i);
+    expect(out).not.toMatch(/switch to a different api key/i);
+  });
+
+  it("user-facing text never leaks the raw allocation_exhausted JSON", () => {
+    const msg = makeAllocationError(GATEWAY_ALLOCATION_EXHAUSTED_BODY);
+    const out = formatUserFacingAssistantErrorText(msg, { provider: "boon-llm-gateway" });
+    expect(out).not.toContain("allocation_exhausted");
+    expect(out).not.toContain("{");
+    expect(out).not.toBe("LLM request failed.");
+    expect(out).toMatch(/usage allocation/i);
+  });
+});
+
 describe("sanitizeUserFacingText — streaming JSON parse error (#59076)", () => {
   it("rewrites transport-classified malformed streaming fragments in error context", () => {
     const result = sanitizeUserFacingText(MALFORMED_STREAMING_FRAGMENT_ERROR_MESSAGE, {

@@ -8,6 +8,7 @@ import type { AuthProfileFailureReason } from "../../auth-profiles.js";
 import {
   formatAssistantErrorText,
   formatBillingErrorMessage,
+  isRawAssistantErrorPassthrough,
   isTimeoutErrorMessage,
   type FailoverReason,
 } from "../../embedded-agent-helpers.js";
@@ -394,17 +395,33 @@ function resolveAssistantFailoverErrorMessage(params: {
   authMode?: string;
 }): string {
   const timeoutFailure = params.timedOut || params.idleTimedOut;
+  // ENG-15627 G2: the user-facing message must never carry raw provider text.
+  // formatAssistantErrorText can fall through to echoing the raw errorMessage
+  // when no classifier branch recognizes it; guard that output with the same
+  // raw-passthrough check formatUserFacingAssistantErrorText uses, and drop the
+  // former `lastAssistant.errorMessage?.trim()` slot entirely. When the
+  // formatted text is a raw passthrough, fall through to the classified tail
+  // below (timeout / rate-limit / billing / auth / generic). The raw text is
+  // still preserved out-of-band on FailoverError.rawError for operators.
+  const formatted = params.lastAssistant
+    ? formatAssistantErrorText(params.lastAssistant, {
+        cfg: params.config,
+        sessionKey: params.sessionKey,
+        provider: params.activeErrorContext.provider,
+        model: params.activeErrorContext.model,
+        authMode: params.authMode,
+      })
+    : undefined;
+  const safeFormatted =
+    formatted &&
+    isRawAssistantErrorPassthrough({
+      friendlyError: formatted,
+      rawError: params.lastAssistant?.errorMessage?.trim(),
+    })
+      ? undefined
+      : formatted;
   return (
-    (params.lastAssistant
-      ? formatAssistantErrorText(params.lastAssistant, {
-          cfg: params.config,
-          sessionKey: params.sessionKey,
-          provider: params.activeErrorContext.provider,
-          model: params.activeErrorContext.model,
-          authMode: params.authMode,
-        })
-      : undefined) ||
-    params.lastAssistant?.errorMessage?.trim() ||
+    safeFormatted ||
     (timeoutFailure
       ? "LLM request timed out."
       : params.rateLimitFailure
