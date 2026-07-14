@@ -204,6 +204,13 @@ const ERROR_PATTERNS = {
     /used\s+all\s+available\s+credits/i,
     /(?:monthly\s+)?spend(?:ing)?\s+limit/i,
     /insufficient[_ ]quota/i,
+    // boon-llm-gateway 429 body: {"error":"allocation_exhausted","message":
+    // "Token allocation exhausted. Contact sales..."}. Before ENG-15627 this
+    // fell through the classifier and leaked the raw `allocation_exhausted`
+    // code (or the generic "LLM request failed.") to the customer. Classify it
+    // as billing so the sanitized billing copy is surfaced instead.
+    /\ballocation[_ ]exhausted\b/i,
+    /\btoken allocation exhausted\b/i,
     "credit balance",
     "plans & billing",
     /insufficient[_ ]balance/i,

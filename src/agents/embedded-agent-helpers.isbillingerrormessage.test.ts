@@ -237,6 +237,18 @@ describe("isBillingErrorMessage", () => {
     expect(isBillingErrorMessage(raw)).toBe(true);
     expect(classifyFailoverReason(raw)).toBe("billing");
   });
+  it("classifies boon-llm-gateway allocation_exhausted as billing (ENG-15627)", () => {
+    // 429 body from boon-llm-gateway when an org's token allocation is spent.
+    // Must NOT fall through to an unclassified failure that leaks the raw code
+    // or the generic "LLM request failed." (the Arguijo customer screenshot).
+    const raw =
+      '{"error":"allocation_exhausted","message":"Token allocation exhausted. Contact sales to increase your limit."}';
+    expect(isBillingErrorMessage(raw)).toBe(true);
+    expect(classifyFailoverReason(raw)).toBe("billing");
+    // Bare code and bare message forms both classify.
+    expect(isBillingErrorMessage("allocation_exhausted")).toBe(true);
+    expect(isBillingErrorMessage("Token allocation exhausted.")).toBe(true);
+  });
   it("still matches explicit 402 markers in long payloads", () => {
     const longStructuredError =
       '{"error":{"code":402,"message":"payment required","details":"' + "x".repeat(700) + '"}}';
