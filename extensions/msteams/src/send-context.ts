@@ -65,7 +65,18 @@ export function resolveMSTeamsProactiveReplyStyle(params: {
   conversationId: string;
   ref: StoredConversationReference;
   conversationType: MSTeamsConversationType;
+  /**
+   * Per-send override (ENG-14117). When set, it wins over the resolved/global
+   * replyStyle so a single send — e.g. a scheduled cron told to post a fresh
+   * top-level channel message — can opt out of (or into) threading without
+   * changing the global `channels.msteams.replyStyle` default that keeps
+   * back-and-forth conversations threaded.
+   */
+  replyStyleOverride?: MSTeamsReplyStyle;
 }): MSTeamsReplyStyle {
+  if (params.replyStyleOverride) {
+    return params.replyStyleOverride;
+  }
   const threadRootId = params.ref.threadId ?? params.ref.activityId;
   if (params.conversationType !== "channel" || !threadRootId) {
     return "top-level";
@@ -148,6 +159,8 @@ async function findConversationReference(recipient: {
 export async function resolveMSTeamsSendContext(params: {
   cfg: OpenClawConfig;
   to: string;
+  /** Per-send replyStyle override (ENG-14117); see resolveMSTeamsProactiveReplyStyle. */
+  replyStyleOverride?: MSTeamsReplyStyle;
 }): Promise<MSTeamsProactiveContext> {
   const msteamsCfg = params.cfg.channels?.msteams;
 
@@ -241,6 +254,7 @@ export async function resolveMSTeamsSendContext(params: {
     conversationId,
     ref: safeRef,
     conversationType,
+    replyStyleOverride: params.replyStyleOverride,
   });
 
   // Get SharePoint site ID from config (required for file uploads in group chats/channels)

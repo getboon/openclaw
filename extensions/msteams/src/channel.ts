@@ -1,10 +1,12 @@
 // Msteams plugin module implements channel behavior.
 import { describeAccountSnapshot } from "openclaw/plugin-sdk/account-helpers";
 import { formatAllowFromLowercase } from "openclaw/plugin-sdk/allow-from";
+import { readBooleanParam } from "openclaw/plugin-sdk/boolean-param";
 import { createTopLevelChannelConfigAdapter } from "openclaw/plugin-sdk/channel-config-helpers";
 import type {
   ChannelMessageActionAdapter,
   ChannelMessageToolDiscovery,
+  ChannelMessageToolSchemaContribution,
 } from "openclaw/plugin-sdk/channel-contract";
 import { createChatChannelPlugin } from "openclaw/plugin-sdk/channel-core";
 import {
@@ -28,7 +30,7 @@ import {
   normalizeOptionalString,
   normalizeStringEntries,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
 import type {
   ChannelMessageActionName,
   ChannelOutboundAdapter,
@@ -385,6 +387,17 @@ async function runWithRequiredActionPinnedMessageTarget<T>(params: {
   return await params.run(target);
 }
 
+function createMSTeamsTopLevelActionSchema(): Record<string, TSchema> {
+  return {
+    topLevel: Type.Optional(
+      Type.Boolean({
+        description:
+          "MS Teams-only opt-out from threaded same-channel context. Set true to post a new parent-channel message instead of inheriting the current thread; set false to force threading even when config is top-level. `threadId: null` is accepted as the same top-level request. Note: only supported for non-presentation sends; presentation cards ignore this parameter.",
+      }),
+    ),
+  };
+}
+
 function describeMSTeamsMessageTool({
   cfg,
 }: Parameters<
@@ -393,6 +406,32 @@ function describeMSTeamsMessageTool({
   const enabled =
     cfg.channels?.msteams?.enabled !== false &&
     Boolean(resolveMSTeamsCredentials(cfg.channels?.msteams));
+
+  const schema: ChannelMessageToolSchemaContribution[] = [];
+
+  // ENG-14117: Add topLevel parameter for send and upload-file actions
+  if (enabled) {
+    schema.push({
+      properties: createMSTeamsTopLevelActionSchema(),
+      actions: ["send", "upload-file"] satisfies ChannelMessageActionName[],
+    });
+  }
+
+  // Existing unpin schema
+  if (enabled) {
+    schema.push({
+      actions: ["unpin"] satisfies ChannelMessageActionName[],
+      properties: {
+        pinnedMessageId: Type.Optional(
+          Type.String({
+            description:
+              "Pinned message resource ID for unpin (from pin or list-pins, not the chat message ID).",
+          }),
+        ),
+      },
+    });
+  }
+
   return {
     actions: enabled
       ? ([
@@ -416,19 +455,7 @@ function describeMSTeamsMessageTool({
         ] satisfies ChannelMessageActionName[])
       : [],
     capabilities: enabled ? ["presentation"] : [],
-    schema: enabled
-      ? {
-          actions: ["unpin"],
-          properties: {
-            pinnedMessageId: Type.Optional(
-              Type.String({
-                description:
-                  "Pinned message resource ID for unpin (from pin or list-pins, not the chat message ID).",
-              }),
-            ),
-          },
-        }
-      : null,
+    schema: schema.length > 0 ? schema : null,
   };
 }
 
@@ -749,11 +776,66 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
               },
             });
           }
+          if (ctx.action === "send" && !presentation) {
+            // ENG-14117: Handle non-presentation send with topLevel support
+            const topLevelParam = readBooleanParam(ctx.params, "topLevel");
+            const threadIdNull = ctx.params.threadId === null;
+
+            // Convert to replyStyleOverride (support bidirectional override)
+            let replyStyleOverride: "top-level" | "thread" | undefined;
+            if (topLevelParam === true || threadIdNull) {
+              replyStyleOverride = "top-level";
+            } else if (topLevelParam === false) {
+              replyStyleOverride = "thread";
+            }
+
+            const content = resolveActionContent(ctx.params);
+            if (!content) {
+              return actionError("Send requires content.");
+            }
+
+            return await runWithRequiredActionTarget({
+              actionLabel: "Send",
+              toolParams: ctx.params,
+              currentChannelId: ctx.toolContext?.currentChannelId,
+              run: async (to) => {
+                const { sendMessageMSTeams } = await loadMSTeamsChannelRuntime();
+                const result = await sendMessageMSTeams({
+                  cfg: ctx.cfg,
+                  to,
+                  text: content,
+                  replyStyleOverride,
+                });
+                return jsonActionResultWithDetails(
+                  {
+                    ok: true,
+                    channel: "msteams",
+                    messageId: result.messageId,
+                    conversationId: result.conversationId,
+                  },
+                  { ok: true, channel: "msteams", messageId: result.messageId },
+                );
+              },
+            });
+          }
           if (ctx.action === "upload-file") {
             const mediaUrl = resolveActionUploadFilePath(ctx.params);
             if (!mediaUrl) {
               return actionError("Upload-file requires media, filePath, or path.");
             }
+
+            // ENG-14117: Read topLevel parameter (mirror Slack pattern)
+            const topLevelParam = readBooleanParam(ctx.params, "topLevel");
+            const threadIdNull = ctx.params.threadId === null;
+
+            // Convert to replyStyleOverride (support bidirectional override)
+            let replyStyleOverride: "top-level" | "thread" | undefined;
+            if (topLevelParam === true || threadIdNull) {
+              replyStyleOverride = "top-level";
+            } else if (topLevelParam === false) {
+              replyStyleOverride = "thread";
+            }
+
             return await runWithRequiredActionTarget({
               actionLabel: "Upload-file",
               toolParams: ctx.params,
@@ -770,6 +852,7 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
                     readOptionalTrimmedString(ctx.params, "title"),
                   mediaLocalRoots: ctx.mediaLocalRoots,
                   mediaReadFile: ctx.mediaReadFile,
+                  replyStyleOverride,
                 });
                 return jsonActionResultWithDetails(
                   {
