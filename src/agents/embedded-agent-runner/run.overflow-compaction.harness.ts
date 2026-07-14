@@ -243,6 +243,7 @@ export const mockedIsLikelyContextOverflowError = vi.fn((msg?: string) => {
 export const mockedParseImageSizeError = vi.fn(() => null);
 export const mockedParseImageDimensionError = vi.fn(() => null);
 export const mockedIsRateLimitAssistantError = vi.fn<MockAssistantErrorProbe>(() => false);
+export const mockedIsRawAssistantErrorPassthrough = vi.fn(() => false);
 export const mockedIsTimeoutErrorMessage = vi.fn(() => false);
 export const mockedPickFallbackThinkingLevel = vi.fn<(params?: unknown) => ThinkLevel | null>(
   () => null,
@@ -441,6 +442,8 @@ export function resetRunOverflowCompactionHarnessMocks(): void {
   mockedParseImageDimensionError.mockReturnValue(null);
   mockedIsRateLimitAssistantError.mockReset();
   mockedIsRateLimitAssistantError.mockReturnValue(false);
+  mockedIsRawAssistantErrorPassthrough.mockReset();
+  mockedIsRawAssistantErrorPassthrough.mockReturnValue(false);
   mockedIsTimeoutErrorMessage.mockReset();
   mockedIsTimeoutErrorMessage.mockReturnValue(false);
   mockedPickFallbackThinkingLevel.mockReset();
@@ -659,6 +662,7 @@ export async function loadRunOverflowCompactionHarness(): Promise<{
     parseImageSizeError: mockedParseImageSizeError,
     parseImageDimensionError: mockedParseImageDimensionError,
     isRateLimitAssistantError: mockedIsRateLimitAssistantError,
+    isRawAssistantErrorPassthrough: mockedIsRawAssistantErrorPassthrough,
     isTimeoutErrorMessage: mockedIsTimeoutErrorMessage,
     pickFallbackThinkingLevel: mockedPickFallbackThinkingLevel,
     sanitizeUserFacingText: vi.fn((text: unknown) => (typeof text === "string" ? text : "")),
