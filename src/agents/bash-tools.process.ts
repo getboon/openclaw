@@ -644,9 +644,18 @@ export function createProcessTool(
                 `Unable to terminate session ${params.sessionId}: no active supervisor run or process id.`,
               );
             }
-            markExited(scopedSession, null, "SIGKILL", "failed");
+            // Record the session's own finished status as "killed" (agent-requested
+            // termination), not "failed" — the SIGKILL succeeded (ENG-15627 §5b).
+            markExited(scopedSession, null, "SIGKILL", "killed");
           }
           resetPollRetrySuggestion(params.sessionId);
+          // An agent-requested termination that succeeds is a SUCCESS, not a
+          // failure (ENG-15627 §5b). Returning status:"failed" here made the
+          // channel render "⚠️ 🧰 Process failed" for a deliberate, successful
+          // teardown. Both paths reach here only after the kill worked
+          // (cancelManagedSession succeeded, or the SIGKILL fallback terminated
+          // the process); a genuine inability to terminate already returned via
+          // failText above.
           return {
             content: [
               {
@@ -657,7 +666,7 @@ export function createProcessTool(
               },
             ],
             details: {
-              status: "failed",
+              status: "completed",
               name: scopedSession ? deriveSessionName(scopedSession.command) : undefined,
             },
           };
@@ -697,10 +706,16 @@ export function createProcessTool(
                   `Unable to remove session ${params.sessionId}: no active supervisor run or process id.`,
                 );
               }
-              markExited(scopedSession, null, "SIGKILL", "failed");
+              // Agent-requested removal: the SIGKILL succeeded, so record
+              // "killed", not "failed" (ENG-15627 §5b).
+              markExited(scopedSession, null, "SIGKILL", "killed");
               deleteSession(params.sessionId);
             }
             resetPollRetrySuggestion(params.sessionId);
+            // A successful agent-requested remove is a SUCCESS, not a failure —
+            // status:"failed" here rendered "⚠️ 🧰 Process failed" for a
+            // deliberate teardown (ENG-15627 §5b). A genuine inability to remove
+            // already returned via failText above.
             return {
               content: [
                 {
@@ -711,7 +726,7 @@ export function createProcessTool(
                 },
               ],
               details: {
-                status: "failed",
+                status: "completed",
                 name: scopedSession ? deriveSessionName(scopedSession.command) : undefined,
               },
             };
