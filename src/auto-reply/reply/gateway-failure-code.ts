@@ -81,9 +81,11 @@ export function isBoonCoreUnreachableError(input: unknown): boolean {
   return (
     lower.includes("econnrefused") ||
     lower.includes("econnreset") ||
+    lower.includes("econnaborted") ||
     lower.includes("etimedout") ||
     lower.includes("enotfound") ||
     lower.includes("eai_again") ||
+    lower.includes("epipe") ||
     lower.includes("fetch failed") ||
     lower.includes("network") ||
     lower.includes("socket hang up") ||
@@ -101,11 +103,10 @@ function resolveStatus(err: unknown): number | undefined {
 
 /**
  * Resolve the deterministic gateway-failure code for a thrown run failure.
- * First match wins; returns undefined only for shapes with no signal at all
- * (the caller's fail-closed resolver downgrades those to a safe transient code
- * in DMs and drops them in groups).
+ * First match wins; the classification is total — any shape with no specific
+ * signal falls through to `agent_failed_transient_after_retries`.
  */
-export function resolveGatewayFailureCode(err: unknown): GatewayFailureCode | undefined {
+export function resolveGatewayFailureCode(err: unknown): GatewayFailureCode {
   const message = formatErrorMessage(err);
 
   // Billing / org allocation — a billing state, not an outage.

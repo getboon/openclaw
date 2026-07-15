@@ -101,4 +101,8 @@ describe("boon_core_unreachable copy", () => {
     expect(copy.toLowerCase()).toContain("project data");
     expect(copy).not.toContain("boon_core_unreachable");
   });
+
+  it("is user_can_retry — its copy tells the user to retry, not that it auto-retries", () => {
+    expect(messageOriginCodeRetryAffordance("boon_core_unreachable")).toBe("user_can_retry");
+  });
 });

@@ -139,7 +139,14 @@ describe("isBoonCoreUnreachableError", () => {
     ).toBe(true);
   });
 
+  it("detects an aborted/timed-out boon-core request (ECONNABORTED)", () => {
+    expect(
+      isBoonCoreUnreachableError("Error: ECONNABORTED https://app.getboon.ai/api/v1/agent/config"),
+    ).toBe(true);
+  });
+
   it("does not fire on a generic provider transport error", () => {
     expect(isBoonCoreUnreachableError("ETIMEDOUT api.anthropic.com")).toBe(false);
+    expect(isBoonCoreUnreachableError("ECONNABORTED api.anthropic.com")).toBe(false);
   });
 });

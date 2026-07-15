@@ -8216,15 +8216,26 @@ describe("runAgentTurnWithFallback — contextual coded copy (ENG-15739)", () =>
     ChatType: "direct",
     MessageSid: "msg",
   } as unknown as TemplateContext;
+  const groupCtx = {
+    Provider: "discord",
+    Surface: "discord",
+    ChatType: "group",
+    GroupSubject: "agent group",
+    GroupChannel: "#general",
+    MessageSid: "msg",
+  } as unknown as TemplateContext;
 
-  async function runDirectFailure(err: unknown): Promise<string | undefined> {
+  async function runFailure(
+    err: unknown,
+    sessionCtx: TemplateContext,
+  ): Promise<string | undefined> {
     state.runEmbeddedAgentMock.mockRejectedValueOnce(err);
     const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
-    const result = await runAgentTurnWithFallback(
-      createMinimalRunAgentTurnParams({ sessionCtx: directCtx }),
-    );
+    const result = await runAgentTurnWithFallback(createMinimalRunAgentTurnParams({ sessionCtx }));
     return result.kind === "final" ? result.payload.text : undefined;
   }
+
+  const runDirectFailure = (err: unknown) => runFailure(err, directCtx);
 
   it("surfaces the malformed-history class for a format failure in a DM", async () => {
     const text = await runDirectFailure(
@@ -8233,11 +8244,15 @@ describe("runAgentTurnWithFallback — contextual coded copy (ENG-15739)", () =>
     expect(text).toBe(messageOriginCodeCopy("provider_malformed_history"));
   });
 
-  it("surfaces the upstream-5xx class for a server_error failure in a DM", async () => {
+  it("downgrades a would-auto-retry class to the terminal transient copy at exhaustion", async () => {
+    // A server_error is provider_upstream_5xx (will_auto_retry), but this path
+    // runs only after retries are exhausted, so the "retrying automatically"
+    // copy would be a stale lie — it must downgrade to the terminal class.
     const text = await runDirectFailure(
       new FailoverError("bad gateway", { reason: "server_error", status: 502 }),
     );
-    expect(text).toBe(messageOriginCodeCopy("provider_upstream_5xx"));
+    expect(text).toBe(messageOriginCodeCopy("agent_failed_transient_after_retries"));
+    expect(text).not.toBe(messageOriginCodeCopy("provider_upstream_5xx"));
   });
 
   it("surfaces the transient class for an unclassified failure in a DM", async () => {
@@ -8245,6 +8260,14 @@ describe("runAgentTurnWithFallback — contextual coded copy (ENG-15739)", () =>
       new Error("openai/gpt-5.5 ended with an incomplete terminal response"),
     );
     expect(text).toBe(messageOriginCodeCopy("agent_failed_transient_after_retries"));
+  });
+
+  it("stays silent in a group chat with default policy (group silence preserved)", async () => {
+    const text = await runFailure(
+      new Error("openai/gpt-5.5 ended with an incomplete terminal response"),
+      groupCtx,
+    );
+    expect(text).toBe(SILENT_REPLY_TOKEN);
   });
 
   it("is deterministic — the same failure class yields the same copy across calls", async () => {

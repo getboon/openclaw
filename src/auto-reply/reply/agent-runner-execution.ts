@@ -69,7 +69,7 @@ import {
 import { buildAgentRuntimeOutcomePlan } from "../../agents/runtime-plan/build.js";
 import {
   messageOriginCodeCopy,
-  resolveEmittableGatewayFailure,
+  messageOriginCodeRetryAffordance,
 } from "../../channels/message/message-origin.js";
 import { resolveGroupSessionKey, type SessionEntry } from "../../config/sessions.js";
 import { updateSessionEntry } from "../../config/sessions/session-accessor.js";
@@ -1096,25 +1096,29 @@ function markAgentRunFailureReplyPayload<T extends ReplyPayload>(payload: T): T 
  * the single generic "message failed" string (ENG-15739). Maps the thrown error
  * to a gateway-failure code and returns its canonical customer copy.
  *
+ * This runs only at a TERMINAL failure (retries/fallbacks exhausted), so a code
+ * whose affordance promises `will_auto_retry` ("I'm retrying automatically")
+ * would be a stale lie here — those are downgraded to the terminal transient
+ * class ("automatic retries didn't recover. Please try again").
+ *
  * Group silence is preserved: the coded copy is routed through the SAME
  * `resolveExternalRunFailureTextForConversation` gate the generic string used,
  * with `isGenericRunnerFailure: true`, so group/channel chats stay silent unless
- * per-surface policy already surfaces failures. Returns `SILENT_REPLY_TOKEN`
- * text in that silent case, exactly as the generic path did.
+ * per-surface policy already surfaces failures (returns `SILENT_REPLY_TOKEN`
+ * text in that silent case, exactly as the generic path did).
  */
 function resolveCodedGenericFailureText(params: {
   err: unknown;
   sessionCtx: TemplateContext;
   cfg?: OpenClawConfig;
 }): string {
-  const isDirect = !isNonDirectConversationContext(params.sessionCtx);
-  const code = resolveGatewayFailureCode(params.err);
-  const emittable = resolveEmittableGatewayFailure(code, { isDirect });
-  const text = emittable
-    ? messageOriginCodeCopy(emittable.code)
-    : GENERIC_EXTERNAL_RUN_FAILURE_TEXT;
+  const resolvedCode = resolveGatewayFailureCode(params.err);
+  const code =
+    messageOriginCodeRetryAffordance(resolvedCode) === "will_auto_retry"
+      ? "agent_failed_transient_after_retries"
+      : resolvedCode;
   return resolveExternalRunFailureTextForConversation({
-    text,
+    text: messageOriginCodeCopy(code),
     sessionCtx: params.sessionCtx,
     isGenericRunnerFailure: true,
     cfg: params.cfg,

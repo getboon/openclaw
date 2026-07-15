@@ -102,7 +102,10 @@ const CODE_RETRY_AFFORDANCE: Record<GatewayFailureCode, RetryAffordance> = {
   provider_malformed_history: "user_can_retry",
   agent_failed_transient_after_retries: "user_can_retry",
   subagent_still_working: "will_auto_retry",
-  boon_core_unreachable: "will_auto_retry",
+  // The copy tells the user to retry (no automatic retry is promised), so the
+  // affordance is user_can_retry — and this keeps its scoped copy from being
+  // downgraded as a stale "retrying automatically" claim at a terminal failure.
+  boon_core_unreachable: "user_can_retry",
 };
 
 /** Canonical user-facing sentence for a gateway-failure code. */
