@@ -113,11 +113,16 @@ describe("isLikelyContextOverflowError", () => {
 });
 
 describe("boon-llm-gateway token allocation exhausted", () => {
-  // Real wire shape: the gateway sends HTTP 429 + {"error":"allocation_exhausted",
-  // "message":"..."}, but the OpenAI SDK collapses that to `429 "allocation_exhausted"`
-  // (status-prefixed, message dropped). Verified end-to-end against the installed
-  // SDK and boon-llm-gateway middleware/quota.go.
-  const SDK_SHAPE = '429 "allocation_exhausted"';
+  // The gateway sends HTTP 429 + {"error":"allocation_exhausted","message":"Token
+  // allocation exhausted. …"} (boon-llm-gateway middleware/quota.go). Each provider
+  // SDK collapses that body differently, verified end-to-end against the installed
+  // SDKs against a mock gateway:
+  //   - OpenAI client   → `429 "allocation_exhausted"`  (keeps the code, drops message)
+  //   - Anthropic client → `429 Token allocation exhausted. …`  (keeps message, drops code)
+  // The Claude models customers use go through the Anthropic client, so matching
+  // ONLY the code missed the real case (repro: agent replied "LLM request failed.").
+  const OPENAI_SHAPE = '429 "allocation_exhausted"';
+  const ANTHROPIC_SHAPE = "429 Token allocation exhausted. Contact sales to upgrade your plan.";
   const HTTP_SHAPE = 'HTTP 429: {"error":"allocation_exhausted","message":"x"}';
   const BARE_JSON =
     '{"error":"allocation_exhausted","message":"Token allocation exhausted. Contact sales to upgrade your plan."}';
@@ -132,28 +137,34 @@ describe("boon-llm-gateway token allocation exhausted", () => {
     });
   const opts = { provider: "boon-llm-gateway", model: "claude-opus-4-8" };
 
-  it("renders the exhaustion copy for the real SDK-collapsed shape", () => {
-    // Core guard: this shape otherwise classifies as rate_limit → "API rate limit
-    // reached", never surfacing the exhaustion reason to the user.
-    expect(formatAssistantErrorText(makeGatewayError(SDK_SHAPE), opts)).toBe(EXPECTED);
+  it("renders the exhaustion copy for the OpenAI-client shape (code kept)", () => {
+    // This shape otherwise classifies as rate_limit → "API rate limit reached".
+    expect(formatAssistantErrorText(makeGatewayError(OPENAI_SHAPE), opts)).toBe(EXPECTED);
   });
 
-  it("renders the exhaustion copy end-to-end (through the passthrough net)", () => {
-    const text = formatUserFacingAssistantErrorText(makeGatewayError(SDK_SHAPE), opts);
-    expect(text).toBe(EXPECTED);
-    expect(text).not.toBe("LLM request failed.");
-    expect(text).not.toContain("rate limit");
+  it("renders the exhaustion copy for the Anthropic-client shape (message kept, code dropped)", () => {
+    // Regression guard for the real repro: Claude models route through the
+    // Anthropic client, which drops the `allocation_exhausted` code entirely.
+    expect(formatAssistantErrorText(makeGatewayError(ANTHROPIC_SHAPE), opts)).toBe(EXPECTED);
+  });
+
+  it("renders the exhaustion copy end-to-end through the passthrough net (both shapes)", () => {
+    for (const shape of [OPENAI_SHAPE, ANTHROPIC_SHAPE]) {
+      const text = formatUserFacingAssistantErrorText(makeGatewayError(shape), opts);
+      expect(text).toBe(EXPECTED);
+      expect(text).not.toBe("LLM request failed.");
+      expect(text).not.toContain("rate limit");
+    }
   });
 
   it("also handles the HTTP-prefixed and bare-JSON shapes", () => {
-    // Robustness across however the code is surfaced; the match is on the code, not the shape.
     expect(formatAssistantErrorText(makeGatewayError(HTTP_SHAPE), opts)).toBe(EXPECTED);
     expect(formatAssistantErrorText(makeGatewayError(BARE_JSON), opts)).toBe(EXPECTED);
   });
 
-  it("does not match unrelated exhausted codes", () => {
-    // Guard against over-matching: resource_exhausted / connection pool exhausted
-    // must not hit the gateway branch.
+  it("does not match unrelated exhausted errors", () => {
+    // Guard against over-matching: only the gateway code or its exact human phrase
+    // should route here, not any use of "exhausted".
     expect(formatAssistantErrorText(makeGatewayError('429 "resource_exhausted"'), opts)).not.toBe(
       EXPECTED,
     );

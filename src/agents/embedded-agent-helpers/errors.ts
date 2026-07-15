@@ -83,11 +83,12 @@ const MAX_FAILOVER_DETAIL_CANDIDATES = 12;
 const MAX_FAILOVER_DETAIL_CHARS = 1_000;
 
 // boon-llm-gateway rejects an exhausted token allocation with HTTP 429 +
-// {"error":"allocation_exhausted",...}. The OpenAI SDK collapses that body to
-// `429 "allocation_exhausted"` (status-prefixed, message dropped), so match the
-// bare code and reconstruct the user copy. `allocation_exhausted` is a provider
-// error-code contract (boon-llm-gateway middleware/quota.go).
-const BOON_GATEWAY_EXHAUSTED_RE = /\ballocation_exhausted\b/;
+// {"error":"allocation_exhausted","message":"Token allocation exhausted. …"}.
+// Match BOTH shapes the SDKs collapse it to: the OpenAI client keeps the code
+// (`429 "allocation_exhausted"`) while the Anthropic client keeps only the
+// message (`429 Token allocation exhausted. …`, code dropped). Contract:
+// boon-llm-gateway middleware/quota.go.
+const BOON_GATEWAY_EXHAUSTED_RE = /\ballocation_exhausted\b|\btoken allocation exhausted\b/i;
 const BOON_GATEWAY_EXHAUSTED_USER_TEXT =
   "LLM error allocation_exhausted: Token allocation exhausted. Contact sales to upgrade your plan.";
 
