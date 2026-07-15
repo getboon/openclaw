@@ -43,4 +43,25 @@ describe("resolveCronDeliveryPlan", () => {
     expect(plan.threadId).toBe(0);
     expect(hasExplicitCronDeliveryTarget(plan)).toBe(true);
   });
+
+  it("carries the captured turn source origin so delivery resolution can pin it (ENG-14833)", () => {
+    const plan = resolveCronDeliveryPlan(
+      makeCronJob({
+        payload: { kind: "agentTurn", message: "report progress" },
+        delivery: {
+          mode: "announce",
+          channel: "last",
+          turnSourceChannel: "msteams",
+          turnSourceTo: "channel-x-id",
+          turnSourceAccountId: "bot-a",
+          turnSourceThreadId: "thread-123",
+        },
+      }),
+    );
+
+    expect(plan.turnSourceChannel).toBe("msteams");
+    expect(plan.turnSourceTo).toBe("channel-x-id");
+    expect(plan.turnSourceAccountId).toBe("bot-a");
+    expect(plan.turnSourceThreadId).toBe("thread-123");
+  });
 });

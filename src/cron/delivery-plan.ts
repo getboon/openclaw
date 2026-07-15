@@ -25,6 +25,15 @@ export type CronDeliveryPlan = {
   replyStyle?: CronReplyStyle;
   /** Explicit channel account id from the delivery config, if set. */
   accountId?: string;
+  /**
+   * Originating channel/target captured at job creation (ENG-14833). Carried through so
+   * delivery resolution can pin the origin instead of falling back to contaminated shared-session
+   * lastChannel/lastTo. See CronDelivery.turnSourceChannel.
+   */
+  turnSourceChannel?: CronMessageChannel;
+  turnSourceTo?: string;
+  turnSourceAccountId?: string;
+  turnSourceThreadId?: string | number;
   source: "delivery";
   requested: boolean;
 };
@@ -105,6 +114,25 @@ export function resolveCronDeliveryPlan(job: CronJob): CronDeliveryPlan {
   const deliveryReplyStyle = normalizeReplyStyle(
     (delivery as { replyStyle?: unknown } | undefined)?.replyStyle,
   );
+  // ENG-14833: carry the captured origin through so delivery resolution can pin it. A stale/empty
+  // turnSourceChannel makes the whole turn source inert, so only surface it with a concrete channel.
+  const turnSourceChannel = normalizeChannel(
+    (delivery as { turnSourceChannel?: unknown } | undefined)?.turnSourceChannel,
+  );
+  const turnSource = turnSourceChannel
+    ? {
+        turnSourceChannel,
+        turnSourceTo: normalizeOptionalString(
+          (delivery as { turnSourceTo?: unknown } | undefined)?.turnSourceTo,
+        ),
+        turnSourceAccountId: normalizeOptionalString(
+          (delivery as { turnSourceAccountId?: unknown } | undefined)?.turnSourceAccountId,
+        ),
+        turnSourceThreadId: normalizeOptionalThreadValue(
+          (delivery as { turnSourceThreadId?: unknown } | undefined)?.turnSourceThreadId,
+        ),
+      }
+    : undefined;
   if (hasDelivery) {
     const resolvedMode = mode ?? "announce";
     const channel =
@@ -118,6 +146,7 @@ export function resolveCronDeliveryPlan(job: CronJob): CronDeliveryPlan {
       threadId: resolvedMode === "webhook" ? undefined : deliveryThreadId,
       replyStyle: resolvedMode === "webhook" ? undefined : deliveryReplyStyle,
       accountId: deliveryAccountId,
+      ...(resolvedMode === "webhook" ? {} : turnSource),
       source: "delivery",
       requested: resolvedMode === "announce",
     };

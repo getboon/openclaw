@@ -46,6 +46,14 @@ export type CronAnnounceTarget = {
    * only completion announces set it — failure alerts keep channel defaults.
    */
   replyStyle?: CronReplyStyle;
+  /**
+   * Originating channel/target captured at job creation (ENG-14833). Pins the origin during
+   * resolution so a contaminated shared-session lastChannel/lastTo cannot redirect this send.
+   */
+  turnSourceChannel?: CronMessageChannel;
+  turnSourceTo?: string;
+  turnSourceAccountId?: string;
+  turnSourceThreadId?: string | number;
 };
 
 type SuccessfulDeliveryTarget = Extract<DeliveryTargetResolution, { ok: true }>;
@@ -76,6 +84,12 @@ async function resolveCronAnnounceDelivery(params: {
       to: params.target.to,
       accountId: params.target.accountId,
       sessionKey: params.target.sessionKey,
+      // ENG-14833: pin the captured origin so contaminated shared-session state cannot redirect
+      // the completion announce to an unrelated conversation.
+      turnSourceChannel: params.target.turnSourceChannel,
+      turnSourceTo: params.target.turnSourceTo,
+      turnSourceAccountId: params.target.turnSourceAccountId,
+      turnSourceThreadId: params.target.turnSourceThreadId,
     },
     targetResolutionOptions,
   );

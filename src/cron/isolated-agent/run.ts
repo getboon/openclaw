@@ -424,6 +424,12 @@ export async function resolveCronDeliveryContext(params: {
     // path, and the delivery preview all honor it uniformly (the dispatch gate refuses the send and
     // never enqueues, so a restart has nothing to replay; the agent turn still runs before that).
     sessionKey: resolveCronDeliverySessionKey(params.job),
+    // ENG-14833: pin the captured origin so a contaminated shared-session lastChannel/lastTo cannot
+    // redirect this run's delivery to an unrelated conversation.
+    turnSourceChannel: deliveryPlan.turnSourceChannel,
+    turnSourceTo: deliveryPlan.turnSourceTo,
+    turnSourceAccountId: deliveryPlan.turnSourceAccountId,
+    turnSourceThreadId: deliveryPlan.turnSourceThreadId,
   });
   return {
     deliveryPlan,

@@ -290,6 +290,32 @@ describe("resolveDeliveryTarget", () => {
     });
   });
 
+  it("pins the captured turn source origin over a contaminated shared session (ENG-14833)", async () => {
+    // Shared agent-main session was contaminated by a concurrent conversation: lastTo now points at
+    // an unrelated DM. A keyless implicit cron would normally be refused (see the test above), but a
+    // job that captured its originating channel/target must still deliver there.
+    setLastSessionEntry({
+      sessionId: "sess-contaminated",
+      lastChannel: "alpha",
+      lastTo: "unrelated-dm",
+    });
+
+    const result = await resolveDeliveryTarget(
+      makeCfg({ channels: { alpha: { allowFrom: [] } } }),
+      AGENT_ID,
+      {
+        channel: "last",
+        to: undefined,
+        turnSourceChannel: "alpha",
+        turnSourceTo: "origin-room",
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.channel).toBe("alpha");
+    expect(result.to).toBe("origin-room");
+  });
+
   it("reroutes implicit delivery to an authorized allowFrom recipient", async () => {
     setLastSessionEntry({
       sessionId: "sess-w1",
