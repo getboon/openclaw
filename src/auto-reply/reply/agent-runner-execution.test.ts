@@ -24,7 +24,6 @@ import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import {
   buildContextOverflowRecoveryText,
-  buildKnownAgentRunFailureReplyPayload,
   buildRateLimitCooldownMessage,
   computeContextAwareReserveTokensFloor,
   MAX_LIVE_SWITCH_RETRIES,
@@ -8210,67 +8209,52 @@ describe("resolveTransientRetryBackoffMs", () => {
   });
 });
 
-describe("buildKnownAgentRunFailureReplyPayload — contextual coded copy (ENG-15739)", () => {
+describe("runAgentTurnWithFallback — contextual coded copy (ENG-15739)", () => {
   const directCtx = {
     Provider: "discord",
     Surface: "discord",
     ChatType: "direct",
     MessageSid: "msg",
   } as unknown as TemplateContext;
-  const groupCtx = {
-    Provider: "discord",
-    Surface: "discord",
-    ChatType: "group",
-    GroupSubject: "agent group",
-    GroupChannel: "#general",
-    MessageSid: "msg",
-  } as unknown as TemplateContext;
 
-  it("surfaces the malformed-history class for a format failure in a DM", () => {
-    const payload = buildKnownAgentRunFailureReplyPayload({
-      err: new FailoverError("provider rejected the request schema", { reason: "format" }),
-      sessionCtx: directCtx,
-      resolvedVerboseLevel: "off",
-    });
-    expect(payload?.text).toBe(messageOriginCodeCopy("provider_malformed_history"));
-    expect(payload?.isError).toBe(true);
+  async function runDirectFailure(err: unknown): Promise<string | undefined> {
+    state.runEmbeddedAgentMock.mockRejectedValueOnce(err);
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback(
+      createMinimalRunAgentTurnParams({ sessionCtx: directCtx }),
+    );
+    return result.kind === "final" ? result.payload.text : undefined;
+  }
+
+  it("surfaces the malformed-history class for a format failure in a DM", async () => {
+    const text = await runDirectFailure(
+      new FailoverError("provider rejected the request schema", { reason: "format" }),
+    );
+    expect(text).toBe(messageOriginCodeCopy("provider_malformed_history"));
   });
 
-  it("surfaces the upstream-5xx class for a server_error failure in a DM", () => {
-    const payload = buildKnownAgentRunFailureReplyPayload({
-      err: new FailoverError("bad gateway", { reason: "server_error", status: 502 }),
-      sessionCtx: directCtx,
-      resolvedVerboseLevel: "off",
-    });
-    expect(payload?.text).toBe(messageOriginCodeCopy("provider_upstream_5xx"));
+  it("surfaces the upstream-5xx class for a server_error failure in a DM", async () => {
+    const text = await runDirectFailure(
+      new FailoverError("bad gateway", { reason: "server_error", status: 502 }),
+    );
+    expect(text).toBe(messageOriginCodeCopy("provider_upstream_5xx"));
   });
 
-  it("surfaces the transient class for an unclassified failure in a DM", () => {
-    const payload = buildKnownAgentRunFailureReplyPayload({
-      err: new Error("openai/gpt-5.5 ended with an incomplete terminal response"),
-      sessionCtx: directCtx,
-      resolvedVerboseLevel: "off",
-    });
-    expect(payload?.text).toBe(messageOriginCodeCopy("agent_failed_transient_after_retries"));
+  it("surfaces the transient class for an unclassified failure in a DM", async () => {
+    const text = await runDirectFailure(
+      new Error("openai/gpt-5.5 ended with an incomplete terminal response"),
+    );
+    expect(text).toBe(messageOriginCodeCopy("agent_failed_transient_after_retries"));
   });
 
-  it("stays silent (undefined) for the same unclassified failure in a group with default policy", () => {
-    const payload = buildKnownAgentRunFailureReplyPayload({
-      err: new Error("openai/gpt-5.5 ended with an incomplete terminal response"),
-      sessionCtx: groupCtx,
-      resolvedVerboseLevel: "off",
-    });
-    expect(payload).toBeUndefined();
-  });
-
-  it("is deterministic — the same failure class yields the same copy across calls", () => {
-    const mk = () =>
-      buildKnownAgentRunFailureReplyPayload({
-        err: new FailoverError("provider rejected the request schema", { reason: "format" }),
-        sessionCtx: directCtx,
-        resolvedVerboseLevel: "off",
-      })?.text;
-    expect(mk()).toBe(messageOriginCodeCopy("provider_malformed_history"));
-    expect(mk()).toBe(mk());
+  it("is deterministic — the same failure class yields the same copy across calls", async () => {
+    const first = await runDirectFailure(
+      new FailoverError("provider rejected the request schema", { reason: "format" }),
+    );
+    const second = await runDirectFailure(
+      new FailoverError("provider rejected the request schema", { reason: "format" }),
+    );
+    expect(first).toBe(messageOriginCodeCopy("provider_malformed_history"));
+    expect(second).toBe(first);
   });
 });

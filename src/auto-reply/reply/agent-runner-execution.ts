@@ -1198,31 +1198,13 @@ export function buildKnownAgentRunFailureReplyPayload(params: {
     },
   );
   if (externalRunFailureReply.isGenericRunnerFailure) {
-    if (isVerboseFailureDetailEnabled(params.resolvedVerboseLevel)) {
-      // Verbose operators want the raw forwarded failure detail, not a friendly
-      // class. Route it through the conversation gate exactly as before.
-      return markAgentRunFailureReplyPayload({
-        text: resolveExternalRunFailureTextForConversation({
-          text: externalRunFailureReply.text,
-          sessionCtx: params.sessionCtx,
-          isGenericRunnerFailure: true,
-          cfg: params.cfg,
-        }),
-      });
-    }
-    // Previously-generic fall-through: replace the single "message failed"
-    // string with deterministic, class-specific copy (ENG-15739). Group silence
-    // is preserved by the shared gate — a silent result still returns undefined
-    // so the caller keeps its existing rethrow/drain behavior.
-    const codedText = resolveCodedGenericFailureText({
-      err: params.err,
-      sessionCtx: params.sessionCtx,
-      cfg: params.cfg,
-    });
-    if (isSilentReplyText(codedText, SILENT_REPLY_TOKEN)) {
-      return undefined;
-    }
-    return markAgentRunFailureReplyPayload({ text: codedText });
+    // This is the outer catch for errors that ESCAPED runAgentTurnWithFallback
+    // entirely (pre-run maintenance crashes, restart lifecycle, truly
+    // unexpected exceptions) — not the classified LLM-completion failures, which
+    // runAgentTurnWithFallback already converts to a coded kind:"final" payload
+    // (ENG-15739 lives there). Returning undefined here preserves the deliberate
+    // "let an unexpected exception propagate to the caller" contract.
+    return undefined;
   }
   return markAgentRunFailureReplyPayload({
     text: resolveExternalRunFailureTextForConversation({
