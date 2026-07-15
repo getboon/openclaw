@@ -1568,6 +1568,13 @@ export function isRawAssistantErrorPassthrough(params: {
   if (!friendlyError || !rawError) {
     return false;
   }
+  // Our own curated exhaustion copy is intended user text, not a raw provider
+  // leak — never let the "LLM error"-prefix heuristic below suppress it. Without
+  // this a JSON-parseable gateway body (parsedMessage set) would collapse the
+  // copy to the generic "LLM request failed.".
+  if (friendlyError === BOON_GATEWAY_EXHAUSTED_USER_TEXT) {
+    return false;
+  }
   const parsedMessage = parseApiErrorInfo(rawError)?.message?.trim();
   const leadingStatusRest = extractLeadingHttpStatus(rawError)?.rest?.trim();
   const hasRawDerivedProviderPrefix =

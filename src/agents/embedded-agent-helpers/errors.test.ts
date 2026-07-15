@@ -157,9 +157,14 @@ describe("boon-llm-gateway token allocation exhausted", () => {
     }
   });
 
-  it("also handles the HTTP-prefixed and bare-JSON shapes", () => {
-    expect(formatAssistantErrorText(makeGatewayError(HTTP_SHAPE), opts)).toBe(EXPECTED);
-    expect(formatAssistantErrorText(makeGatewayError(BARE_JSON), opts)).toBe(EXPECTED);
+  it("also handles the HTTP-prefixed and bare-JSON shapes end-to-end", () => {
+    // Bare JSON is parseable, so it must survive the passthrough net too (the
+    // net would otherwise suppress the "LLM error"-prefixed copy to the generic
+    // fallback). Assert the full user-facing path, not just the formatter.
+    for (const shape of [HTTP_SHAPE, BARE_JSON]) {
+      expect(formatAssistantErrorText(makeGatewayError(shape), opts)).toBe(EXPECTED);
+      expect(formatUserFacingAssistantErrorText(makeGatewayError(shape), opts)).toBe(EXPECTED);
+    }
   });
 
   it("does not match unrelated exhausted errors", () => {
