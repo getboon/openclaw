@@ -3,6 +3,7 @@
  * Verifies managed session cancellation, process-tree fallback, and registry state.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { isToolResultError } from "./tool-result-error.js";
 
 const { supervisorMock } = vi.hoisted(() => ({
   supervisorMock: {
@@ -112,6 +113,25 @@ describe("process tool supervisor cancellation", () => {
     expectTextContent(result.content[0], "Termination requested for session sess.");
   });
 
+  it("does not classify a successful agent-requested kill as a tool error (ENG-15627 §5b)", async () => {
+    // An agent intentionally killing a backgrounded session it started is a
+    // SUCCESS, not a failure. Marking the result status:"failed" makes the
+    // channel render "⚠️ 🧰 Process failed" for a deliberate teardown — the lie
+    // Mona flagged. isToolResultError is the exact predicate that drives that
+    // ⚠️ banner, so assert against it.
+    supervisorMock.getRecord.mockReturnValue({ runId: "sess", state: "running" });
+    addSession(createBackgroundSession("sess"));
+    const processTool = createProcessTool();
+
+    const result = await processTool.execute("toolcall", {
+      action: "kill",
+      sessionId: "sess",
+    });
+
+    expectTextContent(result.content[0], "Termination requested for session sess.");
+    expect(isToolResultError(result)).toBe(false);
+  });
+
   it("remove drops running session immediately when cancellation is requested", async () => {
     supervisorMock.getRecord.mockReturnValue({
       runId: "sess",
@@ -129,6 +149,7 @@ describe("process tool supervisor cancellation", () => {
     expect(getSession("sess")).toBeUndefined();
     expect(getFinishedSession("sess")).toBeUndefined();
     expectTextContent(result.content[0], "Removed session sess (termination requested).");
+    expect(isToolResultError(result)).toBe(false);
   });
 
   it("falls back to process-tree kill when supervisor record is missing", async () => {
@@ -143,8 +164,11 @@ describe("process tool supervisor cancellation", () => {
 
     expect(killProcessTreeMock).toHaveBeenCalledWith(4242);
     expect(getSession("sess-fallback")).toBeUndefined();
-    expectFinishedSessionState("sess-fallback", { status: "failed", exitSignal: "SIGKILL" });
+    // A successful SIGKILL fallback records the session as "killed", not
+    // "failed" (ENG-15627 §5b) — the agent asked for it and it worked.
+    expectFinishedSessionState("sess-fallback", { status: "killed", exitSignal: "SIGKILL" });
     expectTextContent(result.content[0], "Killed session sess-fallback.");
+    expect(isToolResultError(result)).toBe(false);
   });
 
   it("fails remove when no supervisor record and no pid is available", async () => {
