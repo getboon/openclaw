@@ -281,23 +281,22 @@ flow:
         - set: concurrentRunStartedAt
           value:
             expr: "Date.now()"
-        # Fire both without awaiting between them so the two isolated runs overlap.
-        - call: env.gateway.call
-          saveAs: runResponseA
-          args:
-            - cron.run
-            - id:
-                ref: jobIdA
-              mode: force
-            - timeoutMs: 30000
-        - call: env.gateway.call
-          saveAs: runResponseB
-          args:
-            - cron.run
-            - id:
-                ref: jobIdB
-              mode: force
-            - timeoutMs: 30000
+        # Submit BOTH cron.run RPCs before awaiting either, so the two isolated runs genuinely
+        # overlap and resolve delivery concurrently — a serial fire-then-await would let run A finish
+        # before B starts and could pass while a real concurrent routing race stayed broken.
+        - set: concurrentRunResponses
+          value:
+            expr: >-
+              (async () => await Promise.all([
+                env.gateway.call('cron.run', { id: jobIdA, mode: 'force' }, { timeoutMs: 30000 }),
+                env.gateway.call('cron.run', { id: jobIdB, mode: 'force' }, { timeoutMs: 30000 }),
+              ]))()
+        - set: runResponseA
+          value:
+            expr: "concurrentRunResponses[0]"
+        - set: runResponseB
+          value:
+            expr: "concurrentRunResponses[1]"
         - assert:
             expr: "runResponseA?.ok === true && runResponseB?.ok === true"
             message:
