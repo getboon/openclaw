@@ -8,6 +8,7 @@ import { LiveSessionModelSwitchError } from "../../agents/live-model-switch-erro
 import { MissingProviderAuthError } from "../../agents/model-auth.js";
 import { FallbackSummaryError } from "../../agents/model-fallback.js";
 import type { FallbackAttempt } from "../../agents/model-fallback.types.js";
+import { messageOriginCodeCopy } from "../../channels/message/message-origin.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import type { ModelDefinitionConfig } from "../../config/types.models.js";
 import { resetLogger, setLoggerOverride } from "../../logging/logger.js";
@@ -23,6 +24,7 @@ import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import {
   buildContextOverflowRecoveryText,
+  buildKnownAgentRunFailureReplyPayload,
   buildRateLimitCooldownMessage,
   computeContextAwareReserveTokensFloor,
   MAX_LIVE_SWITCH_RETRIES,
@@ -57,6 +59,10 @@ const state = vi.hoisted(() => ({
 
 const GENERIC_RUN_FAILURE_TEXT =
   "⚠️ Something went wrong while processing your request. Please try again, or use /new to start a fresh session.";
+
+// ENG-15739: previously-generic terminal failures now surface deterministic,
+// class-specific copy. An unclassified failure maps to this transient class.
+const TRANSIENT_CODED_FAILURE_TEXT = messageOriginCodeCopy("agent_failed_transient_after_retries");
 
 describe("resolveSessionRuntimeOverrideForProvider", () => {
   afterEach(() => {
@@ -6295,7 +6301,10 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      expect(result.payload.text).toBe(GENERIC_RUN_FAILURE_TEXT);
+      // ENG-15739: an unclassified failure now surfaces deterministic
+      // class-specific copy instead of the single generic string.
+      expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
+      expect(result.payload.text).not.toBe(GENERIC_RUN_FAILURE_TEXT);
     }
     const terminalFailureEvent = emitAgentEvent.mock.calls
       .map((call) => call[0])
@@ -6503,8 +6512,10 @@ describe("runAgentTurnWithFallback", () => {
 
       expect(result.kind).toBe("final");
       if (result.kind === "final") {
+        // disallow policy surfaces the failure in groups; ENG-15739 makes that
+        // surfaced text the deterministic coded copy, not the generic string.
         expect(result.payload.text).not.toBe(SILENT_REPLY_TOKEN);
-        expect(result.payload.text).toBe(GENERIC_RUN_FAILURE_TEXT);
+        expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
       }
     },
   );
@@ -6545,7 +6556,8 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      expect(result.payload.text).toBe(GENERIC_RUN_FAILURE_TEXT);
+      // Per-surface disallow surfaces the failure; ENG-15739 makes it coded.
+      expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
     }
   });
 
@@ -6696,7 +6708,9 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      expect(result.payload.text).toBe(GENERIC_RUN_FAILURE_TEXT);
+      // ENG-15739: DM surfaces the deterministic coded copy for this class.
+      expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
+      expect(result.payload.text).not.toBe(GENERIC_RUN_FAILURE_TEXT);
     }
   });
 
@@ -8193,5 +8207,70 @@ describe("resolveTransientRetryBackoffMs", () => {
 
   it("retries up to 5 times for a robust recovery window", () => {
     expect(MAX_TRANSIENT_BUSY_RETRIES).toBe(5);
+  });
+});
+
+describe("buildKnownAgentRunFailureReplyPayload — contextual coded copy (ENG-15739)", () => {
+  const directCtx = {
+    Provider: "discord",
+    Surface: "discord",
+    ChatType: "direct",
+    MessageSid: "msg",
+  } as unknown as TemplateContext;
+  const groupCtx = {
+    Provider: "discord",
+    Surface: "discord",
+    ChatType: "group",
+    GroupSubject: "agent group",
+    GroupChannel: "#general",
+    MessageSid: "msg",
+  } as unknown as TemplateContext;
+
+  it("surfaces the malformed-history class for a format failure in a DM", () => {
+    const payload = buildKnownAgentRunFailureReplyPayload({
+      err: new FailoverError("provider rejected the request schema", { reason: "format" }),
+      sessionCtx: directCtx,
+      resolvedVerboseLevel: "off",
+    });
+    expect(payload?.text).toBe(messageOriginCodeCopy("provider_malformed_history"));
+    expect(payload?.isError).toBe(true);
+  });
+
+  it("surfaces the upstream-5xx class for a server_error failure in a DM", () => {
+    const payload = buildKnownAgentRunFailureReplyPayload({
+      err: new FailoverError("bad gateway", { reason: "server_error", status: 502 }),
+      sessionCtx: directCtx,
+      resolvedVerboseLevel: "off",
+    });
+    expect(payload?.text).toBe(messageOriginCodeCopy("provider_upstream_5xx"));
+  });
+
+  it("surfaces the transient class for an unclassified failure in a DM", () => {
+    const payload = buildKnownAgentRunFailureReplyPayload({
+      err: new Error("openai/gpt-5.5 ended with an incomplete terminal response"),
+      sessionCtx: directCtx,
+      resolvedVerboseLevel: "off",
+    });
+    expect(payload?.text).toBe(messageOriginCodeCopy("agent_failed_transient_after_retries"));
+  });
+
+  it("stays silent (undefined) for the same unclassified failure in a group with default policy", () => {
+    const payload = buildKnownAgentRunFailureReplyPayload({
+      err: new Error("openai/gpt-5.5 ended with an incomplete terminal response"),
+      sessionCtx: groupCtx,
+      resolvedVerboseLevel: "off",
+    });
+    expect(payload).toBeUndefined();
+  });
+
+  it("is deterministic — the same failure class yields the same copy across calls", () => {
+    const mk = () =>
+      buildKnownAgentRunFailureReplyPayload({
+        err: new FailoverError("provider rejected the request schema", { reason: "format" }),
+        sessionCtx: directCtx,
+        resolvedVerboseLevel: "off",
+      })?.text;
+    expect(mk()).toBe(messageOriginCodeCopy("provider_malformed_history"));
+    expect(mk()).toBe(mk());
   });
 });

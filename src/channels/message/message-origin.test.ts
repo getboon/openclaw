@@ -26,6 +26,7 @@ describe("gateway-failure code registry", () => {
         "provider_malformed_history",
         "agent_failed_transient_after_retries",
         "subagent_still_working",
+        "boon_core_unreachable",
       ]),
     );
   });
@@ -91,5 +92,13 @@ describe("resolveEmittableGatewayFailure (fail-closed)", () => {
   it("downgrades an uncoded failure to agent_failed_transient_after_retries in DMs", () => {
     const origin = resolveEmittableGatewayFailure(undefined, { isDirect: true });
     expect(origin?.code).toBe("agent_failed_transient_after_retries");
+  });
+});
+
+describe("boon_core_unreachable copy", () => {
+  it("is a scoped, customer-safe sentence that reassures general chat still works", () => {
+    const copy = messageOriginCodeCopy("boon_core_unreachable");
+    expect(copy.toLowerCase()).toContain("project data");
+    expect(copy).not.toContain("boon_core_unreachable");
   });
 });
