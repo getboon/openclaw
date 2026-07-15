@@ -64,6 +64,11 @@ export async function resolveCronDeliveryPreview(params: {
       threadId: plan.threadId,
       accountId: plan.accountId,
       sessionKey: deliverySessionKey,
+      // ENG-14833: mirror runtime origin pinning so the preview matches the actual delivery route.
+      turnSourceChannel: plan.turnSourceChannel,
+      turnSourceTo: plan.turnSourceTo,
+      turnSourceAccountId: plan.turnSourceAccountId,
+      turnSourceThreadId: plan.turnSourceThreadId,
     },
     { dryRun: true },
   );

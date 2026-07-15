@@ -1,0 +1,359 @@
+title: Cron cross-channel origin routing
+
+scenario:
+  id: cron-cross-channel-origin-routing
+  surface: cron
+  runtimeParityTier: live-only
+  coverage:
+    primary:
+      - runtime.delivery
+    secondary:
+      - scheduling.cron
+      - channels.qa-channel
+  objective: >-
+    Verify a cron created in one conversation delivers to that origin conversation even after a
+    concurrent conversation contaminates the shared session's lastChannel/lastTo (ENG-14833).
+  successCriteria:
+    - The shared main session's lastTo is contaminated to the second (unrelated) conversation.
+    - The forced cron run delivers exactly one message to the originating conversation.
+    - The contaminated (unrelated) conversation receives zero cron deliveries.
+    - Two crons pinned to two different origin channels each deliver only to their own origin, with no cross-delivery.
+  docsRefs:
+    - docs/help/testing.md
+    - docs/channels/qa-channel.md
+  codeRefs:
+    - src/cron/delivery-plan.ts
+    - src/cron/isolated-agent/delivery-target.ts
+    - src/infra/outbound/targets-session.ts
+    - extensions/qa-lab/src/suite-runtime-transport.ts
+  execution:
+    kind: flow
+    suiteIsolation: isolated
+    isolationReason: >-
+      Mutates the shared agent:qa:main session lastChannel/lastTo via injected inbound messages; a
+      co-running scenario's session writes would race the contamination this scenario asserts.
+    summary: >-
+      Contaminate the shared main session from an unrelated conversation, then force an origin-pinned
+      cron and assert delivery lands in the originating conversation, not the contaminated one.
+    config:
+      requiredChannelDriver: qa-channel
+      originConversationId: cron-origin-room
+      contaminatingConversationId: unrelated-dm
+      concurrentConversationIdA: estimator-channel-a
+      concurrentConversationIdB: estimator-channel-b
+      noOutboundWindowMs: 4000
+  gatewayConfigPatch:
+    session:
+      dmScope: main
+
+flow:
+  steps:
+    - name: contaminates the shared session from an unrelated conversation
+      actions:
+        - call: waitForGatewayHealthy
+          args:
+            - ref: env
+            - 60000
+        - call: waitForQaChannelReady
+          args:
+            - ref: env
+            - 60000
+        - call: reset
+        # Origin conversation speaks first so the run's intended target exists in the transport.
+        - call: injectInboundMessage
+          args:
+            - accountId: default
+              conversation:
+                id:
+                  expr: config.originConversationId
+                kind: channel
+                title: Cron Origin Room
+              senderId: estimator
+              senderName: Junior Estimator
+              text: Kick off the estimate skill in this channel.
+        # A different conversation then messages the agent, overwriting the shared session lastTo.
+        - call: injectInboundMessage
+          args:
+            - accountId: default
+              conversation:
+                id:
+                  expr: config.contaminatingConversationId
+                kind: direct
+                title: Unrelated DM
+              senderId: operator
+              senderName: Operator
+              text: Unrelated question in my DM.
+        - call: waitForCondition
+          saveAs: contaminated
+          args:
+            - lambda:
+                async: true
+                expr: >-
+                  (async () => {
+                    const store = await readRawQaSessionStore(env);
+                    const entry = store['agent:qa:main'];
+                    return entry && entry.lastTo === `channel:${config.contaminatingConversationId}`
+                      ? entry
+                      : (entry && String(entry.lastTo ?? '').includes(config.contaminatingConversationId) ? entry : undefined);
+                  })()
+            - expr: liveTurnTimeoutMs(env, 45000)
+            - 500
+        - assert:
+            expr: "Boolean(contaminated)"
+            message:
+              expr: "`expected shared session lastTo contaminated to ${config.contaminatingConversationId}, saw ${JSON.stringify(contaminated)}`"
+      detailsExpr: "`contaminated lastTo=${contaminated?.lastTo}`"
+
+    - name: forces an origin-pinned cron and asserts delivery to the origin only
+      actions:
+        - set: cronMarker
+          value:
+            expr: "`QA-CRON-ORIGIN-${randomUUID().slice(0, 8)}`"
+        # Index into the OUTBOUND-only list, since waitForOutboundMessage/waitForNoOutbound slice
+        # the filtered outbound stream (not the full inbound+outbound message list).
+        - set: outboundStartIndex
+          value:
+            expr: "getTransportSnapshot().messages.filter((m) => m.direction === 'outbound').length"
+        - set: scheduledFor
+          value:
+            expr: "new Date(Date.now() + 10 * 60 * 1000).toISOString()"
+        # channel:"last" would resolve to the contaminated session lastTo; turnSource* must pin the
+        # origin conversation instead. This mirrors what the agent cron tool captures at creation.
+        - call: env.gateway.call
+          saveAs: response
+          args:
+            - cron.add
+            - name:
+                expr: "`qa-origin-${randomUUID()}`"
+              enabled: true
+              schedule:
+                kind: at
+                at:
+                  ref: scheduledFor
+              sessionTarget: isolated
+              wakeMode: now
+              payload:
+                kind: agentTurn
+                message:
+                  expr: "`Send a one-line ping containing this exact marker: ${cronMarker}`"
+              delivery:
+                mode: announce
+                channel: last
+                turnSourceChannel: qa-channel
+                turnSourceTo:
+                  expr: "`channel:${config.originConversationId}`"
+                turnSourceAccountId: default
+        - set: jobId
+          value:
+            expr: response.id
+        - assert:
+            expr: "Boolean(jobId)"
+            message:
+              expr: "`cron.add rejected the origin-pinned job: ${JSON.stringify(response)}`"
+        - set: runStartedAt
+          value:
+            expr: "Date.now()"
+        - call: env.gateway.call
+          saveAs: runResponse
+          args:
+            - cron.run
+            - id:
+                ref: jobId
+              mode: force
+            - timeoutMs: 30000
+        - assert:
+            expr: "runResponse?.ok === true && runResponse?.ran !== false"
+            message:
+              expr: "`expected cron.run to enqueue one run, got ${JSON.stringify(runResponse)}`"
+        - call: waitForCronRunCompletion
+          saveAs: completedRun
+          args:
+            - callGateway:
+                expr: "env.gateway.call.bind(env.gateway)"
+              jobId:
+                ref: jobId
+              afterTs:
+                ref: runStartedAt
+              timeoutMs:
+                expr: liveTurnTimeoutMs(env, 45000)
+        - assert:
+            expr: "completedRun?.status === 'ok'"
+            message:
+              expr: "`expected cron run ok, got ${JSON.stringify(completedRun)}`"
+        - call: waitForOutboundMessage
+          saveAs: originOutbound
+          args:
+            - ref: state
+            - lambda:
+                params: [candidate]
+                expr: "candidate.conversation.id === config.originConversationId && candidate.text.includes(cronMarker)"
+            - expr: liveTurnTimeoutMs(env, 45000)
+            - sinceIndex:
+                ref: outboundStartIndex
+        - assert:
+            expr: "originOutbound.conversation.id === config.originConversationId"
+            message:
+              expr: "`cron delivered to ${originOutbound.conversation.id}, expected ${config.originConversationId}`"
+        # No cron delivery may leak into the contaminated conversation.
+        - set: leakedToContaminated
+          value:
+            expr: "getTransportSnapshot().messages.filter((message) => message.direction === 'outbound' && message.conversation.id === config.contaminatingConversationId && message.text.includes(cronMarker))"
+        - assert:
+            expr: "leakedToContaminated.length === 0"
+            message:
+              expr: "`cron leaked ${leakedToContaminated.length} delivery to contaminated conversation ${config.contaminatingConversationId}`"
+      detailsExpr: "`origin delivery=${originOutbound.id}; leaked=${leakedToContaminated.length}`"
+
+    - name: concurrent origin-pinned crons in two channels stay in their own origin
+      actions:
+        - set: markerA
+          value:
+            expr: "`QA-CRON-CC-A-${randomUUID().slice(0, 8)}`"
+        - set: markerB
+          value:
+            expr: "`QA-CRON-CC-B-${randomUUID().slice(0, 8)}`"
+        - set: concurrentStartIndex
+          value:
+            expr: "getTransportSnapshot().messages.filter((m) => m.direction === 'outbound').length"
+        - set: scheduledForConcurrent
+          value:
+            expr: "new Date(Date.now() + 10 * 60 * 1000).toISOString()"
+        # Two crons, each channel:"last" but pinned to a DIFFERENT origin channel. If routing leaked
+        # across runs (shared session or channel-id drift), a marker would surface in the wrong origin.
+        - call: env.gateway.call
+          saveAs: responseA
+          args:
+            - cron.add
+            - name:
+                expr: "`qa-concurrent-a-${randomUUID()}`"
+              enabled: true
+              schedule:
+                kind: at
+                at:
+                  ref: scheduledForConcurrent
+              sessionTarget: isolated
+              wakeMode: now
+              payload:
+                kind: agentTurn
+                message:
+                  expr: "`Send a one-line ping containing this exact marker: ${markerA}`"
+              delivery:
+                mode: announce
+                channel: last
+                turnSourceChannel: qa-channel
+                turnSourceTo:
+                  expr: "`channel:${config.concurrentConversationIdA}`"
+                turnSourceAccountId: default
+        - call: env.gateway.call
+          saveAs: responseB
+          args:
+            - cron.add
+            - name:
+                expr: "`qa-concurrent-b-${randomUUID()}`"
+              enabled: true
+              schedule:
+                kind: at
+                at:
+                  ref: scheduledForConcurrent
+              sessionTarget: isolated
+              wakeMode: now
+              payload:
+                kind: agentTurn
+                message:
+                  expr: "`Send a one-line ping containing this exact marker: ${markerB}`"
+              delivery:
+                mode: announce
+                channel: last
+                turnSourceChannel: qa-channel
+                turnSourceTo:
+                  expr: "`channel:${config.concurrentConversationIdB}`"
+                turnSourceAccountId: default
+        - set: jobIdA
+          value:
+            expr: responseA.id
+        - set: jobIdB
+          value:
+            expr: responseB.id
+        - assert:
+            expr: "Boolean(jobIdA) && Boolean(jobIdB)"
+            message:
+              expr: "`cron.add rejected a concurrent job: A=${JSON.stringify(responseA)} B=${JSON.stringify(responseB)}`"
+        - set: concurrentRunStartedAt
+          value:
+            expr: "Date.now()"
+        # Submit BOTH cron.run RPCs before awaiting either, so the two isolated runs genuinely
+        # overlap and resolve delivery concurrently — a serial fire-then-await would let run A finish
+        # before B starts and could pass while a real concurrent routing race stayed broken.
+        - set: concurrentRunResponses
+          value:
+            expr: >-
+              (async () => await Promise.all([
+                env.gateway.call('cron.run', { id: jobIdA, mode: 'force' }, { timeoutMs: 30000 }),
+                env.gateway.call('cron.run', { id: jobIdB, mode: 'force' }, { timeoutMs: 30000 }),
+              ]))()
+        - set: runResponseA
+          value:
+            expr: "concurrentRunResponses[0]"
+        - set: runResponseB
+          value:
+            expr: "concurrentRunResponses[1]"
+        - assert:
+            expr: "runResponseA?.ok === true && runResponseB?.ok === true"
+            message:
+              expr: "`expected both concurrent runs to enqueue, got A=${JSON.stringify(runResponseA)} B=${JSON.stringify(runResponseB)}`"
+        - call: waitForCronRunCompletion
+          saveAs: completedA
+          args:
+            - callGateway:
+                expr: "env.gateway.call.bind(env.gateway)"
+              jobId:
+                ref: jobIdA
+              afterTs:
+                ref: concurrentRunStartedAt
+              timeoutMs:
+                expr: liveTurnTimeoutMs(env, 45000)
+        - call: waitForCronRunCompletion
+          saveAs: completedB
+          args:
+            - callGateway:
+                expr: "env.gateway.call.bind(env.gateway)"
+              jobId:
+                ref: jobIdB
+              afterTs:
+                ref: concurrentRunStartedAt
+              timeoutMs:
+                expr: liveTurnTimeoutMs(env, 45000)
+        - assert:
+            expr: "completedA?.status === 'ok' && completedB?.status === 'ok'"
+            message:
+              expr: "`expected both concurrent runs ok, got A=${JSON.stringify(completedA)} B=${JSON.stringify(completedB)}`"
+        - call: waitForOutboundMessage
+          saveAs: outboundA
+          args:
+            - ref: state
+            - lambda:
+                params: [candidate]
+                expr: "candidate.conversation.id === config.concurrentConversationIdA && candidate.text.includes(markerA)"
+            - expr: liveTurnTimeoutMs(env, 45000)
+            - sinceIndex:
+                ref: concurrentStartIndex
+        - call: waitForOutboundMessage
+          saveAs: outboundB
+          args:
+            - ref: state
+            - lambda:
+                params: [candidate]
+                expr: "candidate.conversation.id === config.concurrentConversationIdB && candidate.text.includes(markerB)"
+            - expr: liveTurnTimeoutMs(env, 45000)
+            - sinceIndex:
+                ref: concurrentStartIndex
+        # Cross-delivery guard: marker A must never appear in channel B (or the contaminated DM) and
+        # vice versa. This is Victor's AC4 — concurrent runs stay in their own origin.
+        - set: crossDelivered
+          value:
+            expr: "getTransportSnapshot().messages.filter((m) => m.direction === 'outbound' && ((m.text.includes(markerA) && m.conversation.id !== config.concurrentConversationIdA) || (m.text.includes(markerB) && m.conversation.id !== config.concurrentConversationIdB)))"
+        - assert:
+            expr: "crossDelivered.length === 0"
+            message:
+              expr: "`concurrent runs cross-delivered ${crossDelivered.length}: ${JSON.stringify(crossDelivered.map((m) => ({ conv: m.conversation.id, text: m.text })))}`"
+      detailsExpr: "`A=${outboundA.conversation.id} B=${outboundB.conversation.id} cross=${crossDelivered.length}`"

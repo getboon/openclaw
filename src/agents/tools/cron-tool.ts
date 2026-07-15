@@ -1019,6 +1019,32 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
                 } satisfies CronDelivery;
               }
             }
+
+            // Capture turn source context to prevent cross-channel contamination (ENG-14833)
+            // Check explicitness from the ORIGINAL user-supplied delivery (not post-inference
+            // currentDelivery) to avoid skipping capture when inferred targets look explicit.
+            if (opts.currentDeliveryContext) {
+              const currentDelivery = (job as { delivery?: unknown }).delivery;
+              if (isRecord(currentDelivery) && !currentDelivery.turnSourceChannel) {
+                const deliveryMode = normalizeLowercaseStringOrEmpty(
+                  typeof currentDelivery.mode === "string" ? currentDelivery.mode : "",
+                );
+                const hasExplicitTarget =
+                  (typeof delivery?.channel === "string" && delivery.channel.trim()) ||
+                  (typeof delivery?.to === "string" && delivery.to.trim());
+                const shouldCapture =
+                  (deliveryMode === "" || deliveryMode === "announce") && !hasExplicitTarget;
+                if (shouldCapture) {
+                  const ctx = opts.currentDeliveryContext;
+                  if (ctx.channel) {
+                    currentDelivery.turnSourceChannel = ctx.channel;
+                    currentDelivery.turnSourceTo = ctx.to;
+                    currentDelivery.turnSourceAccountId = ctx.accountId;
+                    currentDelivery.turnSourceThreadId = ctx.threadId;
+                  }
+                }
+              }
+            }
           }
 
           const contextMessages = readNonNegativeIntegerParam(params, "contextMessages") ?? 0;

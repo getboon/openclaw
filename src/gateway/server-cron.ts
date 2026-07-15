@@ -478,6 +478,12 @@ export function buildGatewayCronService(params: {
             // ENG-14117: honor the job's completion reply-style on the main/current
             // announce path too (isolated jobs route through dispatchCronDelivery).
             replyStyle: plan.replyStyle,
+            // ENG-14833: pin the captured origin so a contaminated shared-session lastChannel/lastTo
+            // cannot redirect this completion announce to an unrelated conversation.
+            turnSourceChannel: plan.turnSourceChannel,
+            turnSourceTo: plan.turnSourceTo,
+            turnSourceAccountId: plan.turnSourceAccountId,
+            turnSourceThreadId: plan.turnSourceThreadId,
           },
           message,
           abortSignal: abortSignal ?? new AbortController().signal,

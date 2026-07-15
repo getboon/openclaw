@@ -142,6 +142,14 @@ export async function resolveDeliveryTarget(
     /** Explicit accountId from job.delivery — overrides session-derived and binding-derived values. */
     accountId?: string;
     sessionKey?: string;
+    /** Originating channel for cross-channel contamination prevention (ENG-14833). */
+    turnSourceChannel?: ChannelId;
+    /** Originating target for cross-channel contamination prevention (ENG-14833). */
+    turnSourceTo?: string;
+    /** Originating account for cross-channel contamination prevention (ENG-14833). */
+    turnSourceAccountId?: string;
+    /** Originating thread for cross-channel contamination prevention (ENG-14833). */
+    turnSourceThreadId?: string | number;
   },
   options?: { dryRun?: boolean; inheritSessionThread?: boolean },
 ): Promise<DeliveryTargetResolution> {
@@ -192,6 +200,11 @@ export async function resolveDeliveryTarget(
     explicitTo,
     explicitThreadId: jobPayload.threadId,
     allowMismatchedLastTo,
+    // Pass stored turn source context to prevent cross-channel contamination (ENG-14833)
+    turnSourceChannel: jobPayload.turnSourceChannel,
+    turnSourceTo: jobPayload.turnSourceTo,
+    turnSourceAccountId: jobPayload.turnSourceAccountId,
+    turnSourceThreadId: jobPayload.turnSourceThreadId,
   });
 
   let fallbackChannel: Exclude<OutboundChannel, "none"> | undefined;
@@ -222,6 +235,11 @@ export async function resolveDeliveryTarget(
         fallbackChannel,
         allowMismatchedLastTo,
         mode: preliminary.mode,
+        // Pass stored turn source context to prevent cross-channel contamination (ENG-14833)
+        turnSourceChannel: jobPayload.turnSourceChannel,
+        turnSourceTo: jobPayload.turnSourceTo,
+        turnSourceAccountId: jobPayload.turnSourceAccountId,
+        turnSourceThreadId: jobPayload.turnSourceThreadId,
       })
     : preliminary;
 
@@ -314,10 +332,13 @@ export async function resolveDeliveryTarget(
   //   - evaluated AFTER the allowFrom reroute above (`toCandidate === resolved.lastTo`) — a cron
   //     whose stale target was rerouted to a configured allow-from peer is delivering to that
   //     allowed peer, not the inherited room, so it is not refused.
+  //   - does not have turnSourceChannel (ENG-14833) — when turnSource context is present, the target
+  //     is safely captured from the originating channel, not contaminated session state.
   if (
     !rawSessionKey &&
     mode === "implicit" &&
     !explicitTo &&
+    !jobPayload.turnSourceChannel &&
     usedSharedMainFallback &&
     toCandidate != null &&
     toCandidate === resolved.lastTo

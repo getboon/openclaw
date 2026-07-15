@@ -46,6 +46,10 @@ type ParsedDeliveryInput = {
   threadId?: string | number;
   replyStyle?: "thread" | "top-level";
   accountId?: string;
+  turnSourceChannel?: string;
+  turnSourceTo?: string;
+  turnSourceAccountId?: string;
+  turnSourceThreadId?: string | number;
 };
 
 /** Parses optional cron delivery fields while dropping invalid values instead of throwing. */
@@ -57,6 +61,16 @@ export function parseDeliveryInput(input: Record<string, unknown>): ParsedDelive
     threadId: parseOptionalField(DeliveryThreadIdFieldSchema, input.threadId),
     replyStyle: parseOptionalField(DeliveryReplyStyleFieldSchema, input.replyStyle),
     accountId: parseOptionalField(TrimmedNonEmptyStringFieldSchema, input.accountId),
+    turnSourceChannel: parseOptionalField(
+      LowercaseNonEmptyStringFieldSchema,
+      input.turnSourceChannel,
+    ),
+    turnSourceTo: parseOptionalField(TrimmedNonEmptyStringFieldSchema, input.turnSourceTo),
+    turnSourceAccountId: parseOptionalField(
+      TrimmedNonEmptyStringFieldSchema,
+      input.turnSourceAccountId,
+    ),
+    turnSourceThreadId: parseOptionalField(DeliveryThreadIdFieldSchema, input.turnSourceThreadId),
   };
 }
 

@@ -317,6 +317,26 @@ function coercePayload(payload: UnknownRecord) {
   return next;
 }
 
+/**
+ * Applies a parsed scalar delivery field to the normalized record: explicit `null` is preserved as
+ * a clear signal, a parsed value overwrites, and an unparseable value drops the key. Shared by all
+ * scalar delivery fields so their normalization stays identical.
+ */
+function applyParsedDeliveryField(
+  next: UnknownRecord,
+  source: UnknownRecord,
+  key: string,
+  parsedValue: unknown,
+) {
+  if (key in source && source[key] === null) {
+    next[key] = null;
+  } else if (parsedValue !== undefined) {
+    next[key] = parsedValue;
+  } else if (key in next) {
+    delete next[key];
+  }
+}
+
 function coerceDelivery(delivery: UnknownRecord) {
   const next: UnknownRecord = { ...delivery };
   const parsed = parseDeliveryInput(delivery);
@@ -325,41 +345,16 @@ function coerceDelivery(delivery: UnknownRecord) {
   } else if ("mode" in next) {
     delete next.mode;
   }
-  if ("channel" in delivery && delivery.channel === null) {
-    next.channel = null;
-  } else if (parsed.channel !== undefined) {
-    next.channel = parsed.channel;
-  } else if ("channel" in next) {
-    delete next.channel;
-  }
-  if ("to" in delivery && delivery.to === null) {
-    next.to = null;
-  } else if (parsed.to !== undefined) {
-    next.to = parsed.to;
-  } else if ("to" in next) {
-    delete next.to;
-  }
-  if ("threadId" in delivery && delivery.threadId === null) {
-    next.threadId = null;
-  } else if (parsed.threadId !== undefined) {
-    next.threadId = parsed.threadId;
-  } else if ("threadId" in next) {
-    delete next.threadId;
-  }
-  if ("replyStyle" in delivery && delivery.replyStyle === null) {
-    next.replyStyle = null;
-  } else if (parsed.replyStyle !== undefined) {
-    next.replyStyle = parsed.replyStyle;
-  } else if ("replyStyle" in next) {
-    delete next.replyStyle;
-  }
-  if ("accountId" in delivery && delivery.accountId === null) {
-    next.accountId = null;
-  } else if (parsed.accountId !== undefined) {
-    next.accountId = parsed.accountId;
-  } else if ("accountId" in next) {
-    delete next.accountId;
-  }
+  applyParsedDeliveryField(next, delivery, "channel", parsed.channel);
+  applyParsedDeliveryField(next, delivery, "to", parsed.to);
+  applyParsedDeliveryField(next, delivery, "threadId", parsed.threadId);
+  applyParsedDeliveryField(next, delivery, "replyStyle", parsed.replyStyle);
+  applyParsedDeliveryField(next, delivery, "accountId", parsed.accountId);
+  // Turn source fields prevent cross-channel contamination in shared sessions (ENG-14833).
+  applyParsedDeliveryField(next, delivery, "turnSourceChannel", parsed.turnSourceChannel);
+  applyParsedDeliveryField(next, delivery, "turnSourceTo", parsed.turnSourceTo);
+  applyParsedDeliveryField(next, delivery, "turnSourceAccountId", parsed.turnSourceAccountId);
+  applyParsedDeliveryField(next, delivery, "turnSourceThreadId", parsed.turnSourceThreadId);
   if ("failureDestination" in next) {
     // Null is an explicit clear signal in patches; invalid objects are dropped.
     if (next.failureDestination === null) {
