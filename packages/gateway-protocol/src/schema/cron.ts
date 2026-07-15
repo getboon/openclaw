@@ -309,6 +309,23 @@ export const CronCompletionDestinationSchema = Type.Object(
 /** Reply-style override for a cron completion send (ENG-14117). */
 export const CronReplyStyleSchema = Type.Union([Type.Literal("thread"), Type.Literal("top-level")]);
 
+// ENG-14833: the originating channel/target captured at job creation, carried so delivery
+// resolution can pin the origin instead of contaminated shared-session lastChannel/lastTo. Additive
+// optional fields; jobs created before this stay valid without them.
+const CronTurnSourceProperties = {
+  turnSourceChannel: Type.Optional(NonBlankString),
+  turnSourceTo: Type.Optional(NonBlankString),
+  turnSourceAccountId: Type.Optional(NonEmptyString),
+  turnSourceThreadId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+};
+
+const CronTurnSourcePatchProperties = {
+  turnSourceChannel: Type.Optional(Type.Union([NonBlankString, Type.Null()])),
+  turnSourceTo: Type.Optional(Type.Union([NonBlankString, Type.Null()])),
+  turnSourceAccountId: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
+  turnSourceThreadId: Type.Optional(Type.Union([Type.String(), Type.Number(), Type.Null()])),
+};
+
 const CronDeliverySharedProperties = {
   channel: Type.Optional(CronAnnounceChannelSchema),
   threadId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
@@ -316,6 +333,7 @@ const CronDeliverySharedProperties = {
   accountId: Type.Optional(NonEmptyString),
   bestEffort: Type.Optional(Type.Boolean()),
   failureDestination: Type.Optional(CronFailureDestinationSchema),
+  ...CronTurnSourceProperties,
 };
 
 const CronDeliveryPatchSharedProperties = {
@@ -325,6 +343,7 @@ const CronDeliveryPatchSharedProperties = {
   accountId: Type.Optional(Type.Union([NonEmptyString, Type.Null()])),
   bestEffort: Type.Optional(Type.Boolean()),
   failureDestination: Type.Optional(Type.Union([CronFailureDestinationPatchSchema, Type.Null()])),
+  ...CronTurnSourcePatchProperties,
 };
 
 const CronDeliveryNoopSchema = Type.Object(

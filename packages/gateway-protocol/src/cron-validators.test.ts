@@ -196,6 +196,45 @@ describe("cron protocol validators", () => {
     ).toBe(false);
   });
 
+  it("accepts delivery turnSource origin on add and update params (ENG-14833)", () => {
+    // The agent cron tool captures the originating channel/target into delivery so resolution can
+    // pin the origin over a contaminated shared session. Without these in the wire schema, cron.add
+    // rejected the captured job outright (additionalProperties:false), breaking cron creation.
+    expect(
+      validateCronAddParams({
+        ...minimalAddParams,
+        sessionTarget: "isolated",
+        payload: { kind: "agentTurn", message: "tick" },
+        delivery: {
+          mode: "announce",
+          channel: "last",
+          turnSourceChannel: "msteams",
+          turnSourceTo: "conversation:19:channel@thread.tacv2",
+          turnSourceAccountId: "bot-a",
+          turnSourceThreadId: "thread-123",
+        },
+      }),
+    ).toBe(true);
+    expect(
+      validateCronUpdateParams({
+        id: "job-1",
+        patch: {
+          delivery: {
+            turnSourceChannel: "telegram",
+            turnSourceThreadId: 42,
+          },
+        },
+      }),
+    ).toBe(true);
+    // null clears the captured origin on update.
+    expect(
+      validateCronUpdateParams({
+        id: "job-1",
+        patch: { delivery: { turnSourceChannel: null, turnSourceTo: null } },
+      }),
+    ).toBe(true);
+  });
+
   it("accepts nullable delivery clears on update params", () => {
     expect(
       validateCronUpdateParams({
