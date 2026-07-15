@@ -769,7 +769,7 @@ export function logMessageDispatchCompleted(params: {
   if (!areDiagnosticsEnabledForProcess()) {
     return;
   }
-  if (diag.isEnabled(params.outcome === "error" ? "error" : "debug")) {
+  if (diag.isEnabled(params.outcome === "error" ? "error" : "warn")) {
     const payload = `message dispatch completed: channel=${params.channel ?? "unknown"} sessionId=${
       params.sessionId ?? "unknown"
     } sessionKey=${params.sessionKey ?? "unknown"} source=${params.source} outcome=${
@@ -780,7 +780,10 @@ export function logMessageDispatchCompleted(params: {
     if (params.outcome === "error") {
       diag.error(payload);
     } else {
-      diag.debug(payload);
+      // Promoted debug -> warn: dispatch-completion is the outbound-reply half
+      // of the turn-liveness beacon (see logMessageProcessed). Ships to Loki
+      // so the watchdog can compute last-received vs last-replied per channel.
+      diag.warn(payload);
     }
   }
   emitDiagnosticEvent({
@@ -811,7 +814,7 @@ export function logMessageProcessed(params: {
   if (!areDiagnosticsEnabledForProcess()) {
     return;
   }
-  const wantsLog = params.outcome === "error" ? diag.isEnabled("error") : diag.isEnabled("debug");
+  const wantsLog = params.outcome === "error" ? diag.isEnabled("error") : diag.isEnabled("warn");
   if (wantsLog) {
     const payload = `message processed: channel=${params.channel} chatId=${
       params.chatId ?? "unknown"
@@ -825,7 +828,13 @@ export function logMessageProcessed(params: {
     if (params.outcome === "error") {
       diag.error(payload);
     } else {
-      diag.debug(payload);
+      // Turn-completion beacon promoted debug -> warn so the fleet log
+      // forwarder (ships WARN+) can see SUCCESSFUL turns, not just failures.
+      // This is the per-channel liveness signal the customer-agent watchdog
+      // needs for Teams/GChat parity with Slack's inbound-vs-reply check
+      // (a green box that has stopped answering is otherwise invisible).
+      // Volume is ~1 line/turn — negligible at fleet scale.
+      diag.warn(payload);
     }
   }
   emitDiagnosticEvent({
