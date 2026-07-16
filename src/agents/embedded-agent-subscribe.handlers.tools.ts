@@ -1176,6 +1176,10 @@ export async function handleToolExecutionEnd(
     toolName,
     meta,
     replaySafe: callSummary.replaySafe,
+    // Tag each call's outcome so the non-terminal continuation status can count
+    // only successfully-completed tools, even when multiple calls errored in
+    // the turn (ENG-15627 G4 / cubic P2 follow-up).
+    errored: isToolError,
     ...(asyncStarted ? { asyncStarted: true, ...asyncTaskIds } : {}),
   });
   const acceptedSessionSpawn =
