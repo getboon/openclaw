@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.4
+
+Fork correction release: honest operation-outcome reporting + msteams send-failure diagnostics.
+
+- **#53 (ENG-15627 §5b/G4):** the run-turn emitter now reports the true operation outcome instead of a false terminal "message failed" — killed/removed poll/log operations and non-terminal tool errors are surfaced with deterministic, contextual copy rather than a generic failure.
+- **#54:** msteams send failures now surface the underlying Bot Framework / Graph HTTP response body, so a failed `send` (e.g. a Graph 4xx) yields the actual error detail instead of an opaque failure — faster Teams delivery debugging.
+- Base = `2026.6.11-boon.3`. No other code changes; both fixes were merged onto `boon` before this correction release.
+
 ## 2026.6.11-boon.3
 
 Fork ABI guard: plugin API version compatibility recognizes the `-boon.N` correction channel.
