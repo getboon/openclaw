@@ -37,11 +37,10 @@ jobs:
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
 
-      # `npm pack` runs prepack, which asserts dist/ prepared artifacts exist
-      # (scripts/openclaw-prepack.ts). Build first so the pack succeeds.
-      - name: Build
-        run: pnpm build
-
+      # No explicit build step: `npm pack` runs prepack
+      # (scripts/openclaw-prepack.ts), whose main() already runs `pnpm build` +
+      # `pnpm ui:build` + artifact verification before packing. A separate build
+      # here would just be discarded and rebuilt during pack, doubling CI time.
       - name: Pack tarball + compute sha256
         id: pack
         run: |
