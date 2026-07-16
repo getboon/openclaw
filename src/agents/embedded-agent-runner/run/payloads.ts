@@ -162,21 +162,22 @@ function shouldMarkNonTerminalToolErrorWarning(lastToolError: ToolErrorSummary):
  * When a tool errors but the turn kept going — the assistant already produced a
  * reply and prior tools completed — a terminal "⚠️ <tool> failed" banner is the
  * over-eager lie Mona flagged: it reads as a hard failure while work actually
- * continued. Instead, report the mechanical outcome as a progress step that
- * names what completed, e.g. "↻ Message didn't complete — continued (2 steps
- * completed)". No ⚠️, no "failed".
+ * continued. The real intermediate content is the assistant reply already
+ * emitted alongside this; this line is only a continuation marker.
+ *
+ * It deliberately does NOT name the tool: the internal tool identity (e.g. the
+ * "message" delivery tool) is plumbing that is meaningless — and misleading —
+ * to a user. Just report that work continued and how much completed, e.g.
+ * "↻ A step didn't complete, but I kept going (2 steps completed)."
  */
-function buildNonTerminalToolStatusText(params: {
-  toolSummary: string;
-  completedToolCount: number;
-}): string {
+function buildNonTerminalToolStatusText(params: { completedToolCount: number }): string {
   const steps =
     params.completedToolCount > 0
-      ? ` — continued (${params.completedToolCount} step${
+      ? ` (${params.completedToolCount} step${
           params.completedToolCount === 1 ? "" : "s"
         } completed)`
-      : " — continued";
-  return `↻ ${params.toolSummary} didn't complete${steps}`;
+      : "";
+  return `↻ A step didn't complete, but I kept going${steps}`;
 }
 
 /**
@@ -588,10 +589,7 @@ export function buildEmbeddedRunPayloads(params: {
           ? `: ${params.lastToolError.error}`
           : "";
       const warningText = isNonTerminalWarning
-        ? buildNonTerminalToolStatusText({
-            toolSummary,
-            completedToolCount: params.toolMetas.length,
-          })
+        ? buildNonTerminalToolStatusText({ completedToolCount: params.toolMetas.length })
         : `⚠️ ${toolSummary} failed${errorSuffix}`;
       const normalizedWarning = normalizeTextForComparison(warningText);
       const duplicateWarning = normalizedWarning

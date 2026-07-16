@@ -798,8 +798,13 @@ describe("buildEmbeddedRunPayloads", () => {
     // No terminal "failed" banner for a non-terminal outcome.
     expect(warning?.text).not.toContain("failed");
     expect(warning?.text).not.toContain("⚠️");
-    // It names that work continued and how much completed.
-    expect(warning?.text).toMatch(/continu|proceed/i);
+    // Must NOT leak the internal tool name — "message" is the delivery-tool
+    // identity (plumbing), meaningless to a user. The real intermediate content
+    // is the assistant reply already emitted above; this is just a continuation
+    // marker naming how much completed.
+    expect(warning?.text?.toLowerCase()).not.toContain("message");
+    expect(warning?.text).not.toContain("✉️");
+    expect(warning?.text).toMatch(/kept going|continu|proceed/i);
     expect(warning?.text).toContain("2 steps completed");
   });
 

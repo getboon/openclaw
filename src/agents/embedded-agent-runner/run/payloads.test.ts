@@ -393,7 +393,8 @@ describe("buildEmbeddedRunPayloads tool-error warnings", () => {
     });
     expect(payloads[1]?.text).not.toContain("failed");
     expect(payloads[1]?.text).not.toContain("⚠️");
-    expect(payloads[1]?.text).toMatch(/didn't complete.*continu/i);
+    expect(payloads[1]?.text?.toLowerCase()).not.toContain("exec");
+    expect(payloads[1]?.text).toMatch(/didn't complete.*kept going/i);
     expect(getReplyPayloadMetadata(payloads[1] as object)).toMatchObject({
       nonTerminalToolErrorWarning: true,
     });
