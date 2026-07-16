@@ -373,7 +373,9 @@ describe("buildEmbeddedRunPayloads tool-error warnings", () => {
 
   it("marks middleware tool-error warnings after assistant output as non-terminal", () => {
     // Middleware failures after useful assistant output warn the user without
-    // replacing the successful answer as the terminal payload.
+    // replacing the successful answer as the terminal payload. Because the turn
+    // continued, the warning is framed as an intermediate status — NOT the
+    // over-eager terminal "⚠️ Exec failed" (ENG-15627 G4).
     const payloads = buildPayloads({
       assistantTexts: ["Queued 3 topics."],
       lastToolError: {
@@ -389,7 +391,9 @@ describe("buildEmbeddedRunPayloads tool-error warnings", () => {
     expect(payloads[1]).toMatchObject({
       isError: true,
     });
-    expect(payloads[1]?.text).toContain("Exec failed");
+    expect(payloads[1]?.text).not.toContain("failed");
+    expect(payloads[1]?.text).not.toContain("⚠️");
+    expect(payloads[1]?.text).toMatch(/didn't complete.*continu/i);
     expect(getReplyPayloadMetadata(payloads[1] as object)).toMatchObject({
       nonTerminalToolErrorWarning: true,
     });

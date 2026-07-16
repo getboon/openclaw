@@ -769,6 +769,40 @@ describe("buildEmbeddedRunPayloads", () => {
     expectSinglePayloadSummary(payloads, { text: warningText ?? "" });
   });
 
+  it("reframes a NON-TERMINAL tool failure as an intermediate status, not '⚠️ … failed' (ENG-15627 G4)", () => {
+    // A middleware (transient) message-tool failure AFTER the assistant already
+    // produced a reply and prior tools completed is non-terminal — core marks
+    // it nonTerminalToolErrorWarning=true. Rendering "⚠️ ✉️ Message failed" is
+    // the over-eager lie: it reads terminal while work actually continued.
+    // Surface the completed-work context instead ("… N steps completed").
+    const payloads = buildPayloads({
+      assistantTexts: ["Here's the summary you asked for."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      currentAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      toolMetas: [
+        { toolName: "bash", meta: "run migration" },
+        { toolName: "read", meta: "config.json" },
+      ],
+      lastToolError: {
+        toolName: "message",
+        error: "transient send failure",
+        middlewareError: true,
+        mutatingAction: true,
+      },
+    });
+
+    const warning = payloads.find(
+      (p) => getReplyPayloadMetadata(p)?.nonTerminalToolErrorWarning === true,
+    );
+    expect(warning).toBeDefined();
+    // No terminal "failed" banner for a non-terminal outcome.
+    expect(warning?.text).not.toContain("failed");
+    expect(warning?.text).not.toContain("⚠️");
+    // It names that work continued and how much completed.
+    expect(warning?.text).toMatch(/continu|proceed/i);
+    expect(warning?.text).toContain("2 steps completed");
+  });
+
   it("wraps markdown-capable mutating tool warnings so mention-looking names stay inert", () => {
     const payloads = buildPayloads({
       lastToolError: {
