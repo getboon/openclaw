@@ -497,6 +497,7 @@ import {
   isMidTurnPrecheckSignal,
   type MidTurnPrecheckRequest,
 } from "./midturn-precheck.js";
+import { normalizeToolMetas } from "./normalize-tool-metas.js";
 import {
   PREEMPTIVE_OVERFLOW_ERROR_TEXT,
   buildPrePromptContextBudgetStatus,
@@ -5303,43 +5304,7 @@ export async function runEmbeddedAttempt(
         params.abortSignal?.removeEventListener?.("abort", onAbort);
       }
 
-      const toolMetasNormalized = toolMetas
-        .filter(
-          (
-            entry,
-          ): entry is {
-            toolName: string;
-            meta?: string;
-            replaySafe?: boolean;
-            asyncStarted?: boolean;
-            asyncTaskRunId?: string;
-            asyncTaskId?: string;
-          } => typeof entry.toolName === "string" && entry.toolName.trim().length > 0,
-        )
-        .map((entry) => {
-          const normalized: {
-            toolName: string;
-            meta?: string;
-            replaySafe: boolean;
-            asyncStarted?: true;
-            asyncTaskRunId?: string;
-            asyncTaskId?: string;
-          } = {
-            toolName: entry.toolName,
-            meta: entry.meta,
-            replaySafe: entry.replaySafe === true,
-          };
-          if (entry.asyncStarted === true) {
-            normalized.asyncStarted = true;
-          }
-          if (entry.asyncTaskRunId) {
-            normalized.asyncTaskRunId = entry.asyncTaskRunId;
-          }
-          if (entry.asyncTaskId) {
-            normalized.asyncTaskId = entry.asyncTaskId;
-          }
-          return normalized;
-        });
+      const toolMetasNormalized = normalizeToolMetas(toolMetas);
       if (cacheObservabilityEnabled) {
         const cacheBreakForLog = cacheBreak as PromptCacheBreak | null;
         if (cacheBreakForLog) {
