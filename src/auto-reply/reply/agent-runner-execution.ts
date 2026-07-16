@@ -67,6 +67,10 @@ import {
   resolveAgentRunAbortLifecycleFields,
 } from "../../agents/run-termination.js";
 import { buildAgentRuntimeOutcomePlan } from "../../agents/runtime-plan/build.js";
+import {
+  messageOriginCodeCopy,
+  messageOriginCodeRetryAffordance,
+} from "../../channels/message/message-origin.js";
 import { resolveGroupSessionKey, type SessionEntry } from "../../config/sessions.js";
 import { updateSessionEntry } from "../../config/sessions/session-accessor.js";
 import { resolveSilentReplyPolicy } from "../../config/silent-reply.js";
@@ -134,6 +138,7 @@ import {
   shouldNotifyUserAboutCompaction,
 } from "./compaction-notice.js";
 import { resolveCurrentTurnImages } from "./current-turn-images.js";
+import { resolveGatewayFailureCode } from "./gateway-failure-code.js";
 import { hasInboundAudio } from "./inbound-media.js";
 import { resolveOriginMessageProvider } from "./origin-routing.js";
 import {
@@ -1086,6 +1091,40 @@ function markAgentRunFailureReplyPayload<T extends ReplyPayload>(payload: T): T 
   return marked;
 }
 
+/**
+ * Deterministic class-specific copy for a run failure that would otherwise emit
+ * the single generic "message failed" string (ENG-15739). Maps the thrown error
+ * to a gateway-failure code and returns its canonical customer copy.
+ *
+ * This runs only at a TERMINAL failure (retries/fallbacks exhausted), so a code
+ * whose affordance promises `will_auto_retry` ("I'm retrying automatically")
+ * would be a stale lie here — those are downgraded to the terminal transient
+ * class ("automatic retries didn't recover. Please try again").
+ *
+ * Group silence is preserved: the coded copy is routed through the SAME
+ * `resolveExternalRunFailureTextForConversation` gate the generic string used,
+ * with `isGenericRunnerFailure: true`, so group/channel chats stay silent unless
+ * per-surface policy already surfaces failures (returns `SILENT_REPLY_TOKEN`
+ * text in that silent case, exactly as the generic path did).
+ */
+function resolveCodedGenericFailureText(params: {
+  err: unknown;
+  sessionCtx: TemplateContext;
+  cfg?: OpenClawConfig;
+}): string {
+  const resolvedCode = resolveGatewayFailureCode(params.err);
+  const code =
+    messageOriginCodeRetryAffordance(resolvedCode) === "will_auto_retry"
+      ? "agent_failed_transient_after_retries"
+      : resolvedCode;
+  return resolveExternalRunFailureTextForConversation({
+    text: messageOriginCodeCopy(code),
+    sessionCtx: params.sessionCtx,
+    isGenericRunnerFailure: true,
+    cfg: params.cfg,
+  });
+}
+
 /** Converts known agent-run failures into user-facing reply payloads. */
 export function buildKnownAgentRunFailureReplyPayload(params: {
   err: unknown;
@@ -1163,6 +1202,12 @@ export function buildKnownAgentRunFailureReplyPayload(params: {
     },
   );
   if (externalRunFailureReply.isGenericRunnerFailure) {
+    // This is the outer catch for errors that ESCAPED runAgentTurnWithFallback
+    // entirely (pre-run maintenance crashes, restart lifecycle, truly
+    // unexpected exceptions) — not the classified LLM-completion failures, which
+    // runAgentTurnWithFallback already converts to a coded kind:"final" payload
+    // (ENG-15739 lives there). Returning undefined here preserves the deliberate
+    // "let an unexpected exception propagate to the caller" contract.
     return undefined;
   }
   return markAgentRunFailureReplyPayload({
@@ -3360,6 +3405,23 @@ export async function runAgentTurnWithFallback(params: {
       const genericFallbackText = params.isHeartbeat
         ? HEARTBEAT_EXTERNAL_RUN_FAILURE_TEXT
         : GENERIC_EXTERNAL_RUN_FAILURE_TEXT;
+      // ENG-15739: for the previously-generic terminal fall-through, emit
+      // deterministic class-specific copy via the shared gate instead of
+      // GENERIC_EXTERNAL_RUN_FAILURE_TEXT. The gate preserves group silence, so
+      // this is byte-identical for silent cases. Skipped for heartbeat and
+      // control-UI (their own copy) and for verbose mode, where the operator
+      // wants the raw forwarded failure detail rather than a friendly class.
+      const codedGenericText =
+        !params.isHeartbeat &&
+        !shouldSurfaceToControlUi &&
+        !isVerboseFailureDetailEnabled(params.resolvedVerboseLevel) &&
+        externalRunFailureReply?.isGenericRunnerFailure
+          ? resolveCodedGenericFailureText({
+              err,
+              sessionCtx: params.sessionCtx,
+              cfg: params.followupRun.run.config,
+            })
+          : undefined;
       const fallbackText = isBilling
         ? resolveBillingFailureReplyText(err)
         : isRateLimit && !isOverloadedErrorMessage(message)
@@ -3370,11 +3432,16 @@ export async function runAgentTurnWithFallback(params: {
               ? "⚠️ Context overflow — prompt too large for this model. Try a shorter message or a larger-context model."
               : shouldSurfaceToControlUi
                 ? `⚠️ Agent failed before reply: ${trimmedMessage}.\nLogs: openclaw logs --follow`
-                : (externalRunFailureReply?.text ?? genericFallbackText);
+                : (codedGenericText ?? externalRunFailureReply?.text ?? genericFallbackText);
       const userVisibleFallbackText = resolveExternalRunFailureTextForConversation({
         text: fallbackText,
         sessionCtx: params.sessionCtx,
-        isGenericRunnerFailure: externalRunFailureReply?.isGenericRunnerFailure ?? false,
+        // The coded text already passed through the conversation gate above, so
+        // treat it as non-generic here to avoid double-silencing. Other branches
+        // keep their prior generic-runner flag.
+        isGenericRunnerFailure: codedGenericText
+          ? false
+          : (externalRunFailureReply?.isGenericRunnerFailure ?? false),
         cfg: params.followupRun.run.config,
       });
       const abortedSignal =

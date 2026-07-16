@@ -32,6 +32,8 @@ export const GATEWAY_FAILURE_CODES = [
   "provider_malformed_history",
   "agent_failed_transient_after_retries",
   "subagent_still_working",
+  // ENG-15739 addition — contextual class surfaced by the run-failure path.
+  "boon_core_unreachable",
 ] as const;
 
 export type GatewayFailureCode = (typeof GATEWAY_FAILURE_CODES)[number];
@@ -85,6 +87,8 @@ const CODE_COPY: Record<GatewayFailureCode, string> = {
     "Something went wrong and automatic retries didn't recover. Please try again in a moment.",
   subagent_still_working:
     "Still working on this in the background — I'll follow up when it's done.",
+  boon_core_unreachable:
+    "I couldn't reach your project data just now. General chat still works — please try that request again in a moment.",
 };
 
 const CODE_RETRY_AFFORDANCE: Record<GatewayFailureCode, RetryAffordance> = {
@@ -98,6 +102,10 @@ const CODE_RETRY_AFFORDANCE: Record<GatewayFailureCode, RetryAffordance> = {
   provider_malformed_history: "user_can_retry",
   agent_failed_transient_after_retries: "user_can_retry",
   subagent_still_working: "will_auto_retry",
+  // The copy tells the user to retry (no automatic retry is promised), so the
+  // affordance is user_can_retry — and this keeps its scoped copy from being
+  // downgraded as a stale "retrying automatically" claim at a terminal failure.
+  boon_core_unreachable: "user_can_retry",
 };
 
 /** Canonical user-facing sentence for a gateway-failure code. */

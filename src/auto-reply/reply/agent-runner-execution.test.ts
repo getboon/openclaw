@@ -8,6 +8,7 @@ import { LiveSessionModelSwitchError } from "../../agents/live-model-switch-erro
 import { MissingProviderAuthError } from "../../agents/model-auth.js";
 import { FallbackSummaryError } from "../../agents/model-fallback.js";
 import type { FallbackAttempt } from "../../agents/model-fallback.types.js";
+import { messageOriginCodeCopy } from "../../channels/message/message-origin.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import type { ModelDefinitionConfig } from "../../config/types.models.js";
 import { resetLogger, setLoggerOverride } from "../../logging/logger.js";
@@ -57,6 +58,10 @@ const state = vi.hoisted(() => ({
 
 const GENERIC_RUN_FAILURE_TEXT =
   "⚠️ Something went wrong while processing your request. Please try again, or use /new to start a fresh session.";
+
+// ENG-15739: previously-generic terminal failures now surface deterministic,
+// class-specific copy. An unclassified failure maps to this transient class.
+const TRANSIENT_CODED_FAILURE_TEXT = messageOriginCodeCopy("agent_failed_transient_after_retries");
 
 describe("resolveSessionRuntimeOverrideForProvider", () => {
   afterEach(() => {
@@ -6295,7 +6300,10 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      expect(result.payload.text).toBe(GENERIC_RUN_FAILURE_TEXT);
+      // ENG-15739: an unclassified failure now surfaces deterministic
+      // class-specific copy instead of the single generic string.
+      expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
+      expect(result.payload.text).not.toBe(GENERIC_RUN_FAILURE_TEXT);
     }
     const terminalFailureEvent = emitAgentEvent.mock.calls
       .map((call) => call[0])
@@ -6503,8 +6511,10 @@ describe("runAgentTurnWithFallback", () => {
 
       expect(result.kind).toBe("final");
       if (result.kind === "final") {
+        // disallow policy surfaces the failure in groups; ENG-15739 makes that
+        // surfaced text the deterministic coded copy, not the generic string.
         expect(result.payload.text).not.toBe(SILENT_REPLY_TOKEN);
-        expect(result.payload.text).toBe(GENERIC_RUN_FAILURE_TEXT);
+        expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
       }
     },
   );
@@ -6545,7 +6555,8 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      expect(result.payload.text).toBe(GENERIC_RUN_FAILURE_TEXT);
+      // Per-surface disallow surfaces the failure; ENG-15739 makes it coded.
+      expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
     }
   });
 
@@ -6696,7 +6707,9 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      expect(result.payload.text).toBe(GENERIC_RUN_FAILURE_TEXT);
+      // ENG-15739: DM surfaces the deterministic coded copy for this class.
+      expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
+      expect(result.payload.text).not.toBe(GENERIC_RUN_FAILURE_TEXT);
     }
   });
 
@@ -8193,5 +8206,78 @@ describe("resolveTransientRetryBackoffMs", () => {
 
   it("retries up to 5 times for a robust recovery window", () => {
     expect(MAX_TRANSIENT_BUSY_RETRIES).toBe(5);
+  });
+});
+
+describe("runAgentTurnWithFallback — contextual coded copy (ENG-15739)", () => {
+  const directCtx = {
+    Provider: "discord",
+    Surface: "discord",
+    ChatType: "direct",
+    MessageSid: "msg",
+  } as unknown as TemplateContext;
+  const groupCtx = {
+    Provider: "discord",
+    Surface: "discord",
+    ChatType: "group",
+    GroupSubject: "agent group",
+    GroupChannel: "#general",
+    MessageSid: "msg",
+  } as unknown as TemplateContext;
+
+  async function runFailure(
+    err: unknown,
+    sessionCtx: TemplateContext,
+  ): Promise<string | undefined> {
+    state.runEmbeddedAgentMock.mockRejectedValueOnce(err);
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback(createMinimalRunAgentTurnParams({ sessionCtx }));
+    return result.kind === "final" ? result.payload.text : undefined;
+  }
+
+  const runDirectFailure = (err: unknown) => runFailure(err, directCtx);
+
+  it("surfaces the malformed-history class for a format failure in a DM", async () => {
+    const text = await runDirectFailure(
+      new FailoverError("provider rejected the request schema", { reason: "format" }),
+    );
+    expect(text).toBe(messageOriginCodeCopy("provider_malformed_history"));
+  });
+
+  it("downgrades a would-auto-retry class to the terminal transient copy at exhaustion", async () => {
+    // A server_error is provider_upstream_5xx (will_auto_retry), but this path
+    // runs only after retries are exhausted, so the "retrying automatically"
+    // copy would be a stale lie — it must downgrade to the terminal class.
+    const text = await runDirectFailure(
+      new FailoverError("bad gateway", { reason: "server_error", status: 502 }),
+    );
+    expect(text).toBe(messageOriginCodeCopy("agent_failed_transient_after_retries"));
+    expect(text).not.toBe(messageOriginCodeCopy("provider_upstream_5xx"));
+  });
+
+  it("surfaces the transient class for an unclassified failure in a DM", async () => {
+    const text = await runDirectFailure(
+      new Error("openai/gpt-5.5 ended with an incomplete terminal response"),
+    );
+    expect(text).toBe(messageOriginCodeCopy("agent_failed_transient_after_retries"));
+  });
+
+  it("stays silent in a group chat with default policy (group silence preserved)", async () => {
+    const text = await runFailure(
+      new Error("openai/gpt-5.5 ended with an incomplete terminal response"),
+      groupCtx,
+    );
+    expect(text).toBe(SILENT_REPLY_TOKEN);
+  });
+
+  it("is deterministic — the same failure class yields the same copy across calls", async () => {
+    const first = await runDirectFailure(
+      new FailoverError("provider rejected the request schema", { reason: "format" }),
+    );
+    const second = await runDirectFailure(
+      new FailoverError("provider rejected the request schema", { reason: "format" }),
+    );
+    expect(first).toBe(messageOriginCodeCopy("provider_malformed_history"));
+    expect(second).toBe(first);
   });
 });
