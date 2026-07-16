@@ -775,6 +775,9 @@ describe("buildEmbeddedRunPayloads", () => {
     // it nonTerminalToolErrorWarning=true. Rendering "⚠️ ✉️ Message failed" is
     // the over-eager lie: it reads terminal while work actually continued.
     // Surface the completed-work context instead ("… N steps completed").
+    // Production pushes a toolMeta for EVERY call including the failing one, so
+    // toolMetas here contains the two completed tools PLUS the failing message
+    // tool (3 entries) — exactly as the runtime builds it.
     const payloads = buildPayloads({
       assistantTexts: ["Here's the summary you asked for."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -782,6 +785,7 @@ describe("buildEmbeddedRunPayloads", () => {
       toolMetas: [
         { toolName: "bash", meta: "run migration" },
         { toolName: "read", meta: "config.json" },
+        { toolName: "message", meta: undefined },
       ],
       lastToolError: {
         toolName: "message",
@@ -805,7 +809,39 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text?.toLowerCase()).not.toContain("message");
     expect(warning?.text).not.toContain("✉️");
     expect(warning?.text).toMatch(/kept going|continu|proceed/i);
+    // cubic P2: the failing message tool must NOT be counted — 3 metas, 1
+    // failed → 2 completed.
     expect(warning?.text).toContain("2 steps completed");
+  });
+
+  it("keeps tool identity + error detail in the non-terminal status when verbose (operator debug)", () => {
+    // Default user copy hides the tool name (plumbing). But an operator running
+    // /verbose full to debug WHICH tool hiccuped and WHY must still get it.
+    const payloads = buildPayloads({
+      assistantTexts: ["Here's the summary you asked for."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      currentAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      toolMetas: [
+        { toolName: "bash", meta: "run migration" },
+        { toolName: "message", meta: undefined },
+      ],
+      lastToolError: {
+        toolName: "message",
+        error: "transient send failure",
+        middlewareError: true,
+        mutatingAction: true,
+      },
+      verboseLevel: "full",
+    });
+
+    const warning = payloads.find(
+      (p) => getReplyPayloadMetadata(p)?.nonTerminalToolErrorWarning === true,
+    );
+    expect(warning).toBeDefined();
+    // Still a continuation, still no terminal "failed".
+    expect(warning?.text).not.toContain("⚠️");
+    // But verbose retains the concrete detail for the operator.
+    expect(warning?.text).toContain("transient send failure");
   });
 
   it("wraps markdown-capable mutating tool warnings so mention-looking names stay inert", () => {

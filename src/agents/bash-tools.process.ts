@@ -111,6 +111,17 @@ function resolvePollWaitMs(value: unknown) {
   return 0;
 }
 
+/**
+ * Maps a finished-session registry status to the result `details.status` a
+ * poll/log surfaces. A "completed" exit is success; a "killed" session is an
+ * agent-requested termination and must NOT read as a terminal failure
+ * (ENG-15627 §5b — cubic P1). Everything else (a real non-zero/failed exit)
+ * stays "failed".
+ */
+function mapFinishedStatusToResultStatus(status: string): "completed" | "failed" {
+  return status === "completed" || status === "killed" ? "completed" : "failed";
+}
+
 function failText(text: string): AgentToolResult<unknown> {
   return {
     content: [
@@ -410,7 +421,7 @@ export function createProcessTool(
                   },
                 ],
                 details: {
-                  status: scopedFinished.status === "completed" ? "completed" : "failed",
+                  status: mapFinishedStatusToResultStatus(scopedFinished.status),
                   sessionId: params.sessionId,
                   exitCode: scopedFinished.exitCode ?? undefined,
                   aggregated: scopedFinished.aggregated,
@@ -531,7 +542,7 @@ export function createProcessTool(
               window.effectiveOffset,
               window.effectiveLimit,
             );
-            const status = scopedFinished.status === "completed" ? "completed" : "failed";
+            const status = mapFinishedStatusToResultStatus(scopedFinished.status);
             const logDefaultTailNote = defaultTailNote(totalLines, window.usingDefaultTail);
             return {
               content: [

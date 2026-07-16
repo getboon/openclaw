@@ -170,14 +170,19 @@ function shouldMarkNonTerminalToolErrorWarning(lastToolError: ToolErrorSummary):
  * to a user. Just report that work continued and how much completed, e.g.
  * "↻ A step didn't complete, but I kept going (2 steps completed)."
  */
-function buildNonTerminalToolStatusText(params: { completedToolCount: number }): string {
+function buildNonTerminalToolStatusText(params: {
+  completedToolCount: number;
+  /** Operator-only tool+error detail appended when verbose (includeDetails). */
+  detailSuffix?: string;
+}): string {
   const steps =
     params.completedToolCount > 0
       ? ` (${params.completedToolCount} step${
           params.completedToolCount === 1 ? "" : "s"
         } completed)`
       : "";
-  return `↻ A step didn't complete, but I kept going${steps}`;
+  const detail = params.detailSuffix ? ` — ${params.detailSuffix}` : "";
+  return `↻ A step didn't complete, but I kept going${steps}${detail}`;
 }
 
 /**
@@ -588,8 +593,16 @@ export function buildEmbeddedRunPayloads(params: {
         warningPolicy.includeDetails && params.lastToolError.error
           ? `: ${params.lastToolError.error}`
           : "";
+      // toolMetas includes the failing call (pushed unconditionally), so the
+      // count of *completed* prior steps excludes it (cubic P2).
+      const completedToolCount = Math.max(0, params.toolMetas.length - 1);
+      // Operators (verbose) keep the concrete tool + error detail; the default
+      // user copy stays tool-name-free.
+      const detailSuffix = warningPolicy.includeDetails
+        ? `${toolSummary}${errorSuffix}`.trim()
+        : undefined;
       const warningText = isNonTerminalWarning
-        ? buildNonTerminalToolStatusText({ completedToolCount: params.toolMetas.length })
+        ? buildNonTerminalToolStatusText({ completedToolCount, detailSuffix })
         : `⚠️ ${toolSummary} failed${errorSuffix}`;
       const normalizedWarning = normalizeTextForComparison(warningText);
       const duplicateWarning = normalizedWarning

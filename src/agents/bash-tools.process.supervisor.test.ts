@@ -171,6 +171,29 @@ describe("process tool supervisor cancellation", () => {
     expect(isToolResultError(result)).toBe(false);
   });
 
+  it("polling a killed session does not render the intentional kill as failed (ENG-15627 §5b)", async () => {
+    // cubic P1: after the kill the session sits in the finished registry as
+    // "killed". A later `process poll`/`log` on it must NOT re-render that
+    // agent-requested termination as a terminal failure.
+    supervisorMock.getRecord.mockReturnValue(undefined);
+    addSession(createBackgroundSession("sess-killed", 4243));
+    const processTool = createProcessTool();
+    await processTool.execute("toolcall", { action: "kill", sessionId: "sess-killed" });
+    expectFinishedSessionState("sess-killed", { status: "killed" });
+
+    for (const action of ["poll", "log"] as const) {
+      const result = await processTool.execute("toolcall", {
+        action,
+        sessionId: "sess-killed",
+      });
+      expect(isToolResultError(result), `${action} of a killed session`).toBe(false);
+      expect(
+        requireRecord(result.details, `${action} details`).status,
+        `${action} status`,
+      ).not.toBe("failed");
+    }
+  });
+
   it("fails remove when no supervisor record and no pid is available", async () => {
     supervisorMock.getRecord.mockReturnValue(undefined);
     addSession(createBackgroundSession("sess-no-pid"));
