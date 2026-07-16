@@ -200,6 +200,7 @@ export type EmbeddedRunAttemptResult = {
     toolName: string;
     meta?: string;
     replaySafe?: boolean;
+    errored?: boolean;
     asyncStarted?: boolean;
     asyncTaskRunId?: string;
     asyncTaskId?: string;

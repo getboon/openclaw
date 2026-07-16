@@ -844,6 +844,36 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text).toContain("transient send failure");
   });
 
+  it("counts only successfully-completed tools when MULTIPLE calls errored in the turn", () => {
+    // Two transient failures in one turn: bash ok, read errored, message errored.
+    // toolMetas carries an `errored` flag per call, so the count must be the
+    // number of non-errored tools (1), not toolMetas.length - 1 (which assumes
+    // a single failure and would wrongly say 2).
+    const payloads = buildPayloads({
+      assistantTexts: ["Here's the summary you asked for."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      currentAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      toolMetas: [
+        { toolName: "bash", meta: "run migration" },
+        { toolName: "read", meta: "config.json", errored: true },
+        { toolName: "message", meta: undefined, errored: true },
+      ],
+      lastToolError: {
+        toolName: "message",
+        error: "transient send failure",
+        middlewareError: true,
+        mutatingAction: true,
+      },
+    });
+
+    const warning = payloads.find(
+      (p) => getReplyPayloadMetadata(p)?.nonTerminalToolErrorWarning === true,
+    );
+    expect(warning).toBeDefined();
+    expect(warning?.text).toContain("1 step completed");
+    expect(warning?.text).not.toContain("2 steps");
+  });
+
   it("wraps markdown-capable mutating tool warnings so mention-looking names stay inert", () => {
     const payloads = buildPayloads({
       lastToolError: {

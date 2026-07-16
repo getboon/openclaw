@@ -44,7 +44,7 @@ import {
 import { isExecLikeToolName, type ToolErrorSummary } from "../../tool-error-summary.js";
 import { isLikelyMutatingToolName } from "../../tool-mutation.js";
 
-type ToolMetaEntry = { toolName: string; meta?: string };
+type ToolMetaEntry = { toolName: string; meta?: string; errored?: boolean };
 type ToolErrorWarningPolicy = {
   showWarning: boolean;
   includeDetails: boolean;
@@ -593,9 +593,16 @@ export function buildEmbeddedRunPayloads(params: {
         warningPolicy.includeDetails && params.lastToolError.error
           ? `: ${params.lastToolError.error}`
           : "";
-      // toolMetas includes the failing call (pushed unconditionally), so the
-      // count of *completed* prior steps excludes it (cubic P2).
-      const completedToolCount = Math.max(0, params.toolMetas.length - 1);
+      // toolMetas includes every call (pushed unconditionally), each tagged
+      // with an `errored` flag. Count only the tools that actually completed —
+      // this stays accurate when MORE THAN ONE call errored in the turn, unlike
+      // a blanket `length - 1` that assumes a single failure (cubic P2 + review
+      // follow-up). Fall back to `length - 1` only for legacy entries with no
+      // `errored` flag set (single-failure assumption).
+      const hasErroredFlags = params.toolMetas.some((meta) => meta.errored !== undefined);
+      const completedToolCount = hasErroredFlags
+        ? params.toolMetas.filter((meta) => !meta.errored).length
+        : Math.max(0, params.toolMetas.length - 1);
       // Operators (verbose) keep the concrete tool + error detail; the default
       // user copy stays tool-name-free.
       const detailSuffix = warningPolicy.includeDetails
