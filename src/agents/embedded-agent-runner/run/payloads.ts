@@ -157,6 +157,29 @@ function shouldMarkNonTerminalToolErrorWarning(lastToolError: ToolErrorSummary):
 }
 
 /**
+ * Intermediate-status copy for a NON-TERMINAL tool failure (ENG-15627 G4).
+ *
+ * When a tool errors but the turn kept going — the assistant already produced a
+ * reply and prior tools completed — a terminal "⚠️ <tool> failed" banner is the
+ * over-eager lie Mona flagged: it reads as a hard failure while work actually
+ * continued. Instead, report the mechanical outcome as a progress step that
+ * names what completed, e.g. "↻ Message didn't complete — continued (2 steps
+ * completed)". No ⚠️, no "failed".
+ */
+function buildNonTerminalToolStatusText(params: {
+  toolSummary: string;
+  completedToolCount: number;
+}): string {
+  const steps =
+    params.completedToolCount > 0
+      ? ` — continued (${params.completedToolCount} step${
+          params.completedToolCount === 1 ? "" : "s"
+        } completed)`
+      : " — continued";
+  return `↻ ${params.toolSummary} didn't complete${steps}`;
+}
+
+/**
  * Chooses whether a tool failure needs a separate user-visible warning and
  * whether to include raw details. Mutating failures are stricter because a
  * silent failed write/send/delete can make the assistant look successful.
@@ -555,11 +578,21 @@ export function buildEmbeddedRunPayloads(params: {
         params.lastToolError.meta ? [params.lastToolError.meta] : undefined,
         { markdown: useMarkdown },
       );
+      // The same non-terminal decision used for the payload metadata below —
+      // computed up front so the visible text can be reframed too, not just the
+      // metadata flag (ENG-15627 G4).
+      const isNonTerminalWarning =
+        hasUserFacingAssistantReply && shouldMarkNonTerminalToolErrorWarning(params.lastToolError);
       const errorSuffix =
         warningPolicy.includeDetails && params.lastToolError.error
           ? `: ${params.lastToolError.error}`
           : "";
-      const warningText = `⚠️ ${toolSummary} failed${errorSuffix}`;
+      const warningText = isNonTerminalWarning
+        ? buildNonTerminalToolStatusText({
+            toolSummary,
+            completedToolCount: params.toolMetas.length,
+          })
+        : `⚠️ ${toolSummary} failed${errorSuffix}`;
       const normalizedWarning = normalizeTextForComparison(warningText);
       const duplicateWarning = normalizedWarning
         ? replyItems.some((item) => {
@@ -574,9 +607,7 @@ export function buildEmbeddedRunPayloads(params: {
         replyItems.push({
           text: warningText,
           isError: true,
-          nonTerminalToolErrorWarning:
-            hasUserFacingAssistantReply &&
-            shouldMarkNonTerminalToolErrorWarning(params.lastToolError),
+          nonTerminalToolErrorWarning: isNonTerminalWarning,
         });
       }
     }
