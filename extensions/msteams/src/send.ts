@@ -13,8 +13,8 @@ import {
 } from "../runtime-api.js";
 import {
   classifyMSTeamsSendError,
+  formatMSTeamsErrorDetail,
   formatMSTeamsSendErrorHint,
-  formatUnknownError,
 } from "./errors.js";
 import { prepareFileConsentActivityFs, requiresFileConsent } from "./file-consent-helpers.js";
 import { buildTeamsFileInfoCard } from "./graph-chat.js";
@@ -381,7 +381,7 @@ export async function sendMessageMSTeams(
       const hint = formatMSTeamsSendErrorHint(classification);
       const status = classification.statusCode ? ` (HTTP ${classification.statusCode})` : "";
       throw new Error(
-        `msteams file send failed${status}: ${formatUnknownError(err)}${hint ? ` (${hint})` : ""}`,
+        `msteams file send failed${status}: ${formatMSTeamsErrorDetail(err)}${hint ? ` (${hint})` : ""}`,
         { cause: err },
       );
     }
@@ -433,7 +433,7 @@ async function sendTextWithMedia(
     const hint = formatMSTeamsSendErrorHint(classification);
     const status = classification.statusCode ? ` (HTTP ${classification.statusCode})` : "";
     throw new Error(
-      `msteams send failed${status}: ${formatUnknownError(err)}${hint ? ` (${hint})` : ""}`,
+      `msteams send failed${status}: ${formatMSTeamsErrorDetail(err)}${hint ? ` (${hint})` : ""}`,
       { cause: err },
     );
   }
@@ -489,7 +489,7 @@ async function sendProactiveActivity({
     const hint = formatMSTeamsSendErrorHint(classification);
     const status = classification.statusCode ? ` (HTTP ${classification.statusCode})` : "";
     throw new Error(
-      `${errorPrefix} failed${status}: ${formatUnknownError(err)}${hint ? ` (${hint})` : ""}`,
+      `${errorPrefix} failed${status}: ${formatMSTeamsErrorDetail(err)}${hint ? ` (${hint})` : ""}`,
       { cause: err },
     );
   }
@@ -655,7 +655,7 @@ export async function editMessageMSTeams(
     const hint = formatMSTeamsSendErrorHint(classification);
     const status = classification.statusCode ? ` (HTTP ${classification.statusCode})` : "";
     throw new Error(
-      `msteams edit failed${status}: ${formatUnknownError(err)}${hint ? ` (${hint})` : ""}`,
+      `msteams edit failed${status}: ${formatMSTeamsErrorDetail(err)}${hint ? ` (${hint})` : ""}`,
       { cause: err },
     );
   }
@@ -692,7 +692,7 @@ export async function deleteMessageMSTeams(
     const hint = formatMSTeamsSendErrorHint(classification);
     const status = classification.statusCode ? ` (HTTP ${classification.statusCode})` : "";
     throw new Error(
-      `msteams delete failed${status}: ${formatUnknownError(err)}${hint ? ` (${hint})` : ""}`,
+      `msteams delete failed${status}: ${formatMSTeamsErrorDetail(err)}${hint ? ` (${hint})` : ""}`,
       { cause: err },
     );
   }

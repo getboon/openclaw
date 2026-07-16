@@ -83,15 +83,89 @@ function extractErrorCode(err: unknown): string | null {
     return null;
   }
 
-  const body = response.body;
-  if (isRecord(body)) {
-    const error = body.error;
-    if (isRecord(error) && typeof error.code === "string" && error.code.trim()) {
-      return error.code;
+  // Bot Framework / Graph errors surfaced through the Teams SDK are axios
+  // errors, whose parsed body lives on `response.data`. The Graph SDK's own
+  // errors use `response.body`. Check both so we recover the real error code
+  // regardless of which client produced it.
+  for (const body of [response.body, response.data]) {
+    if (isRecord(body)) {
+      const error = body.error;
+      if (isRecord(error) && typeof error.code === "string" && error.code.trim()) {
+        return error.code;
+      }
     }
   }
 
   return null;
+}
+
+/**
+ * Extract a human-readable detail string from an error's HTTP response body.
+ *
+ * Axios (used by the Teams SDK Bot Connector client) puts the parsed body on
+ * `response.data`; the Graph SDK uses `response.body`. Both commonly carry a
+ * `{ error: { code, message } }` shape, but we also tolerate an arbitrary
+ * object body. Returns `null` when no useful body detail is present.
+ */
+function extractResponseBodyDetail(err: unknown): string | null {
+  if (!isRecord(err)) {
+    return null;
+  }
+  const response = err.response;
+  if (!isRecord(response)) {
+    return null;
+  }
+  for (const body of [response.body, response.data]) {
+    if (body === undefined || body === null) {
+      continue;
+    }
+    if (typeof body === "string") {
+      const trimmed = body.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+      continue;
+    }
+    if (isRecord(body)) {
+      const error = body.error;
+      if (isRecord(error)) {
+        const code = typeof error.code === "string" ? error.code.trim() : "";
+        const message = typeof error.message === "string" ? error.message.trim() : "";
+        const parts = [code, message].filter(Boolean);
+        if (parts.length > 0) {
+          return parts.join(": ");
+        }
+      }
+      try {
+        const json = JSON.stringify(body);
+        if (json && json !== "{}") {
+          return json;
+        }
+      } catch {
+        // fall through to next candidate body
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Format an outbound-send error into a message that includes the underlying
+ * HTTP response body when available.
+ *
+ * The Teams SDK / axios default error message is the opaque
+ * "Request failed with status code 400", which hides the actual Bot
+ * Framework / Graph rejection reason. This appends that reason so operators
+ * can see *why* a send failed (e.g. the exact rejected attachment field),
+ * without dropping the original message.
+ */
+export function formatMSTeamsErrorDetail(err: unknown): string {
+  const base = formatUnknownError(err);
+  const detail = extractResponseBodyDetail(err);
+  if (!detail || base.includes(detail)) {
+    return base;
+  }
+  return `${base} — ${detail}`;
 }
 
 function extractRetryAfterMs(err: unknown): number | null {

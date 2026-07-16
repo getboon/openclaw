@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   classifyMSTeamsSendError,
+  formatMSTeamsErrorDetail,
   formatMSTeamsSendErrorHint,
   formatUnknownError,
   isRevokedProxyError,
@@ -33,6 +34,26 @@ describe("msteams errors", () => {
     expect(result.kind).toBe("permanent");
     expect(result.statusCode).toBe(403);
     expect(result.errorCode).toBe("ContentStreamNotAllowed");
+  });
+
+  it("extracts the error code from an axios-shaped response.data body", () => {
+    // Bot Framework / Graph errors surfaced by the Teams SDK are axios errors:
+    // the parsed body lives on `response.data`, not `response.body`.
+    const result = classifyMSTeamsSendError({
+      message: "Request failed with status code 400",
+      response: {
+        status: 400,
+        data: {
+          error: {
+            code: "BadRequest",
+            message: "Attachment type is not supported in this conversation.",
+          },
+        },
+      },
+    });
+    expect(result.kind).toBe("permanent");
+    expect(result.statusCode).toBe(400);
+    expect(result.errorCode).toBe("BadRequest");
   });
 
   it("classifies throttling errors and parses retry-after", () => {
@@ -149,6 +170,49 @@ describe("msteams errors", () => {
   it("still classifies HTTP errors as unknown when no status code and no network code", () => {
     expect(classifyMSTeamsSendError(new Error("unexpected error")).kind).toBe("unknown");
     expect(classifyMSTeamsSendError(null).kind).toBe("unknown");
+  });
+
+  describe("formatMSTeamsErrorDetail", () => {
+    it("appends the axios response.data Graph/Connector body to the base message", () => {
+      const err = Object.assign(new Error("Request failed with status code 400"), {
+        response: {
+          status: 400,
+          data: {
+            error: {
+              code: "BadRequest",
+              message: "Attachment type is not supported in this conversation.",
+            },
+          },
+        },
+      });
+      const detail = formatMSTeamsErrorDetail(err);
+      // The generic axios message is retained, but the real Graph reason is now visible.
+      expect(detail).toContain("Request failed with status code 400");
+      expect(detail).toContain("BadRequest");
+      expect(detail).toContain("Attachment type is not supported in this conversation.");
+    });
+
+    it("falls back to the base message when there is no response body", () => {
+      expect(formatMSTeamsErrorDetail(new Error("boom"))).toBe("boom");
+      expect(formatMSTeamsErrorDetail("oops")).toBe("oops");
+    });
+
+    it("does not duplicate the body when it is already contained in the base message", () => {
+      const err = Object.assign(new Error("failed: Attachment type is not supported"), {
+        response: { status: 400, data: { error: { message: "Attachment type is not supported" } } },
+      });
+      const detail = formatMSTeamsErrorDetail(err);
+      expect(detail).toBe("failed: Attachment type is not supported");
+    });
+
+    it("stringifies a non-standard response.data body", () => {
+      const err = Object.assign(new Error("Request failed with status code 400"), {
+        response: { status: 400, data: { message: "Invalid request", target: "attachments" } },
+      });
+      const detail = formatMSTeamsErrorDetail(err);
+      expect(detail).toContain("Request failed with status code 400");
+      expect(detail).toContain("Invalid request");
+    });
   });
 
   describe("isRevokedProxyError", () => {
