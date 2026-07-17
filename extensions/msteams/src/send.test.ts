@@ -20,7 +20,6 @@ const mockState = vi.hoisted(() => ({
   deleteMSTeamsActivityWithReference: vi.fn(async () => {}),
   uploadAndShareSharePoint: vi.fn(),
   getDriveItemProperties: vi.fn(),
-  buildTeamsFileInfoCard: vi.fn(),
   createMSTeamsTokenProvider: vi.fn(),
 }));
 
@@ -87,10 +86,6 @@ vi.mock("./graph-upload.js", () => ({
   uploadAndShareSharePoint: mockState.uploadAndShareSharePoint,
   getDriveItemProperties: mockState.getDriveItemProperties,
   uploadAndShareOneDrive: vi.fn(),
-}));
-
-vi.mock("./graph-chat.js", () => ({
-  buildTeamsFileInfoCard: mockState.buildTeamsFileInfoCard,
 }));
 
 vi.mock("./sdk.js", () => ({
@@ -196,12 +191,6 @@ function mockSharePointPdfUpload(params: {
     webDavUrl: `https://sp.example.com/dav/${params.fileName}`,
     name: params.fileName,
   });
-  mockState.buildTeamsFileInfoCard.mockReturnValue({
-    contentType: "application/vnd.microsoft.teams.card.file.info",
-    contentUrl: `https://sp.example.com/dav/${params.fileName}`,
-    name: params.fileName,
-    content: { uniqueId: params.uniqueId, fileType: "pdf" },
-  });
 }
 
 type MockWithCalls = {
@@ -237,7 +226,6 @@ describe("sendMessageMSTeams", () => {
     mockState.deleteMSTeamsActivityWithReference.mockReset();
     mockState.uploadAndShareSharePoint.mockReset();
     mockState.getDriveItemProperties.mockReset();
-    mockState.buildTeamsFileInfoCard.mockReset();
 
     mockState.extractFilename.mockResolvedValue("fallback.bin");
     mockState.requiresFileConsent.mockReturnValue(false);
