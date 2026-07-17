@@ -11,6 +11,21 @@ name: Boon Fork Release
 #   https://github.com/getboon/openclaw/releases/download/v<version>/openclaw-<version>.tgz
 #   plus a sibling openclaw-<version>.tgz.sha256 (single `<sha>  <file>` line).
 #
+# It ALSO publishes the fork-versioned @openclaw/msteams channel plugin as a
+# sibling asset on the SAME tag (ENG-14431). Upstream ships @openclaw/msteams via
+# the public npm registry, but the fork's `-boon.N` version cannot publish there
+# (the npm-publish version validator has no `-boon.N` arm, and `@openclaw/*` is an
+# upstream-owned scope). So — exactly like the gateway above — the fork ships
+# msteams as a GitHub Release tarball, and gandalf-manager installs it via
+# `npm i -g <asset-url>`. This retires the host-local SP-PATCH / dist-swap that
+# shipped the fork's msteams fixes (ENG-14349 attachment + ENG-14117 topLevel +
+# filecard→SharePoint-link) as fragile per-host edits. msteams asset contract —
+# also do NOT change the shape:
+#   https://github.com/getboon/openclaw/releases/download/v<version>/openclaw-msteams-<version>.tgz
+#   plus a sibling openclaw-msteams-<version>.tgz.sha256.
+# extensions/msteams/package.json version is pinned to the gateway version in
+# lockstep (`2026.6.11-boon.N`), so this tag's msteams asset always matches core.
+#
 # Docker images are handled separately by docker-release.yml (also `v*`-tagged);
 # its `-boon.N` suffix correctly never advances the mutable `:latest` aliases.
 on:
@@ -77,23 +92,68 @@ jobs:
             exit 1
           fi
 
+      # Pack the fork-versioned @openclaw/msteams plugin (ENG-14431). A plain
+      # `npm pack` in extensions/msteams would ship raw TS + unresolved
+      # `workspace:*` deps — NOT runnable. The publishable, runnable tarball is
+      # produced by the fork's own plugin-release tooling: first build the
+      # package-local `dist/`, then pack under the manifest overlay
+      # (plugin-npm-package-manifest.mjs --run) which rewrites entries to
+      # `./dist/*.js` and bundles workspace deps, then restores package.json.
+      # This is the SAME machinery plugin-npm-release.yml uses; we only redirect
+      # the artifact to a GitHub Release instead of npm.
+      - name: Pack msteams plugin tarball + compute sha256
+        id: msteams
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./extensions/msteams/package.json').version")"
+          # Guard: the msteams version MUST equal the gateway tag, so the asset
+          # URL (derived from the tag) resolves to the artifact it claims to be
+          # AND the compat gate (>=2026.6.11, satisfied by -boon.N normalization)
+          # lines up with the core the fleet runs. A drifted msteams version fails
+          # the release rather than shipping a mismatched plugin.
+          if [[ "${{ github.ref_name }}" != "v${version}" ]]; then
+            echo "FATAL: tag '${{ github.ref_name }}' does not match extensions/msteams/package.json version 'v${version}' — bump msteams in lockstep with the gateway" >&2
+            exit 1
+          fi
+          tarball="openclaw-msteams-${version}.tgz"
+          # Build dist/ then pack via the overlay into cwd (a scoped package packs
+          # to <scope-stripped>-<ver>.tgz → openclaw-msteams-<ver>.tgz).
+          node scripts/lib/plugin-npm-runtime-build.mjs extensions/msteams
+          OPENCLAW_PLUGIN_NPM_BUNDLE_DEPENDENCIES=1 \
+            node scripts/lib/plugin-npm-package-manifest.mjs --run extensions/msteams -- \
+            npm pack --pack-destination "${GITHUB_WORKSPACE}"
+          # Assert on disk — do NOT parse pack stdout (build noise, same reason as
+          # the gateway pack step above).
+          if [[ ! -f "${tarball}" ]]; then
+            echo "FATAL: expected '${tarball}' on disk after msteams pack; found:" >&2
+            ls -1 ./openclaw-msteams-*.tgz >&2 || true
+            exit 1
+          fi
+          sha256sum "${tarball}" > "${tarball}.sha256"
+          echo "tarball=${tarball}" >> "$GITHUB_OUTPUT"
+          echo "Packed ${tarball}"
+          cat "${tarball}.sha256"
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
           TARBALL: ${{ steps.pack.outputs.tarball }}
+          MSTEAMS_TARBALL: ${{ steps.msteams.outputs.tarball }}
         run: |
           set -euo pipefail
           if gh release view "${RELEASE_TAG}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "${RELEASE_TAG}" --repo "$GITHUB_REPOSITORY" --clobber \
-              "${TARBALL}" "${TARBALL}.sha256"
+              "${TARBALL}" "${TARBALL}.sha256" \
+              "${MSTEAMS_TARBALL}" "${MSTEAMS_TARBALL}.sha256"
           else
             gh release create "${RELEASE_TAG}" --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --prerelease \
               --title "${RELEASE_TAG}" \
-              --notes "Boon fork release ${RELEASE_TAG}. Install: \`npm i -g <asset-url>\`." \
-              "${TARBALL}" "${TARBALL}.sha256"
+              --notes "Boon fork release ${RELEASE_TAG}. Install: \`npm i -g <asset-url>\`. Ships the gateway tarball + the fork-versioned @openclaw/msteams plugin tarball (ENG-14431)." \
+              "${TARBALL}" "${TARBALL}.sha256" \
+              "${MSTEAMS_TARBALL}" "${MSTEAMS_TARBALL}.sha256"
           fi
           echo "- Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}" >> "$GITHUB_STEP_SUMMARY"

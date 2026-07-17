@@ -2,6 +2,10 @@
 
 Docs: https://docs.openclaw.ai
 
+## Unreleased
+
+- **ENG-14431 — fork-publish `@openclaw/msteams`:** the boon release workflow (`boon-release.yml`) now packs the fork-versioned `@openclaw/msteams` plugin and publishes it as a sibling GitHub Release asset (`openclaw-msteams-<version>.tgz` + `.sha256`) on the same `v*-boon.*` tag as the gateway. `extensions/msteams/package.json` version is pinned to the gateway version in lockstep (`2026.6.11-boon.N`). This retires the host-local SP-PATCH / dist-swap that gandalf-manager used to ship the fork's msteams fixes (ENG-14349 attachment Graph fallback + aadGroupId, ENG-14117 `topLevel`, filecard→SharePoint-link) as fragile per-host edits — a plugin reinstall or fresh standup no longer silently reverts them. The fork ships msteams via GitHub Release (not npm) for the same reason the gateway does: the npm-publish version validator has no `-boon.N` arm and `@openclaw/*` is an upstream-owned scope.
+
 ## 2026.6.11-boon.4
 
 Fork correction release: honest operation-outcome reporting + msteams send-failure diagnostics.
