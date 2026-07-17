@@ -17,12 +17,7 @@ import {
   formatMSTeamsSendErrorHint,
 } from "./errors.js";
 import { prepareFileConsentActivityFs, requiresFileConsent } from "./file-consent-helpers.js";
-import { buildTeamsFileInfoCard } from "./graph-chat.js";
-import {
-  getDriveItemProperties,
-  uploadAndShareOneDrive,
-  uploadAndShareSharePoint,
-} from "./graph-upload.js";
+import { uploadAndShareOneDrive, uploadAndShareSharePoint } from "./graph-upload.js";
 import { extractFilename, extractMessageId } from "./media-helpers.js";
 import { buildConversationReference, sendMSTeamsMessages } from "./messenger.js";
 import { setPendingUploadActivityIdFs } from "./pending-uploads-fs.js";
@@ -295,36 +290,24 @@ export async function sendMessageMSTeams(
           shareUrl: uploaded.shareUrl,
         });
 
-        // Get driveItem properties needed for native file card
-        const driveItem = await getDriveItemProperties({
-          siteId: sharePointSiteId,
-          itemId: uploaded.itemId,
-          tokenProvider,
-        });
-
-        log.debug?.("driveItem properties retrieved", {
-          eTag: driveItem.eTag,
-          webDavUrl: driveItem.webDavUrl,
-        });
-
-        // Build native Teams file card attachment and send via Bot Framework
-        const fileCardAttachment = buildTeamsFileInfoCard(driveItem);
-        const activity = {
-          type: "message",
-          text: messageText || undefined,
-          attachments: [fileCardAttachment],
-        };
+        // ENG-14431/arguijo: Bot Framework file-info cards render as a broken
+        // "chiclet" (400 on file.info) in this tenant — post a markdown link to
+        // the shared SharePoint item instead of a native file card attachment.
+        const spFileLink = `📎 [${uploaded.name}](${uploaded.shareUrl})`;
         const messageId = await sendProactiveActivityRaw({
           app,
           ref,
-          activity,
+          activity: {
+            type: "message",
+            text: messageText ? `${messageText}\n\n${spFileLink}` : spFileLink,
+          },
           serviceUrlBoundary: sdkCloudOptions,
         });
 
-        log.info("sent native file card", {
+        log.info("sent message with SharePoint file link", {
           conversationId,
           messageId,
-          fileName: driveItem.name,
+          shareUrl: uploaded.shareUrl,
         });
 
         return createMSTeamsSendResult({

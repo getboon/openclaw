@@ -16,12 +16,7 @@ import type { MSTeamsAccessTokenProvider } from "./attachments/types.js";
 import type { StoredConversationReference } from "./conversation-store.js";
 import { classifyMSTeamsSendError } from "./errors.js";
 import { prepareFileConsentActivity, requiresFileConsent } from "./file-consent-helpers.js";
-import { buildTeamsFileInfoCard } from "./graph-chat.js";
-import {
-  getDriveItemProperties,
-  uploadAndShareOneDrive,
-  uploadAndShareSharePoint,
-} from "./graph-upload.js";
+import { uploadAndShareOneDrive, uploadAndShareSharePoint } from "./graph-upload.js";
 import { extractFilename, extractMessageId, getMimeType, isLocalPath } from "./media-helpers.js";
 import { parseMentions } from "./mentions.js";
 import { setPendingUploadActivityId } from "./pending-uploads.js";
@@ -360,16 +355,12 @@ export async function buildActivity(
           usePerUserSharing: conversationType === "groupchat",
         });
 
-        // Get driveItem properties needed for native file card attachment
-        const driveItem = await getDriveItemProperties({
-          siteId: sharePointSiteId,
-          itemId: uploaded.itemId,
-          tokenProvider,
-        });
-
-        // Build native Teams file card attachment
-        const fileCardAttachment = buildTeamsFileInfoCard(driveItem);
-        activity.attachments = [fileCardAttachment];
+        // ENG-14431/arguijo: Bot Framework file-info cards render as a broken
+        // "chiclet" (400 on file.info) in this tenant — post a markdown link to
+        // the shared SharePoint item instead of a native file card attachment.
+        const fileLink = `📎 [${uploaded.name}](${uploaded.shareUrl})`;
+        const existingText = typeof activity.text === "string" ? activity.text : undefined;
+        activity.text = existingText ? `${existingText}\n\n${fileLink}` : fileLink;
 
         return activity;
       }
