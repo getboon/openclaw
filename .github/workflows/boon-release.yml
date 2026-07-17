@@ -103,6 +103,11 @@ jobs:
       # the artifact to a GitHub Release instead of npm.
       - name: Pack msteams plugin tarball + compute sha256
         id: msteams
+        env:
+          # Pass the tag via env (not inline ${{ }}) so it isn't interpolated into
+          # the shell body — zizmor template-injection safety, matching the gateway
+          # steps above.
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           version="$(node -p "require('./extensions/msteams/package.json').version")"
@@ -111,8 +116,8 @@ jobs:
           # AND the compat gate (>=2026.6.11, satisfied by -boon.N normalization)
           # lines up with the core the fleet runs. A drifted msteams version fails
           # the release rather than shipping a mismatched plugin.
-          if [[ "${{ github.ref_name }}" != "v${version}" ]]; then
-            echo "FATAL: tag '${{ github.ref_name }}' does not match extensions/msteams/package.json version 'v${version}' — bump msteams in lockstep with the gateway" >&2
+          if [[ "${TAG}" != "v${version}" ]]; then
+            echo "FATAL: tag '${TAG}' does not match extensions/msteams/package.json version 'v${version}' — bump msteams in lockstep with the gateway" >&2
             exit 1
           fi
           tarball="openclaw-msteams-${version}.tgz"
