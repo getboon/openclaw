@@ -413,7 +413,7 @@ export function collectReleaseTagErrors(params: {
   const parsedVersion = parseReleaseVersion(packageVersion);
   if (parsedVersion === null) {
     errors.push(
-      `package.json version must match YYYY.M.PATCH, YYYY.M.PATCH-N, YYYY.M.PATCH-alpha.N, or YYYY.M.PATCH-beta.N; found "${packageVersion || "<missing>"}".`,
+      `package.json version must match YYYY.M.PATCH, YYYY.M.PATCH-N, YYYY.M.PATCH-boon.N, YYYY.M.PATCH-alpha.N, or YYYY.M.PATCH-beta.N; found "${packageVersion || "<missing>"}".`,
     );
   } else {
     errors.push(...collectReleaseVersionFloorErrorsBase(parsedVersion));

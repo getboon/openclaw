@@ -6,6 +6,14 @@ const BETA_VERSION_REGEX =
   /^(?<year>\d{4})\.(?<month>[1-9]\d?)\.(?<patch>[1-9]\d*)-beta\.(?<beta>[1-9]\d*)$/;
 const CORRECTION_VERSION_REGEX =
   /^(?<year>\d{4})\.(?<month>[1-9]\d?)\.(?<patch>[1-9]\d*)-(?<correction>[1-9]\d*)$/;
+// The Boon fork's `-boon.N` correction channel. Treated as a stable correction
+// (same rank/semantics as the numeric `-N` correction above), mirroring how
+// src/infra/clawhub.ts normalizes `-boon.N` for the plugin API compat gate
+// (getboon/openclaw PR #41). This lets a fork-versioned publishable plugin
+// (e.g. @openclaw/msteams@2026.6.11-boon.4, ENG-14431) pass release-version
+// validation instead of being rejected as an unrecognized prerelease.
+const BOON_VERSION_REGEX =
+  /^(?<year>\d{4})\.(?<month>[1-9]\d?)\.(?<patch>[1-9]\d*)-boon\.(?<correction>[1-9]\d*)$/;
 export const JUNE_2026_PATCH_FLOOR = 5;
 
 /**
@@ -114,7 +122,10 @@ export function parseReleaseVersion(version) {
     return parseVersionParts(trimmed, betaMatch.groups, "beta");
   }
 
-  const correctionMatch = CORRECTION_VERSION_REGEX.exec(trimmed);
+  // A numeric `-N` correction and a fork `-boon.N` correction parse identically
+  // (both are stable corrections with a correctionNumber); only the regex differs.
+  const correctionMatch =
+    CORRECTION_VERSION_REGEX.exec(trimmed) ?? BOON_VERSION_REGEX.exec(trimmed);
   if (correctionMatch?.groups) {
     const parsedCorrection = parseVersionParts(trimmed, correctionMatch.groups, "stable");
     const correctionNumber = parseSafeIntegerPart(correctionMatch.groups.correction);

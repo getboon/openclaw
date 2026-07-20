@@ -181,7 +181,7 @@ describe("collectPublishablePluginPackageErrors", () => {
       "package.json private must not be true.",
       'package.json type must be "module" so built .js runtime entries load as ESM.',
       `package.json repository.url must be "${OPENCLAW_PLUGIN_NPM_REPOSITORY_URL}" so npm provenance can validate GitHub trusted publishing; found "<missing>".`,
-      'package.json version must match YYYY.M.PATCH, YYYY.M.PATCH-N, YYYY.M.PATCH-alpha.N, or YYYY.M.PATCH-beta.N; found "latest".',
+      'package.json version must match YYYY.M.PATCH, YYYY.M.PATCH-N, YYYY.M.PATCH-boon.N, YYYY.M.PATCH-alpha.N, or YYYY.M.PATCH-beta.N; found "latest".',
       "openclaw.extensions must contain only non-empty strings.",
       "openclaw.install.npmSpec must be a non-empty string for publishable plugins.",
     ]);

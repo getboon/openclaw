@@ -2,6 +2,8 @@
 import { describe, expect, it } from "vitest";
 import {
   collectReleaseVersionFloorErrors,
+  compareReleaseVersions,
+  parseReleaseVersion,
   resolveNpmDistTagMirrorAuth,
   resolveNpmPublishPlan,
   shouldRequireNpmDistTagMirrorAuth,
@@ -21,6 +23,48 @@ describe("collectReleaseVersionFloorErrors", () => {
     expect(collectReleaseVersionFloorErrors("2026.6.4-alpha.1")).toEqual([]);
     expect(collectReleaseVersionFloorErrors("2026.6.5-beta.2")).toEqual([]);
     expect(collectReleaseVersionFloorErrors("2026.7.1")).toEqual([]);
+  });
+});
+
+describe("fork -boon.N correction versions (ENG-14431)", () => {
+  it("parses a fork -boon.N version as a stable correction release", () => {
+    const parsed = parseReleaseVersion("2026.6.11-boon.4");
+
+    expect(parsed).toEqual({
+      version: "2026.6.11-boon.4",
+      baseVersion: "2026.6.11",
+      channel: "stable",
+      year: 2026,
+      month: 6,
+      patch: 11,
+      alphaNumber: undefined,
+      betaNumber: undefined,
+      correctionNumber: 4,
+    });
+  });
+
+  it("rejects a malformed -boon.N correction (zero correction number)", () => {
+    expect(parseReleaseVersion("2026.6.11-boon.0")).toBeNull();
+  });
+
+  it("plans a fork -boon.N publish as a latest publish with beta mirroring", () => {
+    const plan = resolveNpmPublishPlan("2026.6.11-boon.4");
+
+    expect(plan).toEqual({
+      channel: "stable",
+      publishTag: "latest",
+      mirrorDistTags: ["beta"],
+    });
+  });
+
+  it("orders -boon.N corrections above the base and by correction number", () => {
+    expect(compareReleaseVersions("2026.6.11-boon.4", "2026.6.11")).toBe(1);
+    expect(compareReleaseVersions("2026.6.11-boon.4", "2026.6.11-boon.3")).toBe(1);
+    expect(compareReleaseVersions("2026.6.11-boon.3", "2026.6.11-boon.3")).toBe(0);
+  });
+
+  it("keeps a fork -boon.N release valid under the June 2026 patch floor", () => {
+    expect(collectReleaseVersionFloorErrors("2026.6.11-boon.4")).toEqual([]);
   });
 });
 

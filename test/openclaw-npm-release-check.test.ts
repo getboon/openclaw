@@ -736,7 +736,7 @@ describe("collectReleaseTagErrors", () => {
         releaseTag: "v2026.3.0",
       }),
     ).toStrictEqual([
-      'package.json version must match YYYY.M.PATCH, YYYY.M.PATCH-N, YYYY.M.PATCH-alpha.N, or YYYY.M.PATCH-beta.N; found "2026.3.0".',
+      'package.json version must match YYYY.M.PATCH, YYYY.M.PATCH-N, YYYY.M.PATCH-boon.N, YYYY.M.PATCH-alpha.N, or YYYY.M.PATCH-beta.N; found "2026.3.0".',
       'Release tag must match vYYYY.M.PATCH, vYYYY.M.PATCH-alpha.N, vYYYY.M.PATCH-beta.N, or fallback correction tag vYYYY.M.PATCH-N; found "v2026.3.0".',
       "Release tag v2026.3.0 does not match package.json version 2026.3.0; expected v2026.3.0.",
     ]);
