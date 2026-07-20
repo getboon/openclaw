@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.5
+
+Fork correction release: ship the fork-versioned `@openclaw/msteams` plugin as a release asset + the msteams SharePoint file-link fix.
+
+- **#60 (ENG-14431):** the boon release workflow now packs the fork-versioned `@openclaw/msteams` plugin and publishes it as a sibling release asset (`openclaw-msteams-<version>.tgz` + `.sha256`) on the same `v*-boon.*` tag as the gateway. `extensions/msteams/package.json` is pinned to the gateway version in lockstep. This retires the fragile host-local SP-PATCH / dist-swap that gandalf-manager used to ship the fork's msteams fixes — a plugin reinstall or fresh standup no longer silently reverts them. The fork ships msteams via GitHub Release (not npm) because `@openclaw/*` is an upstream-owned scope the fork cannot publish to.
+- **#59 (ENG-14349 / ENG-14117):** msteams outbound file attachments post a SharePoint file link instead of the native Bot Framework file-info card, which the BF connector rejected with a `BadSyntax` 400 on channel conversations — restoring reliable Teams file delivery.
+- Base = `2026.6.11-boon.4`. No other code changes; both fixes were merged onto `boon` before this correction release.
+
 ## 2026.6.11-boon.4
 
 Fork correction release: honest operation-outcome reporting + msteams send-failure diagnostics.
