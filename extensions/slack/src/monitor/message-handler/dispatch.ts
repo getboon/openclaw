@@ -74,6 +74,7 @@ import { applyAppendOnlyStreamUpdate, resolveSlackStreamingConfig } from "../../
 import type { SlackStreamSession } from "../../streaming.js";
 import {
   appendSlackStream,
+  isInvalidThreadSlackError,
   markSlackStreamFallbackDelivered,
   SlackStreamNotDeliveredError,
   startSlackStream,
@@ -93,6 +94,7 @@ import {
   resolveSlackThreadTs,
 } from "../replies.js";
 import { dispatchReplyWithBufferedBlockDispatcher } from "../reply.runtime.js";
+import { resolveThreadTsFromHistory } from "../thread-resolution.js";
 import { finalizeSlackPreviewEdit } from "./preview-finalize.js";
 import { resolveSlackTimestampMs } from "./timestamp.js";
 import type { PreparedSlackMessage } from "./types.js";
@@ -846,6 +848,39 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
       usedBlockReplyThreadTs = deliveredThreadTs;
     }
   };
+  // When Slack rejects a stream finalize with invalid_thread_ts/thread_not_found
+  // (the anchoring message was deleted/edited mid-turn, or the anchor was a
+  // non-root reply ts), re-resolve the real thread root before the fallback
+  // re-posts, so it threads correctly instead of silently orphaning the reply to
+  // the channel top level. If no root can be recovered (message truly gone),
+  // clear the anchor so delivery degrades to the channel deterministically
+  // rather than reusing the rejected ts. Both stream finalize-error paths (the
+  // mid-turn append catch and the terminal stop catch) call this. ENG-16286.
+  const recoverThreadTsIfInvalid = async (
+    session: SlackStreamSession,
+    err: unknown,
+  ): Promise<void> => {
+    if (!session.threadTs || !isInvalidThreadSlackError(err)) {
+      return;
+    }
+    const rejectedThreadTs = session.threadTs;
+    const recoveredThreadTs = await resolveThreadTsFromHistory({
+      client: ctx.app.client,
+      channelId: message.channel,
+      messageTs: rejectedThreadTs,
+    });
+    if (recoveredThreadTs && recoveredThreadTs !== rejectedThreadTs) {
+      logVerbose(
+        `slack-stream: recovered thread anchor after invalid_thread_ts ${rejectedThreadTs} -> ${recoveredThreadTs}`,
+      );
+      session.threadTs = recoveredThreadTs;
+    } else {
+      logVerbose(
+        `slack-stream: could not recover thread anchor after invalid_thread_ts ${rejectedThreadTs}; delivering to channel`,
+      );
+      session.threadTs = undefined;
+    }
+  };
   const deliverPendingStreamFallback = async (
     session: SlackStreamSession,
     err: SlackStreamNotDeliveredError,
@@ -1228,6 +1263,9 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
         danger(`slack-stream: streaming API call failed: ${formatSlackError(err)}, falling back`),
       );
       streamFailed = true;
+      if (streamSession) {
+        await recoverThreadTsIfInvalid(streamSession, err);
+      }
       // Non-benign streaming errors leave `pendingText` populated with every
       // buffered chunk since the last flush (appendSlackStream accumulates
       // into pendingText BEFORE the SDK call, so the failing chunk is
@@ -2047,6 +2085,20 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
     } catch (err) {
       if (err instanceof SlackStreamNotDeliveredError) {
         streamFallbackDelivered = await deliverPendingStreamFallback(finalStream, err);
+        if (!streamFallbackDelivered) {
+          dispatchError ??= err;
+        }
+      } else if (isInvalidThreadSlackError(err) && finalStream.pendingText) {
+        // The finalize was rejected because the thread anchor is invalid
+        // (message deleted/edited mid-turn). Recover the real thread root, then
+        // route the SDK-buffered text through the fallback so it still lands —
+        // threaded if we recovered a root, else in the channel — instead of
+        // being lost with the rejected stream. ENG-16286.
+        await recoverThreadTsIfInvalid(finalStream, err);
+        streamFallbackDelivered = await deliverPendingStreamFallback(
+          finalStream,
+          new SlackStreamNotDeliveredError(finalStream.pendingText, "unknown"),
+        );
         if (!streamFallbackDelivered) {
           dispatchError ??= err;
         }
