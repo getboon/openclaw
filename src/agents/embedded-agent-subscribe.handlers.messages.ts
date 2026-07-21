@@ -908,6 +908,10 @@ export function handleMessageEnd(
 ): void | Promise<void> {
   const msg = evt.message;
   if (msg?.role !== "assistant" || isTranscriptOnlyOpenClawAssistantMessage(msg)) {
+    // ENG-16330 (cubic P1): a non-assistant / transcript-only message_end is not a
+    // turn boundary for surfacing — do NOT touch the buffer (it belongs to the
+    // in-flight turn). Leaving it intact avoids dropping a still-continuing turn's
+    // recovered errors.
     return;
   }
 
@@ -920,6 +924,12 @@ export function handleMessageEnd(
   ctx.recordAssistantUsage((assistantMessage as { usage?: unknown }).usage);
   ctx.commitAssistantUsage();
   if (suppressVisibleAssistantOutput) {
+    // ENG-16330 (cubic P1): a commentary/suppressed-output assistant message produces
+    // no user-visible reply, so there is nothing to attach a path trail to. Discard
+    // any buffered recoverable errors here so they cannot leak into the next turn's
+    // resolution (the buffer is per-turn; handleToolExecutionEnd only re-creates it
+    // when undefined).
+    ctx.state.intelligentMessagingBuffer = undefined;
     return;
   }
   promoteThinkingTagsToBlocks(assistantMessage);
@@ -1190,25 +1200,34 @@ export function handleMessageEnd(
   }
 
   // ENG-16330: resolve the per-turn recoverable-error buffer now that the visible
-  // reply is composed/emitted. On success (normal stopReason + a real non-empty
-  // reply) emit a neutral path-trail note; on failure flush the buffered errors as
-  // honest failure badges (no regression). Runs before the onBlockReplyFlush return
-  // branches so it executes exactly once on every successful path.
+  // reply is composed/emitted. Only resolve on a TERMINAL assistant outcome — an
+  // in-progress `toolUse` turn means more tool steps (and the real final reply) are
+  // still coming, so leaving the buffer intact lets later steps reach it (cubic P1).
+  // On a terminal turn: success (real reply text OR media) → neutral path-trail note;
+  // otherwise → flush the buffered errors as honest failure badges (no regression).
+  // Both emissions respect the tool-output gate (cubic P2). Non-terminal turns leave
+  // the buffer untouched; the early-return sites above clear it (see resetForTurn).
   const intelligentMessagingBuffer = ctx.state.intelligentMessagingBuffer;
   if (intelligentMessagingBuffer && intelligentMessagingBuffer.size() > 0) {
     const stopReason = (assistantMessage as { stopReason?: unknown }).stopReason;
-    const stopReasonSucceeded = stopReason === "stop" || stopReason === "end_turn";
-    // Confabulation guard: a bland/empty final message does not count as success.
-    const turnSucceeded = stopReasonSucceeded && cleanedText.trim().length > 0;
-    const resolution = intelligentMessagingBuffer.resolve({ turnSucceeded });
-    if (resolution.pathTrail) {
-      ctx.emitToolOutput?.(undefined, undefined, resolution.pathTrail);
+    const terminalOutcome = stopReason === "stop" || stopReason === "end_turn";
+    if (terminalOutcome) {
+      // Confabulation guard: a bland/empty final message is not success — but a
+      // media-only silent reply (empty cleanedText + hasMedia) IS valid (cubic P2).
+      const turnSucceeded = cleanedText.trim().length > 0 || hasMedia;
+      const resolution = intelligentMessagingBuffer.resolve({ turnSucceeded });
+      if (ctx.shouldEmitToolOutput()) {
+        if (resolution.pathTrail) {
+          ctx.emitToolOutput?.(undefined, undefined, resolution.pathTrail);
+        }
+        for (const badge of resolution.emitFailureBadges) {
+          ctx.emitToolOutput?.(badge.toolName, badge.summary, `${badge.toolName} failed`);
+        }
+      }
+      // Resolved this turn → clear so it can never double-emit on a later message_end.
+      ctx.state.intelligentMessagingBuffer = undefined;
     }
-    for (const badge of resolution.emitFailureBadges) {
-      ctx.emitToolOutput?.(badge.toolName, badge.summary, `${badge.toolName} failed`);
-    }
-    // Clear so the buffer can never double-emit on a later message_end.
-    ctx.state.intelligentMessagingBuffer = undefined;
+    // Non-terminal (toolUse): leave the buffer for the continuing turn.
   }
 
   if (

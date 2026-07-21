@@ -39,6 +39,27 @@ describe("classifyToolSurfacing", () => {
     expect(decision.mode).toBe("immediate");
   });
 
+  it("surfaces a RECOVERABLE tool immediately when it carries a TERMINAL signal (looksTerminal branch)", () => {
+    // exec/process/tmux are normally buffer-recoverable, but a terminal error signal
+    // (auth/quota/forbidden) must escalate to immediate — the user has to see it now,
+    // not have it hidden behind a path trail. Guards the looksTerminal branch.
+    for (const signal of ["unauthorized", "forbidden", "quota", "allocation_exhausted"]) {
+      const viaError = classifyToolSurfacing({
+        toolName: "exec",
+        isToolError: true,
+        result: { details: { status: "failed", exitCode: 1, error: `graph ${signal}` } },
+      });
+      expect(viaError.mode, `error=${signal}`).toBe("immediate");
+    }
+    // also via errorCode field
+    const viaCode = classifyToolSurfacing({
+      toolName: "process",
+      isToolError: true,
+      result: { details: { status: "failed", errorCode: "invalid_api_key" } },
+    });
+    expect(viaCode.mode).toBe("immediate");
+  });
+
   it("does not touch a successful tool result", () => {
     const decision = classifyToolSurfacing({
       toolName: "exec",
