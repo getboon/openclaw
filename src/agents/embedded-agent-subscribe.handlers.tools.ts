@@ -77,6 +77,7 @@ import {
 } from "./embedded-agent-subscribe.tools.js";
 import { inferToolMetaFromArgs } from "./embedded-agent-utils.js";
 import { parseExecApprovalResultText } from "./exec-approval-result.js";
+import { classifyToolSurfacing, createTurnErrorBuffer } from "./intelligent-messaging.js";
 import type { AgentEvent } from "./runtime/index.js";
 import { buildToolMutationState, isSameToolMutationAction } from "./tool-mutation.js";
 import { normalizeToolName } from "./tool-policy.js";
@@ -1549,6 +1550,29 @@ export async function handleToolExecutionEnd(
   ctx.log.debug(
     `embedded run tool end: runId=${ctx.params.runId} tool=${toolName} toolCallId=${toolCallId}`,
   );
+
+  // ENG-16330: outcome-aware surfacing. A RECOVERABLE tool error (exec/tmux/process
+  // bg, non-terminal) is BUFFERED instead of emitted live — at turn close
+  // (handleMessageEnd) it becomes a path-trail note if the turn succeeded, or is
+  // flushed as a real failure if it didn't. The model still sees the error (result is
+  // unchanged); only the live channel badge is deferred. Terminal errors (auth/quota/
+  // delivery) and non-recoverable tools fall through to the normal live emit.
+  const surfacing = classifyToolSurfacing({ toolName, isToolError, result });
+  if (surfacing.mode === "buffer-recoverable") {
+    if (!ctx.state.intelligentMessagingBuffer) {
+      ctx.state.intelligentMessagingBuffer = createTurnErrorBuffer();
+    }
+    const details = readToolResultDetails(sanitizedResult);
+    ctx.state.intelligentMessagingBuffer.record({
+      toolName,
+      sessionName: typeof details?.name === "string" ? details.name : undefined,
+      summary: meta,
+    });
+    await Promise.resolve(ctx.params.onToolStreamBoundary?.()).catch((error: unknown) => {
+      ctx.log.debug(`embedded run tool stream boundary callback failed: ${String(error)}`);
+    });
+    return;
+  }
 
   await emitToolResultOutput({
     ctx,

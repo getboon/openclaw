@@ -1189,6 +1189,28 @@ export function handleMessageEnd(
     emitSplitResultAsBlockReply(ctx.consumeReplyDirectives("", { final: true }));
   }
 
+  // ENG-16330: resolve the per-turn recoverable-error buffer now that the visible
+  // reply is composed/emitted. On success (normal stopReason + a real non-empty
+  // reply) emit a neutral path-trail note; on failure flush the buffered errors as
+  // honest failure badges (no regression). Runs before the onBlockReplyFlush return
+  // branches so it executes exactly once on every successful path.
+  const intelligentMessagingBuffer = ctx.state.intelligentMessagingBuffer;
+  if (intelligentMessagingBuffer && intelligentMessagingBuffer.size() > 0) {
+    const stopReason = (assistantMessage as { stopReason?: unknown }).stopReason;
+    const stopReasonSucceeded = stopReason === "stop" || stopReason === "end_turn";
+    // Confabulation guard: a bland/empty final message does not count as success.
+    const turnSucceeded = stopReasonSucceeded && cleanedText.trim().length > 0;
+    const resolution = intelligentMessagingBuffer.resolve({ turnSucceeded });
+    if (resolution.pathTrail) {
+      ctx.emitToolOutput?.(undefined, undefined, resolution.pathTrail);
+    }
+    for (const badge of resolution.emitFailureBadges) {
+      ctx.emitToolOutput?.(badge.toolName, badge.summary, `${badge.toolName} failed`);
+    }
+    // Clear so the buffer can never double-emit on a later message_end.
+    ctx.state.intelligentMessagingBuffer = undefined;
+  }
+
   if (
     !ctx.params.silentExpected &&
     ctx.state.blockReplyBreak === "message_end" &&
