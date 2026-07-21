@@ -468,6 +468,29 @@ describe("msteams attachments", () => {
       runAttachmentAuthRetryCase,
     );
 
+    // Teams drag-drop files are served from a short-lived pre-authenticated CDN
+    // URL on *.asyncgw.teams.microsoft.com. When the embedded token goes stale the
+    // unauthenticated GET 401s; the bot-token retry must fire for the media to be
+    // recovered. This relies on the DEFAULT auth allowlist (no authAllowHosts
+    // override) because that is what a live host runs. (ENG-15866)
+    it("retries with the bot token on a 401 from an asyncgw CDN url using the default auth allowlist", async () => {
+      const asyncgwUrl = "https://us-prod.asyncgw.teams.microsoft.com/v1/objects/abc/views/imgo";
+      const tokenProvider = createTokenProvider();
+      const fetchMock = createAuthAwareImageFetchMock({
+        unauthStatus: 401,
+        unauthBody: "unauthorized",
+      });
+      const media = await downloadAttachmentsWithFetch(
+        createImageAttachments(asyncgwUrl),
+        fetchMock,
+        // allowHosts opens the OUTER media gate; authAllowHosts is intentionally
+        // left to the default so we exercise DEFAULT_MEDIA_AUTH_HOST_ALLOWLIST.
+        { tokenProvider, allowHosts: ["asyncgw.teams.microsoft.com"] },
+      );
+      expectAttachmentMediaLength(media, 1);
+      expect(tokenProvider.getAccessToken).toHaveBeenCalled();
+    });
+
     it("preserves auth fallback when dispatcher-mode fetch returns a redirect", async () => {
       const redirectedUrl = createTestUrl("redirected.png");
       const tokenProvider = createTokenProvider();
