@@ -623,10 +623,11 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads[1]?.text).toContain("Write");
   });
 
-  it("still shows exec tool errors when timedOut is true (no file-write boundary)", () => {
-    // Exec timeouts never set `fileTarget`, so the new file-write boundary
-    // never matches. Exec/message/cron/gateway tools keep the visible
-    // warning because the disk-write idempotency reasoning does not apply.
+  it("reframes a recovered exec timeout on a successful turn as an intermediate status (ENG-16330)", () => {
+    // A recovered exec/bash/process/tmux error on a turn that still produced a
+    // real reply is non-terminal — the deliverable is the answer, not the command
+    // call. Reframe the false "⚠️ Exec failed" badge into the G4 continuation note
+    // (previously this surfaced a terminal warning; ENG-16330 corrects that).
     const payloads = buildPayloads({
       assistantTexts: ["The script is ready."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -639,11 +640,14 @@ describe("buildEmbeddedRunPayloads", () => {
     });
 
     expect(payloads).toHaveLength(2);
-    expect(payloads[1]?.isError).toBe(true);
-    expect(payloads[1]?.text).toContain("Exec");
+    const warning = payloads[1];
+    expect(getReplyPayloadMetadata(warning as object)?.nonTerminalToolErrorWarning).toBe(true);
+    expect(warning?.text).not.toContain("⚠️");
+    expect(warning?.text).not.toContain("failed");
+    expect(warning?.text).toMatch(/kept going|continu|proceed/i);
   });
 
-  it("shows exec tool errors when assistant output claims success", () => {
+  it("reframes a recovered exec error as an intermediate status when the turn claims success (ENG-16330)", () => {
     const payloads = buildPayloads({
       assistantTexts: ["The script is ready to use and saved in your workspace."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -655,12 +659,12 @@ describe("buildEmbeddedRunPayloads", () => {
 
     expect(payloads).toHaveLength(2);
     expect(payloads[0]?.text).toBe("The script is ready to use and saved in your workspace.");
-    expect(payloads[1]?.isError).toBe(true);
-    expect(payloads[1]?.text).toContain("Exec");
-    expect(payloads[1]?.text).not.toContain("python: command not found");
-    expect(getReplyPayloadMetadata(payloads[1] as object)?.nonTerminalToolErrorWarning).toBe(
-      undefined,
-    );
+    const warning = payloads[1];
+    expect(getReplyPayloadMetadata(warning as object)?.nonTerminalToolErrorWarning).toBe(true);
+    expect(warning?.text).not.toContain("⚠️");
+    expect(warning?.text).not.toContain("failed");
+    expect(warning?.text).not.toContain("python: command not found");
+    expect(warning?.text).toMatch(/kept going|continu|proceed/i);
   });
 
   it("shows mutating tool errors when assistant output does not acknowledge the failure", () => {
@@ -889,6 +893,80 @@ describe("buildEmbeddedRunPayloads", () => {
       text: "⚠️ 🛠️ `show matrix-progress-@room-@alice:matrix-qa.test-!room:matrix-qa.test.txt (workspace)` failed",
       isError: true,
     });
+  });
+
+  it("reframes a recovered bg-process non-zero exit as an intermediate status, not '⚠️ Process failed' (ENG-16330)", () => {
+    // The gandalf `salty-shore` case: a backgrounded process/tmux session exits
+    // non-zero, the agent RECOVERS (produces a real final reply), the turn
+    // succeeds — yet core rendered "⚠️ 🧰 Process: salty-shore failed", giving the
+    // user the wrong intuition ("the agent broke"). A recovered exec/process/tmux
+    // error on a successful turn is non-terminal: surface the G4 continuation note,
+    // never a terminal badge, and never the raw generated session name.
+    const payloads = buildPayloads({
+      assistantTexts: ["Here's the honest status while the draft work runs."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      currentAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      toolMetas: [
+        { toolName: "read", meta: "plan.md" },
+        { toolName: "process", meta: "salty-shore" },
+      ],
+      lastToolError: {
+        toolName: "process",
+        meta: "salty-shore",
+        error: "Process exited with code 1.",
+      },
+    });
+
+    const warning = payloads.find(
+      (p) => getReplyPayloadMetadata(p)?.nonTerminalToolErrorWarning === true,
+    );
+    expect(warning).toBeDefined();
+    expect(warning?.text).not.toContain("⚠️");
+    expect(warning?.text).not.toContain("failed");
+    expect(warning?.text).not.toContain("salty-shore");
+    expect(warning?.text).not.toContain("🧰");
+    expect(warning?.text).toMatch(/kept going|continu|proceed/i);
+  });
+
+  it("reframes a recovered exec non-zero exit as an intermediate status on a successful turn (ENG-16330)", () => {
+    const payloads = buildPayloads({
+      assistantTexts: ["The script is ready to use and saved in your workspace."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      currentAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      toolMetas: [{ toolName: "exec", meta: "python build.py" }],
+      lastToolError: {
+        toolName: "exec",
+        error: "/bin/bash: line 1: python: command not found",
+      },
+    });
+
+    const warning = payloads.find(
+      (p) => getReplyPayloadMetadata(p)?.nonTerminalToolErrorWarning === true,
+    );
+    expect(warning).toBeDefined();
+    expect(warning?.text).not.toContain("⚠️");
+    expect(warning?.text).not.toContain("failed");
+    expect(warning?.text).toMatch(/kept going|continu|proceed/i);
+  });
+
+  it("still flushes a terminal '⚠️ … failed' badge for a recovered tool when the turn produced NO reply (ENG-16330 regression guard)", () => {
+    // No user-facing reply → the turn did not recover into a real answer, so the
+    // honest terminal badge must still surface (no #53/#47/#48/#50 regression).
+    const payloads = buildPayloads({
+      lastToolError: {
+        toolName: "process",
+        meta: "salty-shore",
+        error: "Process exited with code 1.",
+      },
+    });
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.isError).toBe(true);
+    expect(payloads[0]?.text).toContain("⚠️");
+    expect(payloads[0]?.text).toContain("failed");
+    expect(getReplyPayloadMetadata(payloads[0] as object)?.nonTerminalToolErrorWarning).toBe(
+      undefined,
+    );
   });
 
   it("keeps non-recoverable tool errors compact when verbose mode is on", () => {

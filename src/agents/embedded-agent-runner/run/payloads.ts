@@ -152,8 +152,27 @@ function shouldIncludeToolErrorDetails(params: {
   );
 }
 
+// Command-execution tools whose errors are recoverable sub-steps, not mutating
+// deliverables. A non-zero exec/bash/process/tmux exit that the agent recovered
+// from — the turn still produced a real reply — is non-terminal: the deliverable
+// is the answer, not the command call. Write/edit/message stay strict (a failed
+// write with a "done" reply is confabulation, #53), so they are NOT listed here.
+const RECOVERABLE_EXEC_CLASS_TOOL_NAMES = new Set(["exec", "bash", "process", "tmux"]);
+
+function isRecoverableExecClassToolName(toolName: string): boolean {
+  return RECOVERABLE_EXEC_CLASS_TOOL_NAMES.has(normalizeOptionalLowercaseString(toolName) ?? "");
+}
+
 function shouldMarkNonTerminalToolErrorWarning(lastToolError: ToolErrorSummary): boolean {
-  return lastToolError.middlewareError === true;
+  // A transient middleware failure is non-terminal (ENG-15627 G4).
+  if (lastToolError.middlewareError === true) {
+    return true;
+  }
+  // ENG-16330: a recovered command-execution error on a turn that still produced a
+  // real reply (the caller gates this on `hasUserFacingAssistantReply`) is
+  // non-terminal — reframe the false "⚠️ 🧰 Process: <session> failed" badge into
+  // the G4 continuation note instead of a terminal failure banner.
+  return isRecoverableExecClassToolName(lastToolError.toolName);
 }
 
 /**
