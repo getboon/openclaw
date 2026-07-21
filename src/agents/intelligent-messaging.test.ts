@@ -28,6 +28,15 @@ describe("classifyToolSurfacing", () => {
     expect(decision.mode).toBe("buffer-recoverable");
   });
 
+  it("buffers a recoverable non-zero tmux error", () => {
+    const decision = classifyToolSurfacing({
+      toolName: "tmux",
+      isToolError: true,
+      result: { details: { status: "failed", exitCode: 1 } },
+    });
+    expect(decision.mode).toBe("buffer-recoverable");
+  });
+
   it("surfaces a NON-recoverable tool error (auth/quota/delivery) immediately", () => {
     // message/delivery + auth failures are terminal-ish; the user must see them now,
     // never buffered into silence.
