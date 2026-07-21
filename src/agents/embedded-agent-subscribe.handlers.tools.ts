@@ -1552,13 +1552,18 @@ export async function handleToolExecutionEnd(
   );
 
   // ENG-16330: outcome-aware surfacing. A RECOVERABLE tool error (exec/tmux/process
-  // bg, non-terminal) is BUFFERED instead of emitted live — at turn close
-  // (handleMessageEnd) it becomes a path-trail note if the turn succeeded, or is
-  // flushed as a real failure if it didn't. The model still sees the error (result is
-  // unchanged); only the live channel badge is deferred. Terminal errors (auth/quota/
-  // delivery) and non-recoverable tools fall through to the normal live emit.
+  // bg, non-terminal) is BUFFERED and its live channel badge is SKIPPED — at turn
+  // close (handleMessageEnd) it becomes a path-trail note if the turn succeeded, or
+  // is flushed as a real failure if it didn't. The model still sees the error (result
+  // is unchanged); only the live channel badge is deferred. Terminal errors
+  // (auth/quota/delivery) and non-recoverable tools emit live as before.
+  //
+  // CRITICAL: only the emitToolResultOutput CALL is gated — the after_tool_call hook
+  // + stream boundary below MUST still run (buffering a badge must not suppress plugin
+  // hooks; regression guarded by after-tool-call.fires-once + owned-tool-runtime tests).
   const surfacing = classifyToolSurfacing({ toolName, isToolError, result });
-  if (surfacing.mode === "buffer-recoverable") {
+  const bufferRecoverable = surfacing.mode === "buffer-recoverable";
+  if (bufferRecoverable) {
     if (!ctx.state.intelligentMessagingBuffer) {
       ctx.state.intelligentMessagingBuffer = createTurnErrorBuffer();
     }
@@ -1568,21 +1573,17 @@ export async function handleToolExecutionEnd(
       sessionName: typeof details?.name === "string" ? details.name : undefined,
       summary: meta,
     });
-    await Promise.resolve(ctx.params.onToolStreamBoundary?.()).catch((error: unknown) => {
-      ctx.log.debug(`embedded run tool stream boundary callback failed: ${String(error)}`);
+  } else {
+    await emitToolResultOutput({
+      ctx,
+      toolName,
+      rawToolName,
+      meta,
+      isToolError,
+      result,
+      sanitizedResult,
     });
-    return;
   }
-
-  await emitToolResultOutput({
-    ctx,
-    toolName,
-    rawToolName,
-    meta,
-    isToolError,
-    result,
-    sanitizedResult,
-  });
   await Promise.resolve(ctx.params.onToolStreamBoundary?.()).catch((error: unknown) => {
     ctx.log.debug(`embedded run tool stream boundary callback failed: ${String(error)}`);
   });
