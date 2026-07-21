@@ -924,12 +924,12 @@ export function handleMessageEnd(
   ctx.recordAssistantUsage((assistantMessage as { usage?: unknown }).usage);
   ctx.commitAssistantUsage();
   if (suppressVisibleAssistantOutput) {
-    // ENG-16330 (cubic P1): a commentary/suppressed-output assistant message produces
-    // no user-visible reply, so there is nothing to attach a path trail to. Discard
-    // any buffered recoverable errors here so they cannot leak into the next turn's
-    // resolution (the buffer is per-turn; handleToolExecutionEnd only re-creates it
-    // when undefined).
-    ctx.state.intelligentMessagingBuffer = undefined;
+    // ENG-16330 (cubic P1 round 2): a commentary/suppressed-output message is a
+    // MID-TURN step, not the terminal boundary — the real final reply comes later and
+    // will resolve the buffer. Do NOT clear it here, or a recoverable error from
+    // earlier in the same turn is dropped (no path trail on the eventual success, no
+    // badge on the eventual failure). Buffer is only ever resolved/cleared at the
+    // terminal outcome below (stopReason !== "toolUse").
     return;
   }
   promoteThinkingTagsToBlocks(assistantMessage);
@@ -1210,7 +1210,13 @@ export function handleMessageEnd(
   const intelligentMessagingBuffer = ctx.state.intelligentMessagingBuffer;
   if (intelligentMessagingBuffer && intelligentMessagingBuffer.size() > 0) {
     const stopReason = (assistantMessage as { stopReason?: unknown }).stopReason;
-    const terminalOutcome = stopReason === "stop" || stopReason === "end_turn";
+    // `toolUse` is the ONLY continuing outcome — more tool steps + the real final
+    // reply are still coming, so leave the buffer intact. EVERY other terminal
+    // outcome (stop/end_turn success, but also error/abort/length/max_tokens) must
+    // resolve the buffer: the `turnSucceeded` guard below decides success vs. failure,
+    // so an error/abort terminal correctly FLUSHES honest badges instead of silently
+    // dropping them (cubic P1 round 2).
+    const terminalOutcome = stopReason !== "toolUse";
     if (terminalOutcome) {
       // Confabulation guard: a bland/empty final message is not success — but a
       // media-only silent reply (empty cleanedText + hasMedia) IS valid (cubic P2).
