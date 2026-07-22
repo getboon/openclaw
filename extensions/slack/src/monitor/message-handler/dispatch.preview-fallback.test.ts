@@ -24,6 +24,10 @@ const startSlackStreamMock = vi.fn(async () => ({
   pendingText: "",
 }));
 const stopSlackStreamMock = vi.fn(async (_params?: unknown) => ({}) as { messageId?: string });
+// ENG-16286: when true, the streaming mock reports the finalize error as an
+// invalid-thread rejection so dispatch runs its thread-anchor recovery.
+let mockedInvalidThreadError = false;
+const resolveThreadTsFromHistoryMock = vi.fn(async () => undefined as string | undefined);
 const emitSlackMessageSentHooksMock = vi.fn(() => {});
 const reactSlackMessageMock = vi.fn(async () => {});
 const removeSlackReactionMock = vi.fn(async () => {});
@@ -849,8 +853,13 @@ vi.mock("../../stream-mode.js", () => ({
   }),
 }));
 
+vi.mock("../thread-resolution.js", () => ({
+  resolveThreadTsFromHistory: resolveThreadTsFromHistoryMock,
+}));
+
 vi.mock("../../streaming.js", () => ({
   appendSlackStream: appendSlackStreamMock,
+  isInvalidThreadSlackError: () => mockedInvalidThreadError,
   markSlackStreamFallbackDelivered: (session: {
     delivered: boolean;
     pendingText: string;
@@ -1237,6 +1246,9 @@ describe("dispatchPreparedSlackMessage preview fallback", () => {
     stopSlackStreamMock.mockReset();
     reactSlackMessageMock.mockReset();
     removeSlackReactionMock.mockReset();
+    mockedInvalidThreadError = false;
+    resolveThreadTsFromHistoryMock.mockReset();
+    resolveThreadTsFromHistoryMock.mockResolvedValue(undefined);
     for (const value of Object.values(statusReactionControllerMock)) {
       value.mockClear();
     }
@@ -2241,6 +2253,36 @@ describe("dispatchPreparedSlackMessage preview fallback", () => {
         "fallback message_sent",
       ),
     ).not.toHaveProperty("messageId");
+  });
+
+  // ENG-16286: the terminal stopSlackStream (not a mid-turn append) is the first
+  // network call for a short reply and Slack rejects it with invalid_thread_ts.
+  // The buffered text must still land via the fallback, threaded into the
+  // recovered root — not lost with the rejected stream.
+  it("recovers the thread root when the terminal stopSlackStream hits invalid_thread_ts", async () => {
+    mockedNativeStreaming = true;
+    mockedInvalidThreadError = true;
+    const session = {
+      channel: "C123",
+      threadTs: THREAD_TS,
+      stopped: false,
+      delivered: false,
+      pendingText: FINAL_REPLY_TEXT,
+    };
+    startSlackStreamMock.mockResolvedValueOnce(session);
+    // Raw non-benign error (NOT SlackStreamNotDeliveredError) from the terminal
+    // finalize → the new invalid-thread recovery branch at the stop catch.
+    stopSlackStreamMock.mockRejectedValueOnce(
+      new Error("An API error occurred: invalid_thread_ts"),
+    );
+    resolveThreadTsFromHistoryMock.mockResolvedValueOnce("recovered-root-ts");
+    deliverRepliesMock.mockResolvedValueOnce({ messageId: "171234.903", channelId: "C123" });
+
+    await dispatchPreparedSlackMessage(createPreparedSlackMessage());
+
+    expect(resolveThreadTsFromHistoryMock).toHaveBeenCalledTimes(1);
+    expect(deliverRepliesMock).toHaveBeenCalledTimes(1);
+    expectDeliverReplyCall(0, FINAL_REPLY_TEXT, { replyThreadTs: "recovered-root-ts" });
   });
 
   it("emits message_sent for a tool-only stream fallback", async () => {
@@ -3682,5 +3724,194 @@ describe("dispatchPreparedSlackMessage preview fallback", () => {
     expect(stopSlackStreamMock).toHaveBeenCalledTimes(1);
     // No raw postMessage path was invoked.
     expect(postMessageMock).not.toHaveBeenCalled();
+  });
+
+  // ENG-16286: the anchoring message was deleted/edited mid-turn (or the anchor
+  // was a non-root reply ts), so Slack rejects the stream finalize with
+  // invalid_thread_ts. The fallback must re-resolve the real thread root and
+  // deliver into it, NOT reuse the rejected anchor (which would orphan the
+  // reply to the channel top level).
+  it("recovers the thread root on invalid_thread_ts and threads the fallback into it", async () => {
+    mockedNativeStreaming = true;
+    mockedInvalidThreadError = true;
+    mockedDispatchSequence = [
+      { kind: "block", payload: { text: "first buffered" } },
+      { kind: "final", payload: { text: "second payload" } },
+    ];
+    const session = {
+      channel: "C123",
+      threadTs: THREAD_TS,
+      stopped: false,
+      delivered: false,
+      pendingText: "first buffered",
+    };
+    startSlackStreamMock.mockResolvedValueOnce(session);
+    // Non-benign raw error thrown by the streaming append (the incident path:
+    // the flush hits invalid_thread_ts) → dispatch's recovery branch.
+    appendSlackStreamMock.mockImplementationOnce(async () => {
+      session.pendingText += "\nsecond payload";
+      throw new Error("An API error occurred: invalid_thread_ts");
+    });
+    stopSlackStreamMock.mockRejectedValueOnce(new Error("stop failed"));
+    resolveThreadTsFromHistoryMock.mockResolvedValueOnce("recovered-root-ts");
+    deliverRepliesMock.mockResolvedValueOnce({ messageId: "171234.777", channelId: "C123" });
+
+    await dispatchPreparedSlackMessage(createPreparedSlackMessage());
+
+    expect(resolveThreadTsFromHistoryMock).toHaveBeenCalledTimes(1);
+    expect(resolveThreadTsFromHistoryMock).toHaveBeenCalledWith({
+      client: expect.anything(),
+      channelId: "C123",
+      messageTs: THREAD_TS,
+    });
+    expect(deliverRepliesMock).toHaveBeenCalledTimes(1);
+    // Delivered into the recovered root, not the rejected anchor.
+    expectDeliverReplyCall(0, "first buffered\nsecond payload", {
+      replyThreadTs: "recovered-root-ts",
+    });
+  });
+
+  it("clears the anchor to the channel when invalid_thread_ts recovery finds no root (deleted message)", async () => {
+    mockedNativeStreaming = true;
+    mockedInvalidThreadError = true;
+    mockedDispatchSequence = [
+      { kind: "block", payload: { text: "first buffered" } },
+      { kind: "final", payload: { text: "second payload" } },
+    ];
+    const session = {
+      channel: "C123",
+      threadTs: THREAD_TS,
+      stopped: false,
+      delivered: false,
+      pendingText: "first buffered",
+    };
+    startSlackStreamMock.mockResolvedValueOnce(session);
+    appendSlackStreamMock.mockImplementationOnce(async () => {
+      session.pendingText += "\nsecond payload";
+      throw new Error("An API error occurred: invalid_thread_ts");
+    });
+    stopSlackStreamMock.mockRejectedValueOnce(new Error("stop failed"));
+    // History lookup returns nothing → message truly gone.
+    resolveThreadTsFromHistoryMock.mockResolvedValueOnce(undefined);
+    deliverRepliesMock.mockResolvedValueOnce({ messageId: "171234.778", channelId: "C123" });
+
+    await dispatchPreparedSlackMessage(createPreparedSlackMessage());
+
+    expect(resolveThreadTsFromHistoryMock).toHaveBeenCalledTimes(1);
+    expect(deliverRepliesMock).toHaveBeenCalledTimes(1);
+    // Anchor cleared → fallback posts to the channel (no thread) rather than
+    // reusing the rejected ts.
+    expectDeliverReplyCall(0, "first buffered\nsecond payload", { replyThreadTs: undefined });
+  });
+
+  // ENG-16286 P1 (cubic): the rejected anchor is itself a thread REPLY ts.
+  // conversations.history does not return thread replies, so a lookup by that ts
+  // finds nothing — recovery must instead use the durable root Slack already gave
+  // us on the inbound event (message.thread_ts / incomingThreadTs), WITHOUT
+  // hitting history at all.
+  it("recovers via the inbound thread root when the rejected anchor is a reply ts (no history lookup)", async () => {
+    mockedNativeStreaming = true;
+    mockedInvalidThreadError = true;
+    mockedDispatchSequence = [
+      { kind: "block", payload: { text: "first buffered" } },
+      { kind: "final", payload: { text: "second payload" } },
+    ];
+    // Session anchored to a REPLY ts (not the root). The inbound message carries
+    // the real root in thread_ts.
+    const replyAnchor = "171299.reply";
+    const session = {
+      channel: "C123",
+      threadTs: replyAnchor,
+      stopped: false,
+      delivered: false,
+      pendingText: "first buffered",
+    };
+    startSlackStreamMock.mockResolvedValueOnce(session);
+    appendSlackStreamMock.mockImplementationOnce(async () => {
+      session.pendingText += "\nsecond payload";
+      throw new Error("An API error occurred: invalid_thread_ts");
+    });
+    stopSlackStreamMock.mockRejectedValueOnce(new Error("stop failed"));
+    deliverRepliesMock.mockResolvedValueOnce({ messageId: "171234.780", channelId: "C123" });
+
+    // Inbound message is a reply: thread_ts is the durable ROOT.
+    await dispatchPreparedSlackMessage(
+      createPreparedSlackMessage({ message: { thread_ts: "171200.root" } }),
+    );
+
+    // Recovered from the inbound root — history was NEVER consulted (it can't map
+    // a reply ts to its root).
+    expect(resolveThreadTsFromHistoryMock).not.toHaveBeenCalled();
+    expect(deliverRepliesMock).toHaveBeenCalledTimes(1);
+    expectDeliverReplyCall(0, "first buffered\nsecond payload", { replyThreadTs: "171200.root" });
+  });
+
+  // ENG-16286 P1 (cubic): the INITIAL startSlackStream throws invalid_thread_ts —
+  // streamSession is never assigned, so recovery must run from the planned anchor,
+  // else the fallback reposts with the rejected ts (orphaned top-level).
+  it("recovers on a start-time startSlackStream invalid_thread_ts rejection", async () => {
+    mockedNativeStreaming = true;
+    mockedInvalidThreadError = true;
+    mockedDispatchSequence = [{ kind: "final", payload: { text: FINAL_REPLY_TEXT } }];
+    // Inbound is a reply → recovery prefers the inbound root over history.
+    startSlackStreamMock.mockRejectedValueOnce(
+      new Error("An API error occurred: invalid_thread_ts"),
+    );
+    deliverRepliesMock.mockResolvedValueOnce({ messageId: "171234.781", channelId: "C123" });
+
+    await dispatchPreparedSlackMessage(
+      createPreparedSlackMessage({ message: { thread_ts: "171200.root" } }),
+    );
+
+    // Delivered normally (no session), into the recovered inbound root — NOT the
+    // rejected planned anchor, and NOT top-level.
+    expect(deliverRepliesMock).toHaveBeenCalledTimes(1);
+    expectDeliverReplyCall(0, FINAL_REPLY_TEXT, { replyThreadTs: "171200.root" });
+  });
+
+  // ENG-16286 P1 (cubic): after a deleted anchor degrades to channel delivery, a
+  // LATER payload in the same turn must NOT reintroduce the rejected anchor via
+  // replyPlan — the degrade is sticky for the whole turn.
+  it("keeps later payloads on the channel after a deleted-anchor degrade (sticky)", async () => {
+    mockedNativeStreaming = true;
+    mockedInvalidThreadError = true;
+    mockedDispatchSequence = [
+      { kind: "block", payload: { text: "first buffered" } },
+      { kind: "final", payload: { text: "second payload" } },
+    ];
+    const session = {
+      channel: "C123",
+      threadTs: THREAD_TS,
+      stopped: false,
+      delivered: false,
+      pendingText: "first buffered",
+    };
+    startSlackStreamMock.mockResolvedValueOnce(session);
+    appendSlackStreamMock.mockImplementationOnce(async () => {
+      session.pendingText += "\nsecond payload";
+      throw new Error("An API error occurred: invalid_thread_ts");
+    });
+    stopSlackStreamMock.mockRejectedValueOnce(new Error("stop failed"));
+    // Truly-deleted top-level anchor: no inbound root (top-level message), history
+    // finds nothing → degrade to channel. Inbound has NO thread_ts.
+    resolveThreadTsFromHistoryMock.mockResolvedValue(undefined);
+    // A second, independent payload delivery later in the same turn.
+    deliverRepliesMock.mockResolvedValue({ messageId: "171234.782", channelId: "C123" });
+
+    await dispatchPreparedSlackMessage(
+      createPreparedSlackMessage({ message: { thread_ts: undefined } }),
+    );
+
+    // EVERY deliverReplies call in the turn posts to the channel (replyThreadTs
+    // undefined) — replyPlan never reintroduces the rejected anchor.
+    const callCount = deliverRepliesMock.mock.calls.length;
+    expect(callCount).toBeGreaterThan(0);
+    for (let i = 0; i < callCount; i += 1) {
+      const params = requireRecord(
+        requireMockCall(deliverRepliesMock, i, "channel-degrade deliver")[0],
+        "channel-degrade deliver params",
+      );
+      expect(params.replyThreadTs).toBeUndefined();
+    }
   });
 });

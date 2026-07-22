@@ -238,6 +238,18 @@ function getSlackWebApiErrorData(err: unknown): SlackWebApiErrorData | undefined
   return data;
 }
 
+// Slack rejected the post's thread_ts: the anchor was deleted/edited or is a
+// non-root reply ts (ENG-16286). Unlike a streaming finalize (chat.startStream),
+// chat.postMessage is USUALLY lenient and drops the thread silently — but not
+// always (e.g. thread_not_found), so the caller retries WITHOUT the thread to
+// guarantee the reply still lands in the channel rather than failing.
+const INVALID_THREAD_SEND_ERROR_CODES = new Set<string>(["invalid_thread_ts", "thread_not_found"]);
+
+function isSlackInvalidThreadError(err: unknown): boolean {
+  const code = getSlackWebApiErrorData(err)?.error;
+  return typeof code === "string" && INVALID_THREAD_SEND_ERROR_CODES.has(code);
+}
+
 function formatSlackWebApiErrorMessage(err: unknown): string | undefined {
   if (!(err instanceof Error)) {
     return undefined;
@@ -362,43 +374,97 @@ async function postSlackMessageBestEffort(params: {
   metadata?: MessageMetadata;
   unfurl?: SlackUnfurlOptions;
 }) {
-  const basePayload = buildSlackPostMessagePayload(params);
   const postChatMessage = params.client.chat.postMessage.bind(params.client.chat);
-  try {
-    // Slack Web API types model icon_url and icon_emoji as mutually exclusive.
-    // Build payloads in explicit branches so TS and runtime stay aligned.
+  // Post a payload with the custom identity overlay (Slack types icon_url/
+  // icon_emoji as mutually exclusive), falling back to no-identity if the token
+  // lacks chat:write.customize. Both the primary post AND the invalid-thread
+  // retry go through here, so the customize-scope fallback applies to the retry
+  // too — otherwise a missing-scope on the no-thread retry would break the
+  // channel-delivery guarantee for a custom-identity host (ENG-16286).
+  const postWithIdentity = async (payload: SlackBasePostMessagePayload) => {
     const identity = params.identity;
-    if (identity?.iconUrl) {
+    try {
+      if (identity?.iconUrl) {
+        return await withSlackDnsRequestRetry("chat.postMessage", () =>
+          postChatMessage({
+            ...payload,
+            ...(identity.username ? { username: identity.username } : {}),
+            icon_url: identity.iconUrl,
+          }),
+        );
+      }
+      if (identity?.iconEmoji) {
+        return await withSlackDnsRequestRetry("chat.postMessage", () =>
+          postChatMessage({
+            ...payload,
+            ...(identity.username ? { username: identity.username } : {}),
+            icon_emoji: identity.iconEmoji,
+          }),
+        );
+      }
       return await withSlackDnsRequestRetry("chat.postMessage", () =>
         postChatMessage({
-          ...basePayload,
-          ...(identity.username ? { username: identity.username } : {}),
-          icon_url: identity.iconUrl,
+          ...payload,
+          ...(identity?.username ? { username: identity.username } : {}),
         }),
       );
+    } catch (err) {
+      if (!hasCustomIdentity(params.identity) || !isSlackCustomizeScopeError(err)) {
+        throw err;
+      }
+      logVerbose("slack send: missing chat:write.customize, retrying without custom identity");
+      return await withSlackDnsRequestRetry("chat.postMessage", () => postChatMessage(payload));
     }
-    if (identity?.iconEmoji) {
-      return await withSlackDnsRequestRetry("chat.postMessage", () =>
-        postChatMessage({
-          ...basePayload,
-          ...(identity.username ? { username: identity.username } : {}),
-          icon_emoji: identity.iconEmoji,
-        }),
-      );
-    }
-    return await withSlackDnsRequestRetry("chat.postMessage", () =>
-      postChatMessage({
-        ...basePayload,
-        ...(identity?.username ? { username: identity.username } : {}),
-      }),
-    );
+  };
+  const basePayload = buildSlackPostMessagePayload(params);
+  try {
+    return await postWithIdentity(basePayload);
   } catch (err) {
-    if (!hasCustomIdentity(params.identity) || !isSlackCustomizeScopeError(err)) {
-      throw err;
+    // Slack rejected the thread anchor (deleted/edited mid-turn, or a non-root
+    // reply ts). Retry ONCE without thread_ts so the reply still lands in the
+    // channel instead of failing — the last-resort degrade behind the dispatch
+    // thread-anchor recovery, and the belt for a recovered anchor that was
+    // itself deleted. ENG-16286.
+    if (params.threadTs && isSlackInvalidThreadError(err)) {
+      logVerbose(
+        `slack send: thread_ts ${params.threadTs} rejected as invalid; retrying to channel`,
+      );
+      const response = await postWithIdentity(
+        buildSlackPostMessagePayload({ ...params, threadTs: undefined }),
+      );
+      // Mark the delivery as thread-dropped so the caller does NOT fall back to
+      // the (rejected) opts.threadTs when recording/returning the thread state —
+      // the reply landed in the channel, not the dead thread.
+      markSlackThreadDropped(response);
+      return response;
     }
-    logVerbose("slack send: missing chat:write.customize, retrying without custom identity");
-    return withSlackDnsRequestRetry("chat.postMessage", () => postChatMessage(basePayload));
+    throw err;
   }
+}
+
+// Non-enumerable marker set on a chat.postMessage response when the send degraded
+// to a channel post because the thread anchor was rejected (ENG-16286). The
+// caller reads it via `wasSlackThreadDropped` so a degraded reply is recorded
+// with NO thread rather than the rejected anchor (which would let downstream
+// routing reintroduce the deleted thread).
+const SLACK_THREAD_DROPPED = Symbol("openclawSlackThreadDropped");
+
+function markSlackThreadDropped(response: unknown): void {
+  if (response && typeof response === "object") {
+    Object.defineProperty(response, SLACK_THREAD_DROPPED, {
+      value: true,
+      enumerable: false,
+      configurable: true,
+    });
+  }
+}
+
+function wasSlackThreadDropped(response: unknown): boolean {
+  return Boolean(
+    response &&
+    typeof response === "object" &&
+    (response as Record<symbol, unknown>)[SLACK_THREAD_DROPPED] === true,
+  );
 }
 
 function resolvePostedMessageThreadTs(response: {
@@ -794,8 +860,12 @@ async function sendMessageSlackQueuedInner(params: {
     });
     const messageId = response.ts ?? "unknown";
     const deliveredChannelId = resolvePostedMessageChannelId(response, channelId);
-    const deliveredThreadTs =
-      resolvePostedMessageThreadTs(response) ?? normalizeSlackThreadTsCandidate(opts.threadTs);
+    // Don't fall back to opts.threadTs when the send degraded to the channel —
+    // that anchor was rejected; recording it would let routing reintroduce the
+    // dead thread (ENG-16286).
+    const deliveredThreadTs = wasSlackThreadDropped(response)
+      ? undefined
+      : (resolvePostedMessageThreadTs(response) ?? normalizeSlackThreadTsCandidate(opts.threadTs));
     return {
       messageId,
       channelId: deliveredChannelId,
@@ -835,6 +905,10 @@ async function sendMessageSlackQueuedInner(params: {
   let lastMessageId = "";
   let deliveredChannelId = channelId;
   let canonicalDeliveredThreadTs: string | undefined;
+  // Set if any chunk degraded to a channel post (thread anchor rejected). When
+  // true, the final thread state must NOT fall back to the rejected opts.threadTs
+  // (ENG-16286).
+  let threadDropped = false;
   let chunksToPost: string[];
   if (opts.mediaUrl) {
     const [firstChunk, ...rest] = resolvedChunks;
@@ -870,15 +944,24 @@ async function sendMessageSlackQueuedInner(params: {
     });
     lastMessageId = response.ts ?? lastMessageId;
     deliveredChannelId = resolvePostedMessageChannelId(response, deliveredChannelId);
-    canonicalDeliveredThreadTs ??= resolvePostedMessageThreadTs(response);
+    if (wasSlackThreadDropped(response)) {
+      // Degraded to a channel post — do NOT let an echoed thread_ts on this
+      // response become the canonical delivered thread (ENG-16286).
+      threadDropped = true;
+    } else {
+      canonicalDeliveredThreadTs ??= resolvePostedMessageThreadTs(response);
+    }
     if (response.ts) {
       sentMessageIds.push(response.ts);
     }
   }
 
   const messageId = lastMessageId || "unknown";
-  const deliveredThreadTs =
-    canonicalDeliveredThreadTs ?? normalizeSlackThreadTsCandidate(opts.threadTs);
+  // A dropped thread forces channel delivery regardless of any echoed/earlier
+  // anchor — never report the rejected opts.threadTs for a degraded send.
+  const deliveredThreadTs = threadDropped
+    ? undefined
+    : (canonicalDeliveredThreadTs ?? normalizeSlackThreadTsCandidate(opts.threadTs));
   return {
     messageId,
     channelId: deliveredChannelId,

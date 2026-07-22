@@ -25,8 +25,13 @@ export type SlackStreamSession = {
   streamer: ChatStreamer;
   /** Channel this stream lives in. */
   channel: string;
-  /** Thread timestamp (required for streaming). */
-  threadTs: string;
+  /**
+   * Thread timestamp. Required to start streaming; cleared to `undefined` by the
+   * dispatch fallback when Slack rejects the anchor as invalid and no valid
+   * thread root can be recovered, so the fallback post degrades to the channel
+   * (ENG-16286).
+   */
+  threadTs: string | undefined;
   /** True once stop() has been called. */
   stopped: boolean;
   /**
@@ -335,6 +340,22 @@ const BENIGN_SLACK_FINALIZE_ERROR_CODES = new Set<string>([
 export function isBenignSlackFinalizeError(err: unknown): boolean {
   const code = extractSlackErrorCode(err);
   return code !== undefined && BENIGN_SLACK_FINALIZE_ERROR_CODES.has(code);
+}
+
+/**
+ * Slack API error codes that indicate the outbound reply's `thread_ts` anchor
+ * is no longer valid — the anchoring message was deleted/edited while the agent
+ * was mid-turn, or the anchor was a non-root reply ts Slack won't thread onto.
+ * Unlike the benign codes above, this is recoverable: the caller can re-resolve
+ * the real thread root via `conversations.history` before falling back, instead
+ * of reusing the rejected anchor (which `chat.postMessage` silently drops,
+ * orphaning the reply to the channel top level). See ENG-16286.
+ */
+const INVALID_THREAD_SLACK_ERROR_CODES = new Set<string>(["invalid_thread_ts", "thread_not_found"]);
+
+export function isInvalidThreadSlackError(err: unknown): boolean {
+  const code = extractSlackErrorCode(err);
+  return code !== undefined && INVALID_THREAD_SLACK_ERROR_CODES.has(code);
 }
 
 export function extractSlackErrorCode(err: unknown): string | undefined {

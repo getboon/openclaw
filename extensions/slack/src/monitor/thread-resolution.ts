@@ -28,7 +28,15 @@ const markAmbiguousThreadReply = (message: SlackMessageEvent): SlackMessageEvent
   _ambiguousThreadReply: true,
 });
 
-async function resolveThreadTsFromHistory(params: {
+/**
+ * Look up the thread root (`thread_ts`) of a message by its `ts` via
+ * `conversations.history`. Returns the root when the ts is a reply, `undefined`
+ * when the message is gone (deleted) or the lookup fails — a deterministic
+ * signal the caller uses to degrade to the channel. Reused by the streaming
+ * fallback to recover a valid anchor after an `invalid_thread_ts` rejection
+ * (ENG-16286).
+ */
+export async function resolveThreadTsFromHistory(params: {
   client: SlackWebClient;
   channelId: string;
   messageTs: string;
