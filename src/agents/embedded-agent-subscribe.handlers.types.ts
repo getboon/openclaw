@@ -23,7 +23,6 @@ import type {
   BlockReplyChunking,
   SubscribeEmbeddedAgentSessionParams,
 } from "./embedded-agent-subscribe.types.js";
-import type { TurnErrorBuffer } from "./intelligent-messaging.js";
 import type { AgentRunTimeoutPhase } from "./run-timeout-attribution.js";
 import type { AgentMessage } from "./runtime/index.js";
 import type { AgentSessionEvent } from "./sessions/index.js";
@@ -86,10 +85,6 @@ export type EmbeddedAgentSubscribeState = {
   itemStartedCount: number;
   itemCompletedCount: number;
   lastToolError?: ToolErrorSummary;
-  // ENG-16330: per-turn buffer of RECOVERABLE tool errors (exec/tmux/process bg) held
-  // back from the channel; resolved at turn close (handleMessageEnd) into either a
-  // path-trail note (turn succeeded) or flushed failure badges (turn failed).
-  intelligentMessagingBuffer?: TurnErrorBuffer;
 
   blockReplyBreak: "text_end" | "message_end";
   reasoningMode: ReasoningLevel;
@@ -313,7 +308,6 @@ type ToolHandlerState = Pick<
   | "itemStartedCount"
   | "itemCompletedCount"
   | "lastToolError"
-  | "intelligentMessagingBuffer"
   | "pendingMessagingTargets"
   | "pendingMessagingTexts"
   | "pendingMessagingMediaUrls"
