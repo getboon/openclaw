@@ -238,6 +238,18 @@ function getSlackWebApiErrorData(err: unknown): SlackWebApiErrorData | undefined
   return data;
 }
 
+// Slack rejected the post's thread_ts: the anchor was deleted/edited or is a
+// non-root reply ts (ENG-16286). Unlike a streaming finalize (chat.startStream),
+// chat.postMessage is USUALLY lenient and drops the thread silently — but not
+// always (e.g. thread_not_found), so the caller retries WITHOUT the thread to
+// guarantee the reply still lands in the channel rather than failing.
+const INVALID_THREAD_SEND_ERROR_CODES = new Set<string>(["invalid_thread_ts", "thread_not_found"]);
+
+function isSlackInvalidThreadError(err: unknown): boolean {
+  const code = getSlackWebApiErrorData(err)?.error;
+  return typeof code === "string" && INVALID_THREAD_SEND_ERROR_CODES.has(code);
+}
+
 function formatSlackWebApiErrorMessage(err: unknown): string | undefined {
   if (!(err instanceof Error)) {
     return undefined;
@@ -362,37 +374,53 @@ async function postSlackMessageBestEffort(params: {
   metadata?: MessageMetadata;
   unfurl?: SlackUnfurlOptions;
 }) {
-  const basePayload = buildSlackPostMessagePayload(params);
   const postChatMessage = params.client.chat.postMessage.bind(params.client.chat);
-  try {
-    // Slack Web API types model icon_url and icon_emoji as mutually exclusive.
-    // Build payloads in explicit branches so TS and runtime stay aligned.
+  // Post with the given payload, applying the identity overlay in explicit
+  // branches (Slack types icon_url/icon_emoji as mutually exclusive).
+  const postWithIdentity = (payload: SlackBasePostMessagePayload) => {
     const identity = params.identity;
     if (identity?.iconUrl) {
-      return await withSlackDnsRequestRetry("chat.postMessage", () =>
+      return withSlackDnsRequestRetry("chat.postMessage", () =>
         postChatMessage({
-          ...basePayload,
+          ...payload,
           ...(identity.username ? { username: identity.username } : {}),
           icon_url: identity.iconUrl,
         }),
       );
     }
     if (identity?.iconEmoji) {
-      return await withSlackDnsRequestRetry("chat.postMessage", () =>
+      return withSlackDnsRequestRetry("chat.postMessage", () =>
         postChatMessage({
-          ...basePayload,
+          ...payload,
           ...(identity.username ? { username: identity.username } : {}),
           icon_emoji: identity.iconEmoji,
         }),
       );
     }
-    return await withSlackDnsRequestRetry("chat.postMessage", () =>
+    return withSlackDnsRequestRetry("chat.postMessage", () =>
       postChatMessage({
-        ...basePayload,
+        ...payload,
         ...(identity?.username ? { username: identity.username } : {}),
       }),
     );
+  };
+  const basePayload = buildSlackPostMessagePayload(params);
+  try {
+    return await postWithIdentity(basePayload);
   } catch (err) {
+    // Slack rejected the thread anchor (deleted/edited mid-turn, or a non-root
+    // reply ts). Retry ONCE without thread_ts so the reply still lands in the
+    // channel instead of failing — the last-resort degrade behind the dispatch
+    // thread-anchor recovery, and the belt for a recovered anchor that was
+    // itself deleted. ENG-16286.
+    if (params.threadTs && isSlackInvalidThreadError(err)) {
+      logVerbose(
+        `slack send: thread_ts ${params.threadTs} rejected as invalid; retrying to channel`,
+      );
+      return await postWithIdentity(
+        buildSlackPostMessagePayload({ ...params, threadTs: undefined }),
+      );
+    }
     if (!hasCustomIdentity(params.identity) || !isSlackCustomizeScopeError(err)) {
       throw err;
     }
