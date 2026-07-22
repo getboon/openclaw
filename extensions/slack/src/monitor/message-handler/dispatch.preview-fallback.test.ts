@@ -3904,8 +3904,8 @@ describe("dispatchPreparedSlackMessage preview fallback", () => {
 
     // EVERY deliverReplies call in the turn posts to the channel (replyThreadTs
     // undefined) — replyPlan never reintroduces the rejected anchor.
-    for (let i = 0; i < deliverRepliesMock.mock.calls.length; i++) {
-      const params = deliverRepliesMock.mock.calls[i][0] as { replyThreadTs?: string };
+    for (const call of deliverRepliesMock.mock.calls) {
+      const params = call[0] as { replyThreadTs?: string };
       expect(params.replyThreadTs).toBeUndefined();
     }
   });
