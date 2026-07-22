@@ -26,6 +26,15 @@ name: Boon Fork Release
 # extensions/msteams/package.json version is pinned to the gateway version in
 # lockstep (`2026.6.11-boon.N`), so this tag's msteams asset always matches core.
 #
+# It ALSO publishes the fork-versioned @openclaw/slack channel plugin as a sibling
+# asset on the SAME tag (ENG-16286), for the same reason as msteams: upstream ships
+# @openclaw/slack on public npm, but the fleet needs the fork's invalid_thread_ts
+# thread-anchor recovery fix, which lives only in the fork's extensions/slack and is
+# NOT bundled into the gateway tarball. slack asset contract — do NOT change:
+#   https://github.com/getboon/openclaw/releases/download/v<version>/openclaw-slack-<version>.tgz
+#   plus a sibling openclaw-slack-<version>.tgz.sha256.
+# extensions/slack/package.json is pinned to the gateway version in lockstep too.
+#
 # Docker images are handled separately by docker-release.yml (also `v*`-tagged);
 # its `-boon.N` suffix correctly never advances the mutable `:latest` aliases.
 on:
@@ -139,6 +148,49 @@ jobs:
           echo "Packed ${tarball}"
           cat "${tarball}.sha256"
 
+      # Pack the fork-versioned @openclaw/slack plugin (ENG-16286). Identical
+      # machinery to the msteams step above: a plain `npm pack` in extensions/slack
+      # would ship raw TS + unresolved `workspace:*` deps — NOT runnable. Build the
+      # package-local dist/ then pack under the manifest overlay
+      # (plugin-npm-package-manifest.mjs --run) which rewrites entries to
+      # `./dist/*.js` and bundles workspace deps. WHY the fork must publish slack at
+      # all: upstream ships @openclaw/slack on public npm, but the fleet needs the
+      # fork's invalid_thread_ts thread-anchor recovery fix (ENG-16286), which lives
+      # only in the fork's extensions/slack — and the gateway tarball does NOT bundle
+      # the slack channel runtime. So slack ships as a GitHub Release tarball exactly
+      # like msteams, installed via `openclaw plugins install npm-pack:<url>` (slack
+      # uses openKeyedStore → REQUIRES trustedOfficialInstall==true, so a bare-tarball
+      # install would crash-loop the channel). slack asset contract — do NOT change:
+      #   https://github.com/getboon/openclaw/releases/download/v<version>/openclaw-slack-<version>.tgz
+      #   plus a sibling openclaw-slack-<version>.tgz.sha256.
+      # extensions/slack/package.json version is pinned to the gateway version in
+      # lockstep (`2026.6.11-boon.N`), same as msteams.
+      - name: Pack slack plugin tarball + compute sha256
+        id: slack
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./extensions/slack/package.json').version")"
+          if [[ "${TAG}" != "v${version}" ]]; then
+            echo "FATAL: tag '${TAG}' does not match extensions/slack/package.json version 'v${version}' — bump slack in lockstep with the gateway" >&2
+            exit 1
+          fi
+          tarball="openclaw-slack-${version}.tgz"
+          node scripts/lib/plugin-npm-runtime-build.mjs extensions/slack
+          OPENCLAW_PLUGIN_NPM_BUNDLE_DEPENDENCIES=1 \
+            node scripts/lib/plugin-npm-package-manifest.mjs --run extensions/slack -- \
+            npm pack --pack-destination "${GITHUB_WORKSPACE}"
+          if [[ ! -f "${tarball}" ]]; then
+            echo "FATAL: expected '${tarball}' on disk after slack pack; found:" >&2
+            ls -1 ./openclaw-slack-*.tgz >&2 || true
+            exit 1
+          fi
+          sha256sum "${tarball}" > "${tarball}.sha256"
+          echo "tarball=${tarball}" >> "$GITHUB_OUTPUT"
+          echo "Packed ${tarball}"
+          cat "${tarball}.sha256"
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -146,19 +198,22 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
           TARBALL: ${{ steps.pack.outputs.tarball }}
           MSTEAMS_TARBALL: ${{ steps.msteams.outputs.tarball }}
+          SLACK_TARBALL: ${{ steps.slack.outputs.tarball }}
         run: |
           set -euo pipefail
           if gh release view "${RELEASE_TAG}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "${RELEASE_TAG}" --repo "$GITHUB_REPOSITORY" --clobber \
               "${TARBALL}" "${TARBALL}.sha256" \
-              "${MSTEAMS_TARBALL}" "${MSTEAMS_TARBALL}.sha256"
+              "${MSTEAMS_TARBALL}" "${MSTEAMS_TARBALL}.sha256" \
+              "${SLACK_TARBALL}" "${SLACK_TARBALL}.sha256"
           else
             gh release create "${RELEASE_TAG}" --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --prerelease \
               --title "${RELEASE_TAG}" \
-              --notes "Boon fork release ${RELEASE_TAG}. Install: \`npm i -g <asset-url>\`. Ships the gateway tarball + the fork-versioned @openclaw/msteams plugin tarball (ENG-14431)." \
+              --notes "Boon fork release ${RELEASE_TAG}. Install: \`npm i -g <asset-url>\`. Ships the gateway tarball + the fork-versioned @openclaw/msteams (ENG-14431) and @openclaw/slack (ENG-16286) plugin tarballs." \
               "${TARBALL}" "${TARBALL}.sha256" \
-              "${MSTEAMS_TARBALL}" "${MSTEAMS_TARBALL}.sha256"
+              "${MSTEAMS_TARBALL}" "${MSTEAMS_TARBALL}.sha256" \
+              "${SLACK_TARBALL}" "${SLACK_TARBALL}.sha256"
           fi
           echo "- Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}" >> "$GITHUB_STEP_SUMMARY"
