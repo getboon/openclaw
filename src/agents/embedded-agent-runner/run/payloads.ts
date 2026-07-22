@@ -153,11 +153,14 @@ function shouldIncludeToolErrorDetails(params: {
 }
 
 // Command-execution tools whose errors are recoverable sub-steps, not mutating
-// deliverables. A non-zero exec/bash/process/tmux exit that the agent recovered
-// from — the turn still produced a real reply — is non-terminal: the deliverable
-// is the answer, not the command call. Write/edit/message stay strict (a failed
-// write with a "done" reply is confabulation, #53), so they are NOT listed here.
-const RECOVERABLE_EXEC_CLASS_TOOL_NAMES = new Set(["exec", "bash", "process", "tmux"]);
+// deliverables. A non-zero exec/bash/process exit that the agent recovered from —
+// the turn still produced a real reply — is non-terminal: the deliverable is the
+// answer, not the command call. Write/edit/message stay strict (a failed write
+// with a "done" reply is confabulation, #53), so they are NOT listed here. `tmux`
+// is intentionally absent: it is neither in MUTATING_TOOL_NAMES nor exec-like, so
+// `resolveToolErrorWarningPolicy` already sets showWarning=false (no badge at all)
+// once a reply exists — it never reaches this helper, so listing it was dead.
+const RECOVERABLE_EXEC_CLASS_TOOL_NAMES = new Set(["exec", "bash", "process"]);
 
 function isRecoverableExecClassToolName(toolName: string): boolean {
   return RECOVERABLE_EXEC_CLASS_TOOL_NAMES.has(normalizeOptionalLowercaseString(toolName) ?? "");

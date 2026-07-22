@@ -624,7 +624,7 @@ describe("buildEmbeddedRunPayloads", () => {
   });
 
   it("reframes a recovered exec timeout on a successful turn as an intermediate status (ENG-16330)", () => {
-    // A recovered exec/bash/process/tmux error on a turn that still produced a
+    // A recovered exec/bash/process error on a turn that still produced a
     // real reply is non-terminal — the deliverable is the answer, not the command
     // call. Reframe the false "⚠️ Exec failed" badge into the G4 continuation note
     // (previously this surfaced a terminal warning; ENG-16330 corrects that).
@@ -896,10 +896,10 @@ describe("buildEmbeddedRunPayloads", () => {
   });
 
   it("reframes a recovered bg-process non-zero exit as an intermediate status, not '⚠️ Process failed' (ENG-16330)", () => {
-    // The gandalf `salty-shore` case: a backgrounded process/tmux session exits
+    // The gandalf `salty-shore` case: a backgrounded process session exits
     // non-zero, the agent RECOVERS (produces a real final reply), the turn
     // succeeds — yet core rendered "⚠️ 🧰 Process: salty-shore failed", giving the
-    // user the wrong intuition ("the agent broke"). A recovered exec/process/tmux
+    // user the wrong intuition ("the agent broke"). A recovered exec/bash/process
     // error on a successful turn is non-terminal: surface the G4 continuation note,
     // never a terminal badge, and never the raw generated session name.
     const payloads = buildPayloads({
