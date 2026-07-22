@@ -908,6 +908,10 @@ export function handleMessageEnd(
 ): void | Promise<void> {
   const msg = evt.message;
   if (msg?.role !== "assistant" || isTranscriptOnlyOpenClawAssistantMessage(msg)) {
+    // ENG-16330 (cubic P1): a non-assistant / transcript-only message_end is not a
+    // turn boundary for surfacing — do NOT touch the buffer (it belongs to the
+    // in-flight turn). Leaving it intact avoids dropping a still-continuing turn's
+    // recovered errors.
     return;
   }
 
@@ -920,6 +924,12 @@ export function handleMessageEnd(
   ctx.recordAssistantUsage((assistantMessage as { usage?: unknown }).usage);
   ctx.commitAssistantUsage();
   if (suppressVisibleAssistantOutput) {
+    // ENG-16330 (cubic P1 round 2): a commentary/suppressed-output message is a
+    // MID-TURN step, not the terminal boundary — the real final reply comes later and
+    // will resolve the buffer. Do NOT clear it here, or a recoverable error from
+    // earlier in the same turn is dropped (no path trail on the eventual success, no
+    // badge on the eventual failure). Buffer is only ever resolved/cleared at the
+    // terminal outcome below (stopReason !== "toolUse").
     return;
   }
   promoteThinkingTagsToBlocks(assistantMessage);
@@ -1187,6 +1197,43 @@ export function handleMessageEnd(
     onBlockReply
   ) {
     emitSplitResultAsBlockReply(ctx.consumeReplyDirectives("", { final: true }));
+  }
+
+  // ENG-16330: resolve the per-turn recoverable-error buffer now that the visible
+  // reply is composed/emitted. Only resolve on a TERMINAL assistant outcome — an
+  // in-progress `toolUse` turn means more tool steps (and the real final reply) are
+  // still coming, so leaving the buffer intact lets later steps reach it (cubic P1).
+  // On a terminal turn: success (real reply text OR media) → neutral path-trail note;
+  // otherwise → flush the buffered errors as honest failure badges (no regression).
+  // Both emissions respect the tool-output gate (cubic P2). Non-terminal turns leave
+  // the buffer untouched; the early-return sites above clear it (see resetForTurn).
+  const intelligentMessagingBuffer = ctx.state.intelligentMessagingBuffer;
+  if (intelligentMessagingBuffer && intelligentMessagingBuffer.size() > 0) {
+    const stopReason = (assistantMessage as { stopReason?: unknown }).stopReason;
+    // `toolUse` is the ONLY continuing outcome — more tool steps + the real final
+    // reply are still coming, so leave the buffer intact. EVERY other terminal
+    // outcome (stop/end_turn success, but also error/abort/length/max_tokens) must
+    // resolve the buffer: the `turnSucceeded` guard below decides success vs. failure,
+    // so an error/abort terminal correctly FLUSHES honest badges instead of silently
+    // dropping them (cubic P1 round 2).
+    const terminalOutcome = stopReason !== "toolUse";
+    if (terminalOutcome) {
+      // Confabulation guard: a bland/empty final message is not success — but a
+      // media-only silent reply (empty cleanedText + hasMedia) IS valid (cubic P2).
+      const turnSucceeded = cleanedText.trim().length > 0 || hasMedia;
+      const resolution = intelligentMessagingBuffer.resolve({ turnSucceeded });
+      if (ctx.shouldEmitToolOutput()) {
+        if (resolution.pathTrail) {
+          ctx.emitToolOutput?.(undefined, undefined, resolution.pathTrail);
+        }
+        for (const badge of resolution.emitFailureBadges) {
+          ctx.emitToolOutput?.(badge.toolName, badge.summary, `${badge.toolName} failed`);
+        }
+      }
+      // Resolved this turn → clear so it can never double-emit on a later message_end.
+      ctx.state.intelligentMessagingBuffer = undefined;
+    }
+    // Non-terminal (toolUse): leave the buffer for the continuing turn.
   }
 
   if (
