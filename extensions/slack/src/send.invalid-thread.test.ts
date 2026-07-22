@@ -63,6 +63,9 @@ describe("sendMessageSlack invalid-thread retry-to-channel", () => {
     // …the retry drops it so the reply lands in the channel.
     expect(readPostMessagePayload(client, 1)).not.toHaveProperty("thread_ts");
     expect(result.messageId).toBe("171234.567");
+    // The degraded reply must NOT report the rejected anchor — otherwise routing
+    // could reintroduce the dead thread (ENG-16286).
+    expect(result.threadTs).toBeUndefined();
     expect(vi.mocked(logVerbose)).toHaveBeenCalledWith(
       "slack send: thread_ts 171200.deleted rejected as invalid; retrying to channel",
     );
@@ -120,5 +123,61 @@ describe("sendMessageSlack invalid-thread retry-to-channel", () => {
     ).rejects.toThrow("invalid_thread_ts");
 
     expect(client.chat.postMessage).toHaveBeenCalledTimes(1);
+  });
+
+  // ENG-16286 (cubic P2): the no-thread retry re-applies the custom identity. If
+  // the token lacks chat:write.customize, that retry must itself fall back to a
+  // no-identity post so the reply still lands in the channel (the customize-scope
+  // fallback now composes with the invalid-thread retry).
+  it("retries to channel AND drops identity when the token lacks chat:write.customize", async () => {
+    const client = createSlackSendTestClient();
+    const missingScope = buildSlackApiError("missing_scope") as Error & {
+      data?: { error?: string; needed?: string };
+    };
+    if (missingScope.data) {
+      missingScope.data.needed = "chat:write.customize";
+    }
+    vi.mocked(client.chat.postMessage)
+      // 1) primary post with thread + identity → invalid_thread_ts
+      .mockRejectedValueOnce(buildSlackApiError("invalid_thread_ts"))
+      // 2) no-thread retry, still with identity → missing_scope
+      .mockRejectedValueOnce(missingScope)
+      // 3) no-thread + no-identity retry → success
+      .mockResolvedValueOnce({ ts: "171234.567" });
+
+    const result = await sendMessageSlack("channel:C123", "hello", {
+      token: "xoxb-test",
+      cfg: SLACK_TEST_CFG,
+      client,
+      threadTs: "171200.deleted",
+      identity: { username: "Bot", iconUrl: "https://example.com/bot.png" },
+    });
+
+    expect(client.chat.postMessage).toHaveBeenCalledTimes(3);
+    // Final successful attempt: no thread_ts AND no custom identity.
+    const finalPayload = readPostMessagePayload(client, 2);
+    expect(finalPayload).not.toHaveProperty("thread_ts");
+    expect(finalPayload).not.toHaveProperty("icon_url");
+    expect(finalPayload).not.toHaveProperty("username");
+    expect(result.messageId).toBe("171234.567");
+    expect(result.threadTs).toBeUndefined();
+  });
+
+  it("reports threadTs undefined (not the rejected anchor) after degrading to channel", async () => {
+    const client = createSlackSendTestClient();
+    // Slack sometimes echoes a thread_ts on the channel post; the degrade marker
+    // must still win so the rejected anchor is never recorded.
+    vi.mocked(client.chat.postMessage)
+      .mockRejectedValueOnce(buildSlackApiError("invalid_thread_ts"))
+      .mockResolvedValueOnce({ ts: "171234.567", message: { thread_ts: "171200.deleted" } });
+
+    const result = await sendMessageSlack("channel:C123", "hello", {
+      token: "xoxb-test",
+      cfg: SLACK_TEST_CFG,
+      client,
+      threadTs: "171200.deleted",
+    });
+
+    expect(result.threadTs).toBeUndefined();
   });
 });
