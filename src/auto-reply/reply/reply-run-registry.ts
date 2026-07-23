@@ -57,6 +57,19 @@ export type ReplyRunTerminalEvent = {
   readonly sessionId: string;
   /** Final result at clear time; null when the run cleared before a result was set (e.g. a queued abort). */
   readonly result: ReplyOperationResult | null;
+  /**
+   * The run's route thread/topic id, snapshotted at clear time. The operation is
+   * already removed from the registry when listeners fire, so a terminal nudge
+   * must read the route from here (not resolveActiveReplyRunThreadId, which would
+   * return undefined) to stay attributable to the originating thread.
+   */
+  readonly routeThreadId?: string | number;
+  /**
+   * Epoch ms the run started, so a listener can decide whether the run had "gone
+   * long" from elapsed time rather than from whether a nudge happened to fire —
+   * a run that crosses the threshold then fails between poll ticks still counts.
+   */
+  readonly startedAt: number;
 };
 
 export type ReplyOperation = {
@@ -356,6 +369,8 @@ function clearReplyRunState(params: {
   sessionKey: string;
   sessionId: string;
   result: ReplyOperationResult | null;
+  routeThreadId?: string | number;
+  startedAt: number;
 }): void {
   replyRunState.activeRunsByKey.delete(params.sessionKey);
   replyRunState.activeSessionIdsByKey.delete(params.sessionKey);
@@ -369,6 +384,8 @@ function clearReplyRunState(params: {
       sessionKey: params.sessionKey,
       sessionId: params.sessionId,
       result: params.result,
+      routeThreadId: params.routeThreadId,
+      startedAt: params.startedAt,
     });
   }
 }
@@ -453,6 +470,8 @@ export function createReplyOperation(params: {
       sessionKey,
       sessionId: currentSessionId,
       result,
+      routeThreadId: params.routeThreadId,
+      startedAt,
     });
     if (!registeredBarrier) {
       flushReplyOperationAfterClear(operation, currentSessionId);

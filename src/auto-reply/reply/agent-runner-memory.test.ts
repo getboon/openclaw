@@ -48,6 +48,7 @@ function createReplyOperation(): TestReplyOperation {
     resetTriggered: false,
     phase: "queued",
     result: null,
+    startedAt: 0,
     setPhase: vi.fn<ReplyOperation["setPhase"]>(),
     updateSessionId: vi.fn<ReplyOperation["updateSessionId"]>(),
     attachBackend: vi.fn(),

@@ -446,6 +446,7 @@ function createMockReplyOperation(): {
       resetTriggered: false,
       phase: "running",
       result: null,
+      startedAt: 0,
       setPhase: vi.fn(),
       updateSessionId: updateSessionIdMock,
       attachBackend: vi.fn(),

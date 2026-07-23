@@ -65,6 +65,22 @@ describe("reply-run-registry progress-nudge hooks", () => {
     off();
   });
 
+  it("carries routeThreadId and startedAt on the terminal event", () => {
+    const events: ReplyRunTerminalEvent[] = [];
+    const off = onReplyRunTerminal((e) => events.push(e));
+    const op = createReplyOperation({
+      sessionKey: "agent:main:main",
+      sessionId: "s1",
+      resetTriggered: false,
+      routeThreadId: "thread-42",
+    });
+    op.fail("run_failed");
+    expect(events).toHaveLength(1);
+    expect(events[0].routeThreadId).toBe("thread-42");
+    expect(events[0].startedAt).toBe(op.startedAt);
+    off();
+  });
+
   it("stops delivering terminal events after unsubscribe", () => {
     const events: ReplyRunTerminalEvent[] = [];
     const off = onReplyRunTerminal((e) => events.push(e));

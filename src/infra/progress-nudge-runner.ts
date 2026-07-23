@@ -179,7 +179,11 @@ export function startProgressNudgeRunner(opts: {
     return entry;
   };
 
-  const deliverNudge = async (sessionKey: string, text: string): Promise<void> => {
+  const deliverNudge = async (
+    sessionKey: string,
+    text: string,
+    threadIdOverride?: string | number,
+  ): Promise<void> => {
     const agentId = resolveAgentIdFromSessionKey(sessionKey) || resolveDefaultAgentId(state.cfg);
     const entry = loadSessionEntryForKey(state.cfg, agentId, sessionKey);
     const delivery = await resolveDeliveryTarget({
@@ -193,7 +197,9 @@ export function startProgressNudgeRunner(opts: {
       log.info("progress-nudge: no deliverable target", { sessionKey, reason: delivery.reason });
       return;
     }
-    const threadId = resolveThreadId(sessionKey) ?? delivery.threadId;
+    // A terminal nudge passes the run's route explicitly (the registry no longer
+    // has the run); the in-turn path resolves it live.
+    const threadId = threadIdOverride ?? resolveThreadId(sessionKey) ?? delivery.threadId;
     const outboundSession = buildOutboundSessionContext({
       cfg: state.cfg,
       agentId,
@@ -307,18 +313,32 @@ export function startProgressNudgeRunner(opts: {
 
   const handleTerminal = (evt: ReplyRunTerminalEvent): void => {
     const entry = state.nudges.get(evt.sessionKey);
-    // Only nudge on failure for a run that had actually gone long (≥1 nudge sent);
-    // a fast failure never went silent, so it needs no error nudge.
-    const wentLong = Boolean(entry && entry.nudgeCount > 0);
+    // "Went long" is decided from elapsed run time, not from whether a nudge
+    // happened to fire — a run that crosses the threshold then fails BETWEEN poll
+    // ticks (so nudgeCount is still 0) has still been silent long enough to owe a
+    // failure message. Fall back to the nudge count only if startedAt is missing.
+    const elapsed = Number.isFinite(evt.startedAt) ? Date.now() - evt.startedAt : 0;
+    const wentLong =
+      elapsed >= state.resolved.thresholdMs || Boolean(entry && entry.nudgeCount > 0);
     const isFailure = evt.result?.kind === "failed" && evt.result.code !== "aborted_by_user";
-    if (isFailure && wentLong && entry && !entry.errorNudgeSent && state.resolved.enabled) {
-      entry.errorNudgeSent = true;
-      void deliverNudge(evt.sessionKey, renderErrorText()).catch((err: unknown) => {
-        log.error("progress-nudge: error-nudge delivery failed", {
-          sessionKey: evt.sessionKey,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
+    const alreadySent = entry?.errorNudgeSent === true;
+    // Gate on delivery being enabled AND target !== "none" — a disabled target
+    // must suppress the terminal failure message too, not just the in-turn nudges.
+    const deliveryOn = state.resolved.enabled && state.resolved.target !== "none";
+    if (isFailure && wentLong && !alreadySent && deliveryOn) {
+      if (entry) {
+        entry.errorNudgeSent = true;
+      }
+      // Pass the run's route explicitly: the operation is already out of the
+      // registry, so a live thread lookup would come back empty.
+      void deliverNudge(evt.sessionKey, renderErrorText(), evt.routeThreadId).catch(
+        (err: unknown) => {
+          log.error("progress-nudge: error-nudge delivery failed", {
+            sessionKey: evt.sessionKey,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        },
+      );
     }
     // The session lane cleared — drop bookkeeping (fires exactly once per run).
     state.nudges.delete(evt.sessionKey);
