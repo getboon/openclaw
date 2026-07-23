@@ -104,18 +104,21 @@ describe("buildEmbeddedRunPayloads", () => {
 
     expect(payloads[0]?.isError).toBe(true);
     expect(payloads[0]?.text).toMatch(/purchase tokens to continue/i);
-    // The button carries the gateway-supplied URL; both channel adapters render
-    // it natively (Slack Block Kit / Teams Action.OpenUrl).
-    expect(payloads[0]?.presentation?.blocks).toContainEqual({
-      type: "buttons",
-      buttons: [
-        {
-          label: "Top up tokens",
-          url: "https://app.getboon.ai/billing?open=agent",
-          style: "primary",
-        },
-      ],
-    });
+    // Assert the ENTIRE blocks array (not just contains) so the button-only
+    // contract is enforced: a stray text block — which would double the copy
+    // inside the Teams card — fails this test.
+    expect(payloads[0]?.presentation?.blocks).toEqual([
+      {
+        type: "buttons",
+        buttons: [
+          {
+            label: "Top up tokens",
+            url: "https://app.getboon.ai/billing?open=agent",
+            style: "primary",
+          },
+        ],
+      },
+    ]);
   });
 
   it("renders a trial exhaustion reply with an 'Upgrade plan' button", () => {
@@ -127,8 +130,19 @@ describe("buildEmbeddedRunPayloads", () => {
     });
 
     expect(payloads[0]?.text).toMatch(/used your full trial/i);
+    // Verify the full button object — the upgrade button must carry the
+    // gateway-supplied URL so trial exhaustion stays actionable.
     const buttons = payloads[0]?.presentation?.blocks.find((b) => b.type === "buttons");
-    expect(buttons).toMatchObject({ buttons: [{ label: "Upgrade plan" }] });
+    expect(buttons).toEqual({
+      type: "buttons",
+      buttons: [
+        {
+          label: "Upgrade plan",
+          url: "https://app.getboon.ai/billing?open=agent",
+          style: "primary",
+        },
+      ],
+    });
   });
 
   it("omits the button (text-only) when the exhaustion body carries no top_up_url", () => {

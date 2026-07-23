@@ -761,16 +761,20 @@ describe("boon-llm-gateway allocation_exhausted (ENG-15627 G1)", () => {
 });
 
 describe("extractTopUpUrl", () => {
-  it("pulls an http(s) top_up_url out of the gateway 402 body", () => {
-    const body =
-      '{"error":"allocation_exhausted","top_up_url":"https://app.getboon.ai/billing?open=agent"}';
-    expect(extractTopUpUrl(body)).toBe("https://app.getboon.ai/billing?open=agent");
+  it("pulls both http and https top_up_url out of the gateway 402 body", () => {
+    for (const scheme of ["http", "https"]) {
+      const url = `${scheme}://app.getboon.ai/billing?open=agent`;
+      const body = `{"error":"allocation_exhausted","top_up_url":"${url}"}`;
+      expect(extractTopUpUrl(body)).toBe(url);
+    }
   });
 
   it("returns undefined for a missing body, missing field, or non-http value", () => {
     expect(extractTopUpUrl(undefined)).toBeUndefined();
     expect(extractTopUpUrl('{"error":"allocation_exhausted"}')).toBeUndefined();
     expect(extractTopUpUrl('{"top_up_url":"javascript:alert(1)"}')).toBeUndefined();
+    // Malformed URL that passes a naive prefix check but is not a valid URL.
+    expect(extractTopUpUrl('{"top_up_url":"https://"}')).toBeUndefined();
     expect(extractTopUpUrl("not json")).toBeUndefined();
   });
 });

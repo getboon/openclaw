@@ -133,11 +133,18 @@ export function extractTopUpUrl(errorBody: string | undefined): string | undefin
       typeof parsed === "object" && parsed !== null
         ? (parsed as Record<string, unknown>).top_up_url
         : undefined;
-    if (typeof url === "string" && /^https?:\/\//i.test(url.trim())) {
-      return url.trim();
+    if (typeof url === "string") {
+      // Fully parse (not just a prefix check) so a malformed value like
+      // "https://" or "http://%" can't produce a broken button — it falls
+      // through to the text-only exhaustion reply instead.
+      const parsedUrl = new URL(url.trim());
+      if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") {
+        return parsedUrl.toString();
+      }
     }
   } catch {
-    // Non-JSON / truncated body — no reliable URL to surface.
+    // Non-JSON / truncated body, or an unparseable URL — no reliable URL to
+    // surface; caller renders the text-only exhaustion reply.
   }
   return undefined;
 }
