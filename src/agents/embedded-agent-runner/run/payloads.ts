@@ -28,6 +28,7 @@ import { extractAssistantTextForPhase } from "../../../shared/chat-message-conte
 import { parseInlineDirectives } from "../../../utils/directive-tags.js";
 import {
   BILLING_ERROR_USER_MESSAGE,
+  buildTokenExhaustedPresentation,
   formatAssistantErrorText,
   formatRawAssistantErrorForUi,
   formatUserFacingAssistantErrorText,
@@ -421,7 +422,18 @@ export function buildEmbeddedRunPayloads(params: {
   const normalizedGenericBillingErrorText = normalizeTextForComparison(BILLING_ERROR_USER_MESSAGE);
   const genericErrorText = "The AI service returned an error. Please try again.";
   if (errorText) {
-    replyItems.push({ text: errorText, isError: true });
+    // Token-exhaustion (402) errors get a portable card with a top-up/upgrade
+    // button (URL parsed from the gateway's 402 body). Slack and Teams render
+    // the button natively; text-only channels fall back to errorText. Attaching
+    // the presentation here means neither channel needs exhaustion-specific code.
+    const exhaustionPresentation = rawErrorMessage
+      ? buildTokenExhaustedPresentation(rawErrorMessage, assistantForPayload?.errorBody)
+      : undefined;
+    replyItems.push({
+      text: errorText,
+      isError: true,
+      ...(exhaustionPresentation ? { presentation: exhaustionPresentation } : {}),
+    });
   }
 
   const inlineToolResults =

@@ -94,6 +94,54 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads.map((payload) => payload.text)).not.toContain(errorJson);
   });
 
+  it("attaches a top-up URL button to a paid token-exhaustion error reply", () => {
+    const body =
+      '{"error":"allocation_exhausted","message":"Token allocation exhausted. Top up to continue.","top_up_url":"https://app.getboon.ai/billing?open=agent"}';
+    const payloads = buildPayloads({
+      assistantTexts: [body],
+      lastAssistant: makeAssistant({ stopReason: "error", errorMessage: body, errorBody: body }),
+    });
+
+    expect(payloads[0]?.isError).toBe(true);
+    expect(payloads[0]?.text).toMatch(/purchase tokens to continue/i);
+    // The button carries the gateway-supplied URL; both channel adapters render
+    // it natively (Slack Block Kit / Teams Action.OpenUrl).
+    expect(payloads[0]?.presentation?.blocks).toContainEqual({
+      type: "buttons",
+      buttons: [
+        {
+          label: "Top up tokens",
+          url: "https://app.getboon.ai/billing?open=agent",
+          style: "primary",
+        },
+      ],
+    });
+  });
+
+  it("renders a trial exhaustion reply with an 'Upgrade plan' button", () => {
+    const body =
+      '{"error":"trial_budget_exhausted","message":"Trial token budget exhausted; upgrade to continue.","top_up_url":"https://app.getboon.ai/billing?open=agent","granted":500000,"used":500000}';
+    const payloads = buildPayloads({
+      assistantTexts: [body],
+      lastAssistant: makeAssistant({ stopReason: "error", errorMessage: body, errorBody: body }),
+    });
+
+    expect(payloads[0]?.text).toMatch(/used your full trial/i);
+    const buttons = payloads[0]?.presentation?.blocks.find((b) => b.type === "buttons");
+    expect(buttons).toMatchObject({ buttons: [{ label: "Upgrade plan" }] });
+  });
+
+  it("omits the button (text-only) when the exhaustion body carries no top_up_url", () => {
+    const body = '{"error":"allocation_exhausted","message":"Token allocation exhausted."}';
+    const payloads = buildPayloads({
+      assistantTexts: [body],
+      lastAssistant: makeAssistant({ stopReason: "error", errorMessage: body, errorBody: body }),
+    });
+
+    expect(payloads[0]?.text).toMatch(/purchase tokens to continue/i);
+    expect(payloads[0]?.presentation).toBeUndefined();
+  });
+
   it("suppresses mutating tool warnings when an assistant error reply already covers the turn", () => {
     const payloads = buildPayloads({
       assistantTexts: [errorJson],

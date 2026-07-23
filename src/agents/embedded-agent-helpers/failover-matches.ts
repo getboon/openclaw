@@ -211,6 +211,10 @@ const ERROR_PATTERNS = {
     // as billing so the sanitized billing copy is surfaced instead.
     /\ballocation[_ ]exhausted\b/i,
     /\btoken allocation exhausted\b/i,
+    // boon-llm-gateway trial 402 body: {"error":"trial_budget_exhausted",...}.
+    // Same rationale as allocation_exhausted above — classify as billing so the
+    // dedicated trial-upgrade copy/card is surfaced, not the raw code.
+    /\btrial[_ ]budget[_ ]exhausted\b/i,
     "credit balance",
     "plans & billing",
     /insufficient[_ ]balance/i,
