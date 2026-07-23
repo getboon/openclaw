@@ -317,7 +317,7 @@ export function startProgressNudgeRunner(opts: {
     // happened to fire — a run that crosses the threshold then fails BETWEEN poll
     // ticks (so nudgeCount is still 0) has still been silent long enough to owe a
     // failure message. Fall back to the nudge count only if startedAt is missing.
-    const elapsed = Number.isFinite(evt.startedAt) ? Date.now() - evt.startedAt : 0;
+    const elapsed = Number.isFinite(evt.startedAt) ? now() - evt.startedAt : 0;
     const wentLong =
       elapsed >= state.resolved.thresholdMs || Boolean(entry && entry.nudgeCount > 0);
     const isFailure = evt.result?.kind === "failed" && evt.result.code !== "aborted_by_user";
