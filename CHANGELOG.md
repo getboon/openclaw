@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.6
+
+Slack threading reliability + fork-published `@openclaw/slack` plugin asset.
+
+- **#65 (ENG-16286):** Slack replies no longer orphan to the channel top level when the thread anchor is rejected as `invalid_thread_ts` / `thread_not_found` (the anchoring message was deleted/edited mid-turn, or the anchor was a non-root reply ts). Both stream finalize-error paths now recover the real thread root — preferring the durable inbound thread root, falling back to a `conversations.history` lookup — and degrade deterministically to the channel only when no root survives, sticky for the rest of the turn. The `sendMessage`/`uploadFile` send path additionally retries once without `thread_ts` (composing the `chat:write.customize` identity fallback) and reports the degraded thread state so routing never reintroduces a dead anchor.
+- **#65 (ENG-16286):** the boon release workflow now packs the fork-versioned `@openclaw/slack` plugin and publishes it as a sibling release asset (`openclaw-slack-<version>.tgz` + `.sha256`) on the same `v*-boon.*` tag as the gateway, exactly like `@openclaw/msteams` (ENG-14431). `extensions/slack/package.json` is pinned to the gateway version in lockstep. The fleet installs it via `openclaw plugins install npm-pack:<url>` so the fix reaches hosts — the gateway does not bundle the slack channel runtime, so a gateway-only roll could not deliver it.
+- Base = `2026.6.11-boon.5`. No other code changes.
+
 ## 2026.6.11-boon.5
 
 Fork correction release: ship the fork-versioned `@openclaw/msteams` plugin as a release asset + the msteams SharePoint file-link fix.
