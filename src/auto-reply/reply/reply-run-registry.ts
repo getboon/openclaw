@@ -888,6 +888,9 @@ export const testing = {
     }
     replyRunState.waitersByKey.clear();
     replyRunState.followupAdmissionBarriersByKey.clear();
+    // Clear terminal-event subscribers too (mirrors resetAgentEventsForTest) so a
+    // runner that a test forgot to stop() can't leak a listener across tests.
+    replyRunTerminalListeners.clear();
   },
 };
 export { testing as __testing };

@@ -238,9 +238,14 @@ export function startProgressNudgeRunner(opts: {
     if (!isWithinActiveHours(state.cfg, { activeHours: state.resolved.activeHours }, nowMs)) {
       return;
     }
-    // Final-reply-race guard: skip if the run left the running phase between the
-    // poll snapshot and here — the real reply is about to land.
-    if (getRunPhase(sessionKey) !== "running") {
+    // Final-reply-race guard: skip only if the run reached a TERMINAL phase
+    // between the poll snapshot and here — the real reply/failure is landing, so
+    // a nudge would be redundant or race the terminal handler. Non-terminal
+    // phases (queued/preflight_compacting/memory_flushing/running) are all
+    // legitimate long waits the user should still be nudged through — those are
+    // exactly the silent gaps this feature targets.
+    const phase = getRunPhase(sessionKey);
+    if (phase === "completed" || phase === "failed" || phase === "aborted") {
       return;
     }
     entry.lastNudgeSentAtMs = nowMs;

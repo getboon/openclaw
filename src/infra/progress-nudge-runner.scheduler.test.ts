@@ -151,12 +151,23 @@ describe("startProgressNudgeRunner scheduler", () => {
     runner.stop();
   });
 
-  it("suppresses a nudge when the run left the running phase (final-reply race)", async () => {
+  it("suppresses a nudge when the run reached a terminal phase (final-reply race)", async () => {
     const { deps, sendMessage, phase } = makeDeps();
     phase.value = "completed";
     const runner = startProgressNudgeRunner({ cfg: config(), deps });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(sendMessage).not.toHaveBeenCalled();
+    runner.stop();
+  });
+
+  it("still nudges during a long non-terminal phase (memory_flushing)", async () => {
+    // memory_flushing / preflight_compacting are legitimate long waits — exactly
+    // the silent gaps this feature targets — so a nudge must still fire.
+    const { deps, sendMessage, phase } = makeDeps();
+    phase.value = "memory_flushing";
+    const runner = startProgressNudgeRunner({ cfg: config(), deps });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
     runner.stop();
   });
 

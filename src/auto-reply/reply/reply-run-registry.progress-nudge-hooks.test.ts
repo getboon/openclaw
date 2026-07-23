@@ -77,4 +77,18 @@ describe("reply-run-registry progress-nudge hooks", () => {
     op.complete();
     expect(events).toHaveLength(0);
   });
+
+  it("resetReplyRunRegistry clears terminal listeners (no cross-test leak)", () => {
+    const events: ReplyRunTerminalEvent[] = [];
+    // Subscribe but never unsubscribe — the reset must drop it.
+    onReplyRunTerminal((e) => events.push(e));
+    testing.resetReplyRunRegistry();
+    const op = createReplyOperation({
+      sessionKey: "agent:main:main",
+      sessionId: "s1",
+      resetTriggered: false,
+    });
+    op.complete();
+    expect(events).toHaveLength(0);
+  });
 });
