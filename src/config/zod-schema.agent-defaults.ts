@@ -78,6 +78,14 @@ export const AgentDefaultsSchema = z
           })
           .strict()
           .optional(),
+        claude: z
+          .object({
+            personality: z
+              .union([z.literal("concise"), z.literal("on"), z.literal("off")])
+              .optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),

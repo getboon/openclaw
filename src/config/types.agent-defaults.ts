@@ -30,9 +30,16 @@ export type Gpt5PromptOverlayConfig = {
   personality?: "friendly" | "on" | "off";
 };
 
+export type ClaudePromptOverlayConfig = {
+  /** Concise, guided-choice interaction-style layer for Claude-family models (default: concise). */
+  personality?: "concise" | "on" | "off";
+};
+
 export type PromptOverlaysConfig = {
   /** Shared GPT-5-family prompt overlay used across providers. */
   gpt5?: Gpt5PromptOverlayConfig;
+  /** Concise chat overlay used by Claude-family providers. */
+  claude?: ClaudePromptOverlayConfig;
 };
 
 export type AgentModelEntryConfig = {
