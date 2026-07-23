@@ -54,6 +54,7 @@ import {
   normalizeAnthropicProviderConfigForProvider,
 } from "./config-defaults.js";
 import { anthropicMediaUnderstandingProvider } from "./media-understanding-provider.js";
+import { resolveAnthropicSystemPromptContribution } from "./prompt-overlay.js";
 import { wrapAnthropicProviderStream } from "./stream-wrappers.js";
 
 const PROVIDER_ID = "anthropic";
@@ -856,6 +857,8 @@ export function buildAnthropicProvider(): ProviderPlugin {
           });
     },
     wrapStreamFn: wrapAnthropicProviderStream,
+    resolveSystemPromptContribution: (ctx) =>
+      resolveAnthropicSystemPromptContribution({ config: ctx.config, modelId: ctx.modelId }),
     resolveUsageAuth: resolveAnthropicUsageAuth,
     fetchUsageSnapshot: async (ctx) =>
       await fetchClaudeUsage(ctx.token, ctx.timeoutMs, ctx.fetchFn),

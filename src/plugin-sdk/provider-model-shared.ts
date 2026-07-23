@@ -56,6 +56,11 @@ export type {
 
 export { DEFAULT_CONTEXT_TOKENS } from "../agents/defaults.js";
 export {
+  type ConcisePromptOverlayMode,
+  normalizeConcisePromptOverlayMode,
+  resolveConciseInteractionContribution,
+} from "../agents/concise-interaction-overlay.js";
+export {
   GPT5_BEHAVIOR_CONTRACT,
   GPT5_FRIENDLY_CHAT_PROMPT_OVERLAY,
   GPT5_FRIENDLY_PROMPT_OVERLAY,
