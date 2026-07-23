@@ -118,6 +118,17 @@ describe("startProgressNudgeRunner error nudge", () => {
     });
     await vi.advanceTimersByTimeAsync(1000);
     expect(sendMessage).toHaveBeenCalledTimes(1);
+    // A repeat terminal must NOT re-fire even though wentLong is elapsed-based and
+    // no "still working" nudge (nudgeCount) ever ran — the fire-once guard must
+    // survive on the kept bookkeeping entry.
+    emitTerminal({
+      sessionKey: SESSION,
+      sessionId: "s1",
+      result: { kind: "failed", code: "run_failed" },
+      startedAt: 0,
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
     runner.stop();
   });
 

@@ -326,9 +326,12 @@ export function startProgressNudgeRunner(opts: {
     // must suppress the terminal failure message too, not just the in-turn nudges.
     const deliveryOn = state.resolved.enabled && state.resolved.target !== "none";
     if (isFailure && wentLong && !alreadySent && deliveryOn) {
-      if (entry) {
-        entry.errorNudgeSent = true;
-      }
+      // Stamp the fire-once guard and KEEP the entry: `wentLong` is elapsed-based,
+      // so a repeat terminal for the same session would otherwise re-fire (the
+      // guard must outlive this handler). The tick-prune reclaims the entry once
+      // the session is no longer active.
+      const guard = entry ?? getOrCreateNudgeState(evt.sessionKey);
+      guard.errorNudgeSent = true;
       // Pass the run's route explicitly: the operation is already out of the
       // registry, so a live thread lookup would come back empty.
       void deliverNudge(evt.sessionKey, renderErrorText(), evt.routeThreadId).catch(
@@ -339,8 +342,9 @@ export function startProgressNudgeRunner(opts: {
           });
         },
       );
+      return;
     }
-    // The session lane cleared — drop bookkeeping (fires exactly once per run).
+    // No error nudge to guard — drop bookkeeping now (the common terminal path).
     state.nudges.delete(evt.sessionKey);
   };
 
