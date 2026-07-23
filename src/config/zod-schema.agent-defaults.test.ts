@@ -470,4 +470,49 @@ describe("agent defaults schema", () => {
     );
     expectSchemaFailurePath(AgentDefaultsSchema.safeParse({ contextTokens: 0 }), "contextTokens");
   });
+
+  it("accepts a full progressNudge block", () => {
+    expectSchemaSuccess(
+      AgentDefaultsSchema.safeParse({
+        progressNudge: {
+          enabled: true,
+          thresholdSeconds: 45,
+          intervalSeconds: 30,
+          maxNudges: 3,
+          target: "last",
+          activeHours: { start: "09:00", end: "18:00", timezone: "user" },
+        },
+      }),
+    );
+  });
+
+  it("accepts an empty/absent progressNudge (feature stays off)", () => {
+    expectSchemaSuccess(AgentDefaultsSchema.safeParse({}));
+    expectSchemaSuccess(AgentDefaultsSchema.safeParse({ progressNudge: {} }));
+  });
+
+  it("rejects an unknown progressNudge key", () => {
+    expectSchemaFailurePath(
+      AgentDefaultsSchema.safeParse({ progressNudge: { bogus: true } }),
+      "progressNudge",
+    );
+  });
+
+  it("rejects a non-positive progressNudge threshold and a bad target", () => {
+    expectSchemaFailurePath(
+      AgentDefaultsSchema.safeParse({ progressNudge: { thresholdSeconds: 0 } }),
+      "progressNudge.thresholdSeconds",
+    );
+    expectSchemaFailurePath(
+      AgentDefaultsSchema.safeParse({ progressNudge: { target: "channel" } }),
+      "progressNudge.target",
+    );
+  });
+
+  it("rejects a malformed progressNudge activeHours time", () => {
+    expectSchemaFailurePath(
+      AgentDefaultsSchema.safeParse({ progressNudge: { activeHours: { start: "9am" } } }),
+      "progressNudge.activeHours.start",
+    );
+  });
 });
