@@ -2,6 +2,16 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.7
+
+Concise + guided interaction overlay for Claude, proactive long-turn progress nudges, a security dependency refresh, and a recovered-tool-error badge fix.
+
+- **#70 (ENG-16418):** Claude agents now get a provider-agnostic "concise" interaction overlay — lead with the answer, avoid walls of text, and offer a short A/B/C guided choice instead of elaborating every branch. Previously only OpenAI/OpenRouter/Codex supplied interaction-style overlays (gated on GPT-5 ids), so a Claude-on-Anthropic agent received zero conciseness guidance. Wired through the `anthropic` provider's `resolveSystemPromptContribution` hook, gated on Claude model ids and a new `agents.defaults.promptOverlays.claude` personality toggle (`concise|on|off`, default `concise`). Verified end-to-end against Bedrock Opus 4.8 through the gateway.
+- **#68 (ENG-16200):** proactive progress nudges during long-running turns. While an agent turn exceeds a config-driven threshold, short "still working on X…" messages post to the user's active channel (Slack/Teams/Boon UI) so a long batch/analysis never goes silent, capped by interval + max count; a failed/stalled long run posts one failure + next-step message instead of vanishing. Fast turns below the threshold get no nudge. Reuses the existing outbound layer (`sendDurableMessageBatch` + `target:"last"`), the agent-event bus, and the reply-run registry — no new per-channel send path. Runtime ships gated by `agents.defaults.progressNudge`, which defaults off.
+- **#69:** bumped production dependencies off nine newly-published high/critical npm advisories that had caught up to already-resolved versions and were turning the CI `security-fast` audit red (axios 1.16.0→1.18.1, tar 7.5.16→7.5.20, fast-uri 3.1.2→3.1.4, linkify-it 5.0.1→5.0.2, brace-expansion→5.0.7, @vitest/browser 4.1.9→4.1.10, @opentelemetry/propagator-jaeger→2.9.0). No product code change.
+- **#64 (ENG-16330):** a backgrounded exec/process/tmux session that exits non-zero but which the agent recovers from — the turn still produces a real reply — no longer renders a terminal "⚠️ 🧰 Process: … failed" badge that wrongly implied the agent broke. `shouldMarkNonTerminalToolErrorWarning` now treats a recovered exec/bash/process/tmux error as non-terminal, gated on `hasUserFacingAssistantReply`; a reply-less genuine failure still surfaces the honest failed badge, and write/edit/message stay strict.
+- Base = `2026.6.11-boon.6`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` bumped to `2026.6.11-boon.7` in lockstep.
+
 ## 2026.6.11-boon.6
 
 Slack threading reliability + fork-published `@openclaw/slack` plugin asset.
