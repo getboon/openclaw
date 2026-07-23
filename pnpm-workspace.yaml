@@ -95,14 +95,14 @@ blockExoticSubdeps: true
 
 overrides:
   "@anthropic-ai/sdk": 0.100.1
-  "@opentelemetry/core": 2.8.0
+  "@opentelemetry/core": 2.9.0
   "@aws-sdk/core": 3.974.13
   "@aws-sdk/credential-provider-node": 3.972.52
   "@aws-sdk/xml-builder": 3.972.25
   hono: 4.12.25
   "@hono/node-server": 1.19.14
-  axios: 1.16.0
-  fast-uri: 3.1.2
+  axios: 1.18.1
+  fast-uri: 3.1.4
   follow-redirects: 1.16.0
   defu: 6.1.5
   fast-xml-parser: 5.7.0
@@ -117,7 +117,7 @@ overrides:
   qs: 6.15.2
   node-domexception: "npm:@nolyfill/domexception@1.0.28"
   typebox: 1.1.39
-  tar: 7.5.16
+  tar: 7.5.20
   tough-cookie: 4.1.3
   yauzl: 3.2.1
   protobufjs: 7.6.4
@@ -126,7 +126,9 @@ overrides:
   # deps off versions with high/critical advisories. Conservative in-range
   # targets where possible (no major bumps). See PR for advisory list.
   "@grpc/grpc-js": 1.14.4
-  linkify-it: 5.0.1
+  linkify-it: 5.0.2
+  brace-expansion: 5.0.7
+  "@opentelemetry/propagator-jaeger": 2.9.0
   # Scope the undici security pin to the 7.x line only. A flat `undici` override
   # would force 8.x consumers (jsdom needs `undici@^7.25.0` and imports
   # lib/handler/wrap-handler.js, removed in 8.x) onto an incompatible major and
@@ -136,7 +138,7 @@ overrides:
   "undici@7": 7.28.0
   vite: 8.0.16
   ws: 8.21.0
-  "@vitest/browser": 4.1.9
+  "@vitest/browser": 4.1.10
 
 allowBuilds:
   "@openclaw/fs-safe": true
