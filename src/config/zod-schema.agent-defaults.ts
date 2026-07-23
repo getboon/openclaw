@@ -3,6 +3,7 @@ import { z } from "zod";
 import { isValidNonNegativeByteSizeString } from "./byte-size.js";
 import {
   HeartbeatSchema,
+  ProgressNudgeSchema,
   AgentSandboxSchema,
   AgentContextLimitsSchema,
   AgentModelRuntimeEntrySchema,
@@ -74,6 +75,14 @@ export const AgentDefaultsSchema = z
           .object({
             personality: z
               .union([z.literal("friendly"), z.literal("on"), z.literal("off")])
+              .optional(),
+          })
+          .strict()
+          .optional(),
+        claude: z
+          .object({
+            personality: z
+              .union([z.literal("concise"), z.literal("on"), z.literal("off")])
               .optional(),
           })
           .strict()
@@ -235,6 +244,7 @@ export const AgentDefaultsSchema = z
     typingIntervalSeconds: z.number().int().positive().optional(),
     typingMode: TypingModeSchema.optional(),
     heartbeat: HeartbeatSchema,
+    progressNudge: ProgressNudgeSchema,
     maxConcurrent: z.number().int().positive().optional(),
     subagents: z
       .object({

@@ -8,10 +8,16 @@ const hoisted = vi.hoisted(() => {
     stop: vi.fn(),
     updateConfig: vi.fn(),
   };
+  const progressNudgeRunner = {
+    stop: vi.fn(),
+    updateConfig: vi.fn(),
+  };
   const stopModelPricingRefresh = vi.fn();
   return {
     heartbeatRunner,
+    progressNudgeRunner,
     startHeartbeatRunner: vi.fn(() => heartbeatRunner),
+    startProgressNudgeRunner: vi.fn(() => progressNudgeRunner),
     startChannelHealthMonitor: vi.fn(() => ({ stop: vi.fn() })),
     stopModelPricingRefresh,
     startGatewayModelPricingRefresh: vi.fn(() => stopModelPricingRefresh),
@@ -25,6 +31,10 @@ const hoisted = vi.hoisted(() => {
 
 vi.mock("../infra/heartbeat-runner.js", () => ({
   startHeartbeatRunner: hoisted.startHeartbeatRunner,
+}));
+
+vi.mock("../infra/progress-nudge-runner.js", () => ({
+  startProgressNudgeRunner: hoisted.startProgressNudgeRunner,
 }));
 
 vi.mock("../infra/env.js", () => ({
@@ -68,7 +78,10 @@ describe("server-runtime-services", () => {
     vi.useRealTimers();
     hoisted.heartbeatRunner.stop.mockClear();
     hoisted.heartbeatRunner.updateConfig.mockClear();
+    hoisted.progressNudgeRunner.stop.mockClear();
+    hoisted.progressNudgeRunner.updateConfig.mockClear();
     hoisted.startHeartbeatRunner.mockClear();
+    hoisted.startProgressNudgeRunner.mockClear();
     hoisted.startChannelHealthMonitor.mockClear();
     hoisted.startGatewayModelPricingRefresh.mockClear();
     hoisted.stopModelPricingRefresh.mockClear();
@@ -158,8 +171,16 @@ describe("server-runtime-services", () => {
     const { cron, services } = activateScheduledServicesForTest({ log });
 
     expect(hoisted.startHeartbeatRunner).toHaveBeenCalledTimes(1);
+    expect(hoisted.startProgressNudgeRunner).toHaveBeenCalledTimes(1);
     expect(cron.start).toHaveBeenCalledTimes(1);
-    expect(services.heartbeatRunner).toBe(hoisted.heartbeatRunner);
+    // The returned handle composes the heartbeat + progress-nudge runners so the
+    // existing stop/updateConfig plumbing drives both. Assert it delegates.
+    services.heartbeatRunner.stop();
+    expect(hoisted.heartbeatRunner.stop).toHaveBeenCalledTimes(1);
+    expect(hoisted.progressNudgeRunner.stop).toHaveBeenCalledTimes(1);
+    services.heartbeatRunner.updateConfig({} as never);
+    expect(hoisted.heartbeatRunner.updateConfig).toHaveBeenCalledTimes(1);
+    expect(hoisted.progressNudgeRunner.updateConfig).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1_250);
     await vi.dynamicImportSettled();
     expect(log.child).toHaveBeenNthCalledWith(1, "delivery-recovery");

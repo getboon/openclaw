@@ -30,9 +30,16 @@ export type Gpt5PromptOverlayConfig = {
   personality?: "friendly" | "on" | "off";
 };
 
+export type ClaudePromptOverlayConfig = {
+  /** Concise, guided-choice interaction-style layer for Claude-family models (default: concise). */
+  personality?: "concise" | "on" | "off";
+};
+
 export type PromptOverlaysConfig = {
   /** Shared GPT-5-family prompt overlay used across providers. */
   gpt5?: Gpt5PromptOverlayConfig;
+  /** Concise chat overlay used by Claude-family providers. */
+  claude?: ClaudePromptOverlayConfig;
 };
 
 export type AgentModelEntryConfig = {
@@ -455,6 +462,36 @@ export type AgentDefaultsConfig = {
      * Default: false (only the final heartbeat payload is delivered).
      */
     includeReasoning?: boolean;
+  };
+  /**
+   * Proactive "still working" progress nudges during long-running turns.
+   * When a turn's elapsed time exceeds `thresholdSeconds`, the agent posts a
+   * short lightweight message to the user's active channel (Slack/Teams/Boon UI)
+   * so a long batch/analysis doesn't go silent, capped by `intervalSeconds` +
+   * `maxNudges`. On a failed/stalled run it posts one failure + next-step
+   * message. Fast turns below the threshold get no nudge. Completion is the
+   * normal final reply (no separate completion message).
+   */
+  progressNudge?: {
+    /** Enable time-based progress nudges. Default: false. */
+    enabled?: boolean;
+    /** Turn duration (seconds) before the first nudge fires. Default: 45. */
+    thresholdSeconds?: number;
+    /** Minimum spacing (seconds) between subsequent "still working" nudges. Default: 30. */
+    intervalSeconds?: number;
+    /** Max "still working" nudges per turn (completion/error nudges are not counted). Default: 3. */
+    maxNudges?: number;
+    /** Delivery target ("last" = the user's active channel, or "none" to disable delivery). Default: "last". */
+    target?: "last" | "none";
+    /** Optional active-hours window (local time); nudges fire only inside this window. */
+    activeHours?: {
+      /** Start time (24h, HH:MM). Inclusive. */
+      start?: string;
+      /** End time (24h, HH:MM). Exclusive. Use "24:00" for end-of-day. */
+      end?: string;
+      /** Timezone for the window ("user", "local", or IANA TZ id). Default: "user". */
+      timezone?: string;
+    };
   };
   /** Max concurrent agent runs across all conversations. Default: 4. */
   maxConcurrent?: number;

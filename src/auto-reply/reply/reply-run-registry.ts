@@ -6,6 +6,7 @@ import {
   markDiagnosticEmbeddedRunStarted,
 } from "../../logging/diagnostic-run-activity.js";
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
+import { notifyListeners, registerListener } from "../../shared/listeners.js";
 import { resolveTimerTimeoutMs } from "../../shared/number-coercion.js";
 import type { ReplyFollowupAdmissionBarrierTimeoutPolicy } from "./reply-dispatcher.types.js";
 
@@ -50,6 +51,27 @@ export type ReplyOperationResult =
   | { kind: "failed"; code: ReplyOperationFailureCode; cause?: unknown }
   | { kind: "aborted"; code: ReplyOperationAbortCode };
 
+/** Terminal outcome broadcast to onReplyRunTerminal listeners when a run clears. */
+export type ReplyRunTerminalEvent = {
+  readonly sessionKey: string;
+  readonly sessionId: string;
+  /** Final result at clear time; null when the run cleared before a result was set (e.g. a queued abort). */
+  readonly result: ReplyOperationResult | null;
+  /**
+   * The run's route thread/topic id, snapshotted at clear time. The operation is
+   * already removed from the registry when listeners fire, so a terminal nudge
+   * must read the route from here (not resolveActiveReplyRunThreadId, which would
+   * return undefined) to stay attributable to the originating thread.
+   */
+  readonly routeThreadId?: string | number;
+  /**
+   * Epoch ms the run started, so a listener can decide whether the run had "gone
+   * long" from elapsed time rather than from whether a nudge happened to fire —
+   * a run that crosses the threshold then fails between poll ticks still counts.
+   */
+  readonly startedAt: number;
+};
+
 export type ReplyOperation = {
   readonly key: ReplyRunKey;
   readonly sessionId: string;
@@ -58,6 +80,8 @@ export type ReplyOperation = {
   readonly resetTriggered: boolean;
   readonly phase: ReplyOperationPhase;
   readonly result: ReplyOperationResult | null;
+  /** Epoch ms captured when the operation was created (turn start). */
+  readonly startedAt: number;
   setPhase(next: "queued" | "preflight_compacting" | "memory_flushing" | "running"): void;
   updateSessionId(nextSessionId: string): void;
   attachBackend(handle: ReplyBackendHandle): void;
@@ -138,6 +162,22 @@ const replyRunState = resolveGlobalSingleton<ReplyRunState>(REPLY_RUN_STATE_KEY,
 replyRunState.followupAdmissionBarriersByKey ??= new Map();
 
 export const REPLY_RUN_IDLE_SETTLE_TIMEOUT_MS = 15_000;
+
+const REPLY_RUN_TERMINAL_LISTENERS_KEY = Symbol.for("openclaw.replyRunTerminalListeners");
+const replyRunTerminalListeners = resolveGlobalSingleton<
+  Set<(event: ReplyRunTerminalEvent) => void>
+>(REPLY_RUN_TERMINAL_LISTENERS_KEY, () => new Set<(event: ReplyRunTerminalEvent) => void>());
+
+/**
+ * Subscribe to reply-run terminal events (fires once per operation when its
+ * session lane clears, via clearReplyRunState). The event carries the final
+ * result, so a subscriber can distinguish completed / failed / aborted without
+ * polling — a poller cannot observe `failed` reliably because fail() clears the
+ * session key before the next tick. Returns an idempotent unsubscribe handle.
+ */
+export function onReplyRunTerminal(listener: (event: ReplyRunTerminalEvent) => void): () => void {
+  return registerListener(replyRunTerminalListeners, listener);
+}
 
 export class ReplyRunAlreadyActiveError extends Error {
   constructor(sessionKey: string) {
@@ -325,7 +365,13 @@ function updateFollowupAdmissionSessionId(sessionKey: string, sessionId: string)
   }
 }
 
-function clearReplyRunState(params: { sessionKey: string; sessionId: string }): void {
+function clearReplyRunState(params: {
+  sessionKey: string;
+  sessionId: string;
+  result: ReplyOperationResult | null;
+  routeThreadId?: string | number;
+  startedAt: number;
+}): void {
   replyRunState.activeRunsByKey.delete(params.sessionKey);
   replyRunState.activeSessionIdsByKey.delete(params.sessionKey);
   if (replyRunState.activeKeysBySessionId.get(params.sessionId) === params.sessionKey) {
@@ -333,6 +379,15 @@ function clearReplyRunState(params: { sessionKey: string; sessionId: string }): 
   }
   clearWaitSessionIds(params.sessionKey);
   notifyReplyRunEnded(params.sessionKey);
+  if (replyRunTerminalListeners.size > 0) {
+    notifyListeners(replyRunTerminalListeners, {
+      sessionKey: params.sessionKey,
+      sessionId: params.sessionId,
+      result: params.result,
+      routeThreadId: params.routeThreadId,
+      startedAt: params.startedAt,
+    });
+  }
 }
 
 function replyRunDiagnosticWorkKey(sessionKey: string): string {
@@ -386,6 +441,7 @@ export function createReplyOperation(params: {
   }
 
   const controller = new AbortController();
+  const startedAt = Date.now();
   let currentSessionId = sessionId;
   let phase: ReplyOperationPhase = "queued";
   let result: ReplyOperationResult | null = null;
@@ -413,6 +469,9 @@ export function createReplyOperation(params: {
     clearReplyRunState({
       sessionKey,
       sessionId: currentSessionId,
+      result,
+      routeThreadId: params.routeThreadId,
+      startedAt,
     });
     if (!registeredBarrier) {
       flushReplyOperationAfterClear(operation, currentSessionId);
@@ -477,6 +536,9 @@ export function createReplyOperation(params: {
     },
     get result() {
       return result;
+    },
+    get startedAt() {
+      return startedAt;
     },
     setPhase(next) {
       if (result) {
@@ -687,6 +749,10 @@ export function resolveActiveReplyRunThreadId(sessionKey: string): string | numb
   return replyRunRegistry.get(sessionKey)?.routeThreadId;
 }
 
+export function resolveActiveReplyRunStartedAt(sessionKey: string): number | undefined {
+  return replyRunRegistry.get(sessionKey)?.startedAt;
+}
+
 export function isReplyRunActiveForSessionId(sessionId: string): boolean {
   return resolveReplyRunForCurrentSessionId(sessionId) !== undefined;
 }
@@ -841,6 +907,9 @@ export const testing = {
     }
     replyRunState.waitersByKey.clear();
     replyRunState.followupAdmissionBarriersByKey.clear();
+    // Clear terminal-event subscribers too (mirrors resetAgentEventsForTest) so a
+    // runner that a test forgot to stop() can't leak a listener across tests.
+    replyRunTerminalListeners.clear();
   },
 };
 export { testing as __testing };

@@ -1157,6 +1157,10 @@ export const FIELD_HELP: Record<string, string> = {
     "Shared GPT-5-family prompt overlay applied to matching model ids across providers such as OpenAI, OpenRouter, OpenCode, Codex, and compatible gateways.",
   "agents.defaults.promptOverlays.gpt5.personality":
     'Friendly interaction-style layer for GPT-5-family models ("friendly" or "on" enables it; "off" disables only that layer). The tagged behavior contract remains enabled for matching GPT-5 models.',
+  "agents.defaults.promptOverlays.claude":
+    "Claude-family prompt overlay applied by the Anthropic provider (including Anthropic-API-compatible gateways) to matching Claude model ids.",
+  "agents.defaults.promptOverlays.claude.personality":
+    'Concise, guided-choice interaction-style layer for Claude-family models ("concise" or "on" enables it, the default; "off" disables it). Reduces verbosity and offers short A/B/C narrowing prompts instead of long responses.',
   "agents.defaults.envelopeTimezone":
     'Timezone for message envelopes ("utc", "local", "user", or an IANA timezone string).',
   "agents.defaults.envelopeTimestamp":
