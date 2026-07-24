@@ -779,9 +779,12 @@ describe("buildContextOverflowRecoveryText", () => {
       primaryModel: "qwen3.6-plus",
     });
 
-    expect(text).toContain("kept this conversation mapped to the current session");
+    expect(text).toContain("Your history is preserved");
+    expect(text).toContain("checkpoint");
     expect(text).toContain("reserveTokensFloor");
+    // Never tell the user to start over to keep working (ENG-16323).
     expect(text).not.toContain("reset our conversation");
+    expect(text).not.toContain("/new");
   });
 
   it("falls back to session entry model when runtimeProvider is not provided", () => {
@@ -6943,7 +6946,7 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      expect(result.payload.text).toContain("kept this conversation mapped to the current session");
+      expect(result.payload.text).toContain("Your history is preserved");
       expect(result.payload.text).toContain("reserveTokensFloor");
       expectRecordFields(requireRecord(getReplyPayloadMetadata(result.payload), "reply metadata"), {
         deliverDespiteSourceReplySuppression: true,
@@ -6986,7 +6989,7 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      expect(result.payload.text).toContain("kept this conversation mapped to the current session");
+      expect(result.payload.text).toContain("Your history is preserved");
       expect(result.payload.text).toContain("reserveTokensFloor");
       expectRecordFields(requireRecord(getReplyPayloadMetadata(result.payload), "reply metadata"), {
         deliverDespiteSourceReplySuppression: true,

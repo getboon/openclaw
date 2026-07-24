@@ -34,6 +34,35 @@ import {
 const MAX_TOOL_RESULT_CONTEXT_SHARE = 0.3;
 
 /**
+ * Ceiling on the COMBINED size of all tool results during overflow recovery.
+ * A long session can accumulate several tool results each under the per-result
+ * 0.3·window cap whose SUM still overflows; without an aggregate ceiling the
+ * per-result truncation reports "did not help" and the run dead-ends. Holding
+ * total tool-result content to half the window leaves the other half for the
+ * system prompt, conversation, and current turn.
+ */
+const RECOVERY_AGGREGATE_TOOL_RESULT_CONTEXT_SHARE = 0.5;
+
+/** Rough chars-per-token used across truncation budgets (see calculateMaxToolResultCharsWithCap). */
+const CHARS_PER_TOKEN = 4;
+
+/**
+ * Aggregate tool-result char budget for the overflow-recovery path, derived from
+ * the full context window rather than the single-result cap. Pass this as
+ * `aggregateMaxCharsOverride` so the summed tool-result content is forced under
+ * budget even when every individual result is under the per-result cap.
+ */
+export function resolveRecoveryAggregateToolResultChars(contextWindowTokens: number): number {
+  if (!Number.isFinite(contextWindowTokens) || contextWindowTokens <= 0) {
+    return DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS;
+  }
+  const budgetTokens = Math.floor(
+    contextWindowTokens * RECOVERY_AGGREGATE_TOOL_RESULT_CONTEXT_SHARE,
+  );
+  return Math.max(1, budgetTokens * CHARS_PER_TOKEN);
+}
+
+/**
  * Low-context default cap for a single live tool result text block.
  *
  * The session runtime already truncates tool results aggressively when serializing old history
@@ -1112,6 +1141,7 @@ export function sessionLikelyHasOversizedToolResults(params: {
   messages: AgentMessage[];
   contextWindowTokens: number;
   maxCharsOverride?: number;
+  aggregateMaxCharsOverride?: number;
 }): boolean {
   const estimate = estimateToolResultReductionPotential(params);
   return estimate.oversizedCount > 0 || estimate.aggregateReducibleChars > 0;

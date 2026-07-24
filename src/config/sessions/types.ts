@@ -62,7 +62,10 @@ export type SessionCompactionCheckpointReason =
   | "manual"
   | "auto-threshold"
   | "overflow-retry"
-  | "timeout-retry";
+  | "timeout-retry"
+  // Captured at a terminal context-overflow block when no prior checkpoint exists,
+  // so history-preserving branch/restore is always reachable from the block.
+  | "overflow-block";
 
 export type SessionCompactionTranscriptReference = {
   sessionId: string;

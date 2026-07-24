@@ -725,7 +725,12 @@ export class SettingsManager {
     return this.settings.compaction?.keepRecentTokens ?? 20000;
   }
 
-  getCompactionSettings(): { enabled: boolean; reserveTokens: number; keepRecentTokens: number } {
+  getCompactionSettings(): {
+    enabled: boolean;
+    reserveTokens: number;
+    keepRecentTokens: number;
+    maxRetainedTokens?: number;
+  } {
     return {
       enabled: this.getCompactionEnabled(),
       reserveTokens: this.getCompactionReserveTokens(),

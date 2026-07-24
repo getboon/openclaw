@@ -1898,6 +1898,23 @@ export class AgentSession {
     return { apiKey: authResult.apiKey, headers: authResult.headers };
   }
 
+  /**
+   * Derive a hard ceiling on verbatim-retained tokens from the active model's
+   * context window, so a recent tail that would itself overflow gets summarized
+   * instead of blocking the session. Leaves settings untouched when the window
+   * is unknown or the default recent budget already fits under the ceiling.
+   */
+  private resolveMaxRetainedTokens(
+    settings: ReturnType<SettingsManager["getCompactionSettings"]>,
+  ): ReturnType<SettingsManager["getCompactionSettings"]> {
+    const contextWindow = this.model?.contextWindow ?? 0;
+    if (contextWindow <= 0) {
+      return settings;
+    }
+    const maxRetainedTokens = Math.max(1, contextWindow - settings.reserveTokens);
+    return { ...settings, maxRetainedTokens };
+  }
+
   private async runCompactionWork(options: {
     settings: ReturnType<SettingsManager["getCompactionSettings"]>;
     signal: AbortSignal;
@@ -1920,7 +1937,12 @@ export class AgentSession {
     }
 
     const pathEntries = this.sessionManager.getBranch();
-    const preparation = unwrapCoreResult(prepareCompaction(pathEntries, options.settings));
+    // Cap the verbatim-retained tail at what actually fits the window. This is a
+    // no-op for normal compaction (the recent tail is far under the window); it
+    // only engages when a long run of recent turns would itself re-overflow —
+    // the state that otherwise dead-ends overflow recovery (ENG-16323).
+    const compactionSettings = this.resolveMaxRetainedTokens(options.settings);
+    const preparation = unwrapCoreResult(prepareCompaction(pathEntries, compactionSettings));
     if (!preparation) {
       if (isManual) {
         const lastEntry = pathEntries[pathEntries.length - 1];
@@ -2053,8 +2075,9 @@ export class AgentSession {
           result: undefined,
           aborted: false,
           willRetry: false,
-          errorMessage:
-            "Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model.",
+          // Internal status note (not user-facing): the embedded runner owns the
+          // terminal blocked payload + history-preserving recovery hint (run.ts).
+          errorMessage: "Context overflow recovery failed after one compact-and-retry attempt.",
         });
         return false;
       }
