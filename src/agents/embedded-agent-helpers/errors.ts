@@ -6,6 +6,10 @@ import {
   normalizeOptionalLowercaseString,
 } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type {
+  MessagePresentation,
+  MessagePresentationBlock,
+} from "../../interactive/payload.js";
 import type { AssistantMessage } from "../../llm/types.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
@@ -83,11 +87,106 @@ const MODEL_NOT_FOUND_USER_TEXT =
 // API-key billing copy: a gateway customer authenticates with a single
 // BOON_API_KEY against an org-level allocation, so "switch to a different API
 // key" is meaningless — there is nothing to switch to. Give it dedicated copy.
+// Wording mirrors the web agent-chat TokensExhaustedBanner so the message reads
+// identically across web, Slack, and Teams (paid vs trial split below).
 const ALLOCATION_EXHAUSTED_USER_TEXT =
-  "⚠️ This account has reached its usage allocation. Top up your allocation or contact your account team, then try again.";
-/** Detect the boon-llm-gateway token-allocation-exhausted signal. */
+  "⚠️ You don't have any active tokens. Purchase tokens to continue using Boon Agent.";
+const TRIAL_EXHAUSTED_USER_TEXT =
+  "⚠️ You've used your full trial. Upgrade to keep chatting with Boon Agent.";
+/** Button label shown on the paid exhaustion card (web parity). */
+const ALLOCATION_EXHAUSTED_BUTTON_LABEL = "Top up tokens";
+/** Button label shown on the trial exhaustion card (web parity). */
+const TRIAL_EXHAUSTED_BUTTON_LABEL = "Upgrade plan";
+
+/** Detect the boon-llm-gateway PAID token-allocation-exhausted signal. */
 export function isAllocationExhaustedErrorMessage(raw: string): boolean {
   return /\ballocation[_ ]exhausted\b/i.test(raw) || /\btoken allocation exhausted\b/i.test(raw);
+}
+/** Detect the boon-llm-gateway TRIAL budget-exhausted signal. */
+export function isTrialBudgetExhaustedErrorMessage(raw: string): boolean {
+  return /\btrial[_ ]budget[_ ]exhausted\b/i.test(raw);
+}
+/**
+ * Detect either exhaustion variant (paid allocation OR trial budget). Both are
+ * "you're out of tokens" states the gateway returns as HTTP 402; callers use
+ * this to surface the dedicated top-up/upgrade copy + card.
+ */
+export function isTokenExhaustedErrorMessage(raw: string): boolean {
+  return isAllocationExhaustedErrorMessage(raw) || isTrialBudgetExhaustedErrorMessage(raw);
+}
+
+/**
+ * Pull `top_up_url` out of the gateway's 402 exhaustion body. The body is the
+ * raw JSON string the gateway emitted, e.g.
+ * `{"error":"allocation_exhausted",...,"top_up_url":"https://.../billing?open=agent"}`.
+ * Returns undefined when the body is absent, unparseable, or carries no URL —
+ * callers then render the exhaustion copy without a button (never a broken link).
+ * Only http(s) URLs are accepted so a malformed value can't produce a bad button.
+ */
+export function extractTopUpUrl(errorBody: string | undefined): string | undefined {
+  if (!errorBody) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(errorBody);
+    const url =
+      typeof parsed === "object" && parsed !== null
+        ? (parsed as Record<string, unknown>).top_up_url
+        : undefined;
+    if (typeof url === "string") {
+      // Fully parse (not just a prefix check) so a malformed value like
+      // "https://" or "http://%" can't produce a broken button — it falls
+      // through to the text-only exhaustion reply instead.
+      const parsedUrl = new URL(url.trim());
+      if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") {
+        return parsedUrl.toString();
+      }
+    }
+  } catch {
+    // Non-JSON / truncated body, or an unparseable URL — no reliable URL to
+    // surface; caller renders the text-only exhaustion reply.
+  }
+  return undefined;
+}
+
+/**
+ * Build the portable exhaustion card — a single top-up/upgrade URL button — that
+ * both the Slack and Teams adapters render natively. Returns undefined when
+ * `raw` is not an exhaustion signal OR no valid `top_up_url` is present, so the
+ * caller falls through to a plain-text reply (the exhaustion copy still ships as
+ * the reply payload's `text`).
+ *
+ * The card carries NO text block on purpose: the reply payload's `text` already
+ * holds the exhaustion copy, and both adapters fold that `text` into the card
+ * body (Teams `buildMSTeamsPresentationCard`) / message (Slack blocks + fallback
+ * text). Adding a text block here would double the copy inside the Teams card.
+ */
+export function buildTokenExhaustedPresentation(
+  raw: string,
+  errorBody: string | undefined,
+): MessagePresentation | undefined {
+  const trial = isTrialBudgetExhaustedErrorMessage(raw);
+  const isExhausted = trial || isAllocationExhaustedErrorMessage(raw);
+  if (!isExhausted) {
+    return undefined;
+  }
+  const topUpUrl = extractTopUpUrl(errorBody);
+  if (!topUpUrl) {
+    return undefined;
+  }
+  const blocks: MessagePresentationBlock[] = [
+    {
+      type: "buttons",
+      buttons: [
+        {
+          label: trial ? TRIAL_EXHAUSTED_BUTTON_LABEL : ALLOCATION_EXHAUSTED_BUTTON_LABEL,
+          url: topUpUrl,
+          style: "primary",
+        },
+      ],
+    },
+  ];
+  return { tone: "warning", blocks };
 }
 const MAX_FAILOVER_DETAIL_CANDIDATES = 12;
 const MAX_FAILOVER_DETAIL_CHARS = 1_000;
@@ -1495,8 +1594,14 @@ export function formatAssistantErrorText(
     return `LLM request rejected: ${invalidRequest[1]}`;
   }
 
-  // boon-llm-gateway allocation exhaustion gets dedicated copy before the
-  // generic billing formatter (which talks about API keys) can claim it.
+  // boon-llm-gateway token exhaustion gets dedicated copy before the generic
+  // billing formatter (which talks about API keys) can claim it. Trial and paid
+  // diverge: trials upgrade, paid tops up. The buttoned card is attached at the
+  // reply-payload layer (buildTokenExhaustedPresentation); this is the plain-text
+  // fallback for channels/paths that render text only.
+  if (isTrialBudgetExhaustedErrorMessage(raw)) {
+    return TRIAL_EXHAUSTED_USER_TEXT;
+  }
   if (isAllocationExhaustedErrorMessage(raw)) {
     return ALLOCATION_EXHAUSTED_USER_TEXT;
   }
