@@ -83,8 +83,8 @@ describe("ensureOverflowBlockCheckpoint", () => {
     expect(checkpoints[0]?.checkpointId).toBe(checkpointId);
   });
 
-  it("reuses the existing checkpoint instead of capturing a duplicate", async () => {
-    const { config, sessionFile, sessionId } = await setup();
+  it("captures a fresh checkpoint at the current position rather than reusing an older one", async () => {
+    const { config, storePath, sessionFile, sessionId } = await setup();
 
     const first = await ensureOverflowBlockCheckpoint({
       config,
@@ -101,8 +101,16 @@ describe("ensureOverflowBlockCheckpoint", () => {
       agentId: AGENT_ID,
     });
 
+    // Each block captures a fresh checkpoint at the then-current transcript
+    // position; reusing an older boundary would discard later history.
     expect(first).toBeTruthy();
-    expect(second).toBe(first);
+    expect(second).toBeTruthy();
+    expect(second).not.toBe(first);
+    const store = JSON.parse(await fs.readFile(storePath, "utf-8")) as Record<
+      string,
+      { compactionCheckpoints?: Array<{ checkpointId: string }> }
+    >;
+    expect(store[SESSION_KEY]?.compactionCheckpoints ?? []).toHaveLength(2);
   });
 
   it("returns undefined when required inputs are missing", async () => {

@@ -393,7 +393,12 @@ export interface CutPointResult {
   isSplitTurn: boolean;
 }
 
-/** Estimated tokens of message entries retained from `cutIndex` (inclusive) to `endIndex`. */
+/**
+ * Estimated tokens of entries retained from `cutIndex` (inclusive) to `endIndex`.
+ * Counts every entry that replays into the LLM context — messages plus
+ * custom_message/branch_summary/compaction — via getMessageFromEntry, so a large
+ * retained non-message entry can't defeat the overflow-recovery budget.
+ */
 function estimateRetainedTokens(
   entries: SessionTreeEntry[],
   cutIndex: number,
@@ -401,9 +406,9 @@ function estimateRetainedTokens(
 ): number {
   let tokens = 0;
   for (let i = cutIndex; i < endIndex; i++) {
-    const entry = entries[i];
-    if (entry.type === "message") {
-      tokens += estimateTokens(entry.message);
+    const message = getMessageFromEntry(entries[i]);
+    if (message) {
+      tokens += estimateTokens(message);
     }
   }
   return tokens;

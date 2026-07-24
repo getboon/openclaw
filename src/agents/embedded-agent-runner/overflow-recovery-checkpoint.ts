@@ -6,12 +6,9 @@
  * one at the pre-block transcript state so branch/restore always carries history
  * forward (ENG-16323).
  */
-import { resolveStorePath } from "../../config/sessions.js";
-import { loadSessionEntry } from "../../config/sessions/session-accessor.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
   captureCompactionCheckpointSnapshotAsync,
-  listSessionCompactionCheckpoints,
   persistSessionCompactionCheckpoint,
   readSessionLeafStateFromTranscriptAsync,
   resolveCompactionCheckpointTranscriptPosition,
@@ -19,11 +16,13 @@ import {
 import { log } from "./logger.js";
 
 /**
- * Returns the checkpoint id that should carry history forward from this block.
- * Reuses the newest existing checkpoint when one exists; otherwise captures a
- * fresh `overflow-block` checkpoint at the current transcript state. Returns
- * `undefined` only when no checkpoint could be established (best-effort; the
- * surface degrades to honest "no restore point" copy).
+ * Captures a fresh `overflow-block` checkpoint at the CURRENT transcript position
+ * and returns its id, so branch/restore carries the full pre-block history forward.
+ * We do not reuse an older checkpoint: its boundary is from an earlier compaction,
+ * so branching there would discard everything since — the opposite of the
+ * history-preserving guarantee (ENG-16323). Returns `undefined` only when no
+ * checkpoint could be established (best-effort; the surface degrades to honest
+ * "no restore point" copy).
  */
 export async function ensureOverflowBlockCheckpoint(params: {
   config?: OpenClawConfig;
@@ -38,14 +37,7 @@ export async function ensureOverflowBlockCheckpoint(params: {
     return undefined;
   }
 
-  const storePath = resolveStorePath(config.session?.store, { agentId: params.agentId });
   try {
-    const entry = loadSessionEntry({ storePath, sessionKey, readConsistency: "latest" });
-    const existing = listSessionCompactionCheckpoints(entry)[0];
-    if (existing) {
-      return existing.checkpointId;
-    }
-
     const snapshot = await captureCompactionCheckpointSnapshotAsync({ sessionFile });
     if (!snapshot) {
       log.warn(
