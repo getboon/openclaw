@@ -785,8 +785,27 @@ describe("buildTokenExhaustedPresentation", () => {
   const TRIAL_BODY =
     '{"error":"trial_budget_exhausted","top_up_url":"https://app.getboon.ai/billing?open=agent","granted":500000,"used":500000}';
 
-  it("returns undefined when the message is not an exhaustion signal", () => {
-    expect(buildTokenExhaustedPresentation("429 rate limited", PAID_BODY)).toBeUndefined();
+  it("returns undefined when neither the message nor the body is an exhaustion signal", () => {
+    expect(
+      buildTokenExhaustedPresentation("429 rate limited", '{"error":"rate_limit"}'),
+    ).toBeUndefined();
+  });
+
+  it("recognizes exhaustion from the BODY even when the message text does not match", () => {
+    // Mirrors production: errorMessage is the prettified human line (no code),
+    // the code lives only in errorBody. The card must still render.
+    const p = buildTokenExhaustedPresentation(
+      "boon-llm-gateway (402): Trial token budget exhausted; upgrade to continue.",
+      TRIAL_BODY,
+    );
+    expect(p?.blocks).toEqual([
+      {
+        type: "buttons",
+        buttons: [
+          { label: "Upgrade plan", url: "https://app.getboon.ai/billing?open=agent", style: "primary" },
+        ],
+      },
+    ]);
   });
 
   it("builds a paid card with a 'Top up tokens' URL button (button-only, no text block)", () => {

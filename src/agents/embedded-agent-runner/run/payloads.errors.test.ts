@@ -121,6 +121,48 @@ describe("buildEmbeddedRunPayloads", () => {
     ]);
   });
 
+  // Production field split: openclaw's provider-error formatter surfaces only the
+  // human `message` in errorMessage and drops the `error` code (it lives under the
+  // JSON `error` key, which the formatter treats as a bare string, not an object).
+  // The raw body — carrying the code + top_up_url — lands in errorBody. These two
+  // tests exercise that real shape, not the raw-JSON-as-errorMessage shortcut above.
+  it("recognizes PAID exhaustion from the code in errorBody (prettified errorMessage)", () => {
+    const errorBody =
+      '{"error":"allocation_exhausted","message":"Token allocation exhausted. Top up to continue.","top_up_url":"https://app.getboon.ai/billing?open=agent"}';
+    const payloads = buildPayloads({
+      assistantTexts: ["boon-llm-gateway (402): Token allocation exhausted. Top up to continue."],
+      lastAssistant: makeAssistant({
+        stopReason: "error",
+        errorMessage: "boon-llm-gateway (402): Token allocation exhausted. Top up to continue.",
+        errorBody,
+      }),
+    });
+
+    expect(payloads[0]?.text).toMatch(/purchase tokens to continue/i);
+    const buttons = payloads[0]?.presentation?.blocks.find((b) => b.type === "buttons");
+    expect(buttons).toMatchObject({ buttons: [{ label: "Top up tokens" }] });
+  });
+
+  it("recognizes TRIAL exhaustion from the code in errorBody (message text alone would NOT match)", () => {
+    // The trial message "Trial token budget exhausted; upgrade to continue." does
+    // NOT match /trial[_ ]budget[_ ]exhausted/ (the word "token" sits between
+    // "Trial" and "budget"), so recognition MUST come from the body code.
+    const errorBody =
+      '{"error":"trial_budget_exhausted","message":"Trial token budget exhausted; upgrade to continue.","top_up_url":"https://app.getboon.ai/billing?open=agent","granted":500000,"used":500000}';
+    const payloads = buildPayloads({
+      assistantTexts: ["boon-llm-gateway (402): Trial token budget exhausted; upgrade to continue."],
+      lastAssistant: makeAssistant({
+        stopReason: "error",
+        errorMessage: "boon-llm-gateway (402): Trial token budget exhausted; upgrade to continue.",
+        errorBody,
+      }),
+    });
+
+    expect(payloads[0]?.text).toMatch(/used your full trial/i);
+    const buttons = payloads[0]?.presentation?.blocks.find((b) => b.type === "buttons");
+    expect(buttons).toMatchObject({ buttons: [{ label: "Upgrade plan" }] });
+  });
+
   it("renders a trial exhaustion reply with an 'Upgrade plan' button", () => {
     const body =
       '{"error":"trial_budget_exhausted","message":"Trial token budget exhausted; upgrade to continue.","top_up_url":"https://app.getboon.ai/billing?open=agent","granted":500000,"used":500000}';

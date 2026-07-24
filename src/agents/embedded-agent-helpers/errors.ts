@@ -165,8 +165,16 @@ export function buildTokenExhaustedPresentation(
   raw: string,
   errorBody: string | undefined,
 ): MessagePresentation | undefined {
-  const trial = isTrialBudgetExhaustedErrorMessage(raw);
-  const isExhausted = trial || isAllocationExhaustedErrorMessage(raw);
+  // Classify against BOTH the prettified message and the raw body: the gateway
+  // puts the discriminating code under the JSON `error` key, which the
+  // provider-error formatter drops from the message (see formatAssistantErrorText).
+  // The trial message text in particular ("Trial token budget exhausted…") does
+  // not match the trial_budget_exhausted pattern — only the body carries it.
+  const rawBody = (errorBody ?? "").trim();
+  const trial =
+    isTrialBudgetExhaustedErrorMessage(raw) || isTrialBudgetExhaustedErrorMessage(rawBody);
+  const isExhausted =
+    trial || isAllocationExhaustedErrorMessage(raw) || isAllocationExhaustedErrorMessage(rawBody);
   if (!isExhausted) {
     return undefined;
   }
@@ -1599,10 +1607,26 @@ export function formatAssistantErrorText(
   // diverge: trials upgrade, paid tops up. The buttoned card is attached at the
   // reply-payload layer (buildTokenExhaustedPresentation); this is the plain-text
   // fallback for channels/paths that render text only.
-  if (isTrialBudgetExhaustedErrorMessage(raw)) {
+  //
+  // Check errorBody as well as the prettified errorMessage: the gateway sends the
+  // discriminating CODE ("allocation_exhausted" / "trial_budget_exhausted") under
+  // the JSON `error` key, which the provider-error formatter drops from
+  // errorMessage (it surfaces only the human `message`). The paid message text
+  // happens to contain "token allocation exhausted" so it matches on raw too, but
+  // the trial message ("Trial token budget exhausted…") does NOT match the
+  // trial_budget_exhausted pattern — only the raw body carries the code. So the
+  // body is the authoritative signal here.
+  const rawErrorBody = (msg.errorBody ?? "").trim();
+  if (
+    isTrialBudgetExhaustedErrorMessage(raw) ||
+    isTrialBudgetExhaustedErrorMessage(rawErrorBody)
+  ) {
     return TRIAL_EXHAUSTED_USER_TEXT;
   }
-  if (isAllocationExhaustedErrorMessage(raw)) {
+  if (
+    isAllocationExhaustedErrorMessage(raw) ||
+    isAllocationExhaustedErrorMessage(rawErrorBody)
+  ) {
     return ALLOCATION_EXHAUSTED_USER_TEXT;
   }
 
