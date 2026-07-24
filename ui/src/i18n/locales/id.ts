@@ -210,6 +210,7 @@ export const id: TranslationMap = {
     autoThreshold: "ambang otomatis",
     overflowRetry: "percobaan ulang overflow",
     timeoutRetry: "percobaan ulang timeout",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} token",
     tokensBefore: "{count} token sebelumnya",
     tokenDeltaUnavailable: "delta token tidak tersedia",

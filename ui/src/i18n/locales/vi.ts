@@ -210,6 +210,7 @@ export const vi: TranslationMap = {
     autoThreshold: "ngưỡng tự động",
     overflowRetry: "thử lại khi tràn",
     timeoutRetry: "thử lại khi hết thời gian chờ",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} token",
     tokensBefore: "{count} token trước",
     tokenDeltaUnavailable: "không có delta token",

@@ -211,6 +211,7 @@ export const pl: TranslationMap = {
     autoThreshold: "automatyczny próg",
     overflowRetry: "ponowna próba po przepełnieniu",
     timeoutRetry: "ponowna próba po przekroczeniu limitu czasu",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} tokenów",
     tokensBefore: "{count} tokenów przed",
     tokenDeltaUnavailable: "zmiana liczby tokenów niedostępna",
