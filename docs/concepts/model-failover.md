@@ -104,6 +104,8 @@ When a later probe succeeds and the session returns to the selected primary, Ope
 
 These notices are operational messages, not assistant content. They are delivered once per state change, including side-effect-only turns when feasible, but sticky fallback turns do not repeat them. Delivery bypasses normal source-reply suppression, the notice does not consume the first assistant reply slot for threaded channels, and it is excluded from text-to-speech and commitment extraction.
 
+The format above is the default `operator` audience. When `agents.defaults.messaging.audience` is set to `consumer`, OpenClaw replaces these with plain-language equivalents that omit the model ids, reason, and attempt counter (for example `↪️ Switched to a backup model to finish your request.` and `↪️ Back on the primary model.`). The full raw detail is still recorded in logs and structured fallback events regardless of audience.
+
 ## Auth storage (keys + OAuth)
 
 OpenClaw uses **auth profiles** for both API keys and OAuth tokens.

@@ -5,11 +5,9 @@ import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
 } from "@openclaw/normalization-core/string-coerce";
+import { resolveMessageAudience } from "../../config/message-audience.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import type {
-  MessagePresentation,
-  MessagePresentationBlock,
-} from "../../interactive/payload.js";
+import type { MessagePresentation, MessagePresentationBlock } from "../../interactive/payload.js";
 import type { AssistantMessage } from "../../llm/types.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
@@ -97,6 +95,97 @@ const TRIAL_EXHAUSTED_USER_TEXT =
 const ALLOCATION_EXHAUSTED_BUTTON_LABEL = "Top up tokens";
 /** Button label shown on the trial exhaustion card (web parity). */
 const TRIAL_EXHAUSTED_BUTTON_LABEL = "Upgrade plan";
+
+// Consumer-audience copy (ENG-16617). When agents.defaults.messaging.audience is
+// "consumer", formatAssistantErrorText returns plain, reassuring copy keyed by
+// the SAME classification the operator path already computes — no second
+// classifier. The raw provider text/reason/attempt detail never reaches these
+// strings; it stays in logs and structured events. Token-exhaustion copy is the
+// deliberate exception (already end-user-grade + button-wired) and is returned
+// above this gate under both audiences.
+type ConsumerCopyCategory =
+  | "auth"
+  | "rate_limit"
+  | "timeout"
+  | "billing"
+  | "context_overflow"
+  | "model_not_found"
+  | "schema"
+  | "generic";
+const CONSUMER_ERROR_COPY: Record<ConsumerCopyCategory, string> = {
+  auth: "I hit a sign-in problem reaching the AI service and couldn't finish that. Please try again in a moment.",
+  rate_limit:
+    "The AI service is busy right now, so I couldn't finish that. Please try again shortly.",
+  timeout:
+    "The AI service took too long to respond, so I couldn't finish that. Please try again in a moment.",
+  billing:
+    "I couldn't complete that because the AI account has hit its usage limit. Please try again later.",
+  context_overflow:
+    "This conversation has grown too long for me to continue in one go. Try starting a new chat or asking for a shorter piece.",
+  model_not_found:
+    "The AI model I tried to use isn't available right now, so I couldn't finish that. Please try again shortly.",
+  schema:
+    "Something went wrong while I was talking to the AI service and I couldn't finish that. Please try again.",
+  generic: "Something went wrong while I was working on that. Please try again in a moment.",
+};
+
+/**
+ * Map an already-classified failure to consumer copy. Reuses the operator
+ * classifier's `providerRuntimeFailureKind` plus the same predicates the
+ * operator branches use — it does not re-match raw text beyond those. Returns a
+ * category for every failure (catch-all "generic"), so consumer mode never falls
+ * through to raw operator text.
+ */
+function resolveConsumerCopyCategory(
+  raw: string,
+  kind: ProviderRuntimeFailureKind,
+  provider: string | undefined,
+): ConsumerCopyCategory {
+  if (
+    kind === "auth_scope" ||
+    kind === "auth_refresh" ||
+    kind === "refresh_timeout" ||
+    kind === "refresh_contention" ||
+    kind === "callback_timeout" ||
+    kind === "callback_validation" ||
+    kind === "auth_html" ||
+    kind === "auth_invalid_token"
+  ) {
+    return "auth";
+  }
+  if (kind === "model_not_found") {
+    return "model_not_found";
+  }
+  if (isContextOverflowError(raw)) {
+    return "context_overflow";
+  }
+  if (kind === "rate_limit") {
+    return "rate_limit";
+  }
+  if (isBilling429MessageForProvider(raw, provider) || isBillingErrorMessage(raw)) {
+    return "billing";
+  }
+  if (
+    kind === "timeout" ||
+    kind === "proxy" ||
+    kind === "upstream_html" ||
+    kind === "dns" ||
+    isTimeoutErrorMessage(raw)
+  ) {
+    return "timeout";
+  }
+  if (kind === "schema" || kind === "replay_invalid") {
+    return "schema";
+  }
+  // The operator path recognizes provider schema/invalid-request rejections here
+  // too (see formatUserFacingAssistantErrorText's parsedErrorType check), so map
+  // them to the same consumer category rather than the generic catch-all.
+  const parsedErrorType = parseApiErrorInfo(raw)?.type?.toLowerCase() ?? "";
+  if (parsedErrorType.includes("invalid_request") || matchesFormatErrorPattern(raw)) {
+    return "schema";
+  }
+  return "generic";
+}
 
 /** Detect the boon-llm-gateway PAID token-allocation-exhausted signal. */
 export function isAllocationExhaustedErrorMessage(raw: string): boolean {
@@ -1479,6 +1568,18 @@ export function formatAssistantErrorText(
   const diskSpaceCopy = formatDiskSpaceErrorCopy(raw);
   if (diskSpaceCopy) {
     return diskSpaceCopy;
+  }
+
+  // Consumer audience (ENG-16617): return plain-language copy keyed by the same
+  // classification the operator branches below use, so raw provider slugs,
+  // reasons, and attempt counters never reach end users. Sandbox-tool-policy and
+  // disk-space copy above stay under both audiences (already user-appropriate).
+  // Token-exhaustion is excluded here so it falls through to its dedicated
+  // trial/allocation copy + top-up card, which is end-user-grade for both.
+  if (resolveMessageAudience(opts?.cfg) === "consumer" && !isTokenExhaustedErrorMessage(raw)) {
+    return CONSUMER_ERROR_COPY[
+      resolveConsumerCopyCategory(raw, providerRuntimeFailureKind, opts?.provider)
+    ];
   }
 
   if (providerRuntimeFailureKind === "auth_refresh") {

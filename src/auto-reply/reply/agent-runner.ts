@@ -2110,6 +2110,7 @@ export async function runReplyAgent(params: {
             selectedProvider,
             selectedModel,
             previousActiveModel: fallbackTransition.previousState.activeModel,
+            cfg,
           }),
           isFallbackNotice: true,
         }),

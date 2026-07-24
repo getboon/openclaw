@@ -760,6 +760,92 @@ describe("boon-llm-gateway allocation_exhausted (ENG-15627 G1)", () => {
   });
 });
 
+describe("consumer audience (ENG-16617)", () => {
+  const makeError = (errorMessage: string): AssistantMessage =>
+    makeAssistantMessageFixture({
+      errorMessage,
+      content: [{ type: "text", text: errorMessage }],
+    });
+  const consumerCfg = {
+    agents: { defaults: { messaging: { audience: "consumer" } } },
+  } as unknown as import("../config/types.openclaw.js").OpenClawConfig;
+  const consumer = (msg: AssistantMessage, provider?: string) =>
+    formatAssistantErrorText(msg, { cfg: consumerCfg, provider });
+
+  it.each([
+    {
+      name: "schema/tool rejection",
+      raw: '{"type":"error","error":{"message":"SECRET\\nCANARY","type":"invalid_request_error"}}',
+      expected: "Something went wrong while I was talking to the AI service",
+    },
+    {
+      name: "timeout",
+      raw: "LLM request timed out",
+      expected: "The AI service took too long to respond",
+    },
+    {
+      name: "rate limit",
+      raw: "429 Too Many Requests",
+      expected: "The AI service is busy right now",
+    },
+    {
+      name: "context overflow",
+      raw: "request_too_large",
+      expected: "This conversation has grown too long",
+    },
+    {
+      name: "auth 401",
+      raw: "401 Unauthorized: invalid api key",
+      expected: "I hit a sign-in problem reaching the AI service",
+    },
+    {
+      name: "billing credit balance",
+      raw: "Your credit balance is too low to access the Anthropic API.",
+      expected: "the AI account has hit its usage limit",
+    },
+  ])("returns plain-language copy for $name", ({ raw, expected }) => {
+    const out = consumer(makeError(raw));
+    expect(out).toContain(expected);
+    // Consumer copy must never leak raw provider/schema/slug detail.
+    expect(out).not.toContain("provider rejected");
+    expect(out).not.toContain("{");
+  });
+
+  it("never exposes raw structured provider payload content to consumers", () => {
+    const out = consumer(
+      makeError(
+        '{"type":"error","error":{"message":"SECRET\\nCANARY","type":"invalid_request_error"}}',
+      ),
+    );
+    expect(out).not.toContain("SECRET");
+    expect(out).not.toContain("CANARY");
+  });
+
+  it("falls back to generic copy for unclassified errors", () => {
+    expect(consumer(makeError("some totally unrecognized failure text"))).toBe(
+      "Something went wrong while I was working on that. Please try again in a moment.",
+    );
+  });
+
+  it("keeps token-exhaustion copy identical under both audiences (allocation)", () => {
+    const raw =
+      '{"error":"allocation_exhausted","message":"Token allocation exhausted. Contact sales to increase your limit."}';
+    const operatorOut = formatAssistantErrorText(makeError(raw), { provider: "boon-llm-gateway" });
+    const consumerOut = consumer(makeError(raw), "boon-llm-gateway");
+    expect(consumerOut).toBe(operatorOut);
+    expect(consumerOut).toMatch(/purchase tokens to continue/i);
+  });
+
+  it("keeps token-exhaustion copy identical under both audiences (trial)", () => {
+    const raw =
+      '{"error":"trial_budget_exhausted","message":"Trial token budget exhausted; upgrade to continue.","granted":500000,"used":500000}';
+    const operatorOut = formatAssistantErrorText(makeError(raw), { provider: "boon-llm-gateway" });
+    const consumerOut = consumer(makeError(raw), "boon-llm-gateway");
+    expect(consumerOut).toBe(operatorOut);
+    expect(consumerOut).toMatch(/used your full trial/i);
+  });
+});
+
 describe("extractTopUpUrl", () => {
   it("pulls both http and https top_up_url out of the gateway 402 body", () => {
     for (const scheme of ["http", "https"]) {

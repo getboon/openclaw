@@ -1,12 +1,18 @@
 /** Tests model fallback notice formatting and transition state tracking. */
 import { afterEach, describe, expect, it } from "vitest";
 import { testing as cliBackendsTesting } from "../agents/cli-backends.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
+  buildFallbackClearedNotice,
   buildFallbackNotice,
   resolveActiveFallbackState,
   resolveFallbackTransition,
   type FallbackNoticeState,
 } from "./fallback-state.js";
+
+const consumerCfg = {
+  agents: { defaults: { messaging: { audience: "consumer" } } },
+} as unknown as OpenClawConfig;
 
 const baseAttempt = {
   provider: "demo-primary",
@@ -246,5 +252,47 @@ describe("fallback-state", () => {
         attempts: [],
       }),
     ).toContain("selected openai/gpt-5.5");
+  });
+
+  describe("consumer audience", () => {
+    it("builds a plain-language fallback notice without slugs, reason, or attempt counter", () => {
+      const notice = buildFallbackNotice({
+        selectedProvider: "boon-llm-gateway",
+        selectedModel: "claude-opus-4-8-bedrock",
+        activeProvider: "boon-llm-gateway",
+        activeModel: "claude-opus-4-8-openrouter",
+        attempts: [baseAttempt, baseAttempt],
+        cfg: consumerCfg,
+      });
+      expect(notice).toBe("↪️ Switched to a backup model to finish your request.");
+      expect(notice).not.toContain("boon-llm-gateway");
+      expect(notice).not.toContain("more attempts");
+      expect(notice).not.toContain("rate");
+    });
+
+    it("still returns null for equivalent refs under consumer audience", () => {
+      registerAnthropicCliBackendForTest();
+      expect(
+        buildFallbackNotice({
+          selectedProvider: "anthropic",
+          selectedModel: "claude-opus-4-7",
+          activeProvider: "claude-cli",
+          activeModel: "claude-opus-4-7",
+          attempts: [],
+          cfg: consumerCfg,
+        }),
+      ).toBeNull();
+    });
+
+    it("builds a plain-language cleared notice without the previous model slug", () => {
+      const cleared = buildFallbackClearedNotice({
+        selectedProvider: "boon-llm-gateway",
+        selectedModel: "claude-opus-4-8-bedrock",
+        previousActiveModel: "boon-llm-gateway/claude-opus-4-8-openrouter",
+        cfg: consumerCfg,
+      });
+      expect(cleared).toBe("↪️ Back on the primary model.");
+      expect(cleared).not.toContain("boon-llm-gateway");
+    });
   });
 });
