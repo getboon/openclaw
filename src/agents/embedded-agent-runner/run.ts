@@ -160,6 +160,7 @@ import { resolveEmbeddedRunFailureSignal } from "./failure-signal.js";
 import { resolveGlobalLane, resolveSessionLane } from "./lanes.js";
 import { log } from "./logger.js";
 import { resolveModelAsync } from "./model.js";
+import { ensureOverflowBlockCheckpoint } from "./overflow-recovery-checkpoint.js";
 import {
   createPostCompactionLoopGuard,
   PostCompactionLoopPersistedError,
@@ -234,6 +235,7 @@ import { mergeAttemptToolMediaPayloads } from "./run/tool-media-payloads.js";
 import type { EmbeddedRunFastModeParam } from "./run/types.js";
 import {
   resolveLiveToolResultMaxChars,
+  resolveRecoveryAggregateToolResultChars,
   sessionLikelyHasOversizedToolResults,
   truncateOversizedToolResultsInSession,
 } from "./tool-result-truncation.js";
@@ -2782,6 +2784,9 @@ async function runEmbeddedAgentInternal(
                       cfg: params.config,
                       agentId: sessionAgentId,
                     }),
+                    aggregateMaxCharsOverride: resolveRecoveryAggregateToolResultChars(
+                      ctxInfo.tokens,
+                    ),
                     sessionId: activeSessionId,
                     sessionKey: params.sessionKey,
                     agentId: sessionAgentId,
@@ -2827,11 +2832,17 @@ async function runEmbeddedAgentInternal(
                 cfg: params.config,
                 agentId: sessionAgentId,
               });
+              // Bound the SUM of tool results to a window fraction so several
+              // recent results each under the per-result cap can still be
+              // truncated when their combined size is what overflows.
+              const aggregateMaxChars =
+                resolveRecoveryAggregateToolResultChars(contextWindowTokens);
               const hasOversized = attempt.messagesSnapshot
                 ? sessionLikelyHasOversizedToolResults({
                     messages: attempt.messagesSnapshot,
                     contextWindowTokens,
                     maxCharsOverride: toolResultMaxChars,
+                    aggregateMaxCharsOverride: aggregateMaxChars,
                   })
                 : false;
 
@@ -2845,6 +2856,7 @@ async function runEmbeddedAgentInternal(
                   sessionFile: activeSessionFile,
                   contextWindowTokens,
                   maxCharsOverride: toolResultMaxChars,
+                  aggregateMaxCharsOverride: aggregateMaxChars,
                   sessionId: activeSessionId,
                   sessionKey: params.sessionKey,
                   agentId: sessionAgentId,
@@ -2876,12 +2888,23 @@ async function runEmbeddedAgentInternal(
               );
             }
             const kind = isCompactionFailure ? "compaction_failure" : "context_overflow";
+            // Ensure a history-preserving restore point exists at the block so the
+            // surface can offer branch/restore instead of a lose-everything reset.
+            const recoveryCheckpointId = await ensureOverflowBlockCheckpoint({
+              config: params.config,
+              sessionKey: params.sessionKey,
+              sessionId: activeSessionId,
+              sessionFile: activeSessionFile,
+              agentId: sessionAgentId,
+              tokensBefore: overflowTokenCountForCompaction ?? ctxInfo.tokens,
+            });
+            // Stable machine reason only; human copy is owned by the surface (Control
+            // UI i18n / channel adapters) keyed off meta.recovery, not this string.
             const overflowRecoveryText =
-              "Context overflow: prompt too large for the model. " +
-              "Try /reset (or /new) to start a fresh session, or use a larger-context model.";
+              "Context overflow: this conversation reached the model's context limit.";
             log.warn(
               `[context-overflow-recovery] exhausted provider overflow recovery for ${provider}/${modelId}; ` +
-                `livenessState=blocked suggestedAction=reset_or_new kind=${kind}`,
+                `livenessState=blocked kind=${kind} recoveryCheckpointId=${recoveryCheckpointId ?? "none"}`,
             );
             setTerminalLifecycleMeta({
               replayInvalid: resolveReplayInvalidForAttempt(),
@@ -2914,6 +2937,11 @@ async function runEmbeddedAgentInternal(
                 replayInvalid: resolveReplayInvalidForAttempt(),
                 livenessState: "blocked",
                 error: { kind, message: errorText },
+                recovery: {
+                  kind: "context_overflow_preserve",
+                  ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
+                  ...(recoveryCheckpointId ? { checkpointId: recoveryCheckpointId } : {}),
+                },
               },
             };
           }

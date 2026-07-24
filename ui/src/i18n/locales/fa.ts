@@ -211,6 +211,7 @@ export const fa: TranslationMap = {
     autoThreshold: "آستانه خودکار",
     overflowRetry: "تلاش دوباره هنگام سرریز",
     timeoutRetry: "تلاش دوباره پس از وقفه",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} توکن",
     tokensBefore: "{count} توکن قبل",
     tokenDeltaUnavailable: "دلتای توکن در دسترس نیست",

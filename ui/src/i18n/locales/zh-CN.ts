@@ -208,6 +208,7 @@ export const zh_CN: TranslationMap = {
     autoThreshold: "自动阈值",
     overflowRetry: "溢出重试",
     timeoutRetry: "超时重试",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} 个 token",
     tokensBefore: "之前 {count} 个 token",
     tokenDeltaUnavailable: "token 增量不可用",

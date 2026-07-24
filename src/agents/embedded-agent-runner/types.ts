@@ -138,6 +138,19 @@ export type EmbeddedRunFailureSignal = {
   fatalForCron: true;
 };
 
+/**
+ * Typed recovery signal for a terminal blocked run. The surface (Control UI chat,
+ * message channels) maps `kind` to human copy and, when `checkpointId` is set,
+ * offers a history-preserving continuation from that checkpoint. Carries a stable
+ * machine reason so no raw user-facing string is inferred downstream.
+ */
+export type EmbeddedRunRecoveryHint = {
+  kind: "context_overflow_preserve";
+  sessionKey?: string;
+  /** Checkpoint that carries the pre-block history forward, when one is available. */
+  checkpointId?: string;
+};
+
 export type EmbeddedAgentRunMeta = {
   durationMs: number;
   agentMeta?: EmbeddedAgentMeta;
@@ -169,6 +182,12 @@ export type EmbeddedAgentRunMeta = {
     terminalPresentation?: boolean;
   };
   failureSignal?: EmbeddedRunFailureSignal;
+  /**
+   * History-preserving recovery hint for a terminal blocked run. Present when the
+   * run dead-ended on context overflow so the surface can offer a checkpoint
+   * branch/restore (carrying history forward) instead of a bare "start over".
+   */
+  recovery?: EmbeddedRunRecoveryHint;
   /** Stop reason for the agent run (e.g., "completed", "tool_calls"). */
   stopReason?: string;
   /** Pending tool calls when stopReason is "tool_calls". */

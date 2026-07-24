@@ -70,7 +70,7 @@ describe("sanitizeUserFacingText", () => {
     "Request size exceeds model context window",
   ])("sanitizes direct context-overflow error: %s", (text) => {
     expect(sanitizeUserFacingText(text, { errorContext: true })).toContain(
-      "Context overflow: prompt too large for the model.",
+      "Context overflow: this conversation reached the model's context limit.",
     );
   });
 
@@ -78,7 +78,7 @@ describe("sanitizeUserFacingText", () => {
     const text =
       'Ollama API error 400: {"StatusCode":400,"Status":"400 Bad Request","error":"prompt too long; exceeded max context length by 4 tokens"}';
     expect(sanitizeUserFacingText(text, { errorContext: true })).toContain(
-      "Context overflow: prompt too large for the model.",
+      "Context overflow: this conversation reached the model's context limit.",
     );
   });
 
@@ -150,7 +150,7 @@ describe("sanitizeUserFacingText", () => {
     const raw =
       '{"type":"error","error":{"type":"invalid_request_error","message":"Request size exceeds model context window"}}';
     expect(sanitizeUserFacingText(raw, { errorContext: true })).toContain(
-      "Context overflow: prompt too large for the model.",
+      "Context overflow: this conversation reached the model's context limit.",
     );
   });
 
@@ -158,7 +158,7 @@ describe("sanitizeUserFacingText", () => {
     const raw =
       'Codex error: {"type":"error","error":{"type":"invalid_request_error","message":"Request size exceeds model context window"}}';
     expect(sanitizeUserFacingText(raw, { errorContext: true })).toContain(
-      "Context overflow: prompt too large for the model.",
+      "Context overflow: this conversation reached the model's context limit.",
     );
   });
 

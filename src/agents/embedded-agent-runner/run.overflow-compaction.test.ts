@@ -2346,10 +2346,13 @@ describe("runEmbeddedAgent overflow compaction trigger routing", () => {
       isError: true,
       text: expect.stringContaining("Context overflow"),
     });
-    expect(result.payloads?.[0]?.text).toContain("/reset");
-    expect(result.payloads?.[0]?.text).toContain("/new");
+    // Human-facing recovery copy is owned by the surface via meta.recovery; the
+    // runner no longer emits a bare "/reset"/"/new" string that loses history.
+    expect(result.payloads?.[0]?.text).not.toContain("/reset");
+    expect(result.payloads?.[0]?.text).not.toContain("/new");
     expect(result.meta.error?.kind).toBe("context_overflow");
     expect(result.meta.livenessState).toBe("blocked");
+    expect(result.meta.recovery).toMatchObject({ kind: "context_overflow_preserve" });
     expect(result.meta.finalAssistantVisibleText).toBe(result.payloads?.[0]?.text);
     expect(terminalLifecycleMeta.at(-1)).toMatchObject({ livenessState: "blocked" });
   });

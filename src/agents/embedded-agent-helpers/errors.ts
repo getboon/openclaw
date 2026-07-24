@@ -1553,8 +1553,9 @@ export function formatAssistantErrorText(
 
   if (isContextOverflowError(raw)) {
     return (
-      "Context overflow: prompt too large for the model. " +
-      "Try /reset (or /new) to start a fresh session, or use a larger-context model."
+      "Context overflow: this conversation reached the model's context limit. " +
+      "Your history is preserved — try again, run /compact, or continue from a saved " +
+      "checkpoint under Sessions → checkpoints. A larger-context model also helps."
     );
   }
 

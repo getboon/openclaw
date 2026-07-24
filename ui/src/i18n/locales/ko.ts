@@ -209,6 +209,7 @@ export const ko: TranslationMap = {
     autoThreshold: "자동 임계값",
     overflowRetry: "오버플로 재시도",
     timeoutRetry: "타임아웃 재시도",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} 토큰",
     tokensBefore: "{count} 토큰 전",
     tokenDeltaUnavailable: "토큰 델타를 사용할 수 없음",

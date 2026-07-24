@@ -1494,11 +1494,15 @@ export function buildContextOverflowRecoveryText(params: {
   runtimeModel?: string;
   activeSessionEntry?: SessionEntry;
 }): string {
+  // History is preserved on every path here (session mapping is kept and a
+  // compaction checkpoint is captured at the block). The copy must never tell the
+  // user to start over to keep working (ENG-16323): point them at the saved
+  // checkpoint they can continue from instead.
   const prefix = params.preserveSessionMapping
-    ? "⚠️ Auto-compaction could not recover this turn. I kept this conversation mapped to the current session. Please try again, use /compact, or use /new to start a fresh session."
+    ? "⚠️ This conversation reached the model's context limit, so I couldn't finish that turn. Your history is preserved. Continue by trying again or running /compact, or open Sessions → checkpoints to branch from a saved checkpoint (nothing is lost)."
     : params.duringCompaction
-      ? "⚠️ Context limit exceeded during compaction. I've reset our conversation to start fresh - please try again."
-      : "⚠️ Context limit exceeded. I've reset our conversation to start fresh - please try again.";
+      ? "⚠️ Context limit exceeded during compaction. Your history is preserved — try again, run /compact, or continue from a saved checkpoint under Sessions → checkpoints."
+      : "⚠️ Context limit exceeded. Your history is preserved — try again, run /compact, or continue from a saved checkpoint under Sessions → checkpoints.";
   const primaryContextWindow = resolveContextWindowForCompactionHint({
     cfg: params.cfg,
     primaryProvider: params.primaryProvider,

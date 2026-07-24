@@ -136,6 +136,15 @@ export interface CompactionSettings {
   reserveTokens: number;
   /** Approximate recent-context tokens to keep after compaction. */
   keepRecentTokens: number;
+  /**
+   * Hard ceiling on the tokens retained verbatim after compaction. Optional and
+   * unset by default so normal compaction keeps its usual recent tail. When a
+   * caller supplies it (overflow recovery, where the retained tail itself is what
+   * overflows the window), the cut is advanced past `keepRecentTokens` until the
+   * retained suffix fits — so a long tail of recent turns gets summarized instead
+   * of blocking the session.
+   */
+  maxRetainedTokens?: number;
 }
 
 /** Default compaction settings used by the harness. */
@@ -384,12 +393,62 @@ export interface CutPointResult {
   isSplitTurn: boolean;
 }
 
+/**
+ * Estimated tokens of entries retained from `cutIndex` (inclusive) to `endIndex`.
+ * Counts every entry that replays into the LLM context — messages plus
+ * custom_message/branch_summary/compaction — via getMessageFromEntry, so a large
+ * retained non-message entry can't defeat the overflow-recovery budget.
+ */
+function estimateRetainedTokens(
+  entries: SessionTreeEntry[],
+  cutIndex: number,
+  endIndex: number,
+): number {
+  let tokens = 0;
+  for (let i = cutIndex; i < endIndex; i++) {
+    const message = getMessageFromEntry(entries[i]);
+    if (message) {
+      tokens += estimateTokens(message);
+    }
+  }
+  return tokens;
+}
+
+/**
+ * Advance the cut point forward through the valid cut points until the retained
+ * suffix fits `maxRetainedTokens`, or only the newest cut point is left. Returns
+ * the first cut point whose retained suffix fits; falls back to the newest cut
+ * point when none fit (that still summarizes the most history possible).
+ */
+function advanceCutToRetainedBudget(
+  entries: SessionTreeEntry[],
+  cutPoints: number[],
+  currentCutIndex: number,
+  endIndex: number,
+  maxRetainedTokens: number,
+): number {
+  if (estimateRetainedTokens(entries, currentCutIndex, endIndex) <= maxRetainedTokens) {
+    return currentCutIndex;
+  }
+  const forwardCutPoints = cutPoints.filter((cutPoint) => cutPoint > currentCutIndex);
+  for (const cutPoint of forwardCutPoints) {
+    if (estimateRetainedTokens(entries, cutPoint, endIndex) <= maxRetainedTokens) {
+      return cutPoint;
+    }
+  }
+  // Nothing fits — keep the newest cut point so the maximum amount of history is summarized.
+  return forwardCutPoints.length > 0
+    ? forwardCutPoints[forwardCutPoints.length - 1]
+    : currentCutIndex;
+}
+
 /** Find the compaction cut point that keeps approximately the requested recent-token budget. */
 export function findCutPoint(
   entries: SessionTreeEntry[],
   startIndex: number,
   endIndex: number,
   keepRecentTokens: number,
+  maxRetainedTokens?: number,
 ): CutPointResult {
   const cutPoints = findValidCutPoints(entries, startIndex, endIndex);
 
@@ -416,6 +475,19 @@ export function findCutPoint(
       }
       break;
     }
+  }
+  // Overflow recovery: if the tail we would retain still exceeds the caller's hard
+  // token ceiling, advance the cut forward (dropping the oldest kept turns into the
+  // summary) until it fits or only the newest cut point remains. Without this, a long
+  // run of recent turns is retained verbatim and re-overflows every retry.
+  if (typeof maxRetainedTokens === "number" && maxRetainedTokens > 0) {
+    cutIndex = advanceCutToRetainedBudget(
+      entries,
+      cutPoints,
+      cutIndex,
+      endIndex,
+      maxRetainedTokens,
+    );
   }
   while (cutIndex > startIndex) {
     const prevEntry = entries[cutIndex - 1];
@@ -661,7 +733,13 @@ export function prepareCompaction(
 
   const tokensBefore = estimateContextTokens(buildSessionContext(pathEntries).messages).tokens;
 
-  const cutPoint = findCutPoint(pathEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
+  const cutPoint = findCutPoint(
+    pathEntries,
+    boundaryStart,
+    boundaryEnd,
+    settings.keepRecentTokens,
+    settings.maxRetainedTokens,
+  );
   const firstKeptEntry = pathEntries[cutPoint.firstKeptEntryIndex];
   if (!firstKeptEntry?.id) {
     return err(

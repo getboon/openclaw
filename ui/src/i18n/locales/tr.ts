@@ -212,6 +212,7 @@ export const tr: TranslationMap = {
     autoThreshold: "otomatik eşik",
     overflowRetry: "taşma yeniden denemesi",
     timeoutRetry: "zaman aşımı yeniden denemesi",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} token",
     tokensBefore: "önce {count} token",
     tokenDeltaUnavailable: "token değişimi kullanılamıyor",
