@@ -1,0 +1,19 @@
+AGENTS.md
+  s_8f954e05d61c42::t_76099f40e4a391 291
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "589b04d3b9e078eeb15a225cafc6b8cb959b8529",
+  "prompts": {},
+  "sessions": {
+    "s_8f954e05d61c42": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "03dcf0e8-a2ff-444a-a79c-899424124e77",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
