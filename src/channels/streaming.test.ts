@@ -2,6 +2,39 @@ import { describe, expect, it } from "vitest";
 import { buildChannelProgressDraftLine } from "./streaming.js";
 
 describe("buildChannelProgressDraftLine", () => {
+  it("drops a benign fs-housekeeping exec chain from the progress card (ENG-16318)", () => {
+    const line = buildChannelProgressDraftLine({
+      event: "tool",
+      name: "exec",
+      args: {
+        command: 'mkdir -p ~/.openclaw/workspace/scratch && ls ~/.openclaw/ && find / -name "abc*"',
+      },
+    });
+
+    expect(line).toBeUndefined();
+  });
+
+  it("drops a standalone read-only `find /` exec line (ENG-16318)", () => {
+    const line = buildChannelProgressDraftLine({
+      event: "tool",
+      name: "exec",
+      args: { command: 'find / -name "abc*"' },
+    });
+
+    expect(line).toBeUndefined();
+  });
+
+  it("keeps a real-work exec line even when chained with housekeeping (ENG-16318)", () => {
+    const line = buildChannelProgressDraftLine({
+      event: "tool",
+      name: "exec",
+      args: { command: "mkdir -p build && python build.py" },
+    });
+
+    expect(line).toBeDefined();
+    expect(line?.toolName).toBe("exec");
+  });
+
   it("omits generic completed status from successful command output with title", () => {
     const line = buildChannelProgressDraftLine(
       {

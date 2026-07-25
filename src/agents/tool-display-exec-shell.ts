@@ -381,3 +381,64 @@ export function stripShellPreamble(command: string): PreambleResult {
 
   return { command: rest.trim(), chdirPath };
 }
+
+// Display-only classification of "benign housekeeping" shell binaries: read-only
+// inspection (find/ls/cat/…) plus scratch scaffolding (mkdir/touch/printf/echo).
+// This is NOT a security boundary — it drives whether a step is worth surfacing
+// to a user (progress bullets, recovered-error notes). A benign `find /` that
+// exits non-zero on permission-denied is bookkeeping, not the task failing
+// (ENG-16318). Keep this separate from `tool-mutation.ts`'s security-sensitive
+// READ_ONLY_SHELL_COMMANDS, which must not include mutating scaffolding.
+const BENIGN_HOUSEKEEPING_SHELL_BINARIES = new Set([
+  "find",
+  "ls",
+  "cat",
+  "head",
+  "tail",
+  "grep",
+  "pwd",
+  "stat",
+  "wc",
+  "mkdir",
+  "printf",
+  "echo",
+  "touch",
+]);
+
+/** True when every pipe segment of a stage is a benign housekeeping command. */
+function isBenignHousekeepingStage(stage: string): boolean {
+  const segments = splitTopLevelPipes(stage);
+  return segments.every((segment) => {
+    const bin = binaryName(trimLeadingEnv(splitShellWords(segment))[0]);
+    return bin !== undefined && BENIGN_HOUSEKEEPING_SHELL_BINARIES.has(bin);
+  });
+}
+
+/**
+ * True when EVERY top-level stage of a shell command is benign housekeeping.
+ *
+ * Two consumers key off this (ENG-16318):
+ *  - dropping scratch-setup + inspection chains (e.g.
+ *    `mkdir … && ls … && find / -name "<uuid>*"`) from user-facing progress cards;
+ *  - suppressing the recovered-error note when such a chain exits non-zero on a
+ *    turn that still produced a real answer (a benign `find /` hitting
+ *    permission-denied is bookkeeping, not the task failing).
+ *
+ * Deliberately "every stage", not "the failing stage": the exec result carries a
+ * single exit code, not per-stage info, so which stage failed cannot be known.
+ * If ALL stages are benign then whichever one failed was benign, with no
+ * guessing — and a chain that also runs real work (e.g. `python foo.py`) still
+ * surfaces its failure. Display heuristic only, not a security boundary.
+ */
+export function isBenignHousekeepingShellCommand(command: string | undefined): boolean {
+  if (!command) {
+    return false;
+  }
+  const inner = unwrapShellWrapper(command.trim());
+  const { command: cleaned } = stripShellPreamble(inner);
+  const stages = splitTopLevelStages(cleaned || inner);
+  if (stages.length === 0) {
+    return false;
+  }
+  return stages.every((stage) => isBenignHousekeepingStage(stage));
+}

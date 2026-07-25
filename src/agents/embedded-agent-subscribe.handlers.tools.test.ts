@@ -540,6 +540,58 @@ describe("handleToolExecutionEnd cron mutation tracking", () => {
     expect(ctx.state.lastToolError?.mutatingAction).toBe(true);
   });
 
+  it("flags benignHousekeepingError when a fused exec chain of housekeeping fails (ENG-16318)", async () => {
+    const { ctx } = createTestContext();
+    const toolCallId = "tool-exec-find-tail";
+    await handleToolExecutionStart(
+      ctx as never,
+      {
+        type: "tool_execution_start",
+        toolName: "exec",
+        toolCallId,
+        args: { command: 'mkdir -p scratch && find / -name "abc*"' },
+      } as never,
+    );
+    await handleToolExecutionEnd(
+      ctx as never,
+      {
+        type: "tool_execution_end",
+        toolName: "exec",
+        toolCallId,
+        isError: true,
+        result: { details: { status: "error", exitCode: 1, error: "Permission denied" } },
+      } as never,
+    );
+
+    expect(ctx.state.lastToolError?.benignHousekeepingError).toBe(true);
+  });
+
+  it("does not flag benignHousekeepingError when the exec chain runs real work (ENG-16318)", async () => {
+    const { ctx } = createTestContext();
+    const toolCallId = "tool-exec-python-tail";
+    await handleToolExecutionStart(
+      ctx as never,
+      {
+        type: "tool_execution_start",
+        toolName: "exec",
+        toolCallId,
+        args: { command: "mkdir -p build && python build.py" },
+      } as never,
+    );
+    await handleToolExecutionEnd(
+      ctx as never,
+      {
+        type: "tool_execution_end",
+        toolName: "exec",
+        toolCallId,
+        isError: true,
+        result: { details: { status: "error", exitCode: 1, error: "traceback" } },
+      } as never,
+    );
+
+    expect(ctx.state.lastToolError?.benignHousekeepingError).toBeUndefined();
+  });
+
   it("records structured core read actions as replay-safe", async () => {
     for (const [toolName, action] of [
       ["cron", "status"],

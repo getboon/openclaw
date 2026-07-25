@@ -729,6 +729,63 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text).toMatch(/kept going|continu|proceed/i);
   });
 
+  it("suppresses the recovered-exec note entirely when the failing step was benign housekeeping (ENG-16318)", () => {
+    // The customer symptom: a correct triage answer followed by a trailing
+    // `find /` that exited non-zero on permission-denied. The failing step is
+    // bookkeeping, not the task — so no ⚠️ badge AND no "↻ kept going" note.
+    const payloads = buildPayloads({
+      assistantTexts: ["Here is the discipline-by-discipline breakdown of the permit set."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      lastToolError: {
+        toolName: "exec",
+        error: "find: '/proc': Permission denied",
+        benignHousekeepingError: true,
+      },
+    });
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.text).toBe(
+      "Here is the discipline-by-discipline breakdown of the permit set.",
+    );
+    expect(payloads[0]?.isError).toBeFalsy();
+  });
+
+  it("keeps the recovered-exec note when the failing step was NOT benign housekeeping (ENG-16318)", () => {
+    // A recovered exec whose failing tail was real work (not read-only) still
+    // gets the ENG-16330 "↻ kept going" note — only benign housekeeping is silent.
+    const payloads = buildPayloads({
+      assistantTexts: ["The build script is ready."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      lastToolError: {
+        toolName: "exec",
+        error: "python: command not found",
+      },
+    });
+
+    expect(payloads).toHaveLength(2);
+    const warning = payloads[1];
+    expect(getReplyPayloadMetadata(warning as object)?.nonTerminalToolErrorWarning).toBe(true);
+    expect(warning?.text).toMatch(/kept going|continu|proceed/i);
+  });
+
+  it("still flushes a terminal badge for a benign-housekeeping exec error when NO reply exists (ENG-16318 guard)", () => {
+    // No user-facing reply → the turn did not recover into a real answer, so the
+    // honest terminal badge must still surface even for read-only housekeeping.
+    const payloads = buildPayloads({
+      lastToolError: {
+        toolName: "exec",
+        error: "find: '/proc': Permission denied",
+        benignHousekeepingError: true,
+      },
+      verboseLevel: "full",
+    });
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.isError).toBe(true);
+    expect(payloads[0]?.text).toContain("⚠️");
+    expect(payloads[0]?.text).toContain("failed");
+  });
+
   it("shows mutating tool errors when assistant output does not acknowledge the failure", () => {
     const payloads = buildPayloads({
       assistantTexts: ["No issues found. The update is complete."],
