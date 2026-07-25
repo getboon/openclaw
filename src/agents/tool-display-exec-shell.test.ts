@@ -26,6 +26,16 @@ describe("isBenignHousekeepingShellCommand", () => {
     expect(isBenignHousekeepingShellCommand("npm run build")).toBe(false);
   });
 
+  it("returns false for side-effecting find forms (ENG-16318 cubic P1)", () => {
+    // `find` is benign only as pure traversal; -delete/-exec/-ok run real work.
+    expect(isBenignHousekeepingShellCommand("find . -delete")).toBe(false);
+    expect(isBenignHousekeepingShellCommand("find . -name '*.tmp' -exec rm {} +")).toBe(false);
+    expect(isBenignHousekeepingShellCommand("find . -type f -execdir chmod 600 {} ;")).toBe(false);
+    expect(isBenignHousekeepingShellCommand("mkdir scratch && find . -delete")).toBe(false);
+    expect(isBenignHousekeepingShellCommand("find . -ok rm {} ;")).toBe(false);
+    expect(isBenignHousekeepingShellCommand("find / -fprint /tmp/out")).toBe(false);
+  });
+
   it("returns false when real work fails and a benign command follows it (|| fallback)", () => {
     // The whole-command rule (not last-stage) is what makes this safe: a failed
     // `python` followed by a benign `find` must NOT read as benign, since the

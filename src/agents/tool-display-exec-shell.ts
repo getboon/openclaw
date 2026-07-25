@@ -405,12 +405,39 @@ const BENIGN_HOUSEKEEPING_SHELL_BINARIES = new Set([
   "touch",
 ]);
 
+// `find` is only benign when it is pure traversal. These predicates run commands
+// or delete files (`find . -delete`, `find . -exec rm …`), so a `find` carrying
+// any of them is real work, not bookkeeping — surface it and its failure. Fail
+// closed: an unrecognized side-effecting form must not be classified benign.
+const FIND_SIDE_EFFECT_ACTIONS = new Set([
+  "-delete",
+  "-exec",
+  "-execdir",
+  "-ok",
+  "-okdir",
+  "-fprint",
+  "-fprintf",
+  "-fls",
+]);
+
+function isSideEffectingFind(words: string[]): boolean {
+  return words.some((word) => FIND_SIDE_EFFECT_ACTIONS.has(word.toLowerCase()));
+}
+
 /** True when every pipe segment of a stage is a benign housekeeping command. */
 function isBenignHousekeepingStage(stage: string): boolean {
   const segments = splitTopLevelPipes(stage);
   return segments.every((segment) => {
-    const bin = binaryName(trimLeadingEnv(splitShellWords(segment))[0]);
-    return bin !== undefined && BENIGN_HOUSEKEEPING_SHELL_BINARIES.has(bin);
+    const words = trimLeadingEnv(splitShellWords(segment));
+    const bin = binaryName(words[0]);
+    if (bin === undefined || !BENIGN_HOUSEKEEPING_SHELL_BINARIES.has(bin)) {
+      return false;
+    }
+    // Guard the one benign binary with destructive forms (ENG-16318 cubic P1).
+    if (bin === "find" && isSideEffectingFind(words)) {
+      return false;
+    }
+    return true;
   });
 }
 
