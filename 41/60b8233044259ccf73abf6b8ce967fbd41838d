@@ -1,0 +1,265 @@
+extensions/msteams/src/outbound.ts
+  s_8f954e05d61c42::t_42c53c871e5b68 55
+extensions/msteams/src/send-context.ts
+  s_8f954e05d61c42::t_1961cdccccee5f 162
+  s_8f954e05d61c42::t_c62c77c7f30b06 69
+src/cron/delivery-field-schemas.ts
+  s_8f954e05d61c42::t_d24595f8a2de66 33
+src/cli/cron-cli/reply-style-shared.ts
+  s_8f954e05d61c42::t_29a87c81f4bd9d 1
+extensions/msteams/src/monitor-handler/inbound-media.test.ts
+  s_8f954e05d61c42::t_73a241f6534870 174
+packages/gateway-protocol/src/schema/cron.ts
+  s_8f954e05d61c42::t_1a74e369811883 312
+  s_8f954e05d61c42::t_02a84457c1eb60 309
+src/channels/plugins/outbound.types.ts
+  s_8f954e05d61c42::t_5cef268843f8c0 39
+src/gateway/server-cron.ts
+  s_8f954e05d61c42::t_6204e19057dbf6 478
+  s_8f954e05d61c42::t_567b7ac7cf18be 481
+src/agents/embedded-agent-runner/overflow-recovery-checkpoint.test.ts
+  s_8f954e05d61c42::t_7cad8495297b47 2
+src/agents/embedded-agent-runner/run/llm-idle-timeout.ts
+  s_8f954e05d61c42::t_84ecdeb67445bc 188
+extensions/slack/src/monitor/message-handler/dispatch.preview-fallback.test.ts
+  s_8f954e05d61c42::t_763e24460bfc42 3807
+  s_8f954e05d61c42::t_5fd0b49c642ad2 27
+  s_8f954e05d61c42::t_16f3b726d5c2df 2258
+  s_8f954e05d61c42::t_1b1c7c3eb3f88e 3729
+  s_8f954e05d61c42::t_50bfc128000d52 3849
+  s_8f954e05d61c42::t_3632fb98b80320 3872
+src/cron/delivery-preview.test.ts
+  s_8f954e05d61c42::t_01feb577960b55 107
+  s_8f954e05d61c42::t_d91be371fb09ce 124
+src/agents/bash-tools.process.ts
+  s_8f954e05d61c42::t_d8a2e31c20e83f 664
+  s_8f954e05d61c42::t_1e8277e3e9583a 118
+  s_8f954e05d61c42::t_34b9d3c516a3b5 721
+  s_8f954e05d61c42::t_54775cd5c9e3fa 659
+  s_8f954e05d61c42::t_82c64263d822bb 728
+src/agents/sessions/agent-session.ts
+  s_8f954e05d61c42::t_e460fd1be6dcdd 1943
+src/auto-reply/reply/gateway-failure-code.test.ts
+  s_8f954e05d61c42::t_820a70d980be3e 1-2
+src/infra/outbound/delivery-queue-storage.ts
+  s_8f954e05d61c42::t_d26edfed4de162 58
+AGENTS.md
+  s_8f954e05d61c42::t_81bcc18ecb1361 212
+CHANGELOG.md
+  s_8f954e05d61c42::t_a9261f0ed643e8 19
+  s_8f954e05d61c42::t_d945d7179f6045 35
+  s_8f954e05d61c42::t_69c54d1e7ccad9 27
+  s_8f954e05d61c42::t_90ae711f1c8ccd 9
+  s_8f954e05d61c42::t_898db164e671f4 10
+  s_8f954e05d61c42::t_59f30c570b9d8c 58
+  s_8f954e05d61c42::t_894533fd38ccff 28
+  s_8f954e05d61c42::t_62dceabb594127 51
+  s_8f954e05d61c42::t_b2cba9719ba068 12
+  s_8f954e05d61c42::t_efdaf98b383b06 20
+docs/channels/msteams.md
+  s_8f954e05d61c42::t_92155e1d626847 765
+src/agents/embedded-agent-helpers.isbillingerrormessage.test.ts
+  s_8f954e05d61c42::t_4c5604d3a15409 240
+src/infra/outbound/deliver.ts
+  s_8f954e05d61c42::t_c9f93d64962761 647
+src/auto-reply/reply/gateway-failure-code.ts
+  s_8f954e05d61c42::t_e7ff0e376af146 2
+  s_8f954e05d61c42::t_4fbd83782bb2b4 3
+extensions/slack/src/monitor/thread-resolution.recover-anchor.test.ts
+  s_8f954e05d61c42::t_24dbabd0ac721c 1
+src/agents/embedded-agent-helpers/failover-matches.ts
+  s_8f954e05d61c42::t_a18f31d36b1e4e 208
+src/cron/isolated-agent/delivery-dispatch.double-announce.test.ts
+  s_8f954e05d61c42::t_29228b821dfd1e 407
+  s_8f954e05d61c42::t_bc19e06e011663 389
+src/cron/delivery.ts
+  s_8f954e05d61c42::t_203d1115b095ba 44
+  s_8f954e05d61c42::t_c227212c6d1ed2 50
+  s_8f954e05d61c42::t_06b91c0affdf8c 87
+  s_8f954e05d61c42::t_6fd483e5a7e89b 129
+  s_8f954e05d61c42::t_cc268b98b83e64 140
+src/cron/delivery-plan.ts
+  s_8f954e05d61c42::t_f13a1853c380ab 29
+  s_8f954e05d61c42::t_b12c8f61dfbf9c 24
+  s_8f954e05d61c42::t_2fe6fbd85ca256 117
+src/cron/isolated-agent/delivery-dispatch.ts
+  s_8f954e05d61c42::t_2e71609721a721 1110
+src/agents/embedded-agent-runner/run/assistant-failover.test.ts
+  s_8f954e05d61c42::t_3ac7d27d7512ef 569,571
+test/npm-publish-plan.test.ts
+  s_8f954e05d61c42::t_37b4523c5e96d4 29
+extensions/slack/src/streaming.ts
+  s_8f954e05d61c42::t_8aae3a55d8c2e8 351
+  s_8f954e05d61c42::t_c0af44fe9caf56 31
+packages/gateway-protocol/src/cron-validators.test.ts
+  s_8f954e05d61c42::t_c32ee3972caa0d 165
+  s_8f954e05d61c42::t_e84e81093b9879 199
+src/agents/embedded-agent-runner/run/normalize-tool-metas.ts
+  s_8f954e05d61c42::t_a965126204a409 11
+src/agents/embedded-agent-runner/run/payloads.ts
+  s_8f954e05d61c42::t_a3db5ebcdd4335 175
+  s_8f954e05d61c42::t_7d816e278c9106 183
+  s_8f954e05d61c42::t_5b584efa584bae 623
+  s_8f954e05d61c42::t_4217a6869e5410 171
+extensions/msteams/src/messenger.ts
+  s_8f954e05d61c42::t_af1bee0198325f 358
+extensions/slack/src/send.invalid-thread.test.ts
+  s_8f954e05d61c42::t_af6e82fb6b4057 1
+  s_8f954e05d61c42::t_149d1615a03f2c 67
+  s_8f954e05d61c42::t_3733894911ce00 128
+src/auto-reply/reply/agent-runner-execution.test.ts
+  s_8f954e05d61c42::t_58c8a251e98681 6714
+  s_8f954e05d61c42::t_22118fe23f2b56 785
+  s_8f954e05d61c42::t_5cf047ba2e5bd6 6562
+  s_8f954e05d61c42::t_cc0f2046b559ef 62
+  s_8f954e05d61c42::t_6305ce23eae1f8 6307
+  s_8f954e05d61c42::t_a7d0ba9add1e41 8216
+  s_8f954e05d61c42::t_f943b26d6aefbb 6518
+src/config/types.msteams.ts
+  s_8f954e05d61c42::t_8b5dfe962aca6e 169
+src/agents/embedded-agent-helpers.formatassistanterrortext.test.ts
+  s_8f954e05d61c42::t_3b9b42266e5abf 711,713
+extensions/slack/src/monitor/message-handler/dispatch.ts
+  s_8f954e05d61c42::t_531df7f4a632a9 885
+  s_8f954e05d61c42::t_260c11efa38892 724
+  s_8f954e05d61c42::t_90702f661c9729 842
+  s_8f954e05d61c42::t_1be8990b484b9e 1309
+  s_8f954e05d61c42::t_6453b62a769e06 2146
+extensions/slack/src/send.ts
+  s_8f954e05d61c42::t_4dc8f233b1474b 242
+  s_8f954e05d61c42::t_b2e7911df85e57 427
+  s_8f954e05d61c42::t_ab34c6c1677ffd 383
+  s_8f954e05d61c42::t_23e7830251bf7d 865
+  s_8f954e05d61c42::t_593b202546d261 909
+  s_8f954e05d61c42::t_25ec189aad2896 446
+  s_8f954e05d61c42::t_e6b6c3c9fc5097 948
+.github/workflows/opengrep-precise.yml
+  s_8f954e05d61c42::t_f5b94fc8ed0f83 80
+  s_8f954e05d61c42::t_d43ee928571711 102
+src/cli/cron-cli/reply-style-shared.test.ts
+  s_8f954e05d61c42::t_3f947fc2249dd5 1
+src/cron/isolated-agent/delivery-target.test.ts
+  s_8f954e05d61c42::t_1b195de6187437 293
+extensions/msteams/src/send.ts
+  s_8f954e05d61c42::t_10668f0fa2e19c 47
+  s_8f954e05d61c42::t_ea3132da4ecb3a 293
+src/channels/message/message-origin.test.ts
+  s_8f954e05d61c42::t_119a90c72dcb39 1
+  s_8f954e05d61c42::t_81844fbf1af78d 14,16
+src/channels/message/message-origin.ts
+  s_8f954e05d61c42::t_a56e1562a671b5 35
+  s_8f954e05d61c42::t_2f3fd3e6c7bb54 2
+  s_8f954e05d61c42::t_8d1b2852ea8a42 19-20
+  s_8f954e05d61c42::t_6c59b57d3e4f86 27
+src/agents/bash-tools.process.supervisor.test.ts
+  s_8f954e05d61c42::t_758eff31b0eb69 174
+  s_8f954e05d61c42::t_ca4da79df1b108 116
+  s_8f954e05d61c42::t_31edecb6a96841 168
+extensions/msteams/src/send-context.test.ts
+  s_8f954e05d61c42::t_dc89868a6a29a2 205
+scripts/lib/npm-publish-plan.mjs
+  s_8f954e05d61c42::t_d79704a5670adb 13
+src/agents/embedded-agent-runner/run/payloads.errors.test.ts
+  s_8f954e05d61c42::t_89a41a408445a6 1014
+  s_8f954e05d61c42::t_e919d97e0304ae 712
+  s_8f954e05d61c42::t_449c30fd2a6c33 838
+  s_8f954e05d61c42::t_44c05b19ad9a50 692
+  s_8f954e05d61c42::t_2481c7339dba69 993
+  s_8f954e05d61c42::t_a375fd3f140638 688
+  s_8f954e05d61c42::t_4b49a698459924 960
+src/agents/embedded-agent-runner/run/payloads.test.ts
+  s_8f954e05d61c42::t_d170eb9356833c 378
+extensions/msteams/src/channel.ts
+  s_8f954e05d61c42::t_25a28accbcbce6 827
+  s_8f954e05d61c42::t_2587ce3ab3ad14 412
+  s_8f954e05d61c42::t_a026b00ec024e7 780
+extensions/msteams/src/monitor-handler/graph-fallback-default.ts
+  s_8f954e05d61c42::t_f16ecf240ed801 3
+src/cron/delivery-plan.test.ts
+  s_8f954e05d61c42::t_e0379048edc358 47
+src/config/zod-schema.providers-core.ts
+  s_8f954e05d61c42::t_ddb957a286770c 1656
+src/cron/isolated-agent/delivery-reply-style.ts
+  s_8f954e05d61c42::t_89accd503f73e1 1
+extensions/sentry-monitor/src/register.test.ts
+  s_8f954e05d61c42::t_997cf48b6d2c06 114
+  s_8f954e05d61c42::t_d415aff6dde314 120
+extensions/slack/src/streaming.invalid-thread.test.ts
+  s_8f954e05d61c42::t_df768df15e1975 1
+src/agents/embedded-agent-helpers/errors.ts
+  s_8f954e05d61c42::t_97840aa51a74c6 86
+src/agents/embedded-agent-runner/run/normalize-tool-metas.test.ts
+  s_8f954e05d61c42::t_8f3e71876c5dd3 9
+qa/scenarios/scheduling/cron-cross-channel-origin-routing.yaml
+  s_8f954e05d61c42::t_75d1aad6d0450d 15
+src/cron/isolated-agent/delivery-reply-style.test.ts
+  s_8f954e05d61c42::t_310c5b816b9975 1
+src/agents/tools/cron-tool.ts
+  s_8f954e05d61c42::t_cb734ed2e633da 1023
+src/cron/isolated-agent/run.ts
+  s_8f954e05d61c42::t_90c8054bd0e68c 427
+src/agents/embedded-agent-subscribe.handlers.tools.ts
+  s_8f954e05d61c42::t_7507d8ecb81e9c 1181
+extensions/msteams/src/monitor-handler/inbound-media.ts
+  s_8f954e05d61c42::t_3681ae0cde833d 121
+  s_8f954e05d61c42::t_0cf2c927971564 41
+src/auto-reply/reply/agent-runner-execution.ts
+  s_8f954e05d61c42::t_e5fb8c43f1050e 1096
+  s_8f954e05d61c42::t_e9e654a09919ff 3412
+  s_8f954e05d61c42::t_25beeadcc7fbb3 1208-1209
+  s_8f954e05d61c42::t_4bcbbac2bbf954 1499
+packages/agent-core/src/harness/compaction/compaction-max-retained.test.ts
+  s_8f954e05d61c42::t_b6dbe8fed93cc8 8
+src/agents/embedded-agent-runner/run/llm-idle-timeout.test.ts
+  s_8f954e05d61c42::t_3c9b4195e2c6c5 26
+  s_8f954e05d61c42::t_a782d0f599b5c9 34
+.github/workflows/boon-release.yml
+  s_8f954e05d61c42::t_c496e6ad28fc9a 158
+  s_8f954e05d61c42::t_46a5c39aaba7ba 104
+  s_8f954e05d61c42::t_94aaa1568883f8 21
+  s_8f954e05d61c42::t_11011099b6fc6c 30
+  s_8f954e05d61c42::t_4a3ac58b95a052 214
+  s_8f954e05d61c42::t_35a59bc87f95f2 151
+  s_8f954e05d61c42::t_62f662b5a5c74b 15
+src/cron/normalize.ts
+  s_8f954e05d61c42::t_7a3b1ceff6ef52 353
+src/agents/embedded-agent-runner/overflow-recovery-checkpoint.ts
+  s_8f954e05d61c42::t_f1a2e1967e2b24 23
+  s_8f954e05d61c42::t_63514f02dc1f3c 7
+src/infra/outbound/delivery-queue.recovery.test.ts
+  s_8f954e05d61c42::t_d6e60128cd8bbd 597
+extensions/msteams/src/outbound.test.ts
+  s_8f954e05d61c42::t_5f09b381e70e22 402
+  s_8f954e05d61c42::t_313c81fc08c45d 463
+extensions/sentry-monitor/src/register.ts
+  s_8f954e05d61c42::t_6185e31328332a 51
+extensions/msteams/src/attachments.helpers.test.ts
+  s_8f954e05d61c42::t_4d3bd0f08ca68d 234
+src/cron/isolated-agent/delivery-target.ts
+  s_8f954e05d61c42::t_a4798b5576f1a4 145,147,149,151
+  s_8f954e05d61c42::t_4b0315dd453371 203,238
+  s_8f954e05d61c42::t_ab56448f17aa0c 335
+src/cron/delivery-preview.ts
+  s_8f954e05d61c42::t_f6d79eb42b0a6f 103
+  s_8f954e05d61c42::t_36d8936489749f 67
+extensions/slack/src/monitor/thread-resolution.ts
+  s_8f954e05d61c42::t_0cc8ef78646d3e 36
+src/agents/embedded-agent-runner/run/assistant-failover.ts
+  s_8f954e05d61c42::t_c996bd765b0471 398
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "4160b8233044259ccf73abf6b8ce967fbd41838d",
+  "prompts": {},
+  "sessions": {
+    "s_8f954e05d61c42": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "03dcf0e8-a2ff-444a-a79c-899424124e77",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
