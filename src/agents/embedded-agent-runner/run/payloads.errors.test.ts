@@ -685,11 +685,11 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads[1]?.text).toContain("Write");
   });
 
-  it("reframes a recovered exec timeout on a successful turn as an intermediate status (ENG-16330)", () => {
+  it("reframes a recovered exec timeout on a successful turn as an intermediate status", () => {
     // A recovered exec/bash/process error on a turn that still produced a
     // real reply is non-terminal — the deliverable is the answer, not the command
     // call. Reframe the false "⚠️ Exec failed" badge into the G4 continuation note
-    // (previously this surfaced a terminal warning; ENG-16330 corrects that).
+    // (previously this surfaced a terminal warning).
     const payloads = buildPayloads({
       assistantTexts: ["The script is ready."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -709,7 +709,7 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text).toMatch(/kept going|continu|proceed/i);
   });
 
-  it("reframes a recovered exec error as an intermediate status when the turn claims success (ENG-16330)", () => {
+  it("reframes a recovered exec error as an intermediate status when the turn claims success", () => {
     const payloads = buildPayloads({
       assistantTexts: ["The script is ready to use and saved in your workspace."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -835,7 +835,7 @@ describe("buildEmbeddedRunPayloads", () => {
     expectSinglePayloadSummary(payloads, { text: warningText ?? "" });
   });
 
-  it("reframes a NON-TERMINAL tool failure as an intermediate status, not '⚠️ … failed' (ENG-15627 G4)", () => {
+  it("reframes a NON-TERMINAL tool failure as an intermediate status, not '⚠️ … failed'", () => {
     // A middleware (transient) message-tool failure AFTER the assistant already
     // produced a reply and prior tools completed is non-terminal — core marks
     // it nonTerminalToolErrorWarning=true. Rendering "⚠️ ✉️ Message failed" is
@@ -957,7 +957,7 @@ describe("buildEmbeddedRunPayloads", () => {
     });
   });
 
-  it("reframes a recovered bg-process non-zero exit as an intermediate status, not '⚠️ Process failed' (ENG-16330)", () => {
+  it("reframes a recovered bg-process non-zero exit as an intermediate status, not '⚠️ Process failed'", () => {
     // The gandalf `salty-shore` case: a backgrounded process session exits
     // non-zero, the agent RECOVERS (produces a real final reply), the turn
     // succeeds — yet core rendered "⚠️ 🧰 Process: salty-shore failed", giving the
@@ -990,7 +990,7 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text).toMatch(/kept going|continu|proceed/i);
   });
 
-  it("reframes a recovered exec non-zero exit as an intermediate status on a successful turn (ENG-16330)", () => {
+  it("reframes a recovered exec non-zero exit as an intermediate status on a successful turn", () => {
     const payloads = buildPayloads({
       assistantTexts: ["The script is ready to use and saved in your workspace."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -1011,7 +1011,7 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text).toMatch(/kept going|continu|proceed/i);
   });
 
-  it("still flushes a terminal '⚠️ … failed' badge for a recovered tool when the turn produced NO reply (ENG-16330 regression guard)", () => {
+  it("still flushes a terminal '⚠️ … failed' badge for a recovered tool when the turn produced NO reply (regression guard)", () => {
     // No user-facing reply → the turn did not recover into a real answer, so the
     // honest terminal badge must still surface (no #53/#47/#48/#50 regression).
     const payloads = buildPayloads({

@@ -52,7 +52,7 @@ type MSTeamsMediaSendFn = (
   opts?: MSTeamsMediaSendOptions,
 ) => Promise<MSTeamsSendResult>;
 
-// ENG-14117: core outbound carries a portable tri-state `threadSuppressed` intent
+// Core outbound carries a portable tri-state `threadSuppressed` intent
 // (set by a scheduled cron's replyStyle, or the message tool's topLevel param).
 // The msteams adapter is the only place that maps it to a per-send replyStyle
 // override — core stays channel-agnostic. `true` forces a top-level channel post;

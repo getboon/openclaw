@@ -115,7 +115,7 @@ function resolvePollWaitMs(value: unknown) {
  * Maps a finished-session registry status to the result `details.status` a
  * poll/log surfaces. A "completed" exit is success; a "killed" session is an
  * agent-requested termination and must NOT read as a terminal failure
- * (ENG-15627 §5b — cubic P1). Everything else (a real non-zero/failed exit)
+ * (cubic P1). Everything else (a real non-zero/failed exit)
  * stays "failed".
  */
 function mapFinishedStatusToResultStatus(status: string): "completed" | "failed" {
@@ -656,12 +656,12 @@ export function createProcessTool(
               );
             }
             // Record the session's own finished status as "killed" (agent-requested
-            // termination), not "failed" — the SIGKILL succeeded (ENG-15627 §5b).
+            // termination), not "failed" — the SIGKILL succeeded.
             markExited(scopedSession, null, "SIGKILL", "killed");
           }
           resetPollRetrySuggestion(params.sessionId);
           // An agent-requested termination that succeeds is a SUCCESS, not a
-          // failure (ENG-15627 §5b). Returning status:"failed" here made the
+          // failure. Returning status:"failed" here made the
           // channel render "⚠️ 🧰 Process failed" for a deliberate, successful
           // teardown. Both paths reach here only after the kill worked
           // (cancelManagedSession succeeded, or the SIGKILL fallback terminated
@@ -718,14 +718,14 @@ export function createProcessTool(
                 );
               }
               // Agent-requested removal: the SIGKILL succeeded, so record
-              // "killed", not "failed" (ENG-15627 §5b).
+              // "killed", not "failed".
               markExited(scopedSession, null, "SIGKILL", "killed");
               deleteSession(params.sessionId);
             }
             resetPollRetrySuggestion(params.sessionId);
             // A successful agent-requested remove is a SUCCESS, not a failure —
             // status:"failed" here rendered "⚠️ 🧰 Process failed" for a
-            // deliberate teardown (ENG-15627 §5b). A genuine inability to remove
+            // deliberate teardown. A genuine inability to remove
             // already returned via failText above.
             return {
               content: [

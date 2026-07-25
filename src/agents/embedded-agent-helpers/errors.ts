@@ -83,7 +83,7 @@ const PROVIDER_SCHEMA_REJECTION_USER_TEXT =
   "LLM request failed: provider rejected the request schema or tool payload.";
 const MODEL_NOT_FOUND_USER_TEXT =
   "The selected model was not found by the provider. Check the model id or choose a different model.";
-// boon-llm-gateway allocation exhaustion (ENG-15627). Distinct from generic
+// boon-llm-gateway allocation exhaustion. Distinct from generic
 // API-key billing copy: a gateway customer authenticates with a single
 // BOON_API_KEY against an org-level allocation, so "switch to a different API
 // key" is meaningless — there is nothing to switch to. Give it dedicated copy.

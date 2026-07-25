@@ -375,7 +375,7 @@ describe("buildEmbeddedRunPayloads tool-error warnings", () => {
     // Middleware failures after useful assistant output warn the user without
     // replacing the successful answer as the terminal payload. Because the turn
     // continued, the warning is framed as an intermediate status — NOT the
-    // over-eager terminal "⚠️ Exec failed" (ENG-15627 G4).
+    // over-eager terminal "⚠️ Exec failed".
     const payloads = buildPayloads({
       assistantTexts: ["Queued 3 topics."],
       lastToolError: {

@@ -1,6 +1,6 @@
 /**
- * Maps a thrown agent-run failure to a deterministic gateway-failure code
- * (ENG-15739). This is consulted only on the previously-generic fall-through of
+ * Maps a thrown agent-run failure to a deterministic gateway-failure code.
+ * This is consulted only on the previously-generic fall-through of
  * the run-failure dispatcher (after the richer bespoke branches decline), so it
  * replaces the single "message failed" string with a class-specific, customer-
  * safe line from the MessageOrigin taxonomy (message-origin.ts).

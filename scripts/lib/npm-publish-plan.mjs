@@ -10,7 +10,7 @@ const CORRECTION_VERSION_REGEX =
 // (same rank/semantics as the numeric `-N` correction above), mirroring how
 // src/infra/clawhub.ts normalizes `-boon.N` for the plugin API compat gate
 // (getboon/openclaw PR #41). This lets a fork-versioned publishable plugin
-// (e.g. @openclaw/msteams@2026.6.11-boon.4, ENG-14431) pass release-version
+// (e.g. @openclaw/msteams@2026.6.11-boon.4) pass release-version
 // validation instead of being rejected as an unrecognized prerelease.
 const BOON_VERSION_REGEX =
   /^(?<year>\d{4})\.(?<month>[1-9]\d?)\.(?<patch>[1-9]\d*)-boon\.(?<correction>[1-9]\d*)$/;

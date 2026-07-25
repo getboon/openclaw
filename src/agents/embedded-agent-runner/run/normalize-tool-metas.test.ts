@@ -6,7 +6,7 @@ describe("normalizeToolMetas", () => {
   it("preserves the per-call `errored` flag so multi-failure step counts stay accurate", () => {
     // Regression: this boundary previously dropped `errored`, which silently
     // defeated the payload-side per-outcome step count and forced the buggy
-    // `length - 1` fallback (ENG-15627 G4 / cubic P2 review follow-up).
+    // `length - 1` fallback (cubic P2 review follow-up).
     const normalized = normalizeToolMetas([
       { toolName: "bash", meta: "ls", errored: false },
       { toolName: "read", meta: "config.json", errored: true },

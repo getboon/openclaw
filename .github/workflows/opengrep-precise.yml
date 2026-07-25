@@ -77,7 +77,7 @@ jobs:
         # advisories (skill env-injection, feishu, discord, zalouser, websocket)
         # that are not introduced by boon changes. Non-blocking here; SARIF is
         # still uploaded to Code Scanning below. Revisit once merged to boon
-        # (normal PRs scan a small changed-path set). See ENG-14959.
+        # (normal PRs scan a small changed-path set).
         continue-on-error: true
         env:
           OPENCLAW_OPENGREP_BASE_REF: ${{ github.event.pull_request.base.sha }}...HEAD
@@ -99,7 +99,7 @@ jobs:
         # advisories (bonjour/browser/discord/feishu test files) get reported as
         # PR-introduced. Non-PR runs (push to boon, scheduled) still upload so
         # Code Scanning stays populated. Revisit with the other merge-scale
-        # relaxations in ENG-14959.
+        # relaxations here.
         if: >-
           always()
           && github.event_name != 'pull_request'

@@ -21,12 +21,12 @@ export type CronDeliveryPlan = {
   channel?: CronMessageChannel;
   to?: string;
   threadId?: string | number;
-  /** Reply-style override for the completion send (ENG-14117), if set. */
+  /** Reply-style override for the completion send, if set. */
   replyStyle?: CronReplyStyle;
   /** Explicit channel account id from the delivery config, if set. */
   accountId?: string;
   /**
-   * Originating channel/target captured at job creation (ENG-14833). Carried through so
+   * Originating channel/target captured at job creation. Carried through so
    * delivery resolution can pin the origin instead of falling back to contaminated shared-session
    * lastChannel/lastTo. See CronDelivery.turnSourceChannel.
    */
@@ -114,7 +114,7 @@ export function resolveCronDeliveryPlan(job: CronJob): CronDeliveryPlan {
   const deliveryReplyStyle = normalizeReplyStyle(
     (delivery as { replyStyle?: unknown } | undefined)?.replyStyle,
   );
-  // ENG-14833: carry the captured origin through so delivery resolution can pin it. A stale/empty
+  // Carry the captured origin through so delivery resolution can pin it. A stale/empty
   // turnSourceChannel makes the whole turn source inert, so only surface it with a concrete channel.
   const turnSourceChannel = normalizeChannel(
     (delivery as { turnSourceChannel?: unknown } | undefined)?.turnSourceChannel,

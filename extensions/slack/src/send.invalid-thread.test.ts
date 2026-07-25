@@ -1,4 +1,4 @@
-// Slack tests cover send.ts invalid-thread retry-to-channel (ENG-16286).
+// Slack tests cover send.ts invalid-thread retry-to-channel.
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSlackSendTestClient } from "./blocks.test-helpers.js";
@@ -64,7 +64,7 @@ describe("sendMessageSlack invalid-thread retry-to-channel", () => {
     expect(readPostMessagePayload(client, 1)).not.toHaveProperty("thread_ts");
     expect(result.messageId).toBe("171234.567");
     // The degraded reply must NOT report the rejected anchor — otherwise routing
-    // could reintroduce the dead thread (ENG-16286).
+    // could reintroduce the dead thread.
     expect(result.threadTs).toBeUndefined();
     expect(vi.mocked(logVerbose)).toHaveBeenCalledWith(
       "slack send: thread_ts 171200.deleted rejected as invalid; retrying to channel",
@@ -125,7 +125,7 @@ describe("sendMessageSlack invalid-thread retry-to-channel", () => {
     expect(client.chat.postMessage).toHaveBeenCalledTimes(1);
   });
 
-  // ENG-16286 (cubic P2): the no-thread retry re-applies the custom identity. If
+  // cubic P2: the no-thread retry re-applies the custom identity. If
   // the token lacks chat:write.customize, that retry must itself fall back to a
   // no-identity post so the reply still lands in the channel (the customize-scope
   // fallback now composes with the invalid-thread retry).

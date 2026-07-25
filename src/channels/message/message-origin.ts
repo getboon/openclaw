@@ -1,5 +1,5 @@
 /**
- * MessageOrigin gateway-failure code schema (ENG-15627 G5).
+ * MessageOrigin gateway-failure code schema.
  *
  * Origin describes who produced a message and how OpenClaw should treat echoes
  * of it (see docs/concepts/message-lifecycle-refactor.md — this is the shape the
@@ -16,15 +16,15 @@
  */
 
 /**
- * Gateway-failure codes. The first three predate ENG-15627 (specified in
- * message-lifecycle-refactor.md); the rest are the ENG-15627 additions.
+ * Gateway-failure codes. The first three predate the later additions (specified in
+ * message-lifecycle-refactor.md); the rest were added afterward.
  */
 export const GATEWAY_FAILURE_CODES = [
   // Pre-existing (message-lifecycle-refactor.md).
   "agent_failed_before_reply",
   "missing_api_key",
   "model_login_expired",
-  // ENG-15627 additions — classifier-backed failure classes.
+  // Classifier-backed failure classes.
   "token_allocation_exhausted",
   "model_context_length_exceeded",
   "provider_rate_limit_shared",
@@ -32,7 +32,7 @@ export const GATEWAY_FAILURE_CODES = [
   "provider_malformed_history",
   "agent_failed_transient_after_retries",
   "subagent_still_working",
-  // ENG-15739 addition — contextual class surfaced by the run-failure path.
+  // Contextual class surfaced by the run-failure path.
   "boon_core_unreachable",
 ] as const;
 

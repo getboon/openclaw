@@ -59,7 +59,7 @@ const state = vi.hoisted(() => ({
 const GENERIC_RUN_FAILURE_TEXT =
   "⚠️ Something went wrong while processing your request. Please try again, or use /new to start a fresh session.";
 
-// ENG-15739: previously-generic terminal failures now surface deterministic,
+// Previously-generic terminal failures now surface deterministic,
 // class-specific copy. An unclassified failure maps to this transient class.
 const TRANSIENT_CODED_FAILURE_TEXT = messageOriginCodeCopy("agent_failed_transient_after_retries");
 
@@ -782,7 +782,7 @@ describe("buildContextOverflowRecoveryText", () => {
     expect(text).toContain("Your history is preserved");
     expect(text).toContain("checkpoint");
     expect(text).toContain("reserveTokensFloor");
-    // Never tell the user to start over to keep working (ENG-16323).
+    // Never tell the user to start over to keep working.
     expect(text).not.toContain("reset our conversation");
     expect(text).not.toContain("/new");
   });
@@ -6304,7 +6304,7 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      // ENG-15739: an unclassified failure now surfaces deterministic
+      // An unclassified failure now surfaces deterministic
       // class-specific copy instead of the single generic string.
       expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
       expect(result.payload.text).not.toBe(GENERIC_RUN_FAILURE_TEXT);
@@ -6515,7 +6515,7 @@ describe("runAgentTurnWithFallback", () => {
 
       expect(result.kind).toBe("final");
       if (result.kind === "final") {
-        // disallow policy surfaces the failure in groups; ENG-15739 makes that
+        // disallow policy surfaces the failure in groups; this makes that
         // surfaced text the deterministic coded copy, not the generic string.
         expect(result.payload.text).not.toBe(SILENT_REPLY_TOKEN);
         expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
@@ -6559,7 +6559,7 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      // Per-surface disallow surfaces the failure; ENG-15739 makes it coded.
+      // Per-surface disallow surfaces the failure; this makes it coded.
       expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
     }
   });
@@ -6711,7 +6711,7 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      // ENG-15739: DM surfaces the deterministic coded copy for this class.
+      // DM surfaces the deterministic coded copy for this class.
       expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
       expect(result.payload.text).not.toBe(GENERIC_RUN_FAILURE_TEXT);
     }
@@ -8213,7 +8213,7 @@ describe("resolveTransientRetryBackoffMs", () => {
   });
 });
 
-describe("runAgentTurnWithFallback — contextual coded copy (ENG-15739)", () => {
+describe("runAgentTurnWithFallback — contextual coded copy", () => {
   const directCtx = {
     Provider: "discord",
     Surface: "discord",

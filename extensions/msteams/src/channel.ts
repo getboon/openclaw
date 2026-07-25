@@ -409,7 +409,7 @@ function describeMSTeamsMessageTool({
 
   const schema: ChannelMessageToolSchemaContribution[] = [];
 
-  // ENG-14117: Add topLevel parameter for send and upload-file actions
+  // Add topLevel parameter for send and upload-file actions
   if (enabled) {
     schema.push({
       properties: createMSTeamsTopLevelActionSchema(),
@@ -777,7 +777,7 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
             });
           }
           if (ctx.action === "send" && !presentation) {
-            // ENG-14117: Handle non-presentation send with topLevel support
+            // Handle non-presentation send with topLevel support
             const topLevelParam = readBooleanParam(ctx.params, "topLevel");
             const threadIdNull = ctx.params.threadId === null;
 
@@ -824,7 +824,7 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
               return actionError("Upload-file requires media, filePath, or path.");
             }
 
-            // ENG-14117: Read topLevel parameter (mirror Slack pattern)
+            // Read topLevel parameter (mirror Slack pattern)
             const topLevelParam = readBooleanParam(ctx.params, "topLevel");
             const threadIdNull = ctx.params.threadId === null;
 

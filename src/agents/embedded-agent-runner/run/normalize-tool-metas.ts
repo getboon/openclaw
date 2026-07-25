@@ -8,7 +8,7 @@
  * accurate when MORE THAN ONE call errors in a turn), and the collector set it
  * correctly, but this normalization step in between silently discarded it —
  * forcing the buggy `toolMetas.length - 1` fallback that assumes a single
- * failure (ENG-15627 G4 / cubic P2 review follow-up).
+ * failure (cubic P2 review follow-up).
  */
 
 /** Raw entry as collected by the subscription's tool-execution handler. */

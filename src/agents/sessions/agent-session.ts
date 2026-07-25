@@ -1940,7 +1940,7 @@ export class AgentSession {
     // Cap the verbatim-retained tail at what actually fits the window. This is a
     // no-op for normal compaction (the recent tail is far under the window); it
     // only engages when a long run of recent turns would itself re-overflow —
-    // the state that otherwise dead-ends overflow recovery (ENG-16323).
+    // the state that otherwise dead-ends overflow recovery.
     const compactionSettings = this.resolveMaxRetainedTokens(options.settings);
     const preparation = unwrapCoreResult(prepareCompaction(pathEntries, compactionSettings));
     if (!preparation) {

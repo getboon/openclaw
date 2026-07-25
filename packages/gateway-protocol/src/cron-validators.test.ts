@@ -162,7 +162,7 @@ describe("cron protocol validators", () => {
     ).toBe(true);
   });
 
-  it("accepts delivery replyStyle on add and update params (ENG-14117)", () => {
+  it("accepts delivery replyStyle on add and update params", () => {
     expect(
       validateCronAddParams({
         ...minimalAddParams,
@@ -196,7 +196,7 @@ describe("cron protocol validators", () => {
     ).toBe(false);
   });
 
-  it("accepts delivery turnSource origin on add and update params (ENG-14833)", () => {
+  it("accepts delivery turnSource origin on add and update params", () => {
     // The agent cron tool captures the originating channel/target into delivery so resolution can
     // pin the origin over a contaminated shared session. Without these in the wire schema, cron.add
     // rejected the captured job outright (additionalProperties:false), breaking cron creation.

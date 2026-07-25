@@ -41,13 +41,13 @@ export type CronAnnounceTarget = {
   sessionKey?: string;
   inheritSessionThread?: boolean;
   /**
-   * Reply-style override for this send (ENG-14117). "top-level" suppresses
+   * Reply-style override for this send. "top-level" suppresses
    * threading so a scheduled completion posts a fresh channel-root message;
    * only completion announces set it — failure alerts keep channel defaults.
    */
   replyStyle?: CronReplyStyle;
   /**
-   * Originating channel/target captured at job creation (ENG-14833). Pins the origin during
+   * Originating channel/target captured at job creation. Pins the origin during
    * resolution so a contaminated shared-session lastChannel/lastTo cannot redirect this send.
    */
   turnSourceChannel?: CronMessageChannel;
@@ -84,7 +84,7 @@ async function resolveCronAnnounceDelivery(params: {
       to: params.target.to,
       accountId: params.target.accountId,
       sessionKey: params.target.sessionKey,
-      // ENG-14833: pin the captured origin so contaminated shared-session state cannot redirect
+      // Pin the captured origin so contaminated shared-session state cannot redirect
       // the completion announce to an unrelated conversation.
       turnSourceChannel: params.target.turnSourceChannel,
       turnSourceTo: params.target.turnSourceTo,
@@ -126,7 +126,7 @@ async function deliverCronAnnouncePayload(params: {
   };
   message: string;
   abortSignal: AbortSignal;
-  /** Reply-style override (ENG-14117); top-level posts a fresh channel-root message. */
+  /** Reply-style override; top-level posts a fresh channel-root message. */
   replyStyle?: CronReplyStyle;
 }): Promise<void> {
   // Cron delivery is durable and non-best-effort for primary announces; partial
@@ -137,7 +137,7 @@ async function deliverCronAnnouncePayload(params: {
     to: params.delivery.resolvedTarget.to,
     accountId: params.delivery.resolvedTarget.accountId,
     threadId: params.delivery.resolvedTarget.threadId,
-    // ENG-14117: tri-state top-level intent; channels that thread (MS Teams) map
+    // Tri-state top-level intent; channels that thread (MS Teams) map
     // it to a per-send override — top-level posts a fresh channel-root message,
     // thread forces threading even when the channel default is top-level.
     threadSuppressed: replyStyleToThreadSuppressed(params.replyStyle),

@@ -1,4 +1,4 @@
-// ENG-14117: cron completion delivery must be able to post a fresh top-level
+// Cron completion delivery must be able to post a fresh top-level
 // channel message (scheduled report) while conversational replies stay threaded.
 import { describe, expect, it } from "vitest";
 import type { CronJob } from "../types.js";

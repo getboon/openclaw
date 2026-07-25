@@ -1,5 +1,5 @@
-// Deterministic mapping from a thrown agent-run failure to a GatewayFailureCode
-// (ENG-15739). Each class must map to exactly one code so the same failure
+// Deterministic mapping from a thrown agent-run failure to a GatewayFailureCode.
+// Each class must map to exactly one code so the same failure
 // always yields the same customer-facing copy.
 import { describe, expect, it } from "vitest";
 import { FailoverError } from "../../agents/failover-error.js";

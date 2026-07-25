@@ -1093,7 +1093,7 @@ function markAgentRunFailureReplyPayload<T extends ReplyPayload>(payload: T): T 
 
 /**
  * Deterministic class-specific copy for a run failure that would otherwise emit
- * the single generic "message failed" string (ENG-15739). Maps the thrown error
+ * the single generic "message failed" string. Maps the thrown error
  * to a gateway-failure code and returns its canonical customer copy.
  *
  * This runs only at a TERMINAL failure (retries/fallbacks exhausted), so a code
@@ -1205,8 +1205,8 @@ export function buildKnownAgentRunFailureReplyPayload(params: {
     // This is the outer catch for errors that ESCAPED runAgentTurnWithFallback
     // entirely (pre-run maintenance crashes, restart lifecycle, truly
     // unexpected exceptions) — not the classified LLM-completion failures, which
-    // runAgentTurnWithFallback already converts to a coded kind:"final" payload
-    // (ENG-15739 lives there). Returning undefined here preserves the deliberate
+    // runAgentTurnWithFallback already converts to a coded kind:"final" payload.
+    // Returning undefined here preserves the deliberate
     // "let an unexpected exception propagate to the caller" contract.
     return undefined;
   }
@@ -1496,7 +1496,7 @@ export function buildContextOverflowRecoveryText(params: {
 }): string {
   // History is preserved on every path here (session mapping is kept and a
   // compaction checkpoint is captured at the block). The copy must never tell the
-  // user to start over to keep working (ENG-16323): point them at the saved
+  // user to start over to keep working: point them at the saved
   // checkpoint they can continue from instead.
   const prefix = params.preserveSessionMapping
     ? "⚠️ This conversation reached the model's context limit, so I couldn't finish that turn. Your history is preserved. Continue by trying again or running /compact, or open Sessions → checkpoints to branch from a saved checkpoint (nothing is lost)."
@@ -3409,7 +3409,7 @@ export async function runAgentTurnWithFallback(params: {
       const genericFallbackText = params.isHeartbeat
         ? HEARTBEAT_EXTERNAL_RUN_FAILURE_TEXT
         : GENERIC_EXTERNAL_RUN_FAILURE_TEXT;
-      // ENG-15739: for the previously-generic terminal fall-through, emit
+      // For the previously-generic terminal fall-through, emit
       // deterministic class-specific copy via the shared gate instead of
       // GENERIC_EXTERNAL_RUN_FAILURE_TEXT. The gate preserves group silence, so
       // this is byte-identical for silent cases. Skipped for heartbeat and

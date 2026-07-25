@@ -399,7 +399,7 @@ describe("msteamsOutbound cfg threading", () => {
     expect(chunker("alpha beta", 5)).toEqual(["alpha", "beta"]);
   });
 
-  // ENG-14117: a scheduled cron told to post top-level flows the portable
+  // A scheduled cron told to post top-level flows the portable
   // `threadSuppressed` intent through core outbound; the msteams adapter must
   // translate it into a per-send replyStyleOverride:"top-level" so the send
   // posts a fresh channel-root message instead of threading under the stored ref.
@@ -460,7 +460,7 @@ describe("msteamsOutbound cfg threading", () => {
   });
 
   it("forwards threadSuppressed:false as replyStyleOverride:thread to force threading", async () => {
-    // Bidirectional (ENG-14117): false must force threading even when the channel
+    // Bidirectional: false must force threading even when the channel
     // default is top-level, so it maps to an explicit "thread" override.
     await requireSendText()({
       cfg,
