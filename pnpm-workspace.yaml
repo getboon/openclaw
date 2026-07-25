@@ -7,6 +7,9 @@ packages:
 minimumReleaseAge: 2880
 
 minimumReleaseAgeExclude:
+  # Security fix newer than the maturity window (GHSA-mh99-v99m-4gvg): the only
+  # patched 5.x release. Excluded so the audit pin can apply before it matures.
+  - "brace-expansion@5.0.8"
   - "@openclaw/crabline@0.1.6"
   - "@openclaw/fs-safe@0.3.0"
   - "@openclaw/proxyline@0.3.3"
@@ -127,7 +130,10 @@ overrides:
   # targets where possible (no major bumps). See PR for advisory list.
   "@grpc/grpc-js": 1.14.4
   linkify-it: 5.0.2
-  brace-expansion: 5.0.7
+  # GHSA-mh99-v99m-4gvg: brace-expansion <=5.0.7 DoS via unbounded expansion.
+  brace-expansion: 5.0.8
+  # GHSA-r28c-9q8g-f849: postcss <=8.5.17 path traversal in source-map auto-load.
+  postcss: 8.5.22
   "@opentelemetry/propagator-jaeger": 2.9.0
   # Scope the undici security pin to the 7.x line only. A flat `undici` override
   # would force 8.x consumers (jsdom needs `undici@^7.25.0` and imports
