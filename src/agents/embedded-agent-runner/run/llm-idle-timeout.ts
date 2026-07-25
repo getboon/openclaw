@@ -185,7 +185,7 @@ export function resolveLlmIdleTimeoutMs(params?: {
   // into longer permissible model silence, so the idle watchdog must scale with
   // it rather than being pinned at the default. The DEFAULT_LLM_IDLE_TIMEOUT_MS
   // network-silence watchdog below applies only when NO turn budget is set.
-  // (ENG-12929: the prior implicit clamp held idle at the 120s default no matter
+  // (The prior implicit clamp held idle at the 120s default no matter
   // how high timeoutSeconds was, silently killing heavy estimation turns
   // mid-generation — model goes quiet >120s during extended thinking → aborted.)
   if (agentTimeoutMs !== undefined) {

@@ -44,7 +44,7 @@ type SendMSTeamsMessageParams = {
   mediaLocalRoots?: readonly string[];
   mediaReadFile?: (filePath: string) => Promise<Buffer>;
   /**
-   * Per-send replyStyle override (ENG-14117). When set, overrides the resolved
+   * Per-send replyStyle override. When set, overrides the resolved
    * channel/global replyStyle for this send only — lets a scheduled cron post a
    * fresh top-level channel message while interactive conversations stay threaded.
    */
@@ -290,7 +290,7 @@ export async function sendMessageMSTeams(
           shareUrl: uploaded.shareUrl,
         });
 
-        // ENG-14431/arguijo: Bot Framework file-info cards render as a broken
+        // Bot Framework file-info cards render as a broken
         // "chiclet" (400 on file.info) in this tenant — post a markdown link to
         // the shared SharePoint item instead of a native file card attachment.
         const spFileLink = `📎 [${uploaded.name}](${uploaded.shareUrl})`;

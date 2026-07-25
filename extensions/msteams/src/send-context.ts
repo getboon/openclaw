@@ -66,7 +66,7 @@ export function resolveMSTeamsProactiveReplyStyle(params: {
   ref: StoredConversationReference;
   conversationType: MSTeamsConversationType;
   /**
-   * Per-send override (ENG-14117). When set, it wins over the resolved/global
+   * Per-send override. When set, it wins over the resolved/global
    * replyStyle so a single send — e.g. a scheduled cron told to post a fresh
    * top-level channel message — can opt out of (or into) threading without
    * changing the global `channels.msteams.replyStyle` default that keeps
@@ -159,7 +159,7 @@ async function findConversationReference(recipient: {
 export async function resolveMSTeamsSendContext(params: {
   cfg: OpenClawConfig;
   to: string;
-  /** Per-send replyStyle override (ENG-14117); see resolveMSTeamsProactiveReplyStyle. */
+  /** Per-send replyStyle override; see resolveMSTeamsProactiveReplyStyle. */
   replyStyleOverride?: MSTeamsReplyStyle;
 }): Promise<MSTeamsProactiveContext> {
   const msteamsCfg = params.cfg.channels?.msteams;

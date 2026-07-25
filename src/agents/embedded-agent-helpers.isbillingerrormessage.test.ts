@@ -237,7 +237,7 @@ describe("isBillingErrorMessage", () => {
     expect(isBillingErrorMessage(raw)).toBe(true);
     expect(classifyFailoverReason(raw)).toBe("billing");
   });
-  it("classifies boon-llm-gateway allocation_exhausted as billing (ENG-15627)", () => {
+  it("classifies boon-llm-gateway allocation_exhausted as billing", () => {
     // 429 body from boon-llm-gateway when an org's token allocation is spent.
     // Must NOT fall through to an unclassified failure that leaks the raw code
     // or the generic "LLM request failed." (the Arguijo customer screenshot).

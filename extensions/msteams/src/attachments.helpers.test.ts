@@ -231,7 +231,7 @@ describe("msteams attachment helpers", () => {
       // Graph `/teams/{id}` rejects the Teams thread-style ID (`19:...thread.tacv2`)
       // that Bot Framework puts on `channelData.team.id` with HTTP 400. The AAD
       // group GUID rides along on `channelData.team.aadGroupId`; the URL builder
-      // must prefer it. ENG-14349.
+      // must prefer it.
       const urls = buildMSTeamsGraphMessageUrls({
         conversationType: "channel",
         messageId: "msg-1",

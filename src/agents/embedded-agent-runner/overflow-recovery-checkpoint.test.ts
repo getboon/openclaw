@@ -1,5 +1,5 @@
 /**
- * Tests for the terminal-block checkpoint guarantee (ENG-16323): a
+ * Tests for the terminal-block checkpoint guarantee: a
  * history-preserving restore point must exist even when no compaction ran.
  */
 import fs from "node:fs/promises";

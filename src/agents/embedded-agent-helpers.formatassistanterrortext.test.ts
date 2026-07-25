@@ -708,9 +708,9 @@ describe("formatBillingErrorMessage — authMode neutral copy (#80877)", () => {
   });
 });
 
-describe("boon-llm-gateway allocation_exhausted (ENG-15627 G1)", () => {
+describe("boon-llm-gateway allocation_exhausted", () => {
   // The boon-llm-gateway returns this 429 body when an org's token allocation
-  // is spent. Before ENG-15627 it fell through the classifier to the bare
+  // is spent. Previously it fell through the classifier to the bare
   // "LLM request failed." — the string in the customer (Arguijo) screenshot.
   const GATEWAY_ALLOCATION_EXHAUSTED_BODY =
     '{"error":"allocation_exhausted","message":"Token allocation exhausted. Contact sales to increase your limit."}';

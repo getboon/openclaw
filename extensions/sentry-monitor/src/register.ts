@@ -48,7 +48,7 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
   // whenever an operator sets a custom environment.
   const hostname = os.hostname();
   const environment = cfg.environment || hostname;
-  // Deploy coordinates (ENG-15261): `release` (fork version, below) already lets
+  // Deploy coordinates: `release` (fork version, below) already lets
   // Sentry cluster a post-deploy regression by build — the arguijo signature was
   // the same error across every host on one release. These tags add the finer
   // rollout dimensions so a spike also attributes to a boon-skills ref and a

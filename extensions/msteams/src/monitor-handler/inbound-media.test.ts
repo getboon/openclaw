@@ -171,7 +171,7 @@ describe("resolveMSTeamsInboundMedia graph fallback trigger", () => {
 
   it("triggers Graph fallback even with no <attachment> tags when alwaysFetchGraphMessage is true", async () => {
     // Workaround for tenants where Bot Framework strips file refs from inbound
-    // activities — see ENG-14349. The opt-in flag forces the Graph re-fetch
+    // activities. The opt-in flag forces the Graph re-fetch
     // path so the bot can recover the file refs through Graph's view.
     vi.mocked(downloadMSTeamsAttachments).mockResolvedValue([]);
     vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce([]);

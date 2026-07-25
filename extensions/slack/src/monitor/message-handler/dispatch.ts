@@ -721,7 +721,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
   let nativeProgressStreamStartPromise: Promise<SlackStreamSession | null> | null = null;
   let nativeProgressStreamThreadTs: string | undefined;
   let streamFailed = false;
-  // Turn-level thread-anchor recovery state (ENG-16286). Once Slack rejects the
+  // Turn-level thread-anchor recovery state. Once Slack rejects the
   // reply's thread_ts as invalid, `resolveDeliveryThreadTs` must NOT recompute
   // the rejected anchor for later payloads in the same turn (replyPlan derives
   // its anchor from the inbound message, independent of the stream session — so
@@ -839,7 +839,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
     kind: ReplyDispatchKind;
     forcedThreadTs?: string;
   }): string | undefined => {
-    // Once the turn's thread anchor was rejected as invalid (ENG-16286), never
+    // Once the turn's thread anchor was rejected as invalid, never
     // reintroduce it: deliver into the recovered root if we found one, else to
     // the channel (undefined). This wins over both the caller's forcedThreadTs
     // (which may still carry the rejected/stale session anchor) and replyPlan
@@ -882,7 +882,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
   // Then set sticky turn-level state so EVERY subsequent payload delivers into
   // the recovered root (or the channel), never recomputing the rejected anchor
   // via replyPlan. Works with or without a stream session (the start-time
-  // startSlackStream-throws path has no session yet). ENG-16286.
+  // startSlackStream-throws path has no session yet).
   const recoverThreadTsIfInvalid = async (
     rejectedThreadTs: string | undefined,
     err: unknown,
@@ -1306,7 +1306,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
       // rejection throws BEFORE `streamSession` is assigned — its anchor is
       // `plannedThreadTs`. Without covering the latter, a start-time
       // invalid_thread_ts would fall straight to deliverNormally with the
-      // rejected anchor and produce the orphaned top-level reply. ENG-16286.
+      // rejected anchor and produce the orphaned top-level reply.
       await recoverThreadTsIfInvalid(
         streamSession?.threadTs ?? plannedThreadTs,
         err,
@@ -2143,7 +2143,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
         // (message deleted/edited mid-turn). Recover the real thread root, then
         // route the SDK-buffered text through the fallback so it still lands —
         // threaded if we recovered a root, else in the channel — instead of
-        // being lost with the rejected stream. ENG-16286.
+        // being lost with the rejected stream.
         await recoverThreadTsIfInvalid(finalStream.threadTs, err, finalStream);
         streamFallbackDelivered = await deliverPendingStreamFallback(
           finalStream,

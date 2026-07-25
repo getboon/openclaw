@@ -111,13 +111,13 @@ describe("registerSentryMonitor", () => {
     expect(initArg?.tracesSampleRate).toBe(0);
   });
 
-  it("does NOT set deploy tags when no deploy env vars are present (ENG-15261)", () => {
+  it("does NOT set deploy tags when no deploy env vars are present", () => {
     const { api } = makeApi({ dsn: "https://abc@o1.ingest.sentry.io/8" });
     registerSentryMonitor(api);
     expect(Sentry.setTags).not.toHaveBeenCalled();
   });
 
-  it("sets boon_skills_ref + wave deploy tags from env (ENG-15261)", () => {
+  it("sets boon_skills_ref + wave deploy tags from env", () => {
     process.env.BOON_SKILLS_REF = "main";
     process.env.DEPLOY_WAVE = "wave-2";
     const { api } = makeApi({ dsn: "https://abc@o1.ingest.sentry.io/9" });

@@ -5,7 +5,7 @@ import { estimateTokens, findCutPoint } from "./compaction.js";
 
 // Each message is ~10k tokens (40k chars / 4). A generous keepRecentTokens
 // retains a long recent tail; when that tail would itself overflow the window,
-// maxRetainedTokens must advance the cut forward (the ENG-16323 dead-end).
+// maxRetainedTokens must advance the cut forward (the dead-end).
 const TURN_TEXT = "x".repeat(40_000);
 // Large enough that the default cut retains many turns verbatim.
 const KEEP_RECENT_TOKENS = 120_000;

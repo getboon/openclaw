@@ -355,7 +355,7 @@ export async function buildActivity(
           usePerUserSharing: conversationType === "groupchat",
         });
 
-        // ENG-14431/arguijo: Bot Framework file-info cards render as a broken
+        // Bot Framework file-info cards render as a broken
         // "chiclet" (400 on file.info) in this tenant — post a markdown link to
         // the shared SharePoint item instead of a native file card attachment.
         const fileLink = `📎 [${uploaded.name}](${uploaded.shareUrl})`;

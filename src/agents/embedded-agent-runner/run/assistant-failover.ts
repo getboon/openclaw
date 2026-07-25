@@ -395,7 +395,7 @@ function resolveAssistantFailoverErrorMessage(params: {
   authMode?: string;
 }): string {
   const timeoutFailure = params.timedOut || params.idleTimedOut;
-  // ENG-15627 G2: the user-facing message must never carry raw provider text.
+  // The user-facing message must never carry raw provider text.
   // formatAssistantErrorText can fall through to echoing the raw errorMessage
   // when no classifier branch recognizes it; guard that output with the same
   // raw-passthrough check formatUserFacingAssistantErrorText uses, and drop the

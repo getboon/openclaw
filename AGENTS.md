@@ -209,6 +209,7 @@ Skills own workflows; root owns hard policy and routing.
 - Split files around ~700 LOC when clarity/testability improves.
 - Naming: **OpenClaw** product/docs; `openclaw` CLI/package/path/config.
 - English: American spelling.
+- No Linear ticket references (`ENG-…`, `linear.app` issue links) in code, comments, or commit messages.
 
 ## Tests
 

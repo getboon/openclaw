@@ -1,4 +1,4 @@
-// Covers the MessageOrigin gateway-failure code schema (ENG-15627 G5):
+// Covers the MessageOrigin gateway-failure code schema:
 // canonical user copy, retry affordance mapping, and the fail-closed
 // emit resolver.
 import { describe, expect, it } from "vitest";
@@ -11,9 +11,9 @@ import {
 } from "./message-origin.js";
 
 describe("gateway-failure code registry", () => {
-  it("includes the pre-existing design-doc codes plus the ENG-15627 additions", () => {
+  it("includes the pre-existing design-doc codes plus the later additions", () => {
     // The three codes already specified in message-lifecycle-refactor.md must
-    // survive, and the seven ENG-15627 codes must be added.
+    // survive, and the seven added codes must be present.
     expect(GATEWAY_FAILURE_CODES).toEqual(
       expect.arrayContaining([
         "agent_failed_before_reply",

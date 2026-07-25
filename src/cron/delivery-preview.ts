@@ -64,7 +64,7 @@ export async function resolveCronDeliveryPreview(params: {
       threadId: plan.threadId,
       accountId: plan.accountId,
       sessionKey: deliverySessionKey,
-      // ENG-14833: mirror runtime origin pinning so the preview matches the actual delivery route.
+      // Mirror runtime origin pinning so the preview matches the actual delivery route.
       turnSourceChannel: plan.turnSourceChannel,
       turnSourceTo: plan.turnSourceTo,
       turnSourceAccountId: plan.turnSourceAccountId,
@@ -100,7 +100,7 @@ export async function resolveCronDeliveryPreview(params: {
   return {
     label: `${plan.mode} -> ${formatTarget(resolved.channel, resolved.to)}`,
     // Surface a top-level reply-style override so operators confirm scheduled
-    // posts land at the channel root (ENG-14117 discoverability).
+    // posts land at the channel root (discoverability).
     detail: showTopLevel ? `${detail}, top-level` : detail,
   };
 }

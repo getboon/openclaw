@@ -168,11 +168,11 @@ function isRecoverableExecClassToolName(toolName: string): boolean {
 }
 
 function shouldMarkNonTerminalToolErrorWarning(lastToolError: ToolErrorSummary): boolean {
-  // A transient middleware failure is non-terminal (ENG-15627 G4).
+  // A transient middleware failure is non-terminal.
   if (lastToolError.middlewareError === true) {
     return true;
   }
-  // ENG-16330: a recovered command-execution error on a turn that still produced a
+  // A recovered command-execution error on a turn that still produced a
   // real reply (the caller gates this on `hasUserFacingAssistantReply`) is
   // non-terminal — reframe the false "⚠️ 🧰 Process: <session> failed" badge into
   // the G4 continuation note instead of a terminal failure banner.
@@ -180,7 +180,7 @@ function shouldMarkNonTerminalToolErrorWarning(lastToolError: ToolErrorSummary):
 }
 
 /**
- * Intermediate-status copy for a NON-TERMINAL tool failure (ENG-15627 G4).
+ * Intermediate-status copy for a NON-TERMINAL tool failure.
  *
  * When a tool errors but the turn kept going — the assistant already produced a
  * reply and prior tools completed — a terminal "⚠️ <tool> failed" banner is the
@@ -620,7 +620,7 @@ export function buildEmbeddedRunPayloads(params: {
       );
       // The same non-terminal decision used for the payload metadata below —
       // computed up front so the visible text can be reframed too, not just the
-      // metadata flag (ENG-15627 G4).
+      // metadata flag.
       const isNonTerminalWarning =
         hasUserFacingAssistantReply && shouldMarkNonTerminalToolErrorWarning(params.lastToolError);
       const errorSuffix =

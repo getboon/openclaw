@@ -1020,7 +1020,7 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
               }
             }
 
-            // Capture turn source context to prevent cross-channel contamination (ENG-14833)
+            // Capture turn source context to prevent cross-channel contamination
             // Check explicitness from the ORIGINAL user-supplied delivery (not post-inference
             // currentDelivery) to avoid skipping capture when inferred targets look explicit.
             if (opts.currentDeliveryContext) {
