@@ -2,6 +2,7 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { formatRawAssistantErrorForUi } from "../agents/embedded-agent-helpers.js";
 import { areRuntimeModelRefsEquivalent } from "../agents/model-runtime-aliases.js";
+import { resolveMessageAudience } from "../config/message-audience.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { FallbackNoticeState } from "../status/fallback-notice-state.js";
 import { formatProviderModelRef } from "./model-runtime.js";
@@ -11,6 +12,15 @@ export {
   resolveActiveFallbackState,
   type FallbackNoticeState,
 } from "../status/fallback-notice-state.js";
+
+// Consumer-audience fallback copy (ENG-16617). When
+// agents.defaults.messaging.audience is "consumer", the notices drop the
+// operator "Model Fallback:" prefix, model slugs, reason word, and attempt
+// counter and read as plain reassurance. The isFallbackNotice payload flag (not
+// this text) drives delivery/suppression/TTS behavior, so wording is free to
+// change. The ↪️ glyph is kept so it still reads as a quiet operational status.
+const CONSUMER_FALLBACK_NOTICE = "↪️ Switched to a backup model to finish your request.";
+const CONSUMER_FALLBACK_CLEARED_NOTICE = "↪️ Back on the primary model.";
 
 const FALLBACK_REASON_PART_MAX = 80;
 const TRANSIENT_FALLBACK_REASONS = new Set([
@@ -106,6 +116,9 @@ export function buildFallbackNotice(params: {
   if (areRuntimeModelRefsEquivalent(selected, active, { config: params.cfg })) {
     return null;
   }
+  if (resolveMessageAudience(params.cfg) === "consumer") {
+    return CONSUMER_FALLBACK_NOTICE;
+  }
   const reasonSummary = buildFallbackReasonSummary(params.attempts);
   return `↪️ Model Fallback: ${active} (selected ${selected}; ${reasonSummary})`;
 }
@@ -115,7 +128,11 @@ export function buildFallbackClearedNotice(params: {
   selectedProvider: string;
   selectedModel: string;
   previousActiveModel?: string;
+  cfg?: OpenClawConfig;
 }): string {
+  if (resolveMessageAudience(params.cfg) === "consumer") {
+    return CONSUMER_FALLBACK_CLEARED_NOTICE;
+  }
   const selected = formatProviderModelRef(params.selectedProvider, params.selectedModel);
   const previous = normalizeOptionalString(params.previousActiveModel);
   if (previous && previous !== selected) {

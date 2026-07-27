@@ -3,6 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  clearRuntimeConfigSnapshot,
+  setRuntimeConfigSnapshot,
+} from "../../config/runtime-snapshot.js";
 import { saveSessionStore, type SessionEntry } from "../../config/sessions.js";
 import { readSessionStoreForTest } from "../../config/sessions/test-helpers.js";
 import type { TypingMode } from "../../config/types.js";
@@ -1595,6 +1599,68 @@ describe("runReplyAgent typing (heartbeat)", () => {
       expect(payloads[1]?.text).toBe("final");
       expect(payloads[1]?.replyToId).toBe("msg");
     } finally {
+      fallbackSpy.mockRestore();
+    }
+  });
+
+  it("renders a plain-language fallback notice under the consumer audience (ENG-16617)", async () => {
+    const sessionEntry: SessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+    };
+    const sessionStore = { main: sessionEntry };
+
+    state.runEmbeddedAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "final" }],
+      meta: {},
+    });
+    const fallbackSpy = vi
+      .spyOn(modelFallbackModule, "runWithModelFallback")
+      .mockImplementationOnce(
+        async ({ run }: { run: (provider: string, model: string) => Promise<unknown> }) => ({
+          outcome: "completed" as const,
+          result: await run("deepinfra", "moonshotai/Kimi-K2.5"),
+          provider: "deepinfra",
+          model: "moonshotai/Kimi-K2.5",
+          attempts: [
+            {
+              provider: "fireworks",
+              model: "fireworks/accounts/fireworks/routers/kimi-k2p5-turbo",
+              error: "Provider fireworks is in cooldown (all profiles unavailable)",
+              reason: "rate_limit",
+            },
+          ],
+        }),
+      );
+    // The queued-reply config resolver reconciles the run config against the
+    // process runtime-config snapshot; pin the snapshot to the same consumer
+    // config so the audience survives resolution (mirrors a consumer deployment).
+    const consumerConfig = {
+      agents: { defaults: { messaging: { audience: "consumer" } } },
+    } as unknown as Parameters<typeof setRuntimeConfigSnapshot>[0];
+    setRuntimeConfigSnapshot(consumerConfig);
+    try {
+      const { run } = createMinimalRun({
+        sessionEntry,
+        sessionStore,
+        sessionKey: "main",
+        runOverrides: { config: consumerConfig },
+      });
+      const res = await run();
+      const payloads = Array.isArray(res) ? res : res ? [res] : [];
+
+      const notice = payloads.find((payload) => payload?.isFallbackNotice);
+      expect(notice?.text).toBe("↪️ Switched to a backup model to finish your request.");
+      // The flag (not the text prefix) drives delivery/suppression, so it must
+      // survive the consumer reword.
+      expect(notice?.isFallbackNotice).toBe(true);
+      // No operator internals leak to the consumer.
+      expect(notice?.text).not.toContain("Model Fallback:");
+      expect(notice?.text).not.toContain("deepinfra");
+      expect(notice?.text).not.toContain("more attempts");
+      expect(payloads.some((payload) => payload?.text === "final")).toBe(true);
+    } finally {
+      clearRuntimeConfigSnapshot();
       fallbackSpy.mockRestore();
     }
   });

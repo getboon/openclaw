@@ -301,6 +301,57 @@ describe("buildEmbeddedRunPayloads", () => {
     expectNoPayloadTextContaining(payloads, "LLM request rejected");
   });
 
+  it("renders plain-language error copy under the consumer audience (ENG-16617)", () => {
+    const rawError =
+      '{"type":"error","error":{"type":"invalid_request_error","message":"SECRET\\nCANARY_69737"}}';
+    const payloads = buildPayloads({
+      config: {
+        agents: { defaults: { messaging: { audience: "consumer" } } },
+      } as unknown as import("../../../config/types.openclaw.js").OpenClawConfig,
+      lastAssistant: makeAssistant({
+        stopReason: "error",
+        errorMessage: rawError,
+        content: [{ type: "text", text: rawError }],
+      }),
+    });
+
+    expect(payloads[0]?.isError).toBe(true);
+    expect(payloads[0]?.text).toContain(
+      "Something went wrong while I was talking to the AI service",
+    );
+    expectNoPayloadTextContaining(payloads, "provider rejected");
+    expectNoPayloadTextContaining(payloads, "SECRET");
+    expectNoPayloadTextContaining(payloads, "CANARY_69737");
+  });
+
+  it("still attaches the top-up card under the consumer audience", () => {
+    const body =
+      '{"error":"allocation_exhausted","message":"Token allocation exhausted. Top up to continue.","top_up_url":"https://app.getboon.ai/billing?open=agent"}';
+    const payloads = buildPayloads({
+      config: {
+        agents: { defaults: { messaging: { audience: "consumer" } } },
+      } as unknown as import("../../../config/types.openclaw.js").OpenClawConfig,
+      assistantTexts: [body],
+      lastAssistant: makeAssistant({ stopReason: "error", errorMessage: body, errorBody: body }),
+    });
+
+    // Token-exhaustion copy + button stay identical for consumers (not routed
+    // into the generic consumer map).
+    expect(payloads[0]?.text).toMatch(/purchase tokens to continue/i);
+    expect(payloads[0]?.presentation?.blocks).toEqual([
+      {
+        type: "buttons",
+        buttons: [
+          {
+            label: "Top up tokens",
+            url: "https://app.getboon.ai/billing?open=agent",
+            style: "primary",
+          },
+        ],
+      },
+    ]);
+  });
+
   it("surfaces OpenAI model capacity errors instead of generic empty-response copy", () => {
     const payloads = buildPayloads({
       lastAssistant: makeAssistant({

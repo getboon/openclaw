@@ -90,6 +90,12 @@ export const AgentDefaultsSchema = z
       })
       .strict()
       .optional(),
+    messaging: z
+      .object({
+        audience: z.union([z.literal("operator"), z.literal("consumer")]).optional(),
+      })
+      .strict()
+      .optional(),
     skipBootstrap: z.boolean().optional(),
     skipOptionalBootstrapFiles: z.array(OptionalBootstrapFileNameSchema).optional(),
     contextInjection: z
