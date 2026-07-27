@@ -2,6 +2,17 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.8
+
+Token-exhaustion top-up/upgrade cards on Slack & Teams, context-overflow recovery that preserves session history, an opt-in consumer-audience messaging mode, and cleanup of tangential tool-error noise after a correct answer.
+
+- **#71:** when a tenant runs out of tokens, Slack and Teams now render an actionable **"Top up tokens" / "Upgrade plan"** button (matching the web agent-chat banner) instead of a plain-text error. Consumes the boon-llm-gateway's HTTP 402 response with a `top_up_url` body for both paid (`allocation_exhausted`) and trial (`trial_budget_exhausted`) exhaustion. `extractTopUpUrl` parses the url http(s)-only and fails safe to a text-only reply on a missing/truncated/non-JSON body; `buildTokenExhaustedPresentation` emits a button-only presentation so the card copy isn't doubled.
+- **#73:** a long Boon Agent session that grows past the model's context window no longer dead-ends telling the user to `/reset` (which dropped the entire session). The embedded runner's context-overflow recovery now bounds the retained recent tail and the aggregate tool-result budget so compaction can actually shrink the prompt below the window, preserving history instead of forcing a choice between staying blocked and losing a day's work.
+- **#74:** new `agents.defaults.messaging.audience: "operator" | "consumer"` toggle. When `"consumer"`, model-fallback notices and LLM-failure copy are rewritten into plain, reassuring language with no provider slugs, failure reasons, or attempt counters; raw detail is still available out-of-band (`FailoverError.rawError`, the lifecycle warn event, the structured `phase: "fallback"` agent event). Default is `"operator"`, so existing/upstream deployments are unchanged on upgrade.
+- **#75:** a correct answer followed by a model-authored trailing housekeeping command (e.g. a `find /` that exits non-zero on permission-denied system dirs) no longer renders a tangential "failed" marker that made a successful reply look broken. Builds on #64's softer non-terminal reframing: the recovered-exec note is suppressed entirely for benign whole-command housekeeping, benign housekeeping exec chains are dropped from the progress card, and workspace guidance steers searches to scoped paths. A reply-less genuine failure still surfaces the honest failed badge.
+- **#76:** stripped 173 internal tracker references across 80 files (comments, JSDoc, test titles, changelog/prose only — no code, config, or assertion changes) and added a policy line to root `AGENTS.md` forbidding them from reappearing.
+- Base = `2026.6.11-boon.7`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` bumped to `2026.6.11-boon.8` in lockstep.
+
 ## 2026.6.11-boon.7
 
 Concise + guided interaction overlay for Claude, proactive long-turn progress nudges, a security dependency refresh, and a recovered-tool-error badge fix.
