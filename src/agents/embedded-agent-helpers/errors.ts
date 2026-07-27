@@ -5,9 +5,11 @@ import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
 } from "@openclaw/normalization-core/string-coerce";
-import { resolveMessageAudience } from "../../config/message-audience.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import type { MessagePresentation, MessagePresentationBlock } from "../../interactive/payload.js";
+import type {
+  MessagePresentation,
+  MessagePresentationBlock,
+} from "../../interactive/payload.js";
 import type { AssistantMessage } from "../../llm/types.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
@@ -81,111 +83,37 @@ const PROVIDER_SCHEMA_REJECTION_USER_TEXT =
   "LLM request failed: provider rejected the request schema or tool payload.";
 const MODEL_NOT_FOUND_USER_TEXT =
   "The selected model was not found by the provider. Check the model id or choose a different model.";
-// boon-llm-gateway allocation exhaustion. Distinct from generic
-// API-key billing copy: a gateway customer authenticates with a single
-// BOON_API_KEY against an org-level allocation, so "switch to a different API
-// key" is meaningless — there is nothing to switch to. Give it dedicated copy.
-// Wording mirrors the web agent-chat TokensExhaustedBanner so the message reads
-// identically across web, Slack, and Teams (paid vs trial split below).
-const ALLOCATION_EXHAUSTED_USER_TEXT =
-  "⚠️ You don't have any active tokens. Purchase tokens to continue using Boon Agent.";
-const TRIAL_EXHAUSTED_USER_TEXT =
-  "⚠️ You've used your full trial. Upgrade to keep chatting with Boon Agent.";
-/** Button label shown on the paid exhaustion card (web parity). */
+// boon-llm-gateway token exhaustion (ENG-15627). Distinct from generic API-key
+// billing copy: a Boon user has no provider API key to "switch" — they run
+// against an org-level allocation — so the generic "switch to a different API
+// key" wording is meaningless and confusing to a non-technical user. Give it
+// dedicated, plain-language copy that mirrors the web agent-chat
+// TokensExhaustedBanner (paid vs trial split below).
+//
+// The copy is built with the billing link embedded INLINE as a markdown link so
+// non-rich surfaces (and any channel where the card button doesn't render) still
+// give the user something to click. Slack (mrkdwn) and Teams (markdown) both
+// render `[label](url)`; plain-text channels show the label + URL. When no URL
+// is available we fall back to link-free text (never a dangling "[click here]").
+// Boon billing page — where a user tops up tokens or upgrades. A static
+// constant (not the gateway's top_up_url) so the link is always present and
+// robust regardless of whether the 402 body threads a URL through. The
+// `open=agent` deep-link matches what the web agent-chat banner uses.
+const BOON_BILLING_URL = "https://app.getboon.ai/billing?open=agent";
 const ALLOCATION_EXHAUSTED_BUTTON_LABEL = "Top up tokens";
-/** Button label shown on the trial exhaustion card (web parity). */
 const TRIAL_EXHAUSTED_BUTTON_LABEL = "Upgrade plan";
 
-// Consumer-audience copy (ENG-16617). When agents.defaults.messaging.audience is
-// "consumer", formatAssistantErrorText returns plain, reassuring copy keyed by
-// the SAME classification the operator path already computes — no second
-// classifier. The raw provider text/reason/attempt detail never reaches these
-// strings; it stays in logs and structured events. Token-exhaustion copy is the
-// deliberate exception (already end-user-grade + button-wired) and is returned
-// above this gate under both audiences.
-type ConsumerCopyCategory =
-  | "auth"
-  | "rate_limit"
-  | "timeout"
-  | "billing"
-  | "context_overflow"
-  | "model_not_found"
-  | "schema"
-  | "generic";
-const CONSUMER_ERROR_COPY: Record<ConsumerCopyCategory, string> = {
-  auth: "I hit a sign-in problem reaching the AI service and couldn't finish that. Please try again in a moment.",
-  rate_limit:
-    "The AI service is busy right now, so I couldn't finish that. Please try again shortly.",
-  timeout:
-    "The AI service took too long to respond, so I couldn't finish that. Please try again in a moment.",
-  billing:
-    "I couldn't complete that because the AI account has hit its usage limit. Please try again later.",
-  context_overflow:
-    "This conversation has grown too long for me to continue in one go. Try starting a new chat or asking for a shorter piece.",
-  model_not_found:
-    "The AI model I tried to use isn't available right now, so I couldn't finish that. Please try again shortly.",
-  schema:
-    "Something went wrong while I was talking to the AI service and I couldn't finish that. Please try again.",
-  generic: "Something went wrong while I was working on that. Please try again in a moment.",
-};
-
-/**
- * Map an already-classified failure to consumer copy. Reuses the operator
- * classifier's `providerRuntimeFailureKind` plus the same predicates the
- * operator branches use — it does not re-match raw text beyond those. Returns a
- * category for every failure (catch-all "generic"), so consumer mode never falls
- * through to raw operator text.
- */
-function resolveConsumerCopyCategory(
-  raw: string,
-  kind: ProviderRuntimeFailureKind,
-  provider: string | undefined,
-): ConsumerCopyCategory {
-  if (
-    kind === "auth_scope" ||
-    kind === "auth_refresh" ||
-    kind === "refresh_timeout" ||
-    kind === "refresh_contention" ||
-    kind === "callback_timeout" ||
-    kind === "callback_validation" ||
-    kind === "auth_html" ||
-    kind === "auth_invalid_token"
-  ) {
-    return "auth";
-  }
-  if (kind === "model_not_found") {
-    return "model_not_found";
-  }
-  if (isContextOverflowError(raw)) {
-    return "context_overflow";
-  }
-  if (kind === "rate_limit") {
-    return "rate_limit";
-  }
-  if (isBilling429MessageForProvider(raw, provider) || isBillingErrorMessage(raw)) {
-    return "billing";
-  }
-  if (
-    kind === "timeout" ||
-    kind === "proxy" ||
-    kind === "upstream_html" ||
-    kind === "dns" ||
-    isTimeoutErrorMessage(raw)
-  ) {
-    return "timeout";
-  }
-  if (kind === "schema" || kind === "replay_invalid") {
-    return "schema";
-  }
-  // The operator path recognizes provider schema/invalid-request rejections here
-  // too (see formatUserFacingAssistantErrorText's parsedErrorType check), so map
-  // them to the same consumer category rather than the generic catch-all.
-  const parsedErrorType = parseApiErrorInfo(raw)?.type?.toLowerCase() ?? "";
-  if (parsedErrorType.includes("invalid_request") || matchesFormatErrorPattern(raw)) {
-    return "schema";
-  }
-  return "generic";
-}
+// Plain-language exhaustion copy for non-technical users, with the billing page
+// linked inline as markdown so EVERY channel gives the user something to click
+// (Slack mrkdwn / Teams markdown render the link; plain-text channels show the
+// label + URL). The rich card button (buildTokenExhaustedPresentation) is an
+// additional affordance on Slack/Teams.
+const ALLOCATION_EXHAUSTED_USER_TEXT =
+  `⚠️ You're out of Boon Agent tokens, so I couldn't finish that. ` +
+  `[Top up your tokens](${BOON_BILLING_URL}) to keep going.`;
+const TRIAL_EXHAUSTED_USER_TEXT =
+  `⚠️ You've used up your free trial, so I couldn't finish that. ` +
+  `[Upgrade your plan](${BOON_BILLING_URL}) to keep chatting with Boon Agent.`;
 
 /** Detect the boon-llm-gateway PAID token-allocation-exhausted signal. */
 export function isAllocationExhaustedErrorMessage(raw: string): boolean {
@@ -205,62 +133,33 @@ export function isTokenExhaustedErrorMessage(raw: string): boolean {
 }
 
 /**
- * Pull `top_up_url` out of the gateway's 402 exhaustion body. The body is the
- * raw JSON string the gateway emitted, e.g.
- * `{"error":"allocation_exhausted",...,"top_up_url":"https://.../billing?open=agent"}`.
- * Returns undefined when the body is absent, unparseable, or carries no URL —
- * callers then render the exhaustion copy without a button (never a broken link).
- * Only http(s) URLs are accepted so a malformed value can't produce a bad button.
- */
-export function extractTopUpUrl(errorBody: string | undefined): string | undefined {
-  if (!errorBody) {
-    return undefined;
-  }
-  try {
-    const parsed: unknown = JSON.parse(errorBody);
-    const url =
-      typeof parsed === "object" && parsed !== null
-        ? (parsed as Record<string, unknown>).top_up_url
-        : undefined;
-    if (typeof url === "string") {
-      // Fully parse (not just a prefix check) so a malformed value like
-      // "https://" or "http://%" can't produce a broken button — it falls
-      // through to the text-only exhaustion reply instead.
-      const parsedUrl = new URL(url.trim());
-      if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") {
-        return parsedUrl.toString();
-      }
-    }
-  } catch {
-    // Non-JSON / truncated body, or an unparseable URL — no reliable URL to
-    // surface; caller renders the text-only exhaustion reply.
-  }
-  return undefined;
-}
-
-/**
- * Build the portable exhaustion card — a single top-up/upgrade URL button — that
- * both the Slack and Teams adapters render natively. Returns undefined when
- * `raw` is not an exhaustion signal OR no valid `top_up_url` is present, so the
- * caller falls through to a plain-text reply (the exhaustion copy still ships as
- * the reply payload's `text`).
+ * Build the portable exhaustion card — a single top-up/upgrade URL button
+ * (pointing at the static Boon billing page) — that both the Slack and Teams
+ * adapters render natively. Returns undefined when neither `raw` nor `errorBody`
+ * is an exhaustion signal, so the caller falls through to a plain-text reply.
  *
  * The card carries NO text block on purpose: the reply payload's `text` already
- * holds the exhaustion copy, and both adapters fold that `text` into the card
- * body (Teams `buildMSTeamsPresentationCard`) / message (Slack blocks + fallback
- * text). Adding a text block here would double the copy inside the Teams card.
+ * holds the exhaustion copy (with the billing link inlined), and both adapters
+ * fold that `text` into the card body (Teams `buildMSTeamsPresentationCard`) /
+ * message (Slack blocks + fallback text). Adding a text block here would double
+ * the copy inside the Teams card. The button is a redundant-but-convenient
+ * second affordance.
  */
 export function buildTokenExhaustedPresentation(
   raw: string,
   errorBody: string | undefined,
 ): MessagePresentation | undefined {
-  const trial = isTrialBudgetExhaustedErrorMessage(raw);
-  const isExhausted = trial || isAllocationExhaustedErrorMessage(raw);
+  // Classify against BOTH the prettified message and the raw body: the gateway
+  // puts the discriminating code under the JSON `error` key, which the
+  // provider-error formatter drops from the message (see formatAssistantErrorText).
+  // The trial message text in particular ("Trial token budget exhausted…") does
+  // not match the trial_budget_exhausted pattern — only the body carries it.
+  const rawBody = (errorBody ?? "").trim();
+  const trial =
+    isTrialBudgetExhaustedErrorMessage(raw) || isTrialBudgetExhaustedErrorMessage(rawBody);
+  const isExhausted =
+    trial || isAllocationExhaustedErrorMessage(raw) || isAllocationExhaustedErrorMessage(rawBody);
   if (!isExhausted) {
-    return undefined;
-  }
-  const topUpUrl = extractTopUpUrl(errorBody);
-  if (!topUpUrl) {
     return undefined;
   }
   const blocks: MessagePresentationBlock[] = [
@@ -269,7 +168,7 @@ export function buildTokenExhaustedPresentation(
       buttons: [
         {
           label: trial ? TRIAL_EXHAUSTED_BUTTON_LABEL : ALLOCATION_EXHAUSTED_BUTTON_LABEL,
-          url: topUpUrl,
+          url: BOON_BILLING_URL,
           style: "primary",
         },
       ],
@@ -1570,18 +1469,6 @@ export function formatAssistantErrorText(
     return diskSpaceCopy;
   }
 
-  // Consumer audience (ENG-16617): return plain-language copy keyed by the same
-  // classification the operator branches below use, so raw provider slugs,
-  // reasons, and attempt counters never reach end users. Sandbox-tool-policy and
-  // disk-space copy above stay under both audiences (already user-appropriate).
-  // Token-exhaustion is excluded here so it falls through to its dedicated
-  // trial/allocation copy + top-up card, which is end-user-grade for both.
-  if (resolveMessageAudience(opts?.cfg) === "consumer" && !isTokenExhaustedErrorMessage(raw)) {
-    return CONSUMER_ERROR_COPY[
-      resolveConsumerCopyCategory(raw, providerRuntimeFailureKind, opts?.provider)
-    ];
-  }
-
   if (providerRuntimeFailureKind === "auth_refresh") {
     return "Authentication refresh failed. Re-authenticate this provider and try again.";
   }
@@ -1654,9 +1541,8 @@ export function formatAssistantErrorText(
 
   if (isContextOverflowError(raw)) {
     return (
-      "Context overflow: this conversation reached the model's context limit. " +
-      "Your history is preserved — try again, run /compact, or continue from a saved " +
-      "checkpoint under Sessions → checkpoints. A larger-context model also helps."
+      "Context overflow: prompt too large for the model. " +
+      "Try /reset (or /new) to start a fresh session, or use a larger-context model."
     );
   }
 
@@ -1701,10 +1587,26 @@ export function formatAssistantErrorText(
   // diverge: trials upgrade, paid tops up. The buttoned card is attached at the
   // reply-payload layer (buildTokenExhaustedPresentation); this is the plain-text
   // fallback for channels/paths that render text only.
-  if (isTrialBudgetExhaustedErrorMessage(raw)) {
+  //
+  // Check errorBody as well as the prettified errorMessage: the gateway sends the
+  // discriminating CODE ("allocation_exhausted" / "trial_budget_exhausted") under
+  // the JSON `error` key, which the provider-error formatter drops from
+  // errorMessage (it surfaces only the human `message`). The paid message text
+  // happens to contain "token allocation exhausted" so it matches on raw too, but
+  // the trial message ("Trial token budget exhausted…") does NOT match the
+  // trial_budget_exhausted pattern — only the raw body carries the code. So the
+  // body is the authoritative signal here.
+  const rawErrorBody = (msg.errorBody ?? "").trim();
+  if (
+    isTrialBudgetExhaustedErrorMessage(raw) ||
+    isTrialBudgetExhaustedErrorMessage(rawErrorBody)
+  ) {
     return TRIAL_EXHAUSTED_USER_TEXT;
   }
-  if (isAllocationExhaustedErrorMessage(raw)) {
+  if (
+    isAllocationExhaustedErrorMessage(raw) ||
+    isAllocationExhaustedErrorMessage(rawErrorBody)
+  ) {
     return ALLOCATION_EXHAUSTED_USER_TEXT;
   }
 
