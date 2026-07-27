@@ -94,57 +94,66 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads.map((payload) => payload.text)).not.toContain(errorJson);
   });
 
-  // Token-exhaustion replies carry plain-language copy with an inline billing
-  // link AND a rich-card button (static Boon billing URL). The gateway 402 code
-  // (allocation_exhausted / trial_budget_exhausted) lands in errorBody; the
-  // prettified errorMessage carries only the human message (no code), so
-  // recognition must key on the body — reproducing the live-tested trial gap.
-  const BILLING_URL = "https://app.getboon.ai/billing?open=agent";
-  const PAID_BUTTON = {
-    type: "buttons" as const,
-    buttons: [{ label: "Top up tokens", url: BILLING_URL, style: "primary" }],
-  };
-  const UPGRADE_BUTTON = {
-    type: "buttons" as const,
-    buttons: [{ label: "Upgrade plan", url: BILLING_URL, style: "primary" }],
-  };
-
-  it("PAID exhaustion: inline top-up link in text + button (recognized from errorBody code)", () => {
-    const errorBody =
-      '{"error":"allocation_exhausted","message":"Token allocation exhausted. Top up to continue."}';
+  it("attaches a top-up URL button to a paid token-exhaustion error reply", () => {
+    const body =
+      '{"error":"allocation_exhausted","message":"Token allocation exhausted. Top up to continue.","top_up_url":"https://app.getboon.ai/billing?open=agent"}';
     const payloads = buildPayloads({
-      assistantTexts: ["boon-llm-gateway (402): Token allocation exhausted. Top up to continue."],
-      lastAssistant: makeAssistant({
-        stopReason: "error",
-        errorMessage: "boon-llm-gateway (402): Token allocation exhausted. Top up to continue.",
-        errorBody,
-      }),
+      assistantTexts: [body],
+      lastAssistant: makeAssistant({ stopReason: "error", errorMessage: body, errorBody: body }),
     });
 
     expect(payloads[0]?.isError).toBe(true);
-    expect(payloads[0]?.text).toContain(`[Top up your tokens](${BILLING_URL})`);
-    expect(payloads[0]?.text).not.toMatch(/switch to a different api key/i);
-    // Button-only presentation (text already carries the copy + link).
-    expect(payloads[0]?.presentation?.blocks).toEqual([PAID_BUTTON]);
+    expect(payloads[0]?.text).toMatch(/out of Boon Agent tokens/i);
+    // Assert the ENTIRE blocks array (not just contains) so the button-only
+    // contract is enforced: a stray text block — which would double the copy
+    // inside the Teams card — fails this test.
+    expect(payloads[0]?.presentation?.blocks).toEqual([
+      {
+        type: "buttons",
+        buttons: [
+          {
+            label: "Top up tokens",
+            url: "https://app.getboon.ai/billing?open=agent",
+            style: "primary",
+          },
+        ],
+      },
+    ]);
   });
 
-  it("TRIAL exhaustion: inline upgrade link in text + button (message text alone would NOT match)", () => {
-    // "Trial token budget exhausted; upgrade to continue." does NOT match
-    // /trial[_ ]budget[_ ]exhausted/ (the word "token" is between "Trial" and
-    // "budget"), so recognition MUST come from the errorBody code.
-    const errorBody =
-      '{"error":"trial_budget_exhausted","message":"Trial token budget exhausted; upgrade to continue.","granted":500000,"used":500000}';
+  it("renders a trial exhaustion reply with an 'Upgrade plan' button", () => {
+    const body =
+      '{"error":"trial_budget_exhausted","message":"Trial token budget exhausted; upgrade to continue.","top_up_url":"https://app.getboon.ai/billing?open=agent","granted":500000,"used":500000}';
     const payloads = buildPayloads({
-      assistantTexts: ["boon-llm-gateway (402): Trial token budget exhausted; upgrade to continue."],
-      lastAssistant: makeAssistant({
-        stopReason: "error",
-        errorMessage: "boon-llm-gateway (402): Trial token budget exhausted; upgrade to continue.",
-        errorBody,
-      }),
+      assistantTexts: [body],
+      lastAssistant: makeAssistant({ stopReason: "error", errorMessage: body, errorBody: body }),
     });
 
-    expect(payloads[0]?.text).toContain(`[Upgrade your plan](${BILLING_URL})`);
-    expect(payloads[0]?.presentation?.blocks).toEqual([UPGRADE_BUTTON]);
+    expect(payloads[0]?.text).toMatch(/used up your free trial/i);
+    // Verify the full button object — the upgrade button must carry the
+    // gateway-supplied URL so trial exhaustion stays actionable.
+    const buttons = payloads[0]?.presentation?.blocks.find((b) => b.type === "buttons");
+    expect(buttons).toEqual({
+      type: "buttons",
+      buttons: [
+        {
+          label: "Upgrade plan",
+          url: "https://app.getboon.ai/billing?open=agent",
+          style: "primary",
+        },
+      ],
+    });
+  });
+
+  it("omits the button (text-only) when the exhaustion body carries no top_up_url", () => {
+    const body = '{"error":"allocation_exhausted","message":"Token allocation exhausted."}';
+    const payloads = buildPayloads({
+      assistantTexts: [body],
+      lastAssistant: makeAssistant({ stopReason: "error", errorMessage: body, errorBody: body }),
+    });
+
+    expect(payloads[0]?.text).toMatch(/out of Boon Agent tokens/i);
+    expect(payloads[0]?.presentation).toBeUndefined();
   });
 
   it("suppresses mutating tool warnings when an assistant error reply already covers the turn", () => {
@@ -290,6 +299,57 @@ describe("buildEmbeddedRunPayloads", () => {
     expectNoPayloadTextContaining(payloads, "SECRET");
     expectNoPayloadTextContaining(payloads, "CANARY_69737");
     expectNoPayloadTextContaining(payloads, "LLM request rejected");
+  });
+
+  it("renders plain-language error copy under the consumer audience (ENG-16617)", () => {
+    const rawError =
+      '{"type":"error","error":{"type":"invalid_request_error","message":"SECRET\\nCANARY_69737"}}';
+    const payloads = buildPayloads({
+      config: {
+        agents: { defaults: { messaging: { audience: "consumer" } } },
+      } as unknown as import("../../../config/types.openclaw.js").OpenClawConfig,
+      lastAssistant: makeAssistant({
+        stopReason: "error",
+        errorMessage: rawError,
+        content: [{ type: "text", text: rawError }],
+      }),
+    });
+
+    expect(payloads[0]?.isError).toBe(true);
+    expect(payloads[0]?.text).toContain(
+      "Something went wrong while I was talking to the AI service",
+    );
+    expectNoPayloadTextContaining(payloads, "provider rejected");
+    expectNoPayloadTextContaining(payloads, "SECRET");
+    expectNoPayloadTextContaining(payloads, "CANARY_69737");
+  });
+
+  it("still attaches the top-up card under the consumer audience", () => {
+    const body =
+      '{"error":"allocation_exhausted","message":"Token allocation exhausted. Top up to continue.","top_up_url":"https://app.getboon.ai/billing?open=agent"}';
+    const payloads = buildPayloads({
+      config: {
+        agents: { defaults: { messaging: { audience: "consumer" } } },
+      } as unknown as import("../../../config/types.openclaw.js").OpenClawConfig,
+      assistantTexts: [body],
+      lastAssistant: makeAssistant({ stopReason: "error", errorMessage: body, errorBody: body }),
+    });
+
+    // Token-exhaustion copy + button stay identical for consumers (not routed
+    // into the generic consumer map).
+    expect(payloads[0]?.text).toMatch(/out of Boon Agent tokens/i);
+    expect(payloads[0]?.presentation?.blocks).toEqual([
+      {
+        type: "buttons",
+        buttons: [
+          {
+            label: "Top up tokens",
+            url: "https://app.getboon.ai/billing?open=agent",
+            style: "primary",
+          },
+        ],
+      },
+    ]);
   });
 
   it("surfaces OpenAI model capacity errors instead of generic empty-response copy", () => {
@@ -676,11 +736,11 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads[1]?.text).toContain("Write");
   });
 
-  it("reframes a recovered exec timeout on a successful turn as an intermediate status (ENG-16330)", () => {
+  it("reframes a recovered exec timeout on a successful turn as an intermediate status", () => {
     // A recovered exec/bash/process error on a turn that still produced a
     // real reply is non-terminal — the deliverable is the answer, not the command
     // call. Reframe the false "⚠️ Exec failed" badge into the G4 continuation note
-    // (previously this surfaced a terminal warning; ENG-16330 corrects that).
+    // (previously this surfaced a terminal warning).
     const payloads = buildPayloads({
       assistantTexts: ["The script is ready."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -700,7 +760,7 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text).toMatch(/kept going|continu|proceed/i);
   });
 
-  it("reframes a recovered exec error as an intermediate status when the turn claims success (ENG-16330)", () => {
+  it("reframes a recovered exec error as an intermediate status when the turn claims success", () => {
     const payloads = buildPayloads({
       assistantTexts: ["The script is ready to use and saved in your workspace."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -718,6 +778,63 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text).not.toContain("failed");
     expect(warning?.text).not.toContain("python: command not found");
     expect(warning?.text).toMatch(/kept going|continu|proceed/i);
+  });
+
+  it("suppresses the recovered-exec note entirely when the failing step was benign housekeeping (ENG-16318)", () => {
+    // The customer symptom: a correct triage answer followed by a trailing
+    // `find /` that exited non-zero on permission-denied. The failing step is
+    // bookkeeping, not the task — so no ⚠️ badge AND no "↻ kept going" note.
+    const payloads = buildPayloads({
+      assistantTexts: ["Here is the discipline-by-discipline breakdown of the permit set."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      lastToolError: {
+        toolName: "exec",
+        error: "find: '/proc': Permission denied",
+        benignHousekeepingError: true,
+      },
+    });
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.text).toBe(
+      "Here is the discipline-by-discipline breakdown of the permit set.",
+    );
+    expect(payloads[0]?.isError).toBeFalsy();
+  });
+
+  it("keeps the recovered-exec note when the failing step was NOT benign housekeeping (ENG-16318)", () => {
+    // A recovered exec whose failing tail was real work (not read-only) still
+    // gets the ENG-16330 "↻ kept going" note — only benign housekeeping is silent.
+    const payloads = buildPayloads({
+      assistantTexts: ["The build script is ready."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      lastToolError: {
+        toolName: "exec",
+        error: "python: command not found",
+      },
+    });
+
+    expect(payloads).toHaveLength(2);
+    const warning = payloads[1];
+    expect(getReplyPayloadMetadata(warning as object)?.nonTerminalToolErrorWarning).toBe(true);
+    expect(warning?.text).toMatch(/kept going|continu|proceed/i);
+  });
+
+  it("still flushes a terminal badge for a benign-housekeeping exec error when NO reply exists (ENG-16318 guard)", () => {
+    // No user-facing reply → the turn did not recover into a real answer, so the
+    // honest terminal badge must still surface even for read-only housekeeping.
+    const payloads = buildPayloads({
+      lastToolError: {
+        toolName: "exec",
+        error: "find: '/proc': Permission denied",
+        benignHousekeepingError: true,
+      },
+      verboseLevel: "full",
+    });
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.isError).toBe(true);
+    expect(payloads[0]?.text).toContain("⚠️");
+    expect(payloads[0]?.text).toContain("failed");
   });
 
   it("shows mutating tool errors when assistant output does not acknowledge the failure", () => {
@@ -826,7 +943,7 @@ describe("buildEmbeddedRunPayloads", () => {
     expectSinglePayloadSummary(payloads, { text: warningText ?? "" });
   });
 
-  it("reframes a NON-TERMINAL tool failure as an intermediate status, not '⚠️ … failed' (ENG-15627 G4)", () => {
+  it("reframes a NON-TERMINAL tool failure as an intermediate status, not '⚠️ … failed'", () => {
     // A middleware (transient) message-tool failure AFTER the assistant already
     // produced a reply and prior tools completed is non-terminal — core marks
     // it nonTerminalToolErrorWarning=true. Rendering "⚠️ ✉️ Message failed" is
@@ -948,7 +1065,7 @@ describe("buildEmbeddedRunPayloads", () => {
     });
   });
 
-  it("reframes a recovered bg-process non-zero exit as an intermediate status, not '⚠️ Process failed' (ENG-16330)", () => {
+  it("reframes a recovered bg-process non-zero exit as an intermediate status, not '⚠️ Process failed'", () => {
     // The gandalf `salty-shore` case: a backgrounded process session exits
     // non-zero, the agent RECOVERS (produces a real final reply), the turn
     // succeeds — yet core rendered "⚠️ 🧰 Process: salty-shore failed", giving the
@@ -981,7 +1098,7 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text).toMatch(/kept going|continu|proceed/i);
   });
 
-  it("reframes a recovered exec non-zero exit as an intermediate status on a successful turn (ENG-16330)", () => {
+  it("reframes a recovered exec non-zero exit as an intermediate status on a successful turn", () => {
     const payloads = buildPayloads({
       assistantTexts: ["The script is ready to use and saved in your workspace."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -1002,7 +1119,7 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text).toMatch(/kept going|continu|proceed/i);
   });
 
-  it("still flushes a terminal '⚠️ … failed' badge for a recovered tool when the turn produced NO reply (ENG-16330 regression guard)", () => {
+  it("still flushes a terminal '⚠️ … failed' badge for a recovered tool when the turn produced NO reply (regression guard)", () => {
     // No user-facing reply → the turn did not recover into a real answer, so the
     // honest terminal badge must still surface (no #53/#47/#48/#50 regression).
     const payloads = buildPayloads({

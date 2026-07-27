@@ -24,6 +24,7 @@ export {
   formatAssistantErrorText,
   formatUserFacingAssistantErrorText,
   buildTokenExhaustedPresentation,
+  extractTopUpUrl,
   isAllocationExhaustedErrorMessage,
   isTrialBudgetExhaustedErrorMessage,
   isTokenExhaustedErrorMessage,
