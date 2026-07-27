@@ -74,7 +74,7 @@ const CODE_COPY: Record<GatewayFailureCode, string> = {
   model_login_expired:
     "The model login for this agent has expired. An operator needs to re-authenticate it.",
   token_allocation_exhausted:
-    "You don't have any active tokens. Purchase tokens to continue using Boon Agent.",
+    "You're out of Boon Agent tokens. [Top up your tokens](https://app.getboon.ai/billing?open=agent) to keep going.",
   model_context_length_exceeded:
     "That request is too large for the model's context window. Start a fresh session or shorten the input.",
   provider_rate_limit_shared:
