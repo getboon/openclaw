@@ -78,6 +78,7 @@ import {
 import { inferToolMetaFromArgs } from "./embedded-agent-utils.js";
 import { parseExecApprovalResultText } from "./exec-approval-result.js";
 import type { AgentEvent } from "./runtime/index.js";
+import { isBenignHousekeepingShellCommand } from "./tool-display-exec-shell.js";
 import { buildToolMutationState, isSameToolMutationAction } from "./tool-mutation.js";
 import { normalizeToolName } from "./tool-policy.js";
 import { readToolResultDetails } from "./tool-result-error.js";
@@ -1194,6 +1195,14 @@ export async function handleToolExecutionEnd(
   if (isToolError) {
     const errorMessage = extractToolErrorMessage(sanitizedResult);
     const errorCode = extractToolErrorCode(sanitizedResult);
+    // For exec/bash, flag an error whose command was entirely benign
+    // housekeeping (scratch setup + inspection like `mkdir … && find /`). The
+    // reply builder uses this to drop a false failure note when the task itself
+    // succeeded (ENG-16318). Shell-string parse only, so gate on exec.
+    const benignHousekeepingError =
+      isExecToolName(toolName) &&
+      typeof startArgs.command === "string" &&
+      isBenignHousekeepingShellCommand(startArgs.command);
     ctx.state.lastToolError = {
       toolName,
       meta,
@@ -1204,6 +1213,7 @@ export async function handleToolExecutionEnd(
       mutatingAction: attemptedMutatingAction,
       actionFingerprint: attemptedMutatingAction ? callSummary.actionFingerprint : undefined,
       fileTarget: attemptedMutatingAction ? callSummary.fileTarget : undefined,
+      ...(benignHousekeepingError ? { benignHousekeepingError: true } : {}),
     };
   } else if (ctx.state.lastToolError) {
     // Keep unresolved mutating failures until the same action succeeds.

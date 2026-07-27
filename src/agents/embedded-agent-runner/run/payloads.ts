@@ -623,6 +623,13 @@ export function buildEmbeddedRunPayloads(params: {
       // metadata flag.
       const isNonTerminalWarning =
         hasUserFacingAssistantReply && shouldMarkNonTerminalToolErrorWarning(params.lastToolError);
+      // ENG-16318: when a real answer was delivered and the exec command that
+      // errored was entirely benign housekeeping (e.g. `mkdir … && find /` that
+      // hit permission-denied noise), append nothing — not even the "↻ kept
+      // going" note. A correct triage should not carry a tangential failure
+      // marker. Commands that also ran real work still keep the note (below).
+      const suppressBenignHousekeepingNote =
+        isNonTerminalWarning && params.lastToolError.benignHousekeepingError === true;
       const errorSuffix =
         warningPolicy.includeDetails && params.lastToolError.error
           ? `: ${params.lastToolError.error}`
@@ -655,7 +662,7 @@ export function buildEmbeddedRunPayloads(params: {
             return normalizedExisting.length > 0 && normalizedExisting === normalizedWarning;
           })
         : false;
-      if (!duplicateWarning) {
+      if (!duplicateWarning && !suppressBenignHousekeepingNote) {
         replyItems.push({
           text: warningText,
           isError: true,
