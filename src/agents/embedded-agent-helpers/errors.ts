@@ -213,63 +213,56 @@ export function isTokenExhaustedErrorMessage(raw: string): boolean {
   return isAllocationExhaustedErrorMessage(raw) || isTrialBudgetExhaustedErrorMessage(raw);
 }
 
-/**
- * Pull `top_up_url` out of the gateway's 402 exhaustion body. The body is the
- * raw JSON string the gateway emitted, e.g.
- * `{"error":"allocation_exhausted",...,"top_up_url":"https://.../billing?open=agent"}`.
- * Returns undefined when the body is absent, unparseable, or carries no URL —
- * callers then render the exhaustion copy without a button (never a broken link).
- * Only http(s) URLs are accepted so a malformed value can't produce a bad button.
- */
-export function extractTopUpUrl(errorBody: string | undefined): string | undefined {
-  if (!errorBody) {
-    return undefined;
-  }
-  try {
-    const parsed: unknown = JSON.parse(errorBody);
-    const url =
-      typeof parsed === "object" && parsed !== null
-        ? (parsed as Record<string, unknown>).top_up_url
-        : undefined;
-    if (typeof url === "string") {
-      // Fully parse (not just a prefix check) so a malformed value like
-      // "https://" or "http://%" can't produce a broken button — it falls
-      // through to the text-only exhaustion reply instead.
-      const parsedUrl = new URL(url.trim());
-      if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") {
-        return parsedUrl.toString();
-      }
-    }
-  } catch {
-    // Non-JSON / truncated body, or an unparseable URL — no reliable URL to
-    // surface; caller renders the text-only exhaustion reply.
-  }
-  return undefined;
+// The gateway puts the discriminating CODE ("allocation_exhausted" /
+// "trial_budget_exhausted") under the 402 body's `error` key, which the
+// provider-error formatter drops from `errorMessage` (it surfaces only the human
+// `message`). The paid message text happens to contain "token allocation
+// exhausted" so it matches on the prettified message too, but the TRIAL message
+// ("Trial token budget exhausted…") does NOT — only the raw body carries the
+// code. So every exhaustion classification must check BOTH the prettified
+// message and the raw error body. These helpers centralize that.
+function isTrialBudgetExhausted(raw: string, errorBody?: string): boolean {
+  return (
+    isTrialBudgetExhaustedErrorMessage(raw) ||
+    isTrialBudgetExhaustedErrorMessage((errorBody ?? "").trim())
+  );
+}
+function isAllocationExhausted(raw: string, errorBody?: string): boolean {
+  return (
+    isAllocationExhaustedErrorMessage(raw) ||
+    isAllocationExhaustedErrorMessage((errorBody ?? "").trim())
+  );
+}
+function isTokenExhausted(raw: string, errorBody?: string): boolean {
+  return isAllocationExhausted(raw, errorBody) || isTrialBudgetExhausted(raw, errorBody);
 }
 
+
 /**
- * Build the portable exhaustion card — a single top-up/upgrade URL button — that
- * both the Slack and Teams adapters render natively. Returns undefined when
- * `raw` is not an exhaustion signal OR no valid `top_up_url` is present, so the
- * caller falls through to a plain-text reply (the exhaustion copy still ships as
- * the reply payload's `text`).
+ * Build the portable exhaustion card — a single top-up/upgrade URL button
+ * (pointing at the static Boon billing page) — that both the Slack and Teams
+ * adapters render natively. Returns undefined when neither `raw` nor `errorBody`
+ * is an exhaustion signal, so the caller falls through to a plain-text reply.
+ *
+ * Classifies against BOTH `raw` and `errorBody` (the gateway's code lives only in
+ * the body for trials — see isTrialBudgetExhausted). Uses the static
+ * BOON_BILLING_URL rather than the gateway's top_up_url so the button is always
+ * present and robust.
  *
  * The card carries NO text block on purpose: the reply payload's `text` already
- * holds the exhaustion copy, and both adapters fold that `text` into the card
- * body (Teams `buildMSTeamsPresentationCard`) / message (Slack blocks + fallback
- * text). Adding a text block here would double the copy inside the Teams card.
+ * holds the exhaustion copy (with the billing link inlined), and both adapters
+ * fold that `text` into the card body (Teams `buildMSTeamsPresentationCard`) /
+ * message (Slack blocks + fallback text). Adding a text block here would double
+ * the copy inside the Teams card. The button is a redundant-but-convenient
+ * second affordance.
  */
 export function buildTokenExhaustedPresentation(
   raw: string,
   errorBody: string | undefined,
 ): MessagePresentation | undefined {
-  const trial = isTrialBudgetExhaustedErrorMessage(raw);
-  const isExhausted = trial || isAllocationExhaustedErrorMessage(raw);
+  const trial = isTrialBudgetExhausted(raw, errorBody);
+  const isExhausted = trial || isAllocationExhausted(raw, errorBody);
   if (!isExhausted) {
-    return undefined;
-  }
-  const topUpUrl = extractTopUpUrl(errorBody);
-  if (!topUpUrl) {
     return undefined;
   }
   const blocks: MessagePresentationBlock[] = [
@@ -278,7 +271,7 @@ export function buildTokenExhaustedPresentation(
       buttons: [
         {
           label: trial ? TRIAL_EXHAUSTED_BUTTON_LABEL : ALLOCATION_EXHAUSTED_BUTTON_LABEL,
-          url: topUpUrl,
+          url: BOON_BILLING_URL,
           style: "primary",
         },
       ],
@@ -1585,7 +1578,7 @@ export function formatAssistantErrorText(
   // disk-space copy above stay under both audiences (already user-appropriate).
   // Token-exhaustion is excluded here so it falls through to its dedicated
   // trial/allocation copy + top-up card, which is end-user-grade for both.
-  if (resolveMessageAudience(opts?.cfg) === "consumer" && !isTokenExhaustedErrorMessage(raw)) {
+  if (resolveMessageAudience(opts?.cfg) === "consumer" && !isTokenExhausted(raw, msg.errorBody)) {
     return CONSUMER_ERROR_COPY[
       resolveConsumerCopyCategory(raw, providerRuntimeFailureKind, opts?.provider)
     ];
@@ -1710,10 +1703,10 @@ export function formatAssistantErrorText(
   // diverge: trials upgrade, paid tops up. The buttoned card is attached at the
   // reply-payload layer (buildTokenExhaustedPresentation); this is the plain-text
   // fallback for channels/paths that render text only.
-  if (isTrialBudgetExhaustedErrorMessage(raw)) {
+  if (isTrialBudgetExhausted(raw, msg.errorBody)) {
     return TRIAL_EXHAUSTED_USER_TEXT;
   }
-  if (isAllocationExhaustedErrorMessage(raw)) {
+  if (isAllocationExhausted(raw, msg.errorBody)) {
     return ALLOCATION_EXHAUSTED_USER_TEXT;
   }
 

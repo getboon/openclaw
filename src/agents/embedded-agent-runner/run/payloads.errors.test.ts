@@ -94,66 +94,52 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads.map((payload) => payload.text)).not.toContain(errorJson);
   });
 
-  it("attaches a top-up URL button to a paid token-exhaustion error reply", () => {
-    const body =
-      '{"error":"allocation_exhausted","message":"Token allocation exhausted. Top up to continue.","top_up_url":"https://app.getboon.ai/billing?open=agent"}';
+  // Token-exhaustion replies carry plain-language copy with an inline billing
+  // link AND a rich-card button (static Boon billing URL). The gateway 402 code
+  // (allocation_exhausted / trial_budget_exhausted) lands in errorBody; the
+  // prettified errorMessage carries only the human message (no code), so
+  // recognition must key on the body — reproducing the live-tested trial gap.
+  const BILLING_URL = "https://app.getboon.ai/billing?open=agent";
+
+  it("PAID exhaustion: inline top-up link in text + button (recognized from errorBody code)", () => {
+    const errorBody =
+      '{"error":"allocation_exhausted","message":"Token allocation exhausted. Top up to continue."}';
     const payloads = buildPayloads({
-      assistantTexts: [body],
-      lastAssistant: makeAssistant({ stopReason: "error", errorMessage: body, errorBody: body }),
+      assistantTexts: ["boon-llm-gateway (402): Token allocation exhausted. Top up to continue."],
+      lastAssistant: makeAssistant({
+        stopReason: "error",
+        errorMessage: "boon-llm-gateway (402): Token allocation exhausted. Top up to continue.",
+        errorBody,
+      }),
     });
 
     expect(payloads[0]?.isError).toBe(true);
-    expect(payloads[0]?.text).toMatch(/out of Boon Agent tokens/i);
-    // Assert the ENTIRE blocks array (not just contains) so the button-only
-    // contract is enforced: a stray text block — which would double the copy
-    // inside the Teams card — fails this test.
+    expect(payloads[0]?.text).toContain(`[Top up your tokens](${BILLING_URL})`);
+    expect(payloads[0]?.text).not.toMatch(/switch to a different api key/i);
     expect(payloads[0]?.presentation?.blocks).toEqual([
-      {
-        type: "buttons",
-        buttons: [
-          {
-            label: "Top up tokens",
-            url: "https://app.getboon.ai/billing?open=agent",
-            style: "primary",
-          },
-        ],
-      },
+      { type: "buttons", buttons: [{ label: "Top up tokens", url: BILLING_URL, style: "primary" }] },
     ]);
   });
 
-  it("renders a trial exhaustion reply with an 'Upgrade plan' button", () => {
-    const body =
-      '{"error":"trial_budget_exhausted","message":"Trial token budget exhausted; upgrade to continue.","top_up_url":"https://app.getboon.ai/billing?open=agent","granted":500000,"used":500000}';
+  it("TRIAL exhaustion: inline upgrade link in text + button (message text alone would NOT match)", () => {
+    // "Trial token budget exhausted; upgrade to continue." does NOT match
+    // /trial[_ ]budget[_ ]exhausted/ (the word "token" is between "Trial" and
+    // "budget"), so recognition MUST come from the errorBody code.
+    const errorBody =
+      '{"error":"trial_budget_exhausted","message":"Trial token budget exhausted; upgrade to continue.","granted":500000,"used":500000}';
     const payloads = buildPayloads({
-      assistantTexts: [body],
-      lastAssistant: makeAssistant({ stopReason: "error", errorMessage: body, errorBody: body }),
+      assistantTexts: ["boon-llm-gateway (402): Trial token budget exhausted; upgrade to continue."],
+      lastAssistant: makeAssistant({
+        stopReason: "error",
+        errorMessage: "boon-llm-gateway (402): Trial token budget exhausted; upgrade to continue.",
+        errorBody,
+      }),
     });
 
-    expect(payloads[0]?.text).toMatch(/used up your free trial/i);
-    // Verify the full button object — the upgrade button must carry the
-    // gateway-supplied URL so trial exhaustion stays actionable.
-    const buttons = payloads[0]?.presentation?.blocks.find((b) => b.type === "buttons");
-    expect(buttons).toEqual({
-      type: "buttons",
-      buttons: [
-        {
-          label: "Upgrade plan",
-          url: "https://app.getboon.ai/billing?open=agent",
-          style: "primary",
-        },
-      ],
-    });
-  });
-
-  it("omits the button (text-only) when the exhaustion body carries no top_up_url", () => {
-    const body = '{"error":"allocation_exhausted","message":"Token allocation exhausted."}';
-    const payloads = buildPayloads({
-      assistantTexts: [body],
-      lastAssistant: makeAssistant({ stopReason: "error", errorMessage: body, errorBody: body }),
-    });
-
-    expect(payloads[0]?.text).toMatch(/out of Boon Agent tokens/i);
-    expect(payloads[0]?.presentation).toBeUndefined();
+    expect(payloads[0]?.text).toContain(`[Upgrade your plan](${BILLING_URL})`);
+    expect(payloads[0]?.presentation?.blocks).toEqual([
+      { type: "buttons", buttons: [{ label: "Upgrade plan", url: BILLING_URL, style: "primary" }] },
+    ]);
   });
 
   it("suppresses mutating tool warnings when an assistant error reply already covers the turn", () => {
