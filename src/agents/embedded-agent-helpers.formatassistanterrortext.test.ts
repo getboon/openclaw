@@ -5,7 +5,6 @@ import { MALFORMED_STREAMING_FRAGMENT_ERROR_MESSAGE } from "../shared/assistant-
 import {
   BILLING_ERROR_USER_MESSAGE,
   buildTokenExhaustedPresentation,
-  extractTopUpUrl,
   formatBillingErrorMessage,
   formatAssistantErrorText,
   formatUserFacingAssistantErrorText,
@@ -721,17 +720,20 @@ describe("boon-llm-gateway allocation_exhausted (ENG-15627 G1)", () => {
       content: [{ type: "text", text: errorMessage }],
     });
 
-  it("returns dedicated allocation copy, not the generic API-key billing wording", () => {
+  const BILLING_URL = "https://app.getboon.ai/billing?open=agent";
+
+  it("returns dedicated allocation copy with an inline billing link, not API-key wording", () => {
     const msg = makeAllocationError(GATEWAY_ALLOCATION_EXHAUSTED_BODY);
     const out = formatAssistantErrorText(msg, { provider: "boon-llm-gateway" });
     // Never the raw JSON or the generic fallback.
     expect(out).toBeDefined();
     expect(out).not.toContain("allocation_exhausted");
     expect(out).not.toBe("LLM request failed.");
-    // A boon-llm-gateway customer has ONE BOON_API_KEY and an org-level
-    // allocation — there is no other API key to "switch" to, so the generic
-    // billing copy is misleading here. Copy mirrors the web TokensExhaustedBanner.
-    expect(out).toMatch(/purchase tokens to continue/i);
+    // Plain-language, non-technical copy with a clickable billing link — a Boon
+    // user has no provider API key to "switch", so the generic billing copy is
+    // both misleading and unactionable.
+    expect(out).toMatch(/out of Boon Agent tokens/i);
+    expect(out).toContain(`[Top up your tokens](${BILLING_URL})`);
     expect(out).not.toMatch(/switch to a different api key/i);
   });
 
@@ -739,9 +741,9 @@ describe("boon-llm-gateway allocation_exhausted (ENG-15627 G1)", () => {
     const msg = makeAllocationError(GATEWAY_ALLOCATION_EXHAUSTED_BODY);
     const out = formatUserFacingAssistantErrorText(msg, { provider: "boon-llm-gateway" });
     expect(out).not.toContain("allocation_exhausted");
-    expect(out).not.toContain("{");
+    expect(out).not.toContain('{"error"');
     expect(out).not.toBe("LLM request failed.");
-    expect(out).toMatch(/purchase tokens to continue/i);
+    expect(out).toContain(`[Top up your tokens](${BILLING_URL})`);
   });
 
   // Trial sibling of allocation_exhausted: the gateway returns this 402 body when
@@ -749,41 +751,38 @@ describe("boon-llm-gateway allocation_exhausted (ENG-15627 G1)", () => {
   const GATEWAY_TRIAL_EXHAUSTED_BODY =
     '{"error":"trial_budget_exhausted","message":"Trial token budget exhausted; upgrade to continue.","granted":500000,"used":500000}';
 
-  it("recognizes trial_budget_exhausted and returns trial-upgrade copy", () => {
+  it("recognizes trial_budget_exhausted and returns trial-upgrade copy with a link", () => {
     expect(isTrialBudgetExhaustedErrorMessage(GATEWAY_TRIAL_EXHAUSTED_BODY)).toBe(true);
     const msg = makeAllocationError(GATEWAY_TRIAL_EXHAUSTED_BODY);
     const out = formatAssistantErrorText(msg, { provider: "boon-llm-gateway" });
     expect(out).toBeDefined();
     expect(out).not.toContain("trial_budget_exhausted");
-    expect(out).toMatch(/used your full trial/i);
-    expect(out).toMatch(/upgrade/i);
-  });
-});
-
-describe("extractTopUpUrl", () => {
-  it("pulls both http and https top_up_url out of the gateway 402 body", () => {
-    for (const scheme of ["http", "https"]) {
-      const url = `${scheme}://app.getboon.ai/billing?open=agent`;
-      const body = `{"error":"allocation_exhausted","top_up_url":"${url}"}`;
-      expect(extractTopUpUrl(body)).toBe(url);
-    }
+    expect(out).toMatch(/used up your free trial/i);
+    expect(out).toContain(`[Upgrade your plan](${BILLING_URL})`);
   });
 
-  it("returns undefined for a missing body, missing field, or non-http value", () => {
-    expect(extractTopUpUrl(undefined)).toBeUndefined();
-    expect(extractTopUpUrl('{"error":"allocation_exhausted"}')).toBeUndefined();
-    expect(extractTopUpUrl('{"top_up_url":"javascript:alert(1)"}')).toBeUndefined();
-    // Malformed URL that passes a naive prefix check but is not a valid URL.
-    expect(extractTopUpUrl('{"top_up_url":"https://"}')).toBeUndefined();
-    expect(extractTopUpUrl("not json")).toBeUndefined();
+  // Production field split: the gateway code lands in errorBody, while the
+  // prettified errorMessage carries only the human `message` (no code). The
+  // trial message text does NOT match the trial_budget_exhausted pattern, so
+  // recognition MUST come from the body — this reproduces the live-tested bug.
+  it("recognizes TRIAL exhaustion from the errorBody code when the message text alone would not", () => {
+    const msg = makeAssistantMessageFixture({
+      stopReason: "error",
+      errorMessage: "boon-llm-gateway (402): Trial token budget exhausted; upgrade to continue.",
+      errorBody: GATEWAY_TRIAL_EXHAUSTED_BODY,
+      content: [],
+    });
+    const out = formatAssistantErrorText(msg, { provider: "boon-llm-gateway" });
+    expect(out).toMatch(/used up your free trial/i);
+    expect(out).toContain(`[Upgrade your plan](${BILLING_URL})`);
+    expect(out).not.toMatch(/switch to a different api key/i);
   });
 });
 
 describe("buildTokenExhaustedPresentation", () => {
-  const PAID_BODY =
-    '{"error":"allocation_exhausted","top_up_url":"https://app.getboon.ai/billing?open=agent"}';
-  const TRIAL_BODY =
-    '{"error":"trial_budget_exhausted","top_up_url":"https://app.getboon.ai/billing?open=agent","granted":500000,"used":500000}';
+  const BILLING_URL = "https://app.getboon.ai/billing?open=agent";
+  const PAID_BODY = '{"error":"allocation_exhausted"}';
+  const TRIAL_BODY = '{"error":"trial_budget_exhausted","granted":500000,"used":500000}';
 
   it("returns undefined when neither the message nor the body is an exhaustion signal", () => {
     expect(
@@ -801,9 +800,7 @@ describe("buildTokenExhaustedPresentation", () => {
     expect(p?.blocks).toEqual([
       {
         type: "buttons",
-        buttons: [
-          { label: "Upgrade plan", url: "https://app.getboon.ai/billing?open=agent", style: "primary" },
-        ],
+        buttons: [{ label: "Upgrade plan", url: BILLING_URL, style: "primary" }],
       },
     ]);
   });
@@ -812,17 +809,11 @@ describe("buildTokenExhaustedPresentation", () => {
     const p = buildTokenExhaustedPresentation("allocation_exhausted", PAID_BODY);
     expect(p?.tone).toBe("warning");
     // No text block — payload.text carries the copy; a text block here would
-    // double the copy inside the Teams card.
+    // double the copy inside the Teams card. Button uses the static billing URL.
     expect(p?.blocks).toEqual([
       {
         type: "buttons",
-        buttons: [
-          {
-            label: "Top up tokens",
-            url: "https://app.getboon.ai/billing?open=agent",
-            style: "primary",
-          },
-        ],
+        buttons: [{ label: "Top up tokens", url: BILLING_URL, style: "primary" }],
       },
     ]);
   });
@@ -830,15 +821,7 @@ describe("buildTokenExhaustedPresentation", () => {
   it("builds a trial card with an 'Upgrade plan' URL button", () => {
     const p = buildTokenExhaustedPresentation("trial_budget_exhausted", TRIAL_BODY);
     const buttons = p?.blocks.find((b) => b.type === "buttons");
-    expect(buttons).toMatchObject({ buttons: [{ label: "Upgrade plan" }] });
-  });
-
-  it("returns undefined (text-only reply) when top_up_url is absent", () => {
-    // No button to render → no presentation; the exhaustion copy still ships as
-    // the reply payload's text.
-    expect(
-      buildTokenExhaustedPresentation("allocation_exhausted", '{"error":"allocation_exhausted"}'),
-    ).toBeUndefined();
+    expect(buttons).toMatchObject({ buttons: [{ label: "Upgrade plan", url: BILLING_URL }] });
   });
 });
 

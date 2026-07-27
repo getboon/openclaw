@@ -83,20 +83,37 @@ const PROVIDER_SCHEMA_REJECTION_USER_TEXT =
   "LLM request failed: provider rejected the request schema or tool payload.";
 const MODEL_NOT_FOUND_USER_TEXT =
   "The selected model was not found by the provider. Check the model id or choose a different model.";
-// boon-llm-gateway allocation exhaustion (ENG-15627). Distinct from generic
-// API-key billing copy: a gateway customer authenticates with a single
-// BOON_API_KEY against an org-level allocation, so "switch to a different API
-// key" is meaningless — there is nothing to switch to. Give it dedicated copy.
-// Wording mirrors the web agent-chat TokensExhaustedBanner so the message reads
-// identically across web, Slack, and Teams (paid vs trial split below).
-const ALLOCATION_EXHAUSTED_USER_TEXT =
-  "⚠️ You don't have any active tokens. Purchase tokens to continue using Boon Agent.";
-const TRIAL_EXHAUSTED_USER_TEXT =
-  "⚠️ You've used your full trial. Upgrade to keep chatting with Boon Agent.";
-/** Button label shown on the paid exhaustion card (web parity). */
+// boon-llm-gateway token exhaustion (ENG-15627). Distinct from generic API-key
+// billing copy: a Boon user has no provider API key to "switch" — they run
+// against an org-level allocation — so the generic "switch to a different API
+// key" wording is meaningless and confusing to a non-technical user. Give it
+// dedicated, plain-language copy that mirrors the web agent-chat
+// TokensExhaustedBanner (paid vs trial split below).
+//
+// The copy is built with the billing link embedded INLINE as a markdown link so
+// non-rich surfaces (and any channel where the card button doesn't render) still
+// give the user something to click. Slack (mrkdwn) and Teams (markdown) both
+// render `[label](url)`; plain-text channels show the label + URL. When no URL
+// is available we fall back to link-free text (never a dangling "[click here]").
+// Boon billing page — where a user tops up tokens or upgrades. A static
+// constant (not the gateway's top_up_url) so the link is always present and
+// robust regardless of whether the 402 body threads a URL through. The
+// `open=agent` deep-link matches what the web agent-chat banner uses.
+const BOON_BILLING_URL = "https://app.getboon.ai/billing?open=agent";
 const ALLOCATION_EXHAUSTED_BUTTON_LABEL = "Top up tokens";
-/** Button label shown on the trial exhaustion card (web parity). */
 const TRIAL_EXHAUSTED_BUTTON_LABEL = "Upgrade plan";
+
+// Plain-language exhaustion copy for non-technical users, with the billing page
+// linked inline as markdown so EVERY channel gives the user something to click
+// (Slack mrkdwn / Teams markdown render the link; plain-text channels show the
+// label + URL). The rich card button (buildTokenExhaustedPresentation) is an
+// additional affordance on Slack/Teams.
+const ALLOCATION_EXHAUSTED_USER_TEXT =
+  `⚠️ You're out of Boon Agent tokens, so I couldn't finish that. ` +
+  `[Top up your tokens](${BOON_BILLING_URL}) to keep going.`;
+const TRIAL_EXHAUSTED_USER_TEXT =
+  `⚠️ You've used up your free trial, so I couldn't finish that. ` +
+  `[Upgrade your plan](${BOON_BILLING_URL}) to keep chatting with Boon Agent.`;
 
 /** Detect the boon-llm-gateway PAID token-allocation-exhausted signal. */
 export function isAllocationExhaustedErrorMessage(raw: string): boolean {
@@ -116,50 +133,17 @@ export function isTokenExhaustedErrorMessage(raw: string): boolean {
 }
 
 /**
- * Pull `top_up_url` out of the gateway's 402 exhaustion body. The body is the
- * raw JSON string the gateway emitted, e.g.
- * `{"error":"allocation_exhausted",...,"top_up_url":"https://.../billing?open=agent"}`.
- * Returns undefined when the body is absent, unparseable, or carries no URL —
- * callers then render the exhaustion copy without a button (never a broken link).
- * Only http(s) URLs are accepted so a malformed value can't produce a bad button.
- */
-export function extractTopUpUrl(errorBody: string | undefined): string | undefined {
-  if (!errorBody) {
-    return undefined;
-  }
-  try {
-    const parsed: unknown = JSON.parse(errorBody);
-    const url =
-      typeof parsed === "object" && parsed !== null
-        ? (parsed as Record<string, unknown>).top_up_url
-        : undefined;
-    if (typeof url === "string") {
-      // Fully parse (not just a prefix check) so a malformed value like
-      // "https://" or "http://%" can't produce a broken button — it falls
-      // through to the text-only exhaustion reply instead.
-      const parsedUrl = new URL(url.trim());
-      if (parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:") {
-        return parsedUrl.toString();
-      }
-    }
-  } catch {
-    // Non-JSON / truncated body, or an unparseable URL — no reliable URL to
-    // surface; caller renders the text-only exhaustion reply.
-  }
-  return undefined;
-}
-
-/**
- * Build the portable exhaustion card — a single top-up/upgrade URL button — that
- * both the Slack and Teams adapters render natively. Returns undefined when
- * `raw` is not an exhaustion signal OR no valid `top_up_url` is present, so the
- * caller falls through to a plain-text reply (the exhaustion copy still ships as
- * the reply payload's `text`).
+ * Build the portable exhaustion card — a single top-up/upgrade URL button
+ * (pointing at the static Boon billing page) — that both the Slack and Teams
+ * adapters render natively. Returns undefined when neither `raw` nor `errorBody`
+ * is an exhaustion signal, so the caller falls through to a plain-text reply.
  *
  * The card carries NO text block on purpose: the reply payload's `text` already
- * holds the exhaustion copy, and both adapters fold that `text` into the card
- * body (Teams `buildMSTeamsPresentationCard`) / message (Slack blocks + fallback
- * text). Adding a text block here would double the copy inside the Teams card.
+ * holds the exhaustion copy (with the billing link inlined), and both adapters
+ * fold that `text` into the card body (Teams `buildMSTeamsPresentationCard`) /
+ * message (Slack blocks + fallback text). Adding a text block here would double
+ * the copy inside the Teams card. The button is a redundant-but-convenient
+ * second affordance.
  */
 export function buildTokenExhaustedPresentation(
   raw: string,
@@ -178,17 +162,13 @@ export function buildTokenExhaustedPresentation(
   if (!isExhausted) {
     return undefined;
   }
-  const topUpUrl = extractTopUpUrl(errorBody);
-  if (!topUpUrl) {
-    return undefined;
-  }
   const blocks: MessagePresentationBlock[] = [
     {
       type: "buttons",
       buttons: [
         {
           label: trial ? TRIAL_EXHAUSTED_BUTTON_LABEL : ALLOCATION_EXHAUSTED_BUTTON_LABEL,
-          url: topUpUrl,
+          url: BOON_BILLING_URL,
           style: "primary",
         },
       ],
