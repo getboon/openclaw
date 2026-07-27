@@ -43,6 +43,26 @@ describe("isBenignHousekeepingShellCommand", () => {
     expect(isBenignHousekeepingShellCommand("python build.py || find /")).toBe(false);
   });
 
+  it("fails closed on shell control the stage splitter cannot model (ENG-16318 gandalfboon)", () => {
+    // splitTopLevelStages only breaks on ;/&&/||, and splitShellWords treats a
+    // newline as whitespace — so these once collapsed to one stage whose benign
+    // first word ("looked like" mkdir/ls/printf/echo) hid real work, dropping the
+    // progress bullet and silencing a genuine failure. All must be non-benign.
+    expect(isBenignHousekeepingShellCommand("mkdir -p build\nnpm run build")).toBe(false);
+    expect(isBenignHousekeepingShellCommand("ls\nrm -rf dist")).toBe(false);
+    expect(isBenignHousekeepingShellCommand("ls & rm -rf dist")).toBe(false);
+    expect(isBenignHousekeepingShellCommand("printf 'x' > ~/.zshrc")).toBe(false);
+    expect(isBenignHousekeepingShellCommand("cat > config.json <<'EOF'\nx\nEOF")).toBe(false);
+    expect(isBenignHousekeepingShellCommand("echo $(rm -rf dist)")).toBe(false);
+  });
+
+  it("does not fail open on a find with a long predicate list ending in -delete (ENG-16318 gandalfboon)", () => {
+    // splitShellWords used to cap at 48 words, so -delete past that cap was never
+    // seen and the side-effect guard failed open. The predicate scan must be uncapped.
+    const longPredicates = Array.from({ length: 30 }, (_, i) => `-name '*.x${i}' -o`).join(" ");
+    expect(isBenignHousekeepingShellCommand(`find . ${longPredicates} -delete`)).toBe(false);
+  });
+
   it("returns false for a piped stage that includes a non-benign command", () => {
     expect(isBenignHousekeepingShellCommand("cat urls.txt | xargs curl")).toBe(false);
   });

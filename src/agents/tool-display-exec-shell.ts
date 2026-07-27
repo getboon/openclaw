@@ -424,11 +424,29 @@ function isSideEffectingFind(words: string[]): boolean {
   return words.some((word) => FIND_SIDE_EFFECT_ACTIONS.has(word.toLowerCase()));
 }
 
+// Shell control this simple word/stage splitter cannot model: a newline or `&`
+// hides a second command the stage scan never sees, and a redirect/backtick/
+// subshell turns a "read-only" binary into a writer (`printf x > ~/.zshrc`,
+// `echo $(rm -rf dist)`). `splitTopLevelStages` only breaks on `;`/`&&`/`||`, so
+// anything here must fail the command CLOSED — treat it as real work, not benign
+// (ENG-16318 gandalfboon). Mirrors the guard in tool-mutation.ts.
+const UNMODELLED_SHELL_CONTROL = /[&<>`\\\n\r]/;
+
 /** True when every pipe segment of a stage is a benign housekeeping command. */
 function isBenignHousekeepingStage(stage: string): boolean {
+  // A benign housekeeping chain never needs a redirect, subshell, backgrounding,
+  // line continuation, or a line break, so refusing them costs nothing and keeps
+  // the classifier fail-closed rather than deciding from a first word that hides
+  // later work. (`;`/`&&`/`||`/`|` stay allowed — those are split and each
+  // segment is classified.)
+  if (UNMODELLED_SHELL_CONTROL.test(stage) || stage.includes("$(")) {
+    return false;
+  }
   const segments = splitTopLevelPipes(stage);
   return segments.every((segment) => {
-    const words = trimLeadingEnv(splitShellWords(segment));
+    // No word cap: a `find` with a long predicate list must still expose a
+    // trailing `-delete`/`-exec`, or the side-effect guard below fails open.
+    const words = trimLeadingEnv(splitShellWords(segment, Number.MAX_SAFE_INTEGER));
     const bin = binaryName(words[0]);
     if (bin === undefined || !BENIGN_HOUSEKEEPING_SHELL_BINARIES.has(bin)) {
       return false;
