@@ -3,6 +3,7 @@ import { completeEmbeddedAttemptResult } from "./attempt-result.js";
 
 function completeResult(params?: {
   latestMcpAppChannelView?: { viewId: string };
+  visibleToolNames?: string[];
   clientToolCallSlots?: Array<{
     toolCallId: string;
     name: string;
@@ -80,6 +81,7 @@ function completeResult(params?: {
       changesForTurn: null,
       streamStrategy: "default",
     },
+    visibleToolNames: params?.visibleToolNames ?? [],
   });
 }
 
@@ -126,6 +128,14 @@ describe("attempt result projection", () => {
         asyncTaskId: "task-1",
       },
     ]);
+  });
+
+  it("projects the model-visible tool names without schemas", () => {
+    expect(
+      completeResult({
+        visibleToolNames: ["web_search", "read"],
+      }).visibleToolNames,
+    ).toEqual(["web_search", "read"]);
   });
 
   it("projects pending media and voice fields", () => {

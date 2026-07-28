@@ -713,3 +713,39 @@ describe("renderSlackMessagePresentationFallbackText", () => {
     ]);
   });
 });
+
+describe("agent decision trace", () => {
+  it("renders a compact verification section without tool arguments or result bodies", () => {
+    const { segments } = resolveSlackReplyBlockResolution({
+      text: "Connected.",
+      auditTrace: {
+        schemaVersion: 1,
+        visibleTools: ["buildingconnected_connect", "read"],
+        toolInvocations: [{ name: "buildingconnected_connect", status: "ok" }],
+        evidence: [{ kind: "tool_outcome", tool: "buildingconnected_connect", status: "ok" }],
+        confidence: "high",
+        disposition: "completed",
+        reason: "tool_execution_succeeded",
+      },
+    });
+
+    expect(segments).toMatchObject([
+      {
+        kind: "blocks",
+        blocks: [
+          {
+            type: "context",
+            elements: [
+              {
+                type: "mrkdwn",
+                text: expect.stringContaining("*How this was verified*"),
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(segments)).not.toContain("arguments");
+    expect(JSON.stringify(segments)).not.toContain("result");
+  });
+});

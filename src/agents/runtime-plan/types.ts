@@ -261,6 +261,34 @@ type AgentRuntimeReplyPayloadLocation = {
   address?: string;
 };
 
+type AgentRuntimeDecisionTraceToolStatus = "ok" | "error" | "blocked";
+
+type AgentRuntimeDecisionTrace = {
+  schemaVersion: 1;
+  visibleTools: string[];
+  toolInvocations: Array<{
+    name: string;
+    status: AgentRuntimeDecisionTraceToolStatus;
+  }>;
+  evidence: Array<{
+    kind: "tool_outcome";
+    tool: string;
+    status: AgentRuntimeDecisionTraceToolStatus;
+  }>;
+  confidence: "high" | "medium" | "low";
+  disposition: "completed" | "permission_required" | "refused" | "failed" | "unverified";
+  reason:
+    | "tool_execution_succeeded"
+    | "tool_execution_partial"
+    | "tool_execution_failed"
+    | "tool_execution_blocked"
+    | "no_tool_invocation"
+    | "no_tools_visible"
+    | "permission_required"
+    | "provider_reported_refusal"
+    | "run_failed";
+};
+
 /** Portable reply payload emitted by agent runtimes before channel rendering. */
 type AgentRuntimeReplyPayload = {
   text?: string;
@@ -297,6 +325,7 @@ type AgentRuntimeReplyPayload = {
   isCompactionNotice?: boolean;
   isFallbackNotice?: boolean;
   isStatusNotice?: boolean;
+  auditTrace?: AgentRuntimeDecisionTrace;
   channelData?: Record<string, unknown>;
 };
 

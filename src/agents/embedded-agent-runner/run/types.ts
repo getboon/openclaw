@@ -262,11 +262,14 @@ export type EmbeddedRunAttemptResult = {
   assistantTexts: string[];
   latestMcpAppChannelView?: McpAppChannelView;
   lastAssistantTextMessageIndex?: number;
+  /** Tool names exposed to the model for this attempt, without schemas. */
+  visibleToolNames?: string[];
   toolMetas: Array<{
     toolName: string;
     meta?: string;
     replaySafe?: boolean;
     isError?: boolean;
+    status?: "blocked";
     asyncStarted?: boolean;
     asyncTaskRunId?: string;
     asyncTaskId?: string;

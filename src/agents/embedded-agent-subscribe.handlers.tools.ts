@@ -1445,6 +1445,7 @@ export async function handleToolExecutionEnd(
     meta,
     replaySafe: callSummary.replaySafe,
     ...(isToolError ? { isError: true } : {}),
+    ...(approvalUnavailable || !executionStarted ? { status: "blocked" as const } : {}),
     ...(asyncStarted ? { asyncStarted: true, ...asyncTaskIds } : {}),
   });
   const acceptedSessionSpawn =

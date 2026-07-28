@@ -21,6 +21,7 @@ import {
   type SlackBlockRenderOptions,
 } from "./blocks-render.js";
 import { markdownToSlackMrkdwnChunks } from "./format.js";
+import { escapeSlackMrkdwn } from "./monitor/mrkdwn.js";
 import {
   appendSlackNativeDataFallbackText,
   buildSlackNativeDataAccessibilityText,
@@ -210,8 +211,43 @@ export function hasSlackReplyStructuredContent(payload: ReplyPayload): boolean {
   return Boolean(
     readSlackChannelBlocks(payload).length ||
     normalizeMessagePresentation(payload.presentation) ||
-    payload.interactive?.blocks.length,
+    payload.interactive?.blocks.length ||
+    payload.auditTrace,
   );
+}
+
+function formatAuditTraceList(values: readonly string[]): string {
+  if (values.length === 0) {
+    return "none";
+  }
+  const visible = values.slice(0, 12).map(escapeSlackMrkdwn);
+  const remainder = values.length - visible.length;
+  return remainder > 0 ? `${visible.join(", ")} (+${remainder} more)` : visible.join(", ");
+}
+
+function formatAuditTraceReason(reason: NonNullable<ReplyPayload["auditTrace"]>["reason"]): string {
+  return reason.replaceAll("_", " ");
+}
+
+function buildSlackAgentDecisionTraceBlock(payload: ReplyPayload): SlackBlock | undefined {
+  const trace = payload.auditTrace;
+  if (!trace) {
+    return undefined;
+  }
+  const invoked = trace.toolInvocations.map(
+    (invocation) => `${invocation.name} (${invocation.status})`,
+  );
+  const lines = [
+    "*How this was verified*",
+    `Tools visible: ${formatAuditTraceList(trace.visibleTools)}`,
+    `Tools invoked: ${formatAuditTraceList(invoked)}`,
+    `Confidence: ${trace.confidence}`,
+    `Outcome: ${trace.disposition} (${formatAuditTraceReason(trace.reason)})`,
+  ];
+  return {
+    type: "context",
+    elements: [{ type: "mrkdwn", text: lines.join("\n") }],
+  } as SlackBlock;
 }
 
 function renderSlackAuthoredTextFragments(blocks: readonly SlackBlock[]): string[] {
@@ -481,6 +517,10 @@ export function resolveSlackReplyBlockResolution(
       presentationBlocks: renderedPresentationBlocks,
     }),
   );
+  const auditTraceBlock = buildSlackAgentDecisionTraceBlock(payload);
+  if (auditTraceBlock) {
+    appendBlockSegment(segments, [auditTraceBlock]);
+  }
   const renderedTextFragments = segments.flatMap((segment) => {
     if (segment.kind === "text") {
       return [segment.text];

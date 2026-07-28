@@ -408,6 +408,7 @@ export async function runEmbeddedAttemptSettledPhase(
       changesForTurn: promptCacheChangesForTurn,
       streamStrategy,
     },
+    visibleToolNames: effectiveTools.map((tool) => tool.name),
     trajectoryRecorder,
   });
   state.trajectoryEndRecorded = true;

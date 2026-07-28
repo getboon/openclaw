@@ -88,6 +88,7 @@ type CompleteEmbeddedAttemptResultInput = {
     streamStrategy: string;
   };
   trajectoryRecorder?: EmbeddedRunAttemptTrajectoryRecorder | null;
+  visibleToolNames: readonly string[];
 };
 
 function normalizeEmbeddedAttemptToolMetas(
@@ -102,6 +103,7 @@ function normalizeEmbeddedAttemptToolMetas(
         meta?: string;
         replaySafe?: boolean;
         isError?: true;
+        status?: "blocked";
         asyncStarted?: boolean;
         asyncTaskRunId?: string;
         asyncTaskId?: string;
@@ -115,6 +117,9 @@ function normalizeEmbeddedAttemptToolMetas(
       };
       if (entry.isError === true) {
         normalized.isError = true;
+      }
+      if (entry.status === "blocked") {
+        normalized.status = "blocked";
       }
       if (entry.asyncStarted === true) {
         normalized.asyncStarted = true;
@@ -387,6 +392,7 @@ export function completeEmbeddedAttemptResult(
     assistantTexts,
     latestMcpAppChannelView: getLatestMcpAppChannelView(),
     lastAssistantTextMessageIndex: getLastAssistantTextMessageIndex(),
+    visibleToolNames: [...input.visibleToolNames],
     toolMetas: toolMetasNormalized,
     acceptedSessionSpawns,
     lastToolError,
