@@ -207,6 +207,8 @@ describe("diagnostics-prometheus service", () => {
         toProvider: "openai",
         toModel: "gpt-5.4",
         reason: "overloaded",
+        cascadeDepth: 2,
+        outcome: "next_fallback",
         suspended: true,
       },
     ] satisfies DiagnosticEventPayload[]) {
@@ -244,7 +246,7 @@ describe("diagnostics-prometheus service", () => {
       'openclaw_tool_execution_blocked_total{denied_reason="tools.deny",params_kind="object",tool="browser",tool_owner="browser-tools",tool_source="mcp"} 1',
     );
     expect(rendered).toContain(
-      'openclaw_model_failover_total{from_model="claude-opus-4-6",from_provider="anthropic",lane="session",reason="overloaded",suspended="true",to_model="gpt-5.4",to_provider="openai"} 1',
+      'openclaw_model_failover_total{from_model="claude-opus-4-6",from_provider="anthropic",lane="session",outcome="next_fallback",reason="overloaded",suspended="true",tier="2",to_model="gpt-5.4",to_provider="openai"} 1',
     );
     expect(rendered).toContain(
       'openclaw_session_stuck_total{reason="startup-sweep",state="processing"} 1',

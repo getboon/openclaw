@@ -1390,6 +1390,22 @@ async function runWithModelFallbackInternal<T>(
   const observeFailedCandidate = async (
     failedAttempt: Parameters<typeof recordFailedCandidateAttempt>[0],
   ) => {
+    // Emit the scrapeable failover metric before the log-gate short-circuit
+    // below: the fleet runs client-owned fallback, so the series (and the
+    // operator `exhausted` alert built on the `chain_exhausted` outcome) must
+    // fire even when warn-level decision logging is off. A failed candidate
+    // with no next candidate is the chain-exhaustion event.
+    emitFailoverEvent({
+      sessionId: failedAttempt.sessionId,
+      lane: failedAttempt.lane,
+      fromProvider: failedAttempt.candidate.provider,
+      fromModel: failedAttempt.candidate.model,
+      toProvider: failedAttempt.nextCandidate?.provider,
+      toModel: failedAttempt.nextCandidate?.model,
+      reason: describeFailoverError(failedAttempt.error).reason ?? "unknown",
+      cascadeDepth: failedAttempt.attempt,
+      outcome: failedAttempt.nextCandidate ? "next_fallback" : "chain_exhausted",
+    });
     if (!params.onFallbackStep && !isModelFallbackDecisionLogEnabled()) {
       appendFailedCandidateAttempt(failedAttempt);
       return;
@@ -1523,6 +1539,8 @@ async function runWithModelFallbackInternal<T>(
               fromProvider: candidate.provider,
               fromModel: candidate.model,
               reason: decision.reason,
+              cascadeDepth: i + 1,
+              outcome: "suspend_lanes",
               suspended: !hasRemainingCandidates,
             });
             if (!hasRemainingCandidates) {
@@ -1677,6 +1695,25 @@ async function runWithModelFallbackInternal<T>(
     });
     if ("success" in attemptRun) {
       if (i > 0 || attempts.length > 0 || attemptedDuringCooldown) {
+        // Fallback recovered: record the transition from the last failed
+        // candidate to the one that succeeded so the dashboard can show
+        // recovery rate, not just failure rate. Only a real prior failure (or
+        // skip) is a recovery — a clean cooldown-probe success on the primary
+        // has no `recoveredFrom`, so it must not inflate the succeeded series.
+        const recoveredFrom = attempts.at(-1);
+        if (recoveredFrom) {
+          emitFailoverEvent({
+            sessionId: params.sessionId,
+            lane: params.lane,
+            fromProvider: recoveredFrom.provider,
+            fromModel: recoveredFrom.model,
+            toProvider: candidate.provider,
+            toModel: candidate.model,
+            reason: recoveredFrom.reason ?? "unknown",
+            cascadeDepth: i + 1,
+            outcome: "succeeded",
+          });
+        }
         await observeDecision({
           decision: "candidate_succeeded",
           runId: params.runId,

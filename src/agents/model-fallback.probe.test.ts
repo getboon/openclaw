@@ -4,6 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
+import {
+  type DiagnosticFailoverEvent,
+  onInternalDiagnosticEvent,
+} from "../infra/diagnostic-events.js";
 import { createDiagnosticLogRecordCapture } from "../logging/test-helpers/diagnostic-log-capture.js";
 import type { AuthProfileStore } from "./auth-profiles.js";
 import type { SessionSuspensionParams } from "./session-suspension.js";
@@ -1071,5 +1075,129 @@ describe("runWithModelFallback – probe logic", () => {
         failedProvider: "openai",
       }),
     );
+  });
+});
+
+describe("runWithModelFallback – scrapeable failover metric", () => {
+  const NOW = 1_700_000_000_000;
+  let realDateNow: () => number;
+  let failoverEvents: DiagnosticFailoverEvent[];
+  let unsubscribe: (() => void) | undefined;
+
+  beforeEach(() => {
+    realDateNow = Date.now;
+    Date.now = vi.fn(() => NOW);
+    // Silent logger proves the metric fires independent of the decision-log
+    // gate: the fleet runs client-owned fallback, so the series must not depend
+    // on warn-level logging being enabled.
+    setLoggerOverride({ level: "silent", consoleLevel: "silent" });
+    probeThrottleInternals.lastProbeAttempt.clear();
+
+    mockedHasAnyAuthProfileStoreSource.mockReturnValue(true);
+    mockedEnsureAuthProfileStore.mockReturnValue({ version: 1, profiles: {} });
+    mockedResolveAuthProfileOrder.mockImplementation(({ provider }: { provider: string }) =>
+      provider === "openai" ? ["openai-profile-1"] : [`${provider}-profile-1`],
+    );
+    // No provider in cooldown: force real run() failures to drive the chain.
+    mockedIsProfileInCooldown.mockReturnValue(false);
+    mockedResolveProfilesUnavailableReason.mockReturnValue("rate_limit");
+
+    failoverEvents = [];
+    unsubscribe = onInternalDiagnosticEvent((event) => {
+      if (event.type === "model.failover") {
+        failoverEvents.push(event);
+      }
+    });
+  });
+
+  afterEach(() => {
+    Date.now = realDateNow;
+    unsubscribe?.();
+    unsubscribe = undefined;
+    setLoggerOverride(null);
+    resetLogger();
+    vi.restoreAllMocks();
+  });
+
+  const crossBackendCfg = () =>
+    makeCfg({
+      agents: {
+        defaults: {
+          model: {
+            primary: "openai/gpt-4.1-mini",
+            fallbacks: ["anthropic/claude-haiku-3-5"],
+          },
+        },
+      },
+    } as Partial<OpenClawConfig>);
+
+  it("emits a next_fallback then succeeded event when a fallback recovers", async () => {
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("primary 429"), { status: 429 }))
+      .mockResolvedValue("fallback-ok");
+
+    const result = await runWithModelFallback({
+      cfg: crossBackendCfg(),
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      sessionId: "test-session",
+      lane: "main",
+      run,
+    });
+
+    expect(result.result).toBe("fallback-ok");
+    const outcomes = failoverEvents.map((event) => event.outcome);
+    expect(outcomes).toEqual(["next_fallback", "succeeded"]);
+
+    const nextFallback = failoverEvents[0];
+    expect(nextFallback.fromProvider).toBe("openai");
+    expect(nextFallback.toProvider).toBe("anthropic");
+    expect(nextFallback.cascadeDepth).toBe(1);
+
+    const succeeded = failoverEvents[1];
+    expect(succeeded.fromProvider).toBe("openai");
+    expect(succeeded.toProvider).toBe("anthropic");
+    expect(succeeded.cascadeDepth).toBe(2);
+  });
+
+  it("emits a chain_exhausted event when every candidate fails (even with logging off)", async () => {
+    const run = vi.fn().mockRejectedValue(Object.assign(new Error("all down"), { status: 429 }));
+
+    await expect(
+      runWithModelFallback({
+        cfg: crossBackendCfg(),
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        sessionId: "test-session",
+        lane: "main",
+        run,
+      }),
+    ).rejects.toThrow();
+
+    const exhausted = failoverEvents.find((event) => event.outcome === "chain_exhausted");
+    expect(exhausted).toBeDefined();
+    expect(exhausted?.fromProvider).toBe("anthropic");
+    expect(exhausted?.toModel).toBeUndefined();
+    expect(exhausted?.cascadeDepth).toBe(2);
+    // The last candidate has no next candidate, so exactly one exhaustion event.
+    expect(failoverEvents.filter((event) => event.outcome === "chain_exhausted")).toHaveLength(1);
+  });
+
+  it("emits no failover metric when the primary succeeds without any prior failure", async () => {
+    const run = vi.fn().mockResolvedValue("primary-ok");
+
+    const result = await runWithModelFallback({
+      cfg: crossBackendCfg(),
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      sessionId: "test-session",
+      lane: "main",
+      run,
+    });
+
+    expect(result.result).toBe("primary-ok");
+    // A clean first-attempt success is not a failover/recovery — no series.
+    expect(failoverEvents).toHaveLength(0);
   });
 });

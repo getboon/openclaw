@@ -3085,9 +3085,14 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
         metadata: DiagnosticEventMetadata,
       ) => {
         const metricAttrs: Record<string, string> = {
+          // `outcome` isolates chain_exhausted (the `exhausted` alert source);
+          // `tier` is the 1-based ladder position for by-depth breakdowns.
+          "openclaw.failover.outcome": lowCardinalityAttr(evt.outcome, "unknown"),
           "openclaw.failover.reason": lowCardinalityAttr(evt.reason, "unknown"),
           "openclaw.failover.suspended":
             evt.suspended === undefined ? "unknown" : String(evt.suspended),
+          "openclaw.failover.tier":
+            evt.cascadeDepth === undefined ? "unknown" : String(evt.cascadeDepth),
           "openclaw.lane": lowCardinalityQueueLaneAttr(evt.lane, "unknown"),
           "openclaw.model": lowCardinalityAttr(evt.fromModel),
           "openclaw.provider": lowCardinalityAttr(evt.fromProvider),
@@ -3120,7 +3125,10 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
           spanAttrs["openclaw.failover.suspended"] = evt.suspended;
         }
         if (evt.cascadeDepth !== undefined) {
-          spanAttrs["openclaw.failover.cascade_depth"] = evt.cascadeDepth;
+          spanAttrs["openclaw.failover.tier"] = evt.cascadeDepth;
+        }
+        if (evt.outcome !== undefined) {
+          spanAttrs["openclaw.failover.outcome"] = evt.outcome;
         }
         const span = spanWithDuration("openclaw.model.failover", spanAttrs, 0, {
           parentContext: activeTrustedParentContext(evt, metadata),

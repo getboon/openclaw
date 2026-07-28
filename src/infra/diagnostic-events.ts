@@ -58,7 +58,16 @@ export type DiagnosticFailoverEvent = DiagnosticBaseEvent & {
   toProvider?: string;
   toModel?: string;
   reason: string;
+  // 1-based chain position of the candidate this event describes; surfaced as
+  // the scrapeable `tier` label so the fleet fallback dashboards can break rate
+  // down by ladder depth. Left undefined only when the caller cannot attribute
+  // a position.
   cascadeDepth?: number;
+  // Which fallback transition this event records. `chain_exhausted` is the
+  // series the `exhausted` alert fires on (chain ran out of tiers), so it must
+  // be emitted even when decision logging is disabled. `suspended` is retained
+  // for the lane-suspension path.
+  outcome?: "next_fallback" | "chain_exhausted" | "succeeded" | "suspend_lanes";
   suspended?: boolean;
 };
 

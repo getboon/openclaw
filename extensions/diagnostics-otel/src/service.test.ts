@@ -2460,6 +2460,7 @@ describe("diagnostics-otel service", () => {
       reason: "overloaded",
       suspended: true,
       cascadeDepth: 1,
+      outcome: "next_fallback",
     });
     await flushDiagnosticEvents();
 
@@ -2470,7 +2471,8 @@ describe("diagnostics-otel service", () => {
     expect(failoverOptions?.attributes?.["openclaw.failover.to_model"]).toBe("gpt-5.4");
     expect(failoverOptions?.attributes?.["openclaw.failover.reason"]).toBe("overloaded");
     expect(failoverOptions?.attributes?.["openclaw.failover.suspended"]).toBe(true);
-    expect(failoverOptions?.attributes?.["openclaw.failover.cascade_depth"]).toBe(1);
+    expect(failoverOptions?.attributes?.["openclaw.failover.tier"]).toBe(1);
+    expect(failoverOptions?.attributes?.["openclaw.failover.outcome"]).toBe("next_fallback");
     expect(failoverOptions?.attributes?.["openclaw.lane"]).toBe("main");
     expect(Object.hasOwn(failoverOptions?.attributes ?? {}, "openclaw.sessionId")).toBe(false);
     expect(Object.hasOwn(failoverOptions?.attributes ?? {}, "openclaw.sessionKey")).toBe(false);
@@ -2479,8 +2481,10 @@ describe("diagnostics-otel service", () => {
     expect(firstCounterAddCall("openclaw.model.failover")).toStrictEqual([
       1,
       {
+        "openclaw.failover.outcome": "next_fallback",
         "openclaw.failover.reason": "overloaded",
         "openclaw.failover.suspended": "true",
+        "openclaw.failover.tier": "1",
         "openclaw.lane": "main",
         "openclaw.model": "claude-opus-4-6",
         "openclaw.provider": "anthropic",

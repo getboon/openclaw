@@ -385,6 +385,8 @@ The persisted fallback override closes that window, and the narrow rollback keep
 
 Structured `model_fallback_decision` logs also include flat `fallbackStep*` fields when a candidate fails, is skipped, or a later fallback succeeds. These fields make the attempted transition explicit (`fallbackStepFromModel`, `fallbackStepToModel`, `fallbackStepFromFailureReason`, `fallbackStepFromFailureDetail`, `fallbackStepFinalOutcome`) so log and diagnostic exporters can reconstruct the primary failure even when the terminal fallback also fails.
 
+Every real chain transition also emits a scrapeable `model.failover` diagnostic event, independent of log verbosity, so client-owned fallback stays observable when the gateway no longer ladders. The [Prometheus](/gateway/prometheus) counter `openclaw_model_failover_total` and the [OpenTelemetry](/gateway/opentelemetry) counter `openclaw.model.failover` carry an `outcome` label (`next_fallback`, `chain_exhausted`, `succeeded`, `suspend_lanes`) and a 1-based `tier` label. The `chain_exhausted` series is the signal an operator "fallback chain exhausted" alert fires on.
+
 When every candidate fails, OpenClaw throws `FallbackSummaryError`. The outer reply runner can use that to build a more specific message such as "all models are temporarily rate-limited" and include the soonest cooldown expiry when one is known.
 
 That cooldown summary is model-aware:
