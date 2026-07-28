@@ -3075,7 +3075,9 @@ describe("runReplyAgent billing error classification", () => {
     });
 
     const payload = Array.isArray(result) ? result[0] : result;
-    expect(payload?.text).toContain("billing error");
+    // Billing classification wins over the context-overflow fallback; the
+    // billing copy is now the Boon top-up message (Boon fork).
+    expect(payload?.text).toContain("out of Boon Agent tokens");
     expect(payload?.text).not.toContain("Context overflow");
   });
 });

@@ -104,7 +104,11 @@ describe("sanitizeUserFacingText", () => {
 
   it("rewrites billing error-shaped text with errorContext", () => {
     const text = "billing: please upgrade your plan";
-    expect(sanitizeUserFacingText(text, { errorContext: true })).toContain("billing error");
+    // Boon fork: billing errors are rewritten to the Boon top-up copy, not the
+    // upstream generic "billing error" wording.
+    expect(sanitizeUserFacingText(text, { errorContext: true })).toContain(
+      "out of Boon Agent tokens",
+    );
   });
 
   it("rewrites exec denied payloads with errorContext", () => {
