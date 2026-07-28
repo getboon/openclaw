@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.9
+
+Plain-language, actionable token-exhaustion copy for non-technical Boon users.
+
+- **#79:** follow-up to #71. The token-exhaustion reply is rewritten into plain language with an inline, clickable billing link on every channel. The pre-existing copy used generic provider-billing wording ("your API key has run out of credits… switch to a different API key") — unactionable for a Boon user who runs against an org-level allocation and has no provider key to switch. The new copy drops the "API key" jargon and renders the Boon billing page (`https://app.getboon.ai/billing?open=agent`, matching the web agent-chat deep-link) as a markdown link *in the reply text*, so even plain-text channels are actionable; the Slack/Teams rich-card button remains as a second affordance. The link is a static constant rather than read from the gateway's `top_up_url`, so it's always present regardless of the 402 body (removing the now-unused `extractTopUpUrl`); the terminal `token_allocation_exhausted` path is aligned to the same link.
+- Base = `2026.6.11-boon.8`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` bumped to `2026.6.11-boon.9` in lockstep. No other code changes; #79 was merged onto `boon` before this release.
+
 ## 2026.6.11-boon.8
 
 Token-exhaustion top-up/upgrade cards on Slack & Teams, context-overflow recovery that preserves session history, an opt-in consumer-audience messaging mode, and cleanup of tangential tool-error noise after a correct answer.
