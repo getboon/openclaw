@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.10
+
+Boon-branded billing copy for every billing failure (closing a live boon.9 gap), plus a scrapeable client-side fallback metric.
+
+- **#84:** the generic upstream billing message ("your API key has run out of credits… switch to a different API key / check your provider's billing dashboard") no longer reaches users on any billing failure. Live testing on a boon.9 box showed it still surfacing on token exhaustion even after the dedicated exhaustion copy (#71/#79) shipped: the specific gateway code (`allocation_exhausted` / `trial_budget_exhausted`) does not always survive to the classifier — the Anthropic transport throws a plain `Error` on a non-2xx with no `errorBody` (often just `"HTTP 402"` with no code), so the failure is classified as generic `billing` and rendered by `formatBillingErrorMessage`. That path now returns the Boon top-up copy (plain language + the `https://app.getboon.ai/billing?open=agent` link) for all provider/model/authMode combinations, so a Boon user — who has no provider API key to switch and no provider billing dashboard — always gets actionable copy.
+- **#81 (ENG-15788):** emit a scrapeable `model.failover` metric on every real fallback chain transition (`next_fallback`, `chain_exhausted`, `succeeded`, `suspend_lanes`), decoupled from the decision-log gate so the series fires even when warn-level logging is off. Previously `model_fallback_decision` was only a structured log line and the one `model.failover` emission fired solely from the narrow `suspend_lanes` cooldown branch — in particular there was no metric for chain exhaustion, so a "fallback chain exhausted" alert had nothing to fire on. Step 1 of ENG-15788 (the OpenClaw-owned emit); the Alloy scrape + Grafana dashboards/alert live in other repos and depend on this series. A clean first-attempt / cooldown-probe success emits nothing.
+- Base = `2026.6.11-boon.9`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` bumped to `2026.6.11-boon.10` in lockstep. No other code changes; #81 and #84 were merged onto `boon` before this release.
+
 ## 2026.6.11-boon.9
 
 Plain-language, actionable token-exhaustion copy for non-technical Boon users.
