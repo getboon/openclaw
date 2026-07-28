@@ -1759,4 +1759,25 @@ describe("classifyProviderRuntimeFailureKind", () => {
   it("classifies internal server error status prose with code 500 as timeout", () => {
     expect(classifyFailoverReason(INTERNAL_SERVER_ERROR_STATUS_WITH_500_SAMPLE)).toBe("timeout");
   });
+
+  it("classifyProviderRuntimeFailureKind returns timeout for a Bedrock 503 when status is supplied", () => {
+    expect(
+      classifyProviderRuntimeFailureKind({
+        status: 503,
+        message:
+          '{"type":"error","error":{"type":"api_error","message":"Bedrock is unable to process your request."}}',
+        provider: "bedrock",
+      }),
+    ).toBe("timeout");
+  });
+
+  it("classifyProviderRuntimeFailureKind returns unclassified for the same body without status", () => {
+    expect(
+      classifyProviderRuntimeFailureKind({
+        message:
+          '{"type":"error","error":{"type":"api_error","message":"Bedrock is unable to process your request."}}',
+        provider: "bedrock",
+      }),
+    ).toBe("unclassified");
+  });
 });
