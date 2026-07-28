@@ -34,35 +34,36 @@ import {
   isTimeoutErrorMessage,
 } from "./failover-matches.js";
 
-/** Format the billing failure copy with optional provider/model context.
+// Boon billing page — where a user tops up tokens or upgrades. Kept in sync with
+// BOON_BILLING_URL in ./errors.ts (the token-exhaustion path).
+const BOON_BILLING_URL = "https://app.getboon.ai/billing?open=agent";
+
+/** Format the billing failure copy.
  *
- * When `authMode` is `"oauth"` or `"token"` (i.e. Anthropic Max or a static
- * bearer-token subscription) the user has no API key to top up, so we emit
- * neutral copy that directs them to check their account instead (#80877).
+ * Boon-fork copy: a Boon user always runs against their org's Boon token
+ * allocation through the boon-llm-gateway — there is no provider API key to
+ * "switch" and no provider billing dashboard they can reach. So EVERY billing
+ * failure gets plain, non-technical wording pointing at the Boon billing page,
+ * never the upstream "check your provider's billing dashboard / switch to a
+ * different API key" text.
+ *
+ * This is the safety net: it fires for any billing-classified failure whose
+ * specific gateway exhaustion code (allocation_exhausted / trial_budget_exhausted)
+ * did NOT survive into the message/body the classifier sees (e.g. the Anthropic
+ * transport surfaces a bare "HTTP 402" with no code). The dedicated
+ * trial-vs-paid exhaustion copy in errors.ts is still preferred when the code IS
+ * recognized. The provider/model/authMode params are retained for call-site
+ * compatibility but no longer change the user-facing wording.
  */
 export function formatBillingErrorMessage(
-  provider?: string,
-  model?: string,
-  authMode?: string,
+  _provider?: string,
+  _model?: string,
+  _authMode?: string,
 ): string {
-  const providerName = provider?.trim();
-  const modelName = model?.trim();
-  const providerLabel =
-    providerName && modelName ? `${providerName} (${modelName})` : providerName || undefined;
-
-  // OAuth and static-token credentials do not have an API key to top up.
-  const isSubscriptionAuth = authMode === "oauth" || authMode === "token";
-  if (isSubscriptionAuth) {
-    if (providerLabel) {
-      return `⚠️ ${providerLabel} returned a billing error — check your account for subscription or usage limits, then try again.`;
-    }
-    return "⚠️ API provider returned a billing error — check your account for subscription or usage limits, then try again.";
-  }
-
-  if (providerLabel) {
-    return `⚠️ ${providerLabel} returned a billing error — your API key has run out of credits or has an insufficient balance. Check your ${providerName} billing dashboard and top up or switch to a different API key.`;
-  }
-  return "⚠️ API provider returned a billing error — your API key has run out of credits or has an insufficient balance. Check your provider's billing dashboard and top up or switch to a different API key.";
+  return (
+    "⚠️ You're out of Boon Agent tokens, so I couldn't finish that. " +
+    `[Top up your tokens](${BOON_BILLING_URL}) to keep going.`
+  );
 }
 
 export const BILLING_ERROR_USER_MESSAGE = formatBillingErrorMessage();

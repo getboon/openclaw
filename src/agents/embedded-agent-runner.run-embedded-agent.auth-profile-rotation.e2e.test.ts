@@ -1549,7 +1549,9 @@ describe("runEmbeddedAgent auth profile rotation", () => {
       expect(errorRecord.provider).toBe("openai");
       expect(errorRecord.model).toBe("mock-rotated");
       expect(thrown).toBeInstanceOf(Error);
-      expect((thrown as Error).message).toContain("openai (mock-rotated) returned a billing error");
+      // provider/model are carried on the structured FailoverError fields above;
+      // the user-facing message is the Boon-unified billing copy (no provider label).
+      expect((thrown as Error).message).toContain("out of Boon Agent tokens");
       expect(runEmbeddedAttemptMock).toHaveBeenCalledTimes(1);
     });
   });

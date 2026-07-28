@@ -6827,7 +6827,7 @@ describe("runAgentTurnWithFallback", () => {
     }
   });
 
-  it("preserves neutral billing guidance for OAuth failover errors", async () => {
+  it("shows Boon top-up billing copy for OAuth failover errors", async () => {
     state.runEmbeddedAgentMock.mockRejectedValueOnce(
       new FailoverError(formatBillingErrorMessage("Anthropic", "claude-sonnet-4-5", "oauth"), {
         reason: "billing",
@@ -6842,13 +6842,15 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      expect(result.payload.text).toContain("check your account for subscription or usage limits");
+      // Boon fork: all billing failures point at the Boon billing page, never
+      // provider-API-key wording.
+      expect(result.payload.text).toContain("out of Boon Agent tokens");
+      expect(result.payload.text).toContain("app.getboon.ai/billing?open=agent");
       expect(result.payload.text).not.toContain("API key");
-      expect(result.payload.text).not.toContain("top up");
     }
   });
 
-  it("preserves neutral billing guidance after fallback exhaustion", async () => {
+  it("shows Boon top-up billing copy after fallback exhaustion", async () => {
     state.runWithModelFallbackMock.mockRejectedValueOnce(
       Object.assign(new Error("All models failed (1): openai/gpt-5.5: billing"), {
         name: "FallbackSummaryError",
@@ -6870,9 +6872,9 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      expect(result.payload.text).toContain("check your account for subscription or usage limits");
+      expect(result.payload.text).toContain("out of Boon Agent tokens");
+      expect(result.payload.text).toContain("app.getboon.ai/billing?open=agent");
       expect(result.payload.text).not.toContain("API key");
-      expect(result.payload.text).not.toContain("top up");
     }
   });
 
