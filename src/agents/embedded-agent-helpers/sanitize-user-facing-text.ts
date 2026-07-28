@@ -34,9 +34,10 @@ import {
   isTimeoutErrorMessage,
 } from "./failover-matches.js";
 
-// Boon billing page — where a user tops up tokens or upgrades. Kept in sync with
-// BOON_BILLING_URL in ./errors.ts (the token-exhaustion path).
-const BOON_BILLING_URL = "https://app.getboon.ai/billing?open=agent";
+// Boon billing page — where a user tops up tokens or upgrades. Single source of
+// truth for the billing deep-link; the token-exhaustion path in ./errors.ts
+// imports this same constant.
+export const BOON_BILLING_URL = "https://app.getboon.ai/billing?open=agent";
 
 /** Format the billing failure copy.
  *

@@ -44,6 +44,7 @@ import {
   matchesProviderContextOverflow,
 } from "./provider-error-patterns.js";
 import {
+  BOON_BILLING_URL,
   formatBillingErrorMessage,
   formatDiskSpaceErrorCopy,
   formatRateLimitOrOverloadedErrorCopy,
@@ -92,8 +93,9 @@ const MODEL_NOT_FOUND_USER_TEXT =
 //
 // Static billing URL (not the gateway's top_up_url) so the text link is always
 // present regardless of whether the 402 body threads a URL through; `open=agent`
-// matches the web agent-chat banner deep-link.
-const BOON_BILLING_URL = "https://app.getboon.ai/billing?open=agent";
+// matches the web agent-chat banner deep-link. Imported from
+// sanitize-user-facing-text.ts (single source of truth, shared with the generic
+// billing-error copy).
 const ALLOCATION_EXHAUSTED_USER_TEXT =
   `⚠️ You're out of Boon Agent tokens, so I couldn't finish that. ` +
   `[Top up your tokens](${BOON_BILLING_URL}) to keep going.`;
@@ -236,7 +238,6 @@ function isAllocationExhausted(raw: string, errorBody?: string): boolean {
 function isTokenExhausted(raw: string, errorBody?: string): boolean {
   return isAllocationExhausted(raw, errorBody) || isTrialBudgetExhausted(raw, errorBody);
 }
-
 
 /**
  * Build the portable exhaustion card — a single top-up/upgrade URL button
