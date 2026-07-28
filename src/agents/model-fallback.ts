@@ -1376,6 +1376,10 @@ async function runWithModelFallbackInternal<T>(
   let latestClassifiedResult: ModelFallbackClassifiedResult<T> | undefined;
   let exhaustionResult: ModelFallbackExhaustionResult<T> | undefined;
   const cooldownProbeUsedProviders = new Set<string>();
+  // Set once a terminal `chain_exhausted` metric has been emitted so the
+  // post-loop terminal emit does not double-count a hard-failed final
+  // candidate (which already emits chain_exhausted inside observeFailedCandidate).
+  let chainExhaustedEmitted = false;
   const resolveTerminalSuspensionLane = () =>
     deferredSuspension.pending ? deferredSuspension.pending.laneId : params.lane;
   const observeDecision = async (decision: ModelFallbackDecisionParams) => {
@@ -1395,6 +1399,9 @@ async function runWithModelFallbackInternal<T>(
     // operator `exhausted` alert built on the `chain_exhausted` outcome) must
     // fire even when warn-level decision logging is off. A failed candidate
     // with no next candidate is the chain-exhaustion event.
+    if (!failedAttempt.nextCandidate) {
+      chainExhaustedEmitted = true;
+    }
     emitFailoverEvent({
       sessionId: failedAttempt.sessionId,
       lane: failedAttempt.lane,
@@ -1877,6 +1884,26 @@ async function runWithModelFallbackInternal<T>(
         total: candidates.length,
       });
     }
+  }
+
+  // The chain is exhausted at both terminal exits below (graceful exhaustion
+  // return and the failure-summary throw). When the final candidate was
+  // skipped, suspended, or probe-exhausted rather than hard-failing, no
+  // per-candidate `chain_exhausted` fired inside the loop, so the operator
+  // `exhausted` alert would miss these unavailable-chain outcomes. Emit one
+  // terminal event here, guarded so a hard-failed final attempt is not
+  // double-counted.
+  if (!chainExhaustedEmitted) {
+    const terminalAttempt = attempts.at(-1);
+    emitFailoverEvent({
+      sessionId: params.sessionId,
+      lane: params.lane,
+      fromProvider: terminalAttempt?.provider,
+      fromModel: terminalAttempt?.model,
+      reason: terminalAttempt?.reason ?? "unknown",
+      cascadeDepth: candidates.length,
+      outcome: "chain_exhausted",
+    });
   }
 
   if (exhaustionResult) {

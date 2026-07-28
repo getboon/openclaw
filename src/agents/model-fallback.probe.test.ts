@@ -10,6 +10,10 @@ import {
 } from "../infra/diagnostic-events.js";
 import { createDiagnosticLogRecordCapture } from "../logging/test-helpers/diagnostic-log-capture.js";
 import type { AuthProfileStore } from "./auth-profiles.js";
+import {
+  markFallbackCandidateSkipped,
+  resetFallbackSkipCacheForTest,
+} from "./fallback-skip-cache.js";
 import type { SessionSuspensionParams } from "./session-suspension.js";
 import { makeModelFallbackCfg } from "./test-helpers/model-fallback-config-fixture.js";
 
@@ -1102,6 +1106,7 @@ describe("runWithModelFallback – scrapeable failover metric", () => {
     mockedIsProfileInCooldown.mockReturnValue(false);
     mockedResolveProfilesUnavailableReason.mockReturnValue("rate_limit");
 
+    resetFallbackSkipCacheForTest();
     failoverEvents = [];
     unsubscribe = onInternalDiagnosticEvent((event) => {
       if (event.type === "model.failover") {
@@ -1114,6 +1119,7 @@ describe("runWithModelFallback – scrapeable failover metric", () => {
     Date.now = realDateNow;
     unsubscribe?.();
     unsubscribe = undefined;
+    resetFallbackSkipCacheForTest();
     setLoggerOverride(null);
     resetLogger();
     vi.restoreAllMocks();
@@ -1199,5 +1205,42 @@ describe("runWithModelFallback – scrapeable failover metric", () => {
     expect(result.result).toBe("primary-ok");
     // A clean first-attempt success is not a failover/recovery — no series.
     expect(failoverEvents).toHaveLength(0);
+  });
+
+  it("emits a terminal chain_exhausted event when the final candidate is skipped, not hard-failed", async () => {
+    // Primary hard-fails (emits next_fallback), then the sole fallback is in the
+    // session skip cache and is `continue`d past with no hard failure. Without
+    // the post-loop terminal emit the `exhausted` alert would miss this
+    // unavailable-chain outcome, so exactly one chain_exhausted must fire.
+    mockedIsProfileInCooldown.mockReturnValue(false);
+    markFallbackCandidateSkipped({
+      sessionId: "test-session",
+      provider: "anthropic",
+      model: "claude-haiku-3-5",
+      reason: "auth",
+      now: NOW,
+      ttlMs: 60_000,
+    });
+
+    const run = vi.fn().mockRejectedValue(Object.assign(new Error("primary 429"), { status: 429 }));
+
+    await expect(
+      runWithModelFallback({
+        cfg: crossBackendCfg(),
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        sessionId: "test-session",
+        lane: "main",
+        run,
+      }),
+    ).rejects.toThrow();
+
+    // Primary hard-failed and advanced; the skipped fallback was never invoked.
+    expect(run).toHaveBeenCalledTimes(1);
+    const outcomes = failoverEvents.map((event) => event.outcome);
+    expect(outcomes).toContain("next_fallback");
+    const exhausted = failoverEvents.filter((event) => event.outcome === "chain_exhausted");
+    expect(exhausted).toHaveLength(1);
+    expect(exhausted[0]?.cascadeDepth).toBe(2);
   });
 });
