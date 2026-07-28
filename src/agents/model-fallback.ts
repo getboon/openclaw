@@ -1376,6 +1376,30 @@ async function runWithModelFallbackInternal<T>(
   let latestClassifiedResult: ModelFallbackClassifiedResult<T> | undefined;
   let exhaustionResult: ModelFallbackExhaustionResult<T> | undefined;
   const cooldownProbeUsedProviders = new Set<string>();
+  // Set once a terminal `chain_exhausted` metric has been emitted so neither
+  // the early-throw path nor the post-loop emit double-counts a hard-failed
+  // final candidate (which already emits chain_exhausted inside
+  // observeFailedCandidate).
+  let chainExhaustedEmitted = false;
+  // Terminal chain-exhaustion emit shared by the unclassified-last-candidate
+  // throw and the post-loop exits. `cascadeDepth` is the full chain length
+  // because, by construction, every tier has now been consumed.
+  const emitTerminalChainExhausted = (from: {
+    provider?: string;
+    model?: string;
+    reason?: string;
+  }) => {
+    chainExhaustedEmitted = true;
+    emitFailoverEvent({
+      sessionId: params.sessionId,
+      lane: params.lane,
+      fromProvider: from.provider,
+      fromModel: from.model,
+      reason: from.reason ?? "unknown",
+      cascadeDepth: candidates.length,
+      outcome: "chain_exhausted",
+    });
+  };
   const resolveTerminalSuspensionLane = () =>
     deferredSuspension.pending ? deferredSuspension.pending.laneId : params.lane;
   const observeDecision = async (decision: ModelFallbackDecisionParams) => {
@@ -1390,6 +1414,25 @@ async function runWithModelFallbackInternal<T>(
   const observeFailedCandidate = async (
     failedAttempt: Parameters<typeof recordFailedCandidateAttempt>[0],
   ) => {
+    // Emit the scrapeable failover metric before the log-gate short-circuit
+    // below: the fleet runs client-owned fallback, so the series (and the
+    // operator `exhausted` alert built on the `chain_exhausted` outcome) must
+    // fire even when warn-level decision logging is off. A failed candidate
+    // with no next candidate is the chain-exhaustion event.
+    if (!failedAttempt.nextCandidate) {
+      chainExhaustedEmitted = true;
+    }
+    emitFailoverEvent({
+      sessionId: failedAttempt.sessionId,
+      lane: failedAttempt.lane,
+      fromProvider: failedAttempt.candidate.provider,
+      fromModel: failedAttempt.candidate.model,
+      toProvider: failedAttempt.nextCandidate?.provider,
+      toModel: failedAttempt.nextCandidate?.model,
+      reason: describeFailoverError(failedAttempt.error).reason ?? "unknown",
+      cascadeDepth: failedAttempt.attempt,
+      outcome: failedAttempt.nextCandidate ? "next_fallback" : "chain_exhausted",
+    });
     if (!params.onFallbackStep && !isModelFallbackDecisionLogEnabled()) {
       appendFailedCandidateAttempt(failedAttempt);
       return;
@@ -1523,6 +1566,8 @@ async function runWithModelFallbackInternal<T>(
               fromProvider: candidate.provider,
               fromModel: candidate.model,
               reason: decision.reason,
+              cascadeDepth: i + 1,
+              outcome: "suspend_lanes",
               suspended: !hasRemainingCandidates,
             });
             if (!hasRemainingCandidates) {
@@ -1677,6 +1722,25 @@ async function runWithModelFallbackInternal<T>(
     });
     if ("success" in attemptRun) {
       if (i > 0 || attempts.length > 0 || attemptedDuringCooldown) {
+        // Fallback recovered: record the transition from the last failed
+        // candidate to the one that succeeded so the dashboard can show
+        // recovery rate, not just failure rate. Only a real prior failure (or
+        // skip) is a recovery — a clean cooldown-probe success on the primary
+        // has no `recoveredFrom`, so it must not inflate the succeeded series.
+        const recoveredFrom = attempts.at(-1);
+        if (recoveredFrom) {
+          emitFailoverEvent({
+            sessionId: params.sessionId,
+            lane: params.lane,
+            fromProvider: recoveredFrom.provider,
+            fromModel: recoveredFrom.model,
+            toProvider: candidate.provider,
+            toModel: candidate.model,
+            reason: recoveredFrom.reason ?? "unknown",
+            cascadeDepth: i + 1,
+            outcome: "succeeded",
+          });
+        }
         await observeDecision({
           decision: "candidate_succeeded",
           runId: params.runId,
@@ -1795,6 +1859,14 @@ async function runWithModelFallbackInternal<T>(
       // (handled above) are truly non-retryable.
       const isKnownFailover = isFailoverError(normalized);
       if (!isKnownFailover && i === candidates.length - 1) {
+        // Unclassified failure on the final candidate: the chain is exhausted
+        // even though this exit throws before the post-loop emit, so record
+        // the terminal series here.
+        emitTerminalChainExhausted({
+          provider: candidate.provider,
+          model: candidate.model,
+          reason: describeFailoverError(err).reason ?? "unknown",
+        });
         throw err;
       }
 
@@ -1840,6 +1912,22 @@ async function runWithModelFallbackInternal<T>(
         total: candidates.length,
       });
     }
+  }
+
+  // The chain is exhausted at both terminal exits below (graceful exhaustion
+  // return and the failure-summary throw). When the final candidate was
+  // skipped, suspended, or probe-exhausted rather than hard-failing, no
+  // per-candidate `chain_exhausted` fired inside the loop, so the operator
+  // `exhausted` alert would miss these unavailable-chain outcomes. Emit one
+  // terminal event here, guarded so a hard-failed final attempt is not
+  // double-counted.
+  if (!chainExhaustedEmitted) {
+    const terminalAttempt = attempts.at(-1);
+    emitTerminalChainExhausted({
+      provider: terminalAttempt?.provider,
+      model: terminalAttempt?.model,
+      reason: terminalAttempt?.reason,
+    });
   }
 
   if (exhaustionResult) {
