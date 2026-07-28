@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.11
+
+Transient upstream 5xx (gateway-relayed Bedrock 503) now fails over instead of hard-blocking the customer.
+
+- **#83 (ENG-16815):** a transient upstream 5xx relayed through `boon-llm-gateway` — e.g. a Bedrock `503 api_error` ("Bedrock is unable to process your request.") — no longer hard-fails the in-flight turn with `LLM request failed` / `failoverReason: null`; it now fails over to the next backend in the configured cross-backend ladder. This was fleet-wide: every paid boon-agent runs the single-hop cross-backend chain, so any transient Bedrock 5xx blocked the customer's turn instead of failing over. The classifier already maps HTTP `503 → timeout` (failover-eligible); the real defect was that the numeric HTTP status was dropped before reaching the classifier (the custom Anthropic Messages fetch client threw a bare `Error(body)` that discarded `response.status`, and `AssistantMessage` had no field to carry it), so the classifier fell back to free-text body matching and yielded `unclassified` for Bedrock's phrasing. The fix threads the numeric status from transport through to the classifier (`errorStatus?` on `AssistantMessage`, captured in `extractTransportErrorDetails`, preserved on the Messages-client error, preferred by `buildAssistantFailoverSignal`), so the existing status-driven failover path fires and the error message text is no longer load-bearing.
+- Base = `2026.6.11-boon.10`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` bumped to `2026.6.11-boon.11` in lockstep. No other code changes; #83 was merged onto `boon` before this release.
+
 ## 2026.6.11-boon.10
 
 Boon-branded billing copy for every billing failure (closing a live boon.9 gap), plus a scrapeable client-side fallback metric.
