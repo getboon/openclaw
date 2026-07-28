@@ -216,8 +216,13 @@ describe("Cloudflare / CDN HTML error page classification (#67517)", () => {
     expect(classifyFailoverReason(`402 ${html402}`)).toBe("billing");
   });
 
-  it("preserves rate-limit classification for 429 HTML", () => {
-    expect(classifyFailoverReason(`429 ${html429}`)).toBe("rate_limit");
+  it("classifies 429 HTML as timeout, not rate_limit (ENG-14852)", () => {
+    // A Cloudflare/edge WAF returns an HTML "Blocked" 429 relayed on every
+    // model hop. It is an external edge blip, not a provider rate-limit, so it
+    // must classify as transient timeout (fails over / rides out) rather than
+    // surfacing "all models rate-limited". A plain JSON 429 stays rate_limit
+    // (see "does not misclassify JSON API rate-limit responses as HTML").
+    expect(classifyFailoverReason(`429 ${html429}`)).toBe("timeout");
   });
 
   it("classifies runtime failure kind as upstream_html for non-auth HTML", () => {

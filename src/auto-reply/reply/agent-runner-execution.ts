@@ -818,13 +818,15 @@ function isPureTransientRateLimitSummary(err: unknown): boolean {
     err.attempts.length > 0 &&
     err.attempts.every((attempt) => {
       const reason = attempt.reason;
-      // Key edge blocks off the preserved HTML body, not `reason`: an edge/WAF
-      // 429 classifies as `timeout` (errors.ts 429 branch), so matching the
-      // body keeps it retryable while genuine model timeouts stay excluded.
+      // An edge/WAF HTML block classifies as `timeout` (errors.ts 429 branch,
+      // plus the 5xx HTML guard). Gate the body check on that reason so a real
+      // edge block stays retryable while HTML auth (401/403 -> auth) and format
+      // (400/422 -> format) failures keep their actionable copy instead of
+      // being ridden out for five blind retries.
       return (
         reason === "rate_limit" ||
         reason === "overloaded" ||
-        isEdgeBlockErrorBody(attempt.error, attempt.status)
+        (reason === "timeout" && isEdgeBlockErrorBody(attempt.error, attempt.status))
       );
     })
   );
