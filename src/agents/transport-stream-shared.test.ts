@@ -100,4 +100,36 @@ describe("transport stream shared helpers", () => {
     });
     expect(end).toHaveBeenCalledTimes(1);
   });
+
+  it("captures a numeric HTTP status from the thrown transport error", () => {
+    const push = vi.fn();
+    const end = vi.fn();
+    const output: {
+      stopReason: string;
+      errorMessage?: string;
+      errorStatus?: number;
+    } = { stopReason: "stop" };
+
+    const error = Object.assign(
+      new Error(
+        '{"type":"error","error":{"type":"api_error","message":"Bedrock is unable to process your request."}}',
+      ),
+      { status: 503 },
+    );
+
+    failTransportStream({ stream: { push, end }, output, error });
+
+    expect(output.stopReason).toBe("error");
+    expect(output.errorStatus).toBe(503);
+  });
+
+  it("omits errorStatus when the thrown error has no numeric status", () => {
+    const push = vi.fn();
+    const end = vi.fn();
+    const output: { stopReason: string; errorStatus?: number } = { stopReason: "stop" };
+
+    failTransportStream({ stream: { push, end }, output, error: new Error("boom") });
+
+    expect(output.errorStatus).toBeUndefined();
+  });
 });

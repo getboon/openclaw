@@ -1108,6 +1108,57 @@ describe("classifyAssistantFailoverReason", () => {
       }),
     ).toBe("model_not_found");
   });
+
+  it("classifies a gateway-relayed Bedrock 503 api_error as timeout via errorStatus", () => {
+    expect(
+      classifyAssistantFailoverReason({
+        role: "assistant",
+        api: "anthropic-messages",
+        provider: "bedrock",
+        model: "claude-opus-4-8-bedrock",
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "error",
+        errorMessage:
+          '{"type":"error","error":{"type":"api_error","message":"Bedrock is unable to process your request."}}',
+        errorType: "api_error",
+        errorStatus: 503,
+        content: [],
+        timestamp: 0,
+      }),
+    ).toBe("timeout");
+  });
+
+  it("still returns null for a bare Bedrock 503 body when errorStatus is absent (regression guard)", () => {
+    expect(
+      classifyAssistantFailoverReason({
+        role: "assistant",
+        api: "anthropic-messages",
+        provider: "bedrock",
+        model: "claude-opus-4-8-bedrock",
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "error",
+        errorMessage:
+          '{"type":"error","error":{"type":"api_error","message":"Bedrock is unable to process your request."}}',
+        errorType: "api_error",
+        content: [],
+        timestamp: 0,
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("classifyFailoverReasonFromHttpStatus – 402 temporary limits", () => {
@@ -1707,5 +1758,26 @@ describe("classifyProviderRuntimeFailureKind", () => {
 
   it("classifies internal server error status prose with code 500 as timeout", () => {
     expect(classifyFailoverReason(INTERNAL_SERVER_ERROR_STATUS_WITH_500_SAMPLE)).toBe("timeout");
+  });
+
+  it("classifyProviderRuntimeFailureKind returns timeout for a Bedrock 503 when status is supplied", () => {
+    expect(
+      classifyProviderRuntimeFailureKind({
+        status: 503,
+        message:
+          '{"type":"error","error":{"type":"api_error","message":"Bedrock is unable to process your request."}}',
+        provider: "bedrock",
+      }),
+    ).toBe("timeout");
+  });
+
+  it("classifyProviderRuntimeFailureKind returns unclassified for the same body without status", () => {
+    expect(
+      classifyProviderRuntimeFailureKind({
+        message:
+          '{"type":"error","error":{"type":"api_error","message":"Bedrock is unable to process your request."}}',
+        provider: "bedrock",
+      }),
+    ).toBe("unclassified");
   });
 });

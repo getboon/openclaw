@@ -1502,7 +1502,10 @@ function buildAssistantFailoverSignal(
   opts?: { provider?: string },
 ): FailoverSignal {
   return {
-    status: extractLeadingHttpStatus(msg.errorMessage?.trim() ?? "")?.code,
+    status:
+      typeof msg.errorStatus === "number" && Number.isFinite(msg.errorStatus)
+        ? msg.errorStatus
+        : extractLeadingHttpStatus(msg.errorMessage?.trim() ?? "")?.code,
     code: msg.errorCode,
     errorType: msg.errorType,
     message: msg.errorMessage?.trim() || undefined,

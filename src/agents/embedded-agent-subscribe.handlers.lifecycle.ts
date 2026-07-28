@@ -135,6 +135,7 @@ export function handleAgentEnd(
     });
     const observedError = buildApiErrorObservationFields(rawError, {
       provider: lastAssistant.provider,
+      status: lastAssistant.errorStatus,
     });
     const safeErrorText =
       buildTextObservationFields(errorText, {
