@@ -1243,4 +1243,31 @@ describe("runWithModelFallback – scrapeable failover metric", () => {
     expect(exhausted).toHaveLength(1);
     expect(exhausted[0]?.cascadeDepth).toBe(2);
   });
+
+  it("emits a terminal chain_exhausted event when the final candidate throws an unclassified error", async () => {
+    // A non-failover error on the last candidate rethrows before the post-loop
+    // emit, so that early-throw exit must record its own terminal series or the
+    // `exhausted` alert misses it. Single-candidate chain keeps it the last.
+    mockedIsProfileInCooldown.mockReturnValue(false);
+
+    const run = vi.fn().mockRejectedValue(new Error("totally unclassified boom"));
+
+    await expect(
+      runWithModelFallback({
+        cfg: makeCfg({
+          agents: { defaults: { model: { primary: "openai/gpt-4.1-mini" } } },
+        } as Partial<OpenClawConfig>),
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        sessionId: "test-session",
+        lane: "main",
+        run,
+      }),
+    ).rejects.toThrow("totally unclassified boom");
+
+    const exhausted = failoverEvents.filter((event) => event.outcome === "chain_exhausted");
+    expect(exhausted).toHaveLength(1);
+    expect(exhausted[0]?.fromProvider).toBe("openai");
+    expect(exhausted[0]?.cascadeDepth).toBe(1);
+  });
 });

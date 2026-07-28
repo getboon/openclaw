@@ -1376,10 +1376,30 @@ async function runWithModelFallbackInternal<T>(
   let latestClassifiedResult: ModelFallbackClassifiedResult<T> | undefined;
   let exhaustionResult: ModelFallbackExhaustionResult<T> | undefined;
   const cooldownProbeUsedProviders = new Set<string>();
-  // Set once a terminal `chain_exhausted` metric has been emitted so the
-  // post-loop terminal emit does not double-count a hard-failed final
-  // candidate (which already emits chain_exhausted inside observeFailedCandidate).
+  // Set once a terminal `chain_exhausted` metric has been emitted so neither
+  // the early-throw path nor the post-loop emit double-counts a hard-failed
+  // final candidate (which already emits chain_exhausted inside
+  // observeFailedCandidate).
   let chainExhaustedEmitted = false;
+  // Terminal chain-exhaustion emit shared by the unclassified-last-candidate
+  // throw and the post-loop exits. `cascadeDepth` is the full chain length
+  // because, by construction, every tier has now been consumed.
+  const emitTerminalChainExhausted = (from: {
+    provider?: string;
+    model?: string;
+    reason?: string;
+  }) => {
+    chainExhaustedEmitted = true;
+    emitFailoverEvent({
+      sessionId: params.sessionId,
+      lane: params.lane,
+      fromProvider: from.provider,
+      fromModel: from.model,
+      reason: from.reason ?? "unknown",
+      cascadeDepth: candidates.length,
+      outcome: "chain_exhausted",
+    });
+  };
   const resolveTerminalSuspensionLane = () =>
     deferredSuspension.pending ? deferredSuspension.pending.laneId : params.lane;
   const observeDecision = async (decision: ModelFallbackDecisionParams) => {
@@ -1839,6 +1859,14 @@ async function runWithModelFallbackInternal<T>(
       // (handled above) are truly non-retryable.
       const isKnownFailover = isFailoverError(normalized);
       if (!isKnownFailover && i === candidates.length - 1) {
+        // Unclassified failure on the final candidate: the chain is exhausted
+        // even though this exit throws before the post-loop emit, so record
+        // the terminal series here.
+        emitTerminalChainExhausted({
+          provider: candidate.provider,
+          model: candidate.model,
+          reason: describeFailoverError(err).reason ?? "unknown",
+        });
         throw err;
       }
 
@@ -1895,14 +1923,10 @@ async function runWithModelFallbackInternal<T>(
   // double-counted.
   if (!chainExhaustedEmitted) {
     const terminalAttempt = attempts.at(-1);
-    emitFailoverEvent({
-      sessionId: params.sessionId,
-      lane: params.lane,
-      fromProvider: terminalAttempt?.provider,
-      fromModel: terminalAttempt?.model,
-      reason: terminalAttempt?.reason ?? "unknown",
-      cascadeDepth: candidates.length,
-      outcome: "chain_exhausted",
+    emitTerminalChainExhausted({
+      provider: terminalAttempt?.provider,
+      model: terminalAttempt?.model,
+      reason: terminalAttempt?.reason,
     });
   }
 
