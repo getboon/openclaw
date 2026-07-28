@@ -1,5 +1,7 @@
-// Lifecycle billing error tests ensure subscription error events include enough
-// provider/model context for users to fix account or quota issues.
+// Lifecycle billing error tests ensure subscription error events carry the
+// user-facing billing copy. Boon fork: that copy is the Boon top-up message
+// (no provider/model internals — a Boon user tops up their Boon allocation, not
+// a provider account).
 import { describe, expect, it, vi } from "vitest";
 import {
   createSubscribedSessionHarness,
@@ -20,7 +22,7 @@ describe("subscribeEmbeddedAgentSession lifecycle billing errors", () => {
     return { emit, onAgentEvent };
   }
 
-  it("includes provider and model context in lifecycle billing errors", () => {
+  it("surfaces Boon top-up billing copy in lifecycle errors (no provider internals)", () => {
     const { emit, onAgentEvent } = createAgentEventHarness({
       runId: "run-billing-error",
       sessionKey: "test-session",
@@ -36,7 +38,8 @@ describe("subscribeEmbeddedAgentSession lifecycle billing errors", () => {
     const lifecycleError = findLifecycleErrorAgentEvent(onAgentEvent.mock.calls);
     expect(lifecycleError?.stream).toBe("lifecycle");
     expect(lifecycleError?.data?.phase).toBe("error");
-    expect(lifecycleError?.data?.error).toContain("Anthropic (claude-3-5-sonnet)");
+    expect(lifecycleError?.data?.error).toContain("out of Boon Agent tokens");
+    expect(lifecycleError?.data?.error).not.toContain("Anthropic");
   });
 
   it("defers error terminal ownership while preserving diagnostics", () => {
@@ -61,7 +64,7 @@ describe("subscribeEmbeddedAgentSession lifecycle billing errors", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           phase: "finishing",
-          error: expect.stringContaining("Anthropic (claude-3-5-sonnet)"),
+          error: expect.stringContaining("out of Boon Agent tokens"),
         }),
       }),
     ]);
