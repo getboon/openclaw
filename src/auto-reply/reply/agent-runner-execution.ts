@@ -34,6 +34,7 @@ import {
   isCompactionFailureError,
   isContextOverflowError,
   isBillingErrorMessage,
+  isEdgeBlockErrorBody,
   isLikelyContextOverflowError,
   isOverloadedErrorMessage,
   isRateLimitErrorMessage,
@@ -817,7 +818,14 @@ function isPureTransientRateLimitSummary(err: unknown): boolean {
     err.attempts.length > 0 &&
     err.attempts.every((attempt) => {
       const reason = attempt.reason;
-      return reason === "rate_limit" || reason === "overloaded";
+      // Key edge blocks off the preserved HTML body, not `reason`: an edge/WAF
+      // 429 classifies as `timeout` (errors.ts 429 branch), so matching the
+      // body keeps it retryable while genuine model timeouts stay excluded.
+      return (
+        reason === "rate_limit" ||
+        reason === "overloaded" ||
+        isEdgeBlockErrorBody(attempt.error, attempt.status)
+      );
     })
   );
 }

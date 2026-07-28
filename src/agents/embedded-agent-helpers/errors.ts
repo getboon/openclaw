@@ -13,6 +13,7 @@ import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
   extractLeadingHttpStatus,
   formatRawAssistantErrorForUi,
+  isCloudflareOrHtmlErrorPage,
   isGenericProviderInternalError,
   parseApiErrorInfo,
 } from "../../shared/assistant-error-format.js";
@@ -716,6 +717,20 @@ function isHtmlErrorResponse(raw: string, status?: number): boolean {
   return HTML_BODY_RE.test(rest) && HTML_CLOSE_RE.test(rest);
 }
 
+/**
+ * A gateway/edge WAF (Cloudflare, Render) block: an HTML error page relayed by
+ * the gateway instead of a real provider JSON error. Matches either a full HTML
+ * document (`isHtmlErrorResponse`) or a Cloudflare challenge/block page hint
+ * (`isCloudflareOrHtmlErrorPage`). Shared by the 429 classifier and the
+ * client-side ride-out retry predicate so both key off the same edge signal.
+ */
+export function isEdgeBlockErrorBody(message: string | undefined, status?: number): boolean {
+  if (!message) {
+    return false;
+  }
+  return isHtmlErrorResponse(message, status) || isCloudflareOrHtmlErrorPage(message);
+}
+
 function isTransportHtmlErrorStatus(status: number | undefined): boolean {
   return (
     status === 408 ||
@@ -1004,6 +1019,14 @@ function classifyFailoverClassificationFromHttpStatus(
     }
     if (message && isBilling429MessageForProvider(message, provider)) {
       return toReasonClassification("billing");
+    }
+    // A Cloudflare/edge WAF in front of the gateway returns an HTML "Blocked"
+    // 429 that the gateway relays on every model hop. It is an external edge
+    // blip, not a provider rate-limit — classify as transient timeout so it
+    // fails over / rides out instead of surfacing "all models rate-limited".
+    // Billing 429s are handled above and still win.
+    if (isEdgeBlockErrorBody(message, status)) {
+      return toReasonClassification("timeout");
     }
     return toReasonClassification("rate_limit");
   }
