@@ -4,8 +4,10 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
  */
 import { fireAndForgetBoundedHook } from "../../../hooks/fire-and-forget.js";
 import {
+  classify5xxSource,
   diagnosticErrorCategory,
   diagnosticErrorFailureKind,
+  diagnosticHttpStatusCode,
   diagnosticProviderRequestIdHash,
 } from "../../../infra/diagnostic-error-metadata.js";
 import {
@@ -59,7 +61,7 @@ type ModelCallEventBase = Omit<
 >;
 type ModelCallErrorFields = Pick<
   Extract<DiagnosticEventInput, { type: "model.call.error" }>,
-  "errorCategory" | "failureKind" | "memory" | "upstreamRequestIdHash"
+  "errorCategory" | "failureKind" | "httpStatus" | "errorClass" | "memory" | "upstreamRequestIdHash"
 >;
 type ModelCallEndedHookFields = Pick<
   PluginHookModelCallEndedEvent,
@@ -70,6 +72,8 @@ type ModelCallEndedHookFields = Pick<
   | "responseStreamBytes"
   | "timeToFirstByteMs"
   | "failureKind"
+  | "httpStatus"
+  | "errorClass"
   | "upstreamRequestIdHash"
 >;
 type ModelCallSizeTimingFields = Pick<
@@ -321,9 +325,18 @@ function modelCallCompletedContent(state: ModelCallObservationState) {
 function modelCallErrorFields(err: unknown): ModelCallErrorFields {
   const upstreamRequestIdHash = diagnosticProviderRequestIdHash(err);
   const failureKind = diagnosticErrorFailureKind(err);
+  // ENG-16922: thread the HTTP status + upstream-vs-gateway 5xx source so an
+  // observer (sentry-monitor) can page on a Bedrock outage separately from a
+  // gateway-origin fault. httpStatus is absent for transport-level failures
+  // with no response (those are already described by failureKind).
+  const httpStatusStr = diagnosticHttpStatusCode(err);
+  const httpStatus = httpStatusStr === undefined ? undefined : Number(httpStatusStr);
+  const errorClass = classify5xxSource(httpStatus, err);
   return {
     errorCategory: diagnosticErrorCategory(err),
     ...(failureKind ? { failureKind, memory: processMemoryUsageSnapshot() } : {}),
+    ...(httpStatus === undefined ? {} : { httpStatus }),
+    ...(errorClass ? { errorClass } : {}),
     ...(upstreamRequestIdHash ? { upstreamRequestIdHash } : {}),
   };
 }

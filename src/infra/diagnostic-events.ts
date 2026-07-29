@@ -619,6 +619,9 @@ export type DiagnosticModelCallErrorEvent = DiagnosticModelCallBaseEvent & {
   durationMs: number;
   errorCategory: string;
   failureKind?: "aborted" | "connection_closed" | "connection_reset" | "terminated" | "timeout";
+  // ENG-16922: HTTP status + upstream-vs-gateway 5xx source classification.
+  httpStatus?: number;
+  errorClass?: "upstream_provider_5xx" | "gateway_origin_5xx";
   memory?: DiagnosticMemoryUsage;
   requestPayloadBytes?: number;
   responseStreamBytes?: number;

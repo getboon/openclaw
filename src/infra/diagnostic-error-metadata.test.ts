@@ -1,6 +1,7 @@
 // Covers diagnostic error metadata extraction.
 import { describe, expect, it } from "vitest";
 import {
+  classify5xxSource,
   diagnosticErrorCategory,
   diagnosticErrorFailureKind,
   diagnosticHttpStatusCode,
@@ -110,5 +111,54 @@ describe("diagnostic error metadata", () => {
     });
 
     expect(diagnosticErrorFailureKind(errorLike)).toBeUndefined();
+  });
+
+  describe("classify5xxSource (ENG-16922)", () => {
+    it("classifies relayed upstream provider 5xx by status band", () => {
+      expect(classify5xxSource(500)).toBe("upstream_provider_5xx");
+      expect(classify5xxSource(503)).toBe("upstream_provider_5xx");
+      expect(classify5xxSource(529)).toBe("upstream_provider_5xx");
+    });
+
+    it("classifies gateway-synthesized 502 and other 5xx as gateway-origin", () => {
+      expect(classify5xxSource(502)).toBe("gateway_origin_5xx");
+      expect(classify5xxSource(504)).toBe("gateway_origin_5xx");
+      expect(classify5xxSource(500 + 20)).toBe("gateway_origin_5xx"); // 520, unknown 5xx
+    });
+
+    it("returns undefined for a missing or non-5xx status", () => {
+      expect(classify5xxSource(undefined)).toBeUndefined();
+      expect(classify5xxSource(429)).toBeUndefined();
+      expect(classify5xxSource(400)).toBeUndefined();
+      expect(classify5xxSource(200)).toBeUndefined();
+    });
+
+    it("uses a recognized provider error.type to break an ambiguous-status tie", () => {
+      // A 502 that actually wraps a relayed provider api_error body is upstream.
+      expect(classify5xxSource(502, { error: { type: "api_error" } })).toBe(
+        "upstream_provider_5xx",
+      );
+      expect(classify5xxSource(502, { type: "overloaded_error" })).toBe("upstream_provider_5xx");
+      // The type tie-break never fires below the 5xx floor.
+      expect(classify5xxSource(429, { type: "api_error" })).toBeUndefined();
+    });
+
+    it("ignores an unrelated provider error.type and falls back to the status band", () => {
+      expect(classify5xxSource(502, { type: "invalid_request_error" })).toBe("gateway_origin_5xx");
+      expect(classify5xxSource(503, { type: "invalid_request_error" })).toBe(
+        "upstream_provider_5xx",
+      );
+    });
+
+    it("does not trigger userland getters while reading the error type", () => {
+      const errorLike = {};
+      Object.defineProperty(errorLike, "type", {
+        get() {
+          throw new Error("should not read getter");
+        },
+      });
+      // Falls back to the status band without throwing.
+      expect(classify5xxSource(502, errorLike)).toBe("gateway_origin_5xx");
+    });
   });
 });

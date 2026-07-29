@@ -174,6 +174,52 @@ export function diagnosticHttpStatusCode(err: unknown): string | undefined {
   return undefined;
 }
 
+/** Source classification of a 5xx model-call failure (see PluginHookModelCallEndedEvent). */
+export type Diagnostic5xxSource = "upstream_provider_5xx" | "gateway_origin_5xx";
+
+// Provider error-type keys checked (own data props only) for the tie-break: a
+// Bedrock/Anthropic relay body carries error.type = "api_error"/"overloaded".
+const UPSTREAM_PROVIDER_ERROR_TYPES = new Set(["api_error", "overloaded_error", "overloaded"]);
+
+function readProviderErrorType(candidate: unknown): string | undefined {
+  const value =
+    readOwnDataProperty(candidate, "type") ?? readOwnDataProperty(candidate, "errorType");
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/**
+ * Classifies a 5xx model-call failure as upstream-provider vs gateway-origin
+ * (ENG-16922), so an observer can page on them differently. Status-driven, NOT
+ * text-driven — no free-text message regex (that fragility is what ENG-16815
+ * deliberately removed). Returns undefined for a missing or non-5xx status.
+ *
+ * The split mirrors boon-llm-gateway's single-hop behavior: a real upstream 5xx
+ * (Bedrock/Anthropic 500/503/529) is relayed verbatim, while the gateway only
+ * *synthesizes* 502 for its own faults (chain exhausted, WAF/HTML block page,
+ * no-response transport failure). So:
+ *   - 502              -> gateway_origin_5xx (the gateway made the final call)
+ *   - 500 / 503 / 529  -> upstream_provider_5xx (relayed provider outage)
+ *   - other 5xx        -> gateway_origin_5xx (conservative: unknown => our infra)
+ * A recognized upstream provider `error.type` (api_error/overloaded) forces the
+ * upstream class even on an ambiguous status, breaking ties without regex.
+ */
+export function classify5xxSource(
+  httpStatus: number | undefined,
+  err?: unknown,
+): Diagnostic5xxSource | undefined {
+  if (httpStatus === undefined || httpStatus < 500 || httpStatus > 599) {
+    return undefined;
+  }
+  const providerType = findDiagnosticErrorProperty(err, readProviderErrorType);
+  if (providerType && UPSTREAM_PROVIDER_ERROR_TYPES.has(providerType)) {
+    return "upstream_provider_5xx";
+  }
+  if (httpStatus === 500 || httpStatus === 503 || httpStatus === 529) {
+    return "upstream_provider_5xx";
+  }
+  return "gateway_origin_5xx";
+}
+
 /** Classifies transport-style failures without exposing raw error messages. */
 export function diagnosticErrorFailureKind(err: unknown): DiagnosticErrorFailureKind | undefined {
   const code = findDiagnosticErrorProperty(err, readDirectCode)?.trim().toUpperCase();
