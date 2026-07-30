@@ -381,10 +381,13 @@ export const TOOL_DISPLAY_CONFIG: ToolDisplayConfig = {
     sessions_spawn: {
       emoji: "🧑‍🔧",
       title: "Sub-agent",
-      // ENG-16868: all seven args (label, task, agentId, model, thinking,
-      // runTimeoutSeconds, cleanup) are operator-only orchestration with no
-      // customer value. Keep empty so no render surface prints scaffolding.
-      detailKeys: [],
+      // ENG-16868: render only taskName — the short, contract-slugged handle
+      // that tells the customer WHICH sub-agent ran (e.g. "Sub-agent:
+      // panel-schedule-extraction"), degrading to a bare "Sub-agent" when it is
+      // absent. The free-form `task` prompt and `label` (plus operator-only
+      // agentId/model/thinking/runTimeoutSeconds/cleanup) are excluded —
+      // rendering `task` is what leaked the sub-agent prompt into chat.
+      detailKeys: ["taskName"],
     },
     subagents: {
       emoji: "🤖",

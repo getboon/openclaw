@@ -536,7 +536,9 @@
     "sessions_spawn": {
       "emoji": "🧑‍🔧",
       "title": "Sub-agent",
-      "detailKeys": []
+      "detailKeys": [
+        "taskName"
+      ]
     },
     "subagents": {
       "emoji": "🤖",

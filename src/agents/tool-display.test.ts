@@ -628,13 +628,34 @@ describe("coerceDisplayValue middle truncation", () => {
 });
 
 describe("sessions_spawn scaffolding is not rendered (ENG-16868)", () => {
-  it("keeps sessions_spawn detailKeys empty so label/task never render", () => {
-    // Drift guard: label/task are internal orchestration; if these regrow, the
-    // sub-agent prompt leaks into customer chat again (ENG-16868).
-    expect(TOOL_DISPLAY_CONFIG.tools.sessions_spawn?.detailKeys).toEqual([]);
+  it("renders only taskName so the prompt/label never leak", () => {
+    // Drift guard: taskName is the short, contract-slugged handle that tells the
+    // customer WHICH sub-agent ran. The free-form task prompt and label are
+    // internal orchestration; if they re-enter detailKeys the ENG-16868 leak
+    // recurs. Keep the list to taskName only.
+    expect(TOOL_DISPLAY_CONFIG.tools.sessions_spawn?.detailKeys).toEqual(["taskName"]);
   });
 
-  it("renders no label/task detail for a sessions_spawn call", () => {
+  it("renders the taskName but never the label/task prompt for a sessions_spawn call", () => {
+    const detail = formatToolDetail(
+      resolveToolDisplay({
+        name: "sessions_spawn",
+        args: {
+          taskName: "panel-schedule-extraction",
+          label: "Merlin Labs panel schedule extraction",
+          task: "You are executing the PANEL SCHEDULE EXTRACTION step…",
+        },
+      }),
+    );
+
+    expect(detail).toBe("panel-schedule-extraction");
+    expect(detail).not.toContain("You are executing");
+    expect(detail).not.toContain("Merlin Labs");
+  });
+
+  it("renders no detail for a sessions_spawn call without a taskName", () => {
+    // taskName is optional; when absent the line degrades to a bare Sub-agent
+    // rather than falling back to the prompt.
     const detail = formatToolDetail(
       resolveToolDisplay({
         name: "sessions_spawn",

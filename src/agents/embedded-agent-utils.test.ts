@@ -878,9 +878,20 @@ describe("empty input handling", () => {
 });
 
 describe("inferToolMetaFromArgs sessions_spawn scaffolding (ENG-16868)", () => {
-  it("produces no meta from a sessions_spawn label/task so the error badge cannot leak scaffolding", () => {
+  it("never leaks the label/task prompt into the badge meta string", () => {
     // The ⚠️ Sub-agent failed badge is built from this precomputed meta string.
-    // Empty detailKeys must yield empty meta so label/task never reach the badge.
+    // Only taskName may render; the free-form task prompt and label must not.
+    const meta = inferToolMetaFromArgs("sessions_spawn", {
+      taskName: "panel-schedule-extraction",
+      label: "Merlin Labs panel schedule extraction",
+      task: "You are executing the PANEL SCHEDULE EXTRACTION step…",
+    });
+    expect(meta).toBe("panel-schedule-extraction");
+    expect(meta).not.toContain("You are executing");
+    expect(meta).not.toContain("Merlin Labs");
+  });
+
+  it("produces no meta from a sessions_spawn without a taskName", () => {
     const meta = inferToolMetaFromArgs("sessions_spawn", {
       label: "Merlin Labs panel schedule extraction",
       task: "You are executing the PANEL SCHEDULE EXTRACTION step…",
