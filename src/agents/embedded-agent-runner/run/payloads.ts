@@ -255,15 +255,20 @@ function resolveToolErrorWarningPolicy(params: {
   // complete answer — its output quality equals a first-try success, and the
   // transient retry is backstage plumbing. Suppress the warning WHEN a real
   // reply was delivered; a genuine failure (no reply) still surfaces honestly.
-  // Must precede the mutating branch below: sessions_spawn is a mutating tool,
-  // and that branch ignores hasUserFacingReply, so a recovered spawn would
-  // otherwise emit a false "failed" badge. Must also follow the suppressToolErrors
-  // global gate so the operator config still wins. Like exec/bash/process, a
-  // recovered error is treated as non-terminal because the deliverable is the
-  // answer, not the spawn call; here we fully suppress (no continuation note)
-  // since a recovered spawn's retry adds no user value.
+  // An existing user-facing error reply also suppresses the badge (matches the
+  // mutating branch it replaces; avoids stacked error lines). Must precede the
+  // mutating branch below: sessions_spawn is a mutating tool, and that branch
+  // ignores hasUserFacingReply, so a recovered spawn would otherwise emit a
+  // false "failed" badge. Must also follow the suppressToolErrors global gate so
+  // the operator config still wins. Like exec/bash/process, a recovered error is
+  // treated as non-terminal because the deliverable is the answer, not the spawn
+  // call; here we fully suppress (no continuation note) since a recovered spawn's
+  // retry adds no user value.
   if (normalizedToolName === "sessions_spawn") {
-    return { showWarning: !params.hasUserFacingReply, includeDetails };
+    return {
+      showWarning: !params.hasUserFacingReply && !params.hasUserFacingErrorReply,
+      includeDetails,
+    };
   }
   const isMutatingToolError =
     params.lastToolError.mutatingAction ?? isLikelyMutatingToolName(params.lastToolError.toolName);

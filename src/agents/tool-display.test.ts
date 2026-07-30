@@ -573,8 +573,8 @@ describe("coerceDisplayValue middle truncation", () => {
       "/important-file.txt";
     const detail = formatToolDetail(
       resolveToolDisplay({
-        name: "exec",
-        args: { command: longPath },
+        name: "memory_search",
+        args: { query: longPath },
       }),
     );
     expect(detail).toContain("/usr/local/share/");
@@ -585,8 +585,8 @@ describe("coerceDisplayValue middle truncation", () => {
   it("does not truncate short string values", () => {
     const detail = formatToolDetail(
       resolveToolDisplay({
-        name: "exec",
-        args: { command: "short-task-name" },
+        name: "memory_search",
+        args: { query: "short-task-name" },
       }),
     );
     expect(detail).toBe("short-task-name");
@@ -603,8 +603,8 @@ describe("coerceDisplayValue middle truncation", () => {
       " final-step";
     const detail = formatToolDetail(
       resolveToolDisplay({
-        name: "exec",
-        args: { command: longValue },
+        name: "memory_search",
+        args: { query: longValue },
       }),
     );
     expect(detail).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop");
@@ -617,8 +617,8 @@ describe("coerceDisplayValue middle truncation", () => {
       " final-step";
     const detail = formatToolDetail(
       resolveToolDisplay({
-        name: "exec",
-        args: { command: longValue },
+        name: "memory_search",
+        args: { query: longValue },
       }),
     );
 

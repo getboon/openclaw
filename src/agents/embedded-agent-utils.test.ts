@@ -9,6 +9,7 @@ import {
   extractAssistantThinking,
   extractAssistantVisibleText,
   formatReasoningMessage,
+  inferToolMetaFromArgs,
   promoteThinkingTagsToBlocks,
   stripDowngradedToolCallText,
 } from "./embedded-agent-utils.js";
@@ -873,5 +874,17 @@ describe("empty input handling", () => {
     for (const helper of helpers) {
       expect(helper("")).toBe("");
     }
+  });
+});
+
+describe("inferToolMetaFromArgs sessions_spawn scaffolding (ENG-16868)", () => {
+  it("produces no meta from a sessions_spawn label/task so the error badge cannot leak scaffolding", () => {
+    // The ⚠️ Sub-agent failed badge is built from this precomputed meta string.
+    // Empty detailKeys must yield empty meta so label/task never reach the badge.
+    const meta = inferToolMetaFromArgs("sessions_spawn", {
+      label: "Merlin Labs panel schedule extraction",
+      task: "You are executing the PANEL SCHEDULE EXTRACTION step…",
+    });
+    expect(meta).toBeUndefined();
   });
 });
