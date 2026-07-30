@@ -61,14 +61,19 @@ export function hasCompletedModelProgressForIdleBreaker(
 
 export function buildTraceToolSummary(params: {
   toolMetas?: EmbeddedRunAttemptForRunner["toolMetas"];
+  visibleToolNames?: readonly string[];
   fallbackHadFailure: boolean;
 }): ToolSummaryTrace | undefined {
-  if (!params.toolMetas?.length) {
+  const toolMetas = params.toolMetas ?? [];
+  const visibleTools = [...new Set(params.visibleToolNames ?? [])]
+    .filter((name) => normalizeOptionalString(name))
+    .toSorted();
+  if (toolMetas.length === 0 && visibleTools.length === 0) {
     return undefined;
   }
   const tools: string[] = [];
   const seen = new Set<string>();
-  for (const entry of params.toolMetas) {
+  for (const entry of toolMetas) {
     const toolName = normalizeOptionalString(entry.toolName);
     if (!toolName || seen.has(toolName)) {
       continue;
@@ -76,12 +81,22 @@ export function buildTraceToolSummary(params: {
     seen.add(toolName);
     tools.push(toolName);
   }
-  const failedToolCalls = params.toolMetas.filter((entry) => entry.isError === true).length;
+  const failedToolCalls = toolMetas.filter((entry) => entry.isError === true).length;
   return {
-    calls: params.toolMetas.length,
+    calls: toolMetas.length,
     tools,
     // Per-call error metadata is additive to the shipped harness result contract.
     // Keep the prior any-failure signal for external harnesses that do not emit it yet.
     failures: failedToolCalls || Number(params.fallbackHadFailure),
+    visibleTools,
+    invocations: toolMetas.map((entry) => ({
+      name: entry.toolName,
+      status:
+        entry.status === "blocked"
+          ? ("blocked" as const)
+          : entry.isError === true
+            ? ("error" as const)
+            : ("ok" as const),
+    })),
   };
 }

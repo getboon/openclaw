@@ -185,6 +185,7 @@ export function prepareEmbeddedRunTerminal(input: {
     (attempt.toolMetas?.length ?? 0) === 0;
   const attemptToolSummary = buildTraceToolSummary({
     toolMetas: attempt.toolMetas,
+    visibleToolNames: attempt.visibleToolNames,
     fallbackHadFailure: Boolean(attempt.lastToolError),
   });
   const failureSignal = resolveEmbeddedRunFailureSignal({

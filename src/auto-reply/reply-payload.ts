@@ -7,6 +7,35 @@ import type {
   ReplyPayloadDelivery,
 } from "../interactive/payload.js";
 
+export type AgentDecisionTraceToolStatus = "ok" | "error" | "blocked";
+
+/** Bounded, user-visible execution facts. Never contains model reasoning or tool data. */
+export type AgentDecisionTrace = {
+  schemaVersion: 1;
+  visibleTools: string[];
+  toolInvocations: Array<{
+    name: string;
+    status: AgentDecisionTraceToolStatus;
+  }>;
+  evidence: Array<{
+    kind: "tool_outcome";
+    tool: string;
+    status: AgentDecisionTraceToolStatus;
+  }>;
+  confidence: "high" | "medium" | "low";
+  disposition: "completed" | "permission_required" | "refused" | "failed" | "unverified";
+  reason:
+    | "tool_execution_succeeded"
+    | "tool_execution_partial"
+    | "tool_execution_failed"
+    | "tool_execution_blocked"
+    | "no_tool_invocation"
+    | "no_tools_visible"
+    | "permission_required"
+    | "provider_reported_refusal"
+    | "run_failed";
+};
+
 /** Channel-agnostic assistant reply payload. */
 export type ReplyPayload = {
   text?: string;
@@ -67,6 +96,8 @@ export type ReplyPayload = {
   isFallbackNotice?: boolean;
   /** Marks this payload as transient status, not assistant answer content. */
   isStatusNotice?: boolean;
+  /** Portable audit facts for clients that render or inspect agent execution. */
+  auditTrace?: AgentDecisionTrace;
   /** Channel-specific payload data (per-channel envelope). */
   channelData?: Record<string, unknown>;
 };
