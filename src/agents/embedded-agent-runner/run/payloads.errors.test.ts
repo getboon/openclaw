@@ -156,6 +156,23 @@ describe("buildEmbeddedRunPayloads", () => {
     expectNoPayloadTextContaining(payloads, "missing");
   });
 
+  it("suppresses the sessions_spawn failure badge when an assistant error reply already covers the turn", () => {
+    // ENG-16868: a genuine spawn failure on a turn the assistant already
+    // reported as an error must not stack a second "⚠️ Sub-agent failed" line —
+    // matches the mutating branch this replaced (hasUserFacingErrorReply guard).
+    const payloads = buildPayloads({
+      assistantTexts: [errorJson],
+      lastAssistant: makeAssistant({}),
+      lastToolError: { toolName: "sessions_spawn", error: "sub-agent step errored" },
+      sessionKey: "agent:main:telegram:direct:u123",
+    });
+
+    expectOverloadedFallback(payloads);
+    expect(payloads[0]?.isError).toBe(true);
+    expectNoPayloadTextContaining(payloads, "Sub-agent");
+    expectNoPayloadTextContaining(payloads, "failed");
+  });
+
   it("keeps mutating tool warnings when assistant error artifacts are not user-facing", () => {
     const payloads = buildPayloads({
       assistantTexts: [errorJson],
