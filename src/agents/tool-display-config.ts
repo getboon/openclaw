@@ -381,7 +381,10 @@ export const TOOL_DISPLAY_CONFIG: ToolDisplayConfig = {
     sessions_spawn: {
       emoji: "🧑‍🔧",
       title: "Sub-agent",
-      detailKeys: ["label", "task", "agentId", "model", "thinking", "runTimeoutSeconds", "cleanup"],
+      // ENG-16868: label/task are internal orchestration plumbing; rendering
+      // them leaked the sub-agent prompt into customer chat. Keep empty so no
+      // render surface (live preview or final badge) prints scaffolding.
+      detailKeys: [],
     },
     subagents: {
       emoji: "🤖",

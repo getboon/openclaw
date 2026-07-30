@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { resolveToolSearchCodeDisplayTarget } from "./tool-display-common.js";
 import { resolveExecDetail } from "./tool-display-exec.js";
 import { formatToolDetail, formatToolSummary, resolveToolDisplay } from "./tool-display.js";
+import { TOOL_DISPLAY_CONFIG } from "./tool-display-config.js";
 
 describe("tool display details", () => {
   it("summarizes tool-search code targets from described tool ids", () => {
@@ -52,16 +53,16 @@ describe("tool display details", () => {
   it("skips zero/false values for optional detail fields", () => {
     const detail = formatToolDetail(
       resolveToolDisplay({
-        name: "sessions_spawn",
+        name: "sessions_history",
         args: {
-          task: "double-message-bug-gpt",
-          label: 0,
-          runTimeoutSeconds: 0,
+          sessionKey: "agent:main:main",
+          limit: 0,
+          includeTools: false,
         },
       }),
     );
 
-    expect(detail).toBe("double-message-bug-gpt");
+    expect(detail).toBe("agent:main:main");
   });
 
   it("includes only truthy boolean details", () => {
@@ -572,23 +573,20 @@ describe("coerceDisplayValue middle truncation", () => {
       "/important-file.txt";
     const detail = formatToolDetail(
       resolveToolDisplay({
-        name: "sessions_spawn",
-        args: { task: longPath },
+        name: "exec",
+        args: { command: longPath },
       }),
     );
-    // Should contain the start of the path
     expect(detail).toContain("/usr/local/share/");
-    // Should contain the end (filename)
     expect(detail).toContain("important-file.txt");
-    // Should contain the ellipsis for middle truncation
     expect(detail).toContain("…");
   });
 
   it("does not truncate short string values", () => {
     const detail = formatToolDetail(
       resolveToolDisplay({
-        name: "sessions_spawn",
-        args: { task: "short-task-name" },
+        name: "exec",
+        args: { command: "short-task-name" },
       }),
     );
     expect(detail).toBe("short-task-name");
@@ -605,11 +603,10 @@ describe("coerceDisplayValue middle truncation", () => {
       " final-step";
     const detail = formatToolDetail(
       resolveToolDisplay({
-        name: "sessions_spawn",
-        args: { task: longValue },
+        name: "exec",
+        args: { command: longValue },
       }),
     );
-    // The ghp_ token must be redacted before truncation
     expect(detail).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop");
   });
 
@@ -620,12 +617,34 @@ describe("coerceDisplayValue middle truncation", () => {
       " final-step";
     const detail = formatToolDetail(
       resolveToolDisplay({
-        name: "sessions_spawn",
-        args: { task: longValue },
+        name: "exec",
+        args: { command: longValue },
       }),
     );
 
     expect(detail).not.toContain("AKIDABCDEFGHIJKLMNOP1234567890");
     expect(detail).toContain("AKIDAB…7890");
+  });
+});
+
+describe("sessions_spawn scaffolding is not rendered (ENG-16868)", () => {
+  it("keeps sessions_spawn detailKeys empty so label/task never render", () => {
+    // Drift guard: label/task are internal orchestration; if these regrow, the
+    // sub-agent prompt leaks into customer chat again (ENG-16868).
+    expect(TOOL_DISPLAY_CONFIG.tools.sessions_spawn?.detailKeys).toEqual([]);
+  });
+
+  it("renders no label/task detail for a sessions_spawn call", () => {
+    const detail = formatToolDetail(
+      resolveToolDisplay({
+        name: "sessions_spawn",
+        args: {
+          label: "Merlin Labs panel schedule extraction",
+          task: "You are executing the PANEL SCHEDULE EXTRACTION step…",
+        },
+      }),
+    );
+
+    expect(detail).toBeUndefined();
   });
 });
