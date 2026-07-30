@@ -1,8 +1,15 @@
 // Slack tests cover action runtime plugin behavior.
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { handleSlackAction, slackActionRuntime } from "./action-runtime.js";
 import { parseSlackBlocksInput } from "./blocks-input.js";
+
+vi.mock("openclaw/plugin-sdk/runtime-env", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("openclaw/plugin-sdk/runtime-env")>()),
+  logVerbose: vi.fn(),
+}));
+
+const { handleSlackAction, slackActionRuntime } = await import("./action-runtime.js");
 
 const originalSlackActionRuntime = { ...slackActionRuntime };
 const deleteSlackMessage = vi.fn(async (..._args: unknown[]) => ({}));
@@ -755,6 +762,83 @@ describe("handleSlackAction", () => {
       },
     );
     expectLastSlackSend("Channel root", cfg);
+  });
+
+  describe("thread-resolution DEBUG logging (ENG-16509)", () => {
+    function lastThreadResolveLog(): string {
+      const calls = vi.mocked(logVerbose).mock.calls;
+      for (let i = calls.length - 1; i >= 0; i -= 1) {
+        const [message] = calls[i] ?? [];
+        if (typeof message === "string" && message.includes("thread-resolve")) {
+          return message;
+        }
+      }
+      throw new Error("expected a slack thread-resolve log line");
+    }
+
+    it("logs resolved thread anchor for a normal replyToMode=all thread send", async () => {
+      const cfg = slackConfig();
+      await handleSlackAction(
+        { action: "sendMessage", to: "channel:C123", content: "in thread" },
+        cfg,
+        { currentChannelId: "C123", currentThreadTs: "1111111111.111111", replyToMode: "all" },
+      );
+      const log = lastThreadResolveLog();
+      expect(log).toContain("slack sendMessage:");
+      expect(log).toContain("resolved=1111111111.111111");
+      expect(log).toContain("topLevel=false");
+      expect(log).toContain("targetsMatch=true");
+    });
+
+    it.each([
+      { name: "topLevel true", patch: { topLevel: true }, expect: "topLevel=true" },
+      { name: "threadTs null", patch: { threadTs: null }, expect: "threadIdNull=true" },
+    ] as const)("logs TOP-LEVEL suppression for $name (cause 1)", async (testCase) => {
+      const cfg = slackConfig();
+      await handleSlackAction(
+        { action: "sendMessage", to: "channel:C123", content: "root", ...testCase.patch },
+        cfg,
+        { currentChannelId: "C123", currentThreadTs: "1111111111.111111", replyToMode: "all" },
+      );
+      const log = lastThreadResolveLog();
+      expect(log).toContain("resolved=TOP-LEVEL");
+      expect(log).toContain(testCase.expect);
+      // The anchor was available; suppression — not a missing anchor — dropped it.
+      expect(log).toContain("currentThreadTs=1111111111.111111");
+    });
+
+    it("logs targetsMatch=false when sending to a different channel (cause 2)", async () => {
+      const cfg = slackConfig();
+      await handleSlackAction(
+        { action: "sendMessage", to: "channel:C999", content: "elsewhere" },
+        cfg,
+        { currentChannelId: "C123", currentThreadTs: "1111111111.111111", replyToMode: "all" },
+      );
+      const log = lastThreadResolveLog();
+      expect(log).toContain("targetsMatch=false");
+      expect(log).toContain("resolved=TOP-LEVEL");
+      // Distinguishes from cause 1: no explicit opt-out, yet still top-level.
+      expect(log).toContain("topLevel=false");
+      expect(log).toContain("currentThreadTs=1111111111.111111");
+    });
+
+    it("logs the decision for uploadFile sends too", async () => {
+      const cfg = slackConfig();
+      await handleSlackAction(
+        {
+          action: "uploadFile",
+          to: "channel:C123",
+          filePath: "/tmp/report.xlsx",
+          topLevel: true,
+        },
+        cfg,
+        { currentChannelId: "C123", currentThreadTs: "1111111111.111111", replyToMode: "all" },
+      );
+      const log = lastThreadResolveLog();
+      expect(log).toContain("slack uploadFile:");
+      expect(log).toContain("topLevel=true");
+      expect(log).toContain("resolved=TOP-LEVEL");
+    });
   });
 
   it("replyToMode=first threads first message then stops", async () => {
