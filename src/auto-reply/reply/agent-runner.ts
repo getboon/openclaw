@@ -71,6 +71,7 @@ import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { buildUsageContract } from "../usage-bar/contract.js";
 import { loadUsageBarTemplate } from "../usage-bar/template.js";
 import { renderUsageBar } from "../usage-bar/translator.js";
+import { attachAgentDecisionTrace, buildAgentDecisionTrace } from "./agent-decision-trace.js";
 import {
   buildKnownAgentRunFailureReplyPayload,
   runAgentTurnWithFallback,
@@ -428,6 +429,11 @@ type TraceToolSummaryView = {
   tools: string[];
   failures?: number;
   totalToolTimeMs?: number;
+  visibleTools?: string[];
+  invocations?: Array<{
+    name: string;
+    status: "ok" | "error" | "blocked";
+  }>;
 };
 
 type TraceCompletionView = {
@@ -2437,6 +2443,19 @@ export async function runReplyAgent(params: {
               : {}),
           }
         : undefined);
+    if (!isHeartbeat) {
+      // Attach before verbose, raw-trace, and usage decorations so audit facts
+      // stay on the terminal assistant reply instead of diagnostic payloads.
+      finalPayloads = attachAgentDecisionTrace(
+        finalPayloads,
+        buildAgentDecisionTrace({
+          toolSummary,
+          completion,
+          error: runResult.meta?.error,
+          failureSignal: runResult.meta?.failureSignal,
+        }),
+      );
+    }
     const contextManagement = {
       ...(typeof activeSessionEntry?.compactionCount === "number"
         ? { sessionCompactions: activeSessionEntry.compactionCount }

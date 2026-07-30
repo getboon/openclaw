@@ -1641,6 +1641,9 @@ describe("handleToolExecutionEnd exec approval prompts", () => {
       }),
       isError: true,
     });
+    expect(ctx.state.toolMetas).toEqual([
+      expect.objectContaining({ toolName: "exec", status: "blocked" }),
+    ]);
     expect(ctx.state.deterministicApprovalPromptSent).toBe(true);
   });
 

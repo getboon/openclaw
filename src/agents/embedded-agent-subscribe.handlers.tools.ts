@@ -1181,6 +1181,7 @@ export async function handleToolExecutionEnd(
     // only successfully-completed tools, even when multiple calls errored in
     // the turn (cubic P2 follow-up).
     errored: isToolError,
+    ...(approvalUnavailable || !executionStarted ? { status: "blocked" as const } : {}),
     ...(asyncStarted ? { asyncStarted: true, ...asyncTaskIds } : {}),
   });
   const acceptedSessionSpawn =

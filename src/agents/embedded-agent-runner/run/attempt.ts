@@ -5619,6 +5619,7 @@ export async function runEmbeddedAttempt(
         ...(beforeAgentFinalizeRevisionReason ? { beforeAgentFinalizeRevisionReason } : {}),
         assistantTexts,
         lastAssistantTextMessageIndex: getLastAssistantTextMessageIndex(),
+        visibleToolNames: effectiveTools.map((tool) => tool.name),
         toolMetas: toolMetasNormalized,
         acceptedSessionSpawns,
         lastAssistant,
