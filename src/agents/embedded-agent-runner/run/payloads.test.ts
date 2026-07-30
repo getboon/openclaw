@@ -605,6 +605,36 @@ describe("buildEmbeddedRunPayloads tool-error warnings", () => {
     });
   });
 
+  it("suppresses sessions_spawn errors when the spawn recovered and delivered a reply", () => {
+    // A sessions_spawn that errored-then-recovered still delivers a complete
+    // answer; the transient failure is backstage plumbing. No warning badge.
+    const payloads = buildPayloads({
+      assistantTexts: ["Here is the full panel schedule: …"],
+      lastToolError: { toolName: "sessions_spawn", error: "sub-agent step errored" },
+      verboseLevel: "off",
+    });
+
+    expectSinglePayloadText(payloads, "Here is the full panel schedule: …");
+  });
+
+  it("surfaces an honest sessions_spawn failure when no reply was delivered", () => {
+    // A genuine failure (spawn errored AND no user-facing answer) must still
+    // surface honestly — do not over-suppress (verification criterion #3).
+    const payloads = buildPayloads({
+      assistantTexts: [],
+      lastToolError: { toolName: "sessions_spawn", error: "sub-agent step errored" },
+      verboseLevel: "off",
+    });
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.isError).toBe(true);
+    expect(payloads[0]?.text).toContain("failed");
+    // Fix #1 (Task 2) strips scaffolding; assert it is absent here too so the two
+    // halves are proven together.
+    expect(payloads[0]?.text).not.toContain("task");
+    expect(payloads[0]?.text).not.toContain("You are executing");
+  });
+
   it("suppresses assistant text when a deterministic exec approval prompt was already delivered", () => {
     expectNoPayloads({
       assistantTexts: ["Approval is needed. Please run /approve abc allow-once"],
