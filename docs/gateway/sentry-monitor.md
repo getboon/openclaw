@@ -44,16 +44,18 @@ The `environment` tag defaults to the host's hostname, and the OpenClaw version 
 
 Every error-bearing lifecycle hook plus node-level uncaught exceptions and unhandled promise rejections:
 
-| Hook               | Captured when                                               | Sentry tags                                                               |
-| ------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `model_call_ended` | `outcome === "error"`                                       | `provider`, `model`, `api`, `transport`, `failure_kind`, `error_category` |
-| `agent_end`        | `success === false`                                         | `host`                                                                    |
-| `after_tool_call`  | `error` is set                                              | `tool`                                                                    |
-| `message_sent`     | `success === false`                                         | `host`                                                                    |
-| `subagent_ended`   | `outcome ∈ {error, timeout, killed, reset, deleted}`        | `outcome`, `target_kind`                                                  |
-| `cron_changed`     | `status === "error"` or `deliveryError` set                 | `action`, `status`, `delivery_status`                                     |
-| `session_end`      | `reason === "unknown"` (other reasons are normal lifecycle) | `reason`                                                                  |
-| node-level         | `uncaughtException` / `unhandledRejection`                  | _(Sentry auto-tags)_                                                      |
+| Hook               | Captured when                                               | Sentry tags                                                                              |
+| ------------------ | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `model_call_ended` | `outcome === "error"`                                       | `provider`, `model`, `api`, `transport`, `failure_kind`, `error_category`, `error_class` |
+| `agent_end`        | `success === false`                                         | `host`                                                                                   |
+| `after_tool_call`  | `error` is set                                              | `tool`                                                                                   |
+| `message_sent`     | `success === false`                                         | `host`                                                                                   |
+| `subagent_ended`   | `outcome ∈ {error, timeout, killed, reset, deleted}`        | `outcome`, `target_kind`                                                                 |
+| `cron_changed`     | `status === "error"` or `deliveryError` set                 | `action`, `status`, `delivery_status`                                                    |
+| `session_end`      | `reason === "unknown"` (other reasons are normal lifecycle) | `reason`                                                                                 |
+| node-level         | `uncaughtException` / `unhandledRejection`                  | _(Sentry auto-tags)_                                                                     |
+
+For a `model_call_ended` error, `error_class` classifies a 5xx failure by source so an alert can page on the two differently (ENG-16922): `upstream_provider_5xx` is a Bedrock/Anthropic 5xx (500/503/529, `api_error`/`overloaded`/`overloaded_error`) relayed verbatim by boon-llm-gateway — a provider outage, not our infra — while `gateway_origin_5xx` is a gateway-synthesized 5xx (chiefly a 502 from an exhausted chain, a WAF/HTML block page, or a no-response transport fault). It is unset for non-5xx failures. The raw numeric `http_status` is attached as event `extra` for drilldown. The classification is status-driven (see `classify5xxSource`), not message-text-driven.
 
 Each capture is wrapped so a bug in the reporting path cannot take down the gateway. Performance tracing is off by default (`tracesSampleRate: 0`).
 

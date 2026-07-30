@@ -53,6 +53,9 @@ export function buildModelCallEndedCapture(
       transport: event.transport,
       failure_kind: event.failureKind,
       error_category: event.errorCategory,
+      // ENG-16922: the discriminator the Rohan 5xx alert splits on —
+      // upstream_provider_5xx (Bedrock/Anthropic relayed) vs gateway_origin_5xx.
+      error_class: event.errorClass,
     }),
     contexts: { run: runContext(event.runId, event.sessionId, event.callId) },
     extra: {
@@ -60,6 +63,7 @@ export function buildModelCallEndedCapture(
       ttfb_ms: event.timeToFirstByteMs,
       request_payload_bytes: event.requestPayloadBytes,
       response_stream_bytes: event.responseStreamBytes,
+      http_status: event.httpStatus,
       upstream_request_id_hash: event.upstreamRequestIdHash,
     },
   };
