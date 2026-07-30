@@ -624,6 +624,16 @@ describe("buildEmbeddedRunPayloads", () => {
     });
   });
 
+  it("suppresses genuinely-failed sessions_spawn errors when messages.suppressToolErrors is enabled", () => {
+    // sessions_spawn honest-failure badge must still respect the operator's
+    // global suppressToolErrors config (ENG-16868 review finding).
+    expectNoPayloads({
+      assistantTexts: [],
+      lastToolError: { toolName: "sessions_spawn", error: "sub-agent step errored" },
+      config: { messages: { suppressToolErrors: true } },
+    });
+  });
+
   it("suppresses mutating tool errors when suppressToolErrorWarnings is enabled", () => {
     expectNoPayloads({
       lastToolError: { toolName: "exec", error: "command not found" },

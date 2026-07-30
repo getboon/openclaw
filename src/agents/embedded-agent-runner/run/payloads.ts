@@ -248,20 +248,22 @@ function resolveToolErrorWarningPolicy(params: {
   if (normalizedToolName === "sessions_send") {
     return { showWarning: false, includeDetails };
   }
+  if (params.suppressToolErrors) {
+    return { showWarning: false, includeDetails };
+  }
   // ENG-16868: a sessions_spawn that errored-then-recovered still delivers a
   // complete answer — its output quality equals a first-try success, and the
   // transient retry is backstage plumbing. Suppress the warning WHEN a real
   // reply was delivered; a genuine failure (no reply) still surfaces honestly.
   // Must precede the mutating branch below: sessions_spawn is a mutating tool,
   // and that branch ignores hasUserFacingReply, so a recovered spawn would
-  // otherwise emit a false "failed" badge. Same recovery semantics the
-  // exec/bash/process class already uses (the deliverable is the answer, not
-  // the spawn call), NOT the write/message confabulation-strict semantics.
+  // otherwise emit a false "failed" badge. Must also follow the suppressToolErrors
+  // global gate so the operator config still wins. Like exec/bash/process, a
+  // recovered error is treated as non-terminal because the deliverable is the
+  // answer, not the spawn call; here we fully suppress (no continuation note)
+  // since a recovered spawn's retry adds no user value.
   if (normalizedToolName === "sessions_spawn") {
     return { showWarning: !params.hasUserFacingReply, includeDetails };
-  }
-  if (params.suppressToolErrors) {
-    return { showWarning: false, includeDetails };
   }
   const isMutatingToolError =
     params.lastToolError.mutatingAction ?? isLikelyMutatingToolName(params.lastToolError.toolName);

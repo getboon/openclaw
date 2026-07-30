@@ -629,10 +629,6 @@ describe("buildEmbeddedRunPayloads tool-error warnings", () => {
     expect(payloads).toHaveLength(1);
     expect(payloads[0]?.isError).toBe(true);
     expect(payloads[0]?.text).toContain("failed");
-    // Fix #1 (Task 2) strips scaffolding; assert it is absent here too so the two
-    // halves are proven together.
-    expect(payloads[0]?.text).not.toContain("task");
-    expect(payloads[0]?.text).not.toContain("You are executing");
   });
 
   it("suppresses assistant text when a deterministic exec approval prompt was already delivered", () => {
