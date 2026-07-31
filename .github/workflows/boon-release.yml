@@ -35,6 +35,17 @@ name: Boon Fork Release
 #   plus a sibling openclaw-slack-<version>.tgz.sha256.
 # extensions/slack/package.json is pinned to the gateway version in lockstep too.
 #
+# It ALSO publishes the fork-versioned @openclaw/diagnostics-prometheus plugin as a
+# sibling asset on the SAME tag. Its dist is EXCLUDED from the published gateway
+# package (`!dist/extensions/diagnostics-prometheus/**`), so a host can't run the
+# Prometheus exporter unless the plugin is installed separately — and the fleet's
+# Alloy scrape (gandalf-manager, ENG-15788) has nothing to read until it is.
+# diagnostics-prometheus asset contract — do NOT change:
+#   https://github.com/getboon/openclaw/releases/download/v<version>/openclaw-diagnostics-prometheus-<version>.tgz
+#   plus a sibling openclaw-diagnostics-prometheus-<version>.tgz.sha256.
+# extensions/diagnostics-prometheus/package.json is pinned to the gateway version
+# in lockstep too.
+#
 # Docker images are handled separately by docker-release.yml (also `v*`-tagged);
 # its `-boon.N` suffix correctly never advances the mutable `:latest` aliases.
 on:
@@ -191,6 +202,48 @@ jobs:
           echo "Packed ${tarball}"
           cat "${tarball}.sha256"
 
+      # Pack the fork-versioned @openclaw/diagnostics-prometheus plugin. Identical
+      # machinery to the slack/msteams steps above. WHY the fork must publish it:
+      # the plugin's dist is EXCLUDED from the published gateway package
+      # (package.json `!dist/extensions/diagnostics-prometheus/**`), so a fleet host
+      # has no way to run the Prometheus exporter unless the plugin is installed
+      # separately — and gandalf-manager's Alloy scrape (job `boon-agent-openclaw`,
+      # ENG-15788) has nothing to scrape until it is. So it ships as a GitHub Release
+      # tarball exactly like slack/msteams, installed via
+      # `openclaw plugins install npm-pack:<url>`. Unlike slack/msteams it does NOT
+      # use openKeyedStore (verified: no trust-gate), so a bare install wouldn't
+      # crash-loop — but we use the same npm-pack: trusted path for install-shape
+      # consistency across the fork's plugins. asset contract:
+      #   https://github.com/getboon/openclaw/releases/download/v<version>/openclaw-diagnostics-prometheus-<version>.tgz
+      #   plus a sibling openclaw-diagnostics-prometheus-<version>.tgz.sha256.
+      # extensions/diagnostics-prometheus/package.json version is pinned to the
+      # gateway version in lockstep (`2026.6.11-boon.N`), same as slack/msteams.
+      - name: Pack diagnostics-prometheus plugin tarball + compute sha256
+        id: diagprom
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./extensions/diagnostics-prometheus/package.json').version")"
+          if [[ "${TAG}" != "v${version}" ]]; then
+            echo "FATAL: tag '${TAG}' does not match extensions/diagnostics-prometheus/package.json version 'v${version}' — bump diagnostics-prometheus in lockstep with the gateway" >&2
+            exit 1
+          fi
+          tarball="openclaw-diagnostics-prometheus-${version}.tgz"
+          node scripts/lib/plugin-npm-runtime-build.mjs extensions/diagnostics-prometheus
+          OPENCLAW_PLUGIN_NPM_BUNDLE_DEPENDENCIES=1 \
+            node scripts/lib/plugin-npm-package-manifest.mjs --run extensions/diagnostics-prometheus -- \
+            npm pack --pack-destination "${GITHUB_WORKSPACE}"
+          if [[ ! -f "${tarball}" ]]; then
+            echo "FATAL: expected '${tarball}' on disk after diagnostics-prometheus pack; found:" >&2
+            ls -1 ./openclaw-diagnostics-prometheus-*.tgz >&2 || true
+            exit 1
+          fi
+          sha256sum "${tarball}" > "${tarball}.sha256"
+          echo "tarball=${tarball}" >> "$GITHUB_OUTPUT"
+          echo "Packed ${tarball}"
+          cat "${tarball}.sha256"
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -199,21 +252,24 @@ jobs:
           TARBALL: ${{ steps.pack.outputs.tarball }}
           MSTEAMS_TARBALL: ${{ steps.msteams.outputs.tarball }}
           SLACK_TARBALL: ${{ steps.slack.outputs.tarball }}
+          DIAGPROM_TARBALL: ${{ steps.diagprom.outputs.tarball }}
         run: |
           set -euo pipefail
           if gh release view "${RELEASE_TAG}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "${RELEASE_TAG}" --repo "$GITHUB_REPOSITORY" --clobber \
               "${TARBALL}" "${TARBALL}.sha256" \
               "${MSTEAMS_TARBALL}" "${MSTEAMS_TARBALL}.sha256" \
-              "${SLACK_TARBALL}" "${SLACK_TARBALL}.sha256"
+              "${SLACK_TARBALL}" "${SLACK_TARBALL}.sha256" \
+              "${DIAGPROM_TARBALL}" "${DIAGPROM_TARBALL}.sha256"
           else
             gh release create "${RELEASE_TAG}" --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
               --prerelease \
               --title "${RELEASE_TAG}" \
-              --notes "Boon fork release ${RELEASE_TAG}. Install: \`npm i -g <asset-url>\`. Ships the gateway tarball + the fork-versioned @openclaw/msteams and @openclaw/slack plugin tarballs." \
+              --notes "Boon fork release ${RELEASE_TAG}. Install: \`npm i -g <asset-url>\`. Ships the gateway tarball + the fork-versioned @openclaw/msteams, @openclaw/slack, and @openclaw/diagnostics-prometheus plugin tarballs." \
               "${TARBALL}" "${TARBALL}.sha256" \
               "${MSTEAMS_TARBALL}" "${MSTEAMS_TARBALL}.sha256" \
-              "${SLACK_TARBALL}" "${SLACK_TARBALL}.sha256"
+              "${SLACK_TARBALL}" "${SLACK_TARBALL}.sha256" \
+              "${DIAGPROM_TARBALL}" "${DIAGPROM_TARBALL}.sha256"
           fi
           echo "- Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}" >> "$GITHUB_STEP_SUMMARY"
