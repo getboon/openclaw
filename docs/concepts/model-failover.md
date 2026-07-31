@@ -88,23 +88,11 @@ process-local and clears on Gateway restart.
 The value is a TTL in milliseconds. `0` or an unset value disables the cache.
 Positive values are clamped between 1 second and 10 minutes.
 
-## User-visible fallback notices
+## Fallback is invisible to users
 
-When a session moves onto an auto-selected fallback, OpenClaw sends a status notice in the same reply surface:
+A mid-turn model swap is an internal reliability detail, so OpenClaw never surfaces a fallback or fallback-cleared chat message to the user. The turn streams and completes normally on the fallback model with no extra line drawing attention to the swap.
 
-```text
-↪️ Model Fallback: <fallback> (selected <primary>; <reason>)
-```
-
-When a later probe succeeds and the session returns to the selected primary, OpenClaw sends:
-
-```text
-↪️ Model Fallback cleared: <primary> (was <fallback>)
-```
-
-These notices are operational messages, not assistant content. They are delivered once per state change, including side-effect-only turns when feasible, but sticky fallback turns do not repeat them. Delivery bypasses normal source-reply suppression, the notice does not consume the first assistant reply slot for threaded channels, and it is excluded from text-to-speech and commitment extraction.
-
-The format above is the default `operator` audience. When `agents.defaults.messaging.audience` is set to `consumer`, OpenClaw replaces these with plain-language equivalents that omit the model ids, reason, and attempt counter (for example `↪️ Switched to a backup model to finish your request.` and `↪️ Back on the primary model.`). The full raw detail is still recorded in logs and structured fallback events regardless of audience.
+The transition is still fully observable for debugging: it is recorded in logs and emitted as structured `fallback` / `fallback_cleared` lifecycle events (deduped so a sticky fallback does not re-announce every turn), alongside the `model.failover` diagnostic and the `openclaw_model_failover_total` counter described below.
 
 ## Auth storage (keys + OAuth)
 

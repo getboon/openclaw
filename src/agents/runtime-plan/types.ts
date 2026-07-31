@@ -253,7 +253,6 @@ export type AgentRuntimeReplyPayload = {
   isReasoning?: boolean;
   isReasoningSnapshot?: boolean;
   isCompactionNotice?: boolean;
-  isFallbackNotice?: boolean;
   isStatusNotice?: boolean;
   channelData?: Record<string, unknown>;
 };
