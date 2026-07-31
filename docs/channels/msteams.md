@@ -826,6 +826,8 @@ When `replyStyle: "thread"` is in effect and the bot was @mentioned from inside 
 
 The thread root is taken from the stored `threadId` on the conversation reference. Older stored references that predate `threadId` fall back to `activityId` (whatever inbound activity last seeded the conversation), so existing deployments keep working without a re-seed.
 
+Thread routing applies to every outbound shape — plain text, inline media, uploaded-file links (SharePoint or OneDrive), Adaptive Cards, presentation cards, and polls. A document link posted after an upload threads exactly like a text reply, so the threading decision never depends on what the reply happens to contain.
+
 When `replyStyle: "top-level"` is in effect, channel-thread inbounds are intentionally answered as new top-level posts — no thread suffix is attached. This is the correct behavior for Threads-style channels; if you see top-level posts where you expected threaded replies, your `replyStyle` is set incorrectly for that channel.
 
 ## Attachments and images

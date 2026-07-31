@@ -36,7 +36,10 @@ const MSTEAMS_MAX_MEDIA_BYTES = 100 * 1024 * 1024;
 const FILE_CONSENT_THRESHOLD_BYTES = 4 * 1024 * 1024;
 
 import type { MSTeamsSdkCloudOptions } from "./cloud.js";
-import { sendMSTeamsActivityWithReference } from "./sdk-proactive.js";
+import {
+  resolveMSTeamsThreadActivityId,
+  sendMSTeamsActivityWithReference,
+} from "./sdk-proactive.js";
 import type { MSTeamsActivityLike } from "./sdk-types.js";
 import type { MSTeamsApp } from "./sdk.js";
 
@@ -519,30 +522,30 @@ export async function sendMSTeamsMessages(params: {
     return messageIds;
   };
 
+  // Resolved once so the thread branch, the revoked-context fallback, and the
+  // top-level branch cannot drift on the same decision.
+  const threadActivityId = resolveMSTeamsThreadActivityId({
+    ref: params.conversationRef,
+    replyStyle: params.replyStyle,
+  });
+
   const sendProactively = async (
     batch: MSTeamsRenderedMessage[],
     startIndex: number,
-    threadActivityId?: string,
   ): Promise<string[]> => {
     const baseRef = buildConversationReference(params.conversationRef);
-    const isChannel = params.conversationRef.conversation?.conversationType === "channel";
     const sendFn = (activity: MSTeamsActivityLike) =>
       sendMSTeamsActivityWithReference(params.app, baseRef, activity, {
-        threadActivityId: isChannel ? threadActivityId : undefined,
+        threadActivityId,
         serviceUrlBoundary: params.serviceUrlBoundary,
       });
     return await sendMessageBatchInContext(sendFn, batch, startIndex);
   };
 
-  // Resolve the thread root message ID for channel thread routing.
-  // `threadId` is the canonical thread root (set on inbound for channel threads);
-  // fall back to `activityId` for backward compatibility with older stored refs.
-  const resolvedThreadId = params.conversationRef.threadId ?? params.conversationRef.activityId;
-
   if (params.replyStyle === "thread") {
     const ctx = params.context;
     if (!ctx) {
-      return await sendProactively(messages, 0, resolvedThreadId);
+      return await sendProactively(messages, 0);
     }
     const sendFn = ctx.sendActivity;
     const messageIds: string[] = [];
@@ -558,8 +561,7 @@ export async function sendMSTeamsMessages(params: {
           // fallback delivers the reply into the correct channel thread.
           const remaining = messages.slice(idx);
           return {
-            ids:
-              remaining.length > 0 ? await sendProactively(remaining, idx, resolvedThreadId) : [],
+            ids: remaining.length > 0 ? await sendProactively(remaining, idx) : [],
             fellBack: true,
           };
         },
@@ -572,11 +574,7 @@ export async function sendMSTeamsMessages(params: {
     return messageIds;
   }
 
-  // replyStyle === "top-level" — explicit "post at the top of the channel"
-  // intent. Do NOT add the thread suffix even when the stored ref has a
-  // threadId; threading on a top-level send would defeat the operator's
-  // explicit choice. Threaded sends route through the `replyStyle === "thread"`
-  // branch above (which already passes resolvedThreadId on the proactive
-  // fallback when the live turn context is revoked, preserving #55198).
+  // replyStyle === "top-level" — resolveMSTeamsThreadActivityId already returned
+  // undefined, so no thread suffix is attached even when the ref has a threadId.
   return await sendProactively(messages, 0);
 }
