@@ -54,8 +54,6 @@ export type ReplyPayload = {
    *  Should be excluded from TTS transcript accumulation so compaction
    *  status lines are not synthesised into the spoken assistant reply. */
   isCompactionNotice?: boolean;
-  /** Marks this payload as a model-fallback transition/recovery notice. */
-  isFallbackNotice?: boolean;
   /** Marks this payload as transient status, not assistant answer content. */
   isStatusNotice?: boolean;
   /** Channel-specific payload data (per-channel envelope). */
@@ -254,7 +252,7 @@ export function markCommandReplyForDelivery(
 
 /** Returns true for internal status/notice payloads, not assistant answer content. */
 export function isReplyPayloadStatusNotice(
-  payload: Pick<ReplyPayload, "isCompactionNotice" | "isFallbackNotice" | "isStatusNotice">,
+  payload: Pick<ReplyPayload, "isCompactionNotice" | "isStatusNotice">,
 ): boolean {
-  return Boolean(payload.isCompactionNotice || payload.isFallbackNotice || payload.isStatusNotice);
+  return Boolean(payload.isCompactionNotice || payload.isStatusNotice);
 }

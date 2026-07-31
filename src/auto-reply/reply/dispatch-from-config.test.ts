@@ -3502,8 +3502,8 @@ describe("dispatchReplyFromConfig", () => {
       ChatType: "direct",
     });
     const notice = {
-      text: "Model Fallback: openai/gpt-5.5",
-      isFallbackNotice: true,
+      text: "Compacting conversation…",
+      isStatusNotice: true,
     } satisfies ReplyPayload;
 
     await dispatchReplyFromConfig({

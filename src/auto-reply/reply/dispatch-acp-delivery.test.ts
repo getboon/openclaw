@@ -227,7 +227,7 @@ describe("createAcpDispatchDeliveryCoordinator", () => {
       shouldRouteToOriginating: false,
     });
 
-    const notice = { text: "Model Fallback: openai/gpt-5.5", isFallbackNotice: true };
+    const notice = { text: "Compacting conversation…", isStatusNotice: true };
     await coordinator.deliver("final", notice);
     await coordinator.settleVisibleText();
 
@@ -463,14 +463,14 @@ describe("createAcpDispatchDeliveryCoordinator", () => {
     });
 
     await coordinator.deliver("block", {
-      text: "Model Fallback: openai/gpt-5.5",
-      isFallbackNotice: true,
+      text: "Compacting conversation…",
+      isStatusNotice: true,
     });
     await coordinator.deliver("block", { text: "Visible answer" });
 
     expect(dispatcher.sendBlockReply).toHaveBeenNthCalledWith(1, {
-      text: "Model Fallback: openai/gpt-5.5",
-      isFallbackNotice: true,
+      text: "Compacting conversation…",
+      isStatusNotice: true,
     });
     expect(dispatcher.sendBlockReply).toHaveBeenNthCalledWith(2, { text: "Visible answer" });
     expect(coordinator.getAccumulatedBlockText()).toBe("Visible answer");
@@ -478,7 +478,7 @@ describe("createAcpDispatchDeliveryCoordinator", () => {
     expect(coordinator.getBlockCount()).toBe(1);
   });
 
-  it("keeps final fallback notices out of ACP transcript accumulation", async () => {
+  it("keeps final status notices out of ACP transcript accumulation", async () => {
     const dispatcher = createDispatcher();
     const coordinator = createAcpDispatchDeliveryCoordinator({
       cfg: createAcpTestConfig(),
@@ -493,14 +493,14 @@ describe("createAcpDispatchDeliveryCoordinator", () => {
     });
 
     const delivered = await coordinator.deliver("final", {
-      text: "Model Fallback: openai/gpt-5.5",
-      isFallbackNotice: true,
+      text: "Compacting conversation…",
+      isStatusNotice: true,
     });
 
     expect(delivered).toBe(true);
     expect(dispatcher.sendFinalReply).toHaveBeenCalledWith({
-      text: "Model Fallback: openai/gpt-5.5",
-      isFallbackNotice: true,
+      text: "Compacting conversation…",
+      isStatusNotice: true,
     });
     expect(coordinator.getAccumulatedFinalText()).toBe("");
   });

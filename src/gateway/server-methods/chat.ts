@@ -4272,7 +4272,6 @@ export const chatHandlers: GatewayRequestHandlers = {
                       payload.isReasoning ||
                       payload.isReasoningSnapshot ||
                       payload.isCompactionNotice ||
-                      payload.isFallbackNotice ||
                       payload.isStatusNotice ||
                       payload.btw,
                     );
