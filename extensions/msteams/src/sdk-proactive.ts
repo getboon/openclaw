@@ -1,9 +1,12 @@
 // Msteams plugin module implements sdk proactive behavior.
+import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import type { MSTeamsReplyStyle } from "../runtime-api.js";
 import { normalizeBotFrameworkServiceUrl } from "./bot-framework-service-url.js";
 import {
   validateMSTeamsProactiveServiceUrlBoundary,
   type MSTeamsSdkCloudOptions,
 } from "./cloud.js";
+import type { StoredConversationReference } from "./conversation-store.js";
 import type { MSTeamsApp } from "./sdk.js";
 
 type MSTeamsAccountRef = {
@@ -82,6 +85,30 @@ function resolveThreadedConversationId(conversationId: string, threadActivityId?
   }
   const baseId = conversationId.split(";")[0] ?? conversationId;
   return `${baseId};messageid=${threadActivityId}`;
+}
+
+/**
+ * Canonical thread anchor for every msteams proactive send. Teams threading is
+ * ONLY the `;messageid=<root>` suffix, and resolveThreadedConversationId STRIPS
+ * that suffix when the anchor is absent — so a send that omits this value posts
+ * at channel root no matter what `replyStyle` config says. Route every proactive
+ * shape (text, media, uploaded-file link, card, poll) through here so payload
+ * shape cannot change the threading decision.
+ */
+export function resolveMSTeamsThreadActivityId(params: {
+  ref: StoredConversationReference;
+  replyStyle: MSTeamsReplyStyle;
+}): string | undefined {
+  if (params.replyStyle !== "thread") {
+    return undefined;
+  }
+  // Only channels carry a thread suffix; groupChat/personal have no threads.
+  if (normalizeOptionalLowercaseString(params.ref.conversation?.conversationType) !== "channel") {
+    return undefined;
+  }
+  // `threadId` is the canonical thread root; `activityId` is the documented
+  // fallback for stored refs that predate it (docs/channels/msteams.md).
+  return params.ref.threadId ?? params.ref.activityId;
 }
 
 function normalizeRequiredServiceUrl(ref: MSTeamsSdkReferenceSource): string {

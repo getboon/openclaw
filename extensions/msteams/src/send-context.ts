@@ -27,6 +27,7 @@ import { formatUnknownError } from "./errors.js";
 import { resolveGraphChatId } from "./graph-upload.js";
 import { resolveMSTeamsReplyPolicy, resolveMSTeamsRouteConfig } from "./policy.js";
 import { getMSTeamsRuntime } from "./runtime.js";
+import { resolveMSTeamsThreadActivityId } from "./sdk-proactive.js";
 import type { MSTeamsApp } from "./sdk.js";
 import { createMSTeamsTokenProvider, loadMSTeamsSdkWithAuth } from "./sdk.js";
 import { resolveMSTeamsCredentials } from "./token.js";
@@ -43,6 +44,13 @@ export type MSTeamsProactiveContext = {
   conversationType: MSTeamsConversationType;
   /** Reply style resolved for proactive text/media sends. */
   replyStyle: MSTeamsReplyStyle;
+  /**
+   * Canonical `;messageid=` thread root for this send, or undefined for a
+   * top-level post. Derived once from ref + replyStyle so every proactive shape
+   * (text, media, uploaded-file link, card, poll, consent card) threads
+   * identically and no call site can forget the anchor.
+   */
+  threadActivityId?: string;
   /** Teams SDK cloud/service endpoint used to validate proactive sends. */
   sdkCloudOptions: MSTeamsSdkCloudOptions;
   /** Token provider for Graph API / OneDrive operations */
@@ -256,6 +264,7 @@ export async function resolveMSTeamsSendContext(params: {
     conversationType,
     replyStyleOverride: params.replyStyleOverride,
   });
+  const threadActivityId = resolveMSTeamsThreadActivityId({ ref: safeRef, replyStyle });
 
   // Get SharePoint site ID from config (required for file uploads in group chats/channels)
   const sharePointSiteId = msteamsCfg.sharePointSiteId;
@@ -313,6 +322,7 @@ export async function resolveMSTeamsSendContext(params: {
     log,
     conversationType,
     replyStyle,
+    threadActivityId,
     sdkCloudOptions,
     tokenProvider,
     sharePointSiteId,

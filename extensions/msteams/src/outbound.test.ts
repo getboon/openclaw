@@ -477,6 +477,49 @@ describe("msteamsOutbound cfg threading", () => {
     });
   });
 
+  // ENG-17134: presentation cards used to drop threadSuppressed entirely, so a
+  // card-shaped reply always posted at channel root. The absence of these two
+  // assertions is what let that ship.
+  it("forwards threadSuppressed as replyStyleOverride:top-level for presentation cards", async () => {
+    await requireSendPayload()({
+      cfg,
+      to: "conversation:abc",
+      text: "Deploy finished",
+      payload: {
+        text: "Deploy finished",
+        channelData: { msteams: { presentationCard: { type: "AdaptiveCard" } } },
+      },
+      threadSuppressed: true,
+    });
+
+    expect(mocks.sendAdaptiveCardMSTeams).toHaveBeenCalledWith({
+      cfg,
+      to: "conversation:abc",
+      card: { type: "AdaptiveCard" },
+      replyStyleOverride: "top-level",
+    });
+  });
+
+  it("forwards threadSuppressed:false as replyStyleOverride:thread for presentation cards", async () => {
+    await requireSendPayload()({
+      cfg,
+      to: "conversation:abc",
+      text: "Deploy finished",
+      payload: {
+        text: "Deploy finished",
+        channelData: { msteams: { presentationCard: { type: "AdaptiveCard" } } },
+      },
+      threadSuppressed: false,
+    });
+
+    expect(mocks.sendAdaptiveCardMSTeams).toHaveBeenCalledWith({
+      cfg,
+      to: "conversation:abc",
+      card: { type: "AdaptiveCard" },
+      replyStyleOverride: "thread",
+    });
+  });
+
   it("omits replyStyleOverride when threadSuppressed is absent (no behavior change)", async () => {
     await requireSendText()({
       cfg,
