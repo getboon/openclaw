@@ -1,4 +1,5 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { copyReplyPayloadMetadata } from "../reply-payload.js";
 import type { AgentDecisionTrace, ReplyPayload } from "../reply-payload.js";
 
 type ToolSummary = {
@@ -55,17 +56,20 @@ export function buildAgentDecisionTrace(params: {
   failureSignal?: { kind?: string; code?: string };
 }): AgentDecisionTrace {
   const visibleTools = normalizeNames(params.toolSummary?.visibleTools);
-  const toolInvocations =
-    params.toolSummary?.invocations
-      ?.flatMap((invocation) => {
-        const name = normalizeTraceToolName(invocation.name);
-        const status = normalizeTraceToolStatus(invocation.status);
-        return name && status ? [{ name, status }] : [];
-      })
-      .slice(0, MAX_TRACE_ITEMS) ?? [];
-  const successfulCalls = toolInvocations.filter((entry) => entry.status === "ok").length;
-  const failedCalls = toolInvocations.filter((entry) => entry.status === "error").length;
-  const blockedCalls = toolInvocations.filter((entry) => entry.status === "blocked").length;
+  // Normalize the FULL invocation set first and derive the disposition from it,
+  // so a failure/blocked call beyond MAX_TRACE_ITEMS still drives the outcome.
+  // Only the emitted `toolInvocations`/`evidence` arrays are bounded (wire size);
+  // truncating before counting would let a late failure read as a clean success.
+  const allInvocations =
+    params.toolSummary?.invocations?.flatMap((invocation) => {
+      const name = normalizeTraceToolName(invocation.name);
+      const status = normalizeTraceToolStatus(invocation.status);
+      return name && status ? [{ name, status }] : [];
+    }) ?? [];
+  const toolInvocations = allInvocations.slice(0, MAX_TRACE_ITEMS);
+  const successfulCalls = allInvocations.filter((entry) => entry.status === "ok").length;
+  const failedCalls = allInvocations.filter((entry) => entry.status === "error").length;
+  const blockedCalls = allInvocations.filter((entry) => entry.status === "blocked").length;
   const permissionRequired =
     params.failureSignal?.kind === "execution_denied" ||
     params.failureSignal?.code === "SYSTEM_RUN_DENIED";
@@ -147,6 +151,11 @@ export function attachAgentDecisionTrace(
     return [...payloads];
   }
   return payloads.map((payload, index) =>
-    index === targetIndex ? { ...payload, auditTrace } : payload,
+    // Cloning the payload drops its WeakMap-backed delivery metadata
+    // (threading/transcript/block-streaming identity); copy it onto the clone
+    // so a traced terminal reply keeps its routing identity.
+    index === targetIndex
+      ? copyReplyPayloadMetadata(payload, { ...payload, auditTrace })
+      : payload,
   );
 }

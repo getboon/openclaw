@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import {
+  getReplyPayloadMetadata,
+  setReplyPayloadMetadata,
+} from "../reply-payload.js";
 import { attachAgentDecisionTrace, buildAgentDecisionTrace } from "./agent-decision-trace.js";
 
 describe("buildAgentDecisionTrace", () => {
@@ -111,6 +115,34 @@ describe("buildAgentDecisionTrace", () => {
     expect(trace.toolInvocations).toHaveLength(128);
     expect(trace.evidence).toHaveLength(128);
   });
+
+  it("derives disposition from the full invocation set even when a failure falls beyond the 128 cap", () => {
+    // Regression: truncating before counting let a late failure (index >= 128)
+    // be discarded, so the trace reported high-confidence success for a run that
+    // actually failed a tool — defeating verifiability.
+    const invocations = [
+      ...Array.from({ length: 128 }, (_, i) => ({
+        name: `tool_${String(i).padStart(3, "0")}`,
+        status: "ok" as const,
+      })),
+      { name: "exec", status: "error" as const },
+    ];
+
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: invocations.length,
+        tools: [],
+        failures: 1,
+        invocations,
+      },
+    });
+
+    // Emitted arrays stay bounded, but the outcome reflects the late failure.
+    expect(trace.toolInvocations).toHaveLength(128);
+    expect(trace.disposition).toBe("completed");
+    expect(trace.reason).toBe("tool_execution_partial");
+    expect(trace.confidence).toBe("medium");
+  });
 });
 
 describe("attachAgentDecisionTrace", () => {
@@ -135,5 +167,26 @@ describe("attachAgentDecisionTrace", () => {
       { text: "answer", auditTrace },
       { text: "usage", isStatusNotice: true },
     ]);
+  });
+
+  it("preserves WeakMap delivery metadata on the traced terminal payload", () => {
+    // Regression: attaching the trace cloned the payload with a bare spread,
+    // orphaning its WeakMap-backed metadata (threading/transcript identity).
+    const terminal = { text: "answer" };
+    setReplyPayloadMetadata(terminal, { replyToIdExplicit: true });
+    const auditTrace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["read"],
+        failures: 0,
+        visibleTools: ["read"],
+        invocations: [{ name: "read", status: "ok" }],
+      },
+    });
+
+    const [traced] = attachAgentDecisionTrace([terminal], auditTrace);
+
+    expect(traced.auditTrace).toBe(auditTrace);
+    expect(getReplyPayloadMetadata(traced)?.replyToIdExplicit).toBe(true);
   });
 });
