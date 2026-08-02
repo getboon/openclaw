@@ -8,6 +8,13 @@ import {
   type SlackBlock,
 } from "./blocks-render.js";
 import { escapeSlackMrkdwn } from "./monitor/mrkdwn.js";
+import { truncateSlackText } from "./truncate.js";
+
+// Slack rejects a text object (context element / section) above 3000 chars with
+// a 400; boon-core then drops the whole reply. The item cap alone is not enough
+// because 12 escaped 120-char tool names across two lists can still exceed it,
+// so the assembled block text is truncated to this budget as the final guard.
+const SLACK_AUDIT_TRACE_TEXT_MAX = 3000;
 
 function formatAuditTraceList(values: readonly string[]): string {
   if (values.length === 0) {
@@ -54,7 +61,9 @@ export function resolveSlackAuditTraceBlock(payload: ReplyPayload): SlackBlock |
   ];
   return {
     type: "context",
-    elements: [{ type: "mrkdwn", text: lines.join("\n") }],
+    elements: [
+      { type: "mrkdwn", text: truncateSlackText(lines.join("\n"), SLACK_AUDIT_TRACE_TEXT_MAX) },
+    ],
   } as SlackBlock;
 }
 

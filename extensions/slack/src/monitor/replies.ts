@@ -172,7 +172,11 @@ export async function deliverReplies(params: {
       emitSent(trimmed, result);
       latestResult = result;
       params.runtime.log?.(`delivered reply to ${params.target}`);
-      await deliverAuditTrace(payload, result?.threadTs ?? threadTs);
+      // Follow the ACTUAL delivered thread (undefined when the primary send
+      // degraded to the channel on a rejected anchor). Falling back to the
+      // request `threadTs` here would re-post the trace against the dead thread
+      // and trigger another invalid-thread retry.
+      await deliverAuditTrace(payload, result?.threadTs);
       continue;
     }
 
@@ -226,7 +230,11 @@ export async function deliverReplies(params: {
       emitSent(hookContent, reply.hasMedia ? undefined : lastResult);
       latestResult = lastResult;
       params.runtime.log?.(`delivered reply to ${params.target}`);
-      await deliverAuditTrace(payload, lastResult?.threadTs ?? threadTs);
+      // Follow the ACTUAL delivered thread (undefined when a chunk/media send
+      // degraded to the channel on a rejected anchor). Falling back to the
+      // request `threadTs` here would re-post the trace against the dead thread
+      // and trigger another invalid-thread retry.
+      await deliverAuditTrace(payload, lastResult?.threadTs);
     }
   }
   return latestResult;
