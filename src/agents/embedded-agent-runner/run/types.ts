@@ -196,11 +196,14 @@ export type EmbeddedRunAttemptResult = {
   beforeAgentFinalizeRevisionReason?: string;
   assistantTexts: string[];
   lastAssistantTextMessageIndex?: number;
+  /** Tool names exposed to the model for this attempt, without schemas. */
+  visibleToolNames?: string[];
   toolMetas: Array<{
     toolName: string;
     meta?: string;
     replaySafe?: boolean;
     errored?: boolean;
+    status?: "blocked";
     asyncStarted?: boolean;
     asyncTaskRunId?: string;
     asyncTaskId?: string;
