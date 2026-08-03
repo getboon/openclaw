@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.13
+
+Adds an optional, bounded `auditTrace` to the final assistant reply so downstream clients can distinguish a tool-grounded answer from one that was unverified, failed, blocked, or permission-gated.
+
+- **#92 (ENG-16854):** the final assistant reply can now carry an optional `auditTrace` — visible tool names, per-tool invocation order and terminal status (`ok`/`error`/`blocked`), a `confidence`, a `disposition`, and a deterministic `reason`. The trace is projected only from runtime facts already known to openclaw (`src/auto-reply/reply/agent-decision-trace.ts`) and never includes prompts, model reasoning, tool arguments/results, secrets, or raw exceptions; replies without a trace are unchanged. Slack renders a trailing "How this was verified" context message in the same thread as the reply (boon has no segmented-reply model, so this differs from upstream's appended-block rendering). Ported from upstream PR #80 (which had landed on `main`, not `boon`, and could not reach the fleet) onto `boon`'s structure, with four correctness fixes folded in during review: (1) a `MAX_TRACE_ITEMS=128` cap on the emitted `visibleTools`/`toolInvocations`/`evidence` arrays so an oversized trace can't trip boon-core's 400-on-invalid validator and drop the whole reply; (2) the disposition is derived from the *full* invocation set before that cap truncates the emitted arrays, so a failure/blocked call past item 128 still reports as a failure, not a false success; (3) a blocked/permission-denied tool call's `status` is now carried through boon's tool-meta normalizer (it was being silently dropped, which reported a blocked run as a verified success); (4) attaching the trace to the terminal reply payload now preserves the payload's WeakMap-backed delivery metadata (threading/transcript/block-stream identity), and the Slack trailing message follows the *actually delivered* thread rather than a rejected thread anchor, plus a character budget so long tool names can't push the Slack context block over Slack's 3000-char mrkdwn limit.
+- Base = `2026.6.11-boon.12`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` bumped to `2026.6.11-boon.13` in lockstep (msteams/slack packages have no functional change in this release — version-only bump to keep the three release assets tag-aligned). No other code changes; #92 was merged onto `boon` before this release.
+
 ## 2026.6.11-boon.12
 
 Edge/WAF 429s no longer surface a false "all models rate-limited", plus two observability improvements: DEBUG tracing of Slack thread-resolution on tool sends, and Sentry classification of gateway-relayed upstream 5xx vs gateway-origin 5xx.
