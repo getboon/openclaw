@@ -355,6 +355,36 @@ describe("handleMessageUpdate text signatures", () => {
     expect(onPartialReply).not.toHaveBeenCalled();
   });
 
+  it("recovers a genuine reply whose first char is a bare N once real content proves it wasn't NO_REPLY", () => {
+    const onAgentEvent = vi.fn();
+    const accumulator = createStreamingDirectiveAccumulator();
+    const context = createMessageUpdateContext({
+      onAgentEvent,
+      consumePartialReplyDirectives: vi.fn((text: string, options?: { final?: boolean }) =>
+        accumulator.consume(text, options),
+      ),
+    });
+
+    const createNonPhaseEvent = (delta: string) =>
+      ({
+        type: "message_update",
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: {
+          type: "text_delta",
+          delta,
+        },
+      }) as never;
+
+    handleMessageUpdate(context, createNonPhaseEvent("N"));
+    handleMessageUpdate(context, createNonPhaseEvent("ot what happened"));
+
+    expect(onAgentEvent).toHaveBeenCalledTimes(1);
+    expect(firstMockArg(onAgentEvent, "agent event")).toMatchObject({
+      stream: "assistant",
+      data: { text: "Not what happened" },
+    });
+  });
+
   it("keeps stripped reply directives out of later plain deltas", () => {
     const onAgentEvent = vi.fn();
     const context = createMessageUpdateContext({ onAgentEvent });
