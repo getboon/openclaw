@@ -62,13 +62,16 @@ process open):
 
 - On a fixed interval (60 minutes; no new config knob — an implementation cadence, not an
   operator-tunable policy), calls the existing, already-tested
-  `runSessionsCleanup({ cfg, opts: { allAgents: true, dryRun: false } })`
+  `runSessionsCleanup({ cfg, opts: { allAgents: true, dryRun: true } })`
   (`src/config/sessions/cleanup-service.ts`) once per tick. This is the exact same code path
-  `openclaw sessions cleanup --all-agents` already exercises — it resolves every configured
-  agent's store via `resolveSessionStoreTargets`, respects each store's real configured
-  `mode` (enforce vs. warn), and mutates through `applySessionEntryLifecycleMutation`, which
-  wraps writes in `runExclusiveSessionStoreWrite` — the same lock hot-path chat writes use, so
-  it cannot race or corrupt concurrent live traffic.
+  `openclaw sessions cleanup --all-agents --dry-run` already exercises — it resolves every
+  configured agent's store via `resolveSessionStoreTargets` and reports each store's real
+  configured `mode` (enforce vs. warn). `dryRun: true` keeps the sweep strictly read-only:
+  `previewStoreCleanup` evaluates a cloned store and simulates the disk budget and orphaned
+  artifact prune, so the sweep never takes `runExclusiveSessionStoreWrite`, never calls
+  `applySessionEntryLifecycleMutation`, and never deletes a file. That is what makes the
+  "zero change to what gets protected or evicted" non-goal above literally true, on enforce
+  deployments as well as warn ones, and means the sweep cannot race live chat writes.
 - No new sweep logic is written. Reusing `runSessionsCleanup` means no new prune/cap/disk-budget
   code path to trust — the risk surface is "call an existing, tested function on a timer."
 - Guard against overlap the same way `server-maintenance.ts`'s `runMediaCleanup` already does
@@ -78,8 +81,9 @@ process open):
 ### 2. Diagnostic log (closes the visibility gap)
 
 After each tick's `runSessionsCleanup` call resolves, log one `info`-level line per store from
-its returned `SessionCleanupSummary` (`agentId`, `storePath`, `mode`, `beforeCount`,
-`afterCount`, `pruned`, `capped`, `diskBudget` totals, `wouldMutate`) — **unconditionally**,
+each `previewResults[].summary` (`SessionCleanupSummary`: `agentId`, `storePath`, `mode`,
+`dryRun`, `beforeCount`, `afterCount`, `pruned`, `capped`, `diskBudget` totals,
+`unreferencedArtifacts` counts, `wouldMutate`) — **unconditionally**,
 including when `wouldMutate` is `false`. This is the one new piece of actual log output, and
 it's placed on the periodic path specifically so it doesn't add per-message log volume to the
 hot chat write path — one line per store per hour, not one line per inbound message.
@@ -108,7 +112,8 @@ strings to match.
 
 - New unit test for `session-maintenance-sweep-runner.ts` (mirrors
   `progress-nudge-runner.test.ts`'s fake-timer/injectable-deps style): verifies each tick calls
-  the cleanup seam with `{ allAgents: true }`, logs a summary every tick including when nothing
+  the cleanup seam with `{ allAgents: true, dryRun: true }`, logs a summary per previewed store
+  every tick including when nothing
   changed, does not overlap a slow tick with the next, and that `stop()`/`updateConfig()` behave
   (mirrors sibling runner tests already covering this shape).
 - No changes needed to existing `store.pruning.test.ts` /

@@ -334,6 +334,23 @@ describe("server-runtime-services", () => {
     expect(clearIntervalSpy).toHaveBeenCalledWith(maintenance.mediaCleanup);
   });
 
+  it("skips the session maintenance sweep under the vitest runtime", () => {
+    hoisted.isVitestRuntimeEnv.mockReturnValue(true);
+
+    const { services } = activateScheduledServicesForTest();
+
+    // The sweep runs a real (dry-run) cleanup preview on start, so it stays off
+    // under vitest; the composed handle must still delegate stop/updateConfig.
+    expect(hoisted.startSessionMaintenanceSweepRunner).not.toHaveBeenCalled();
+    expect(hoisted.startHeartbeatRunner).toHaveBeenCalledTimes(1);
+    services.heartbeatRunner.stop();
+    services.heartbeatRunner.updateConfig({} as never);
+    expect(hoisted.sessionMaintenanceSweepRunner.stop).not.toHaveBeenCalled();
+    expect(hoisted.sessionMaintenanceSweepRunner.updateConfig).not.toHaveBeenCalled();
+    expect(hoisted.heartbeatRunner.stop).toHaveBeenCalledTimes(1);
+    expect(hoisted.progressNudgeRunner.stop).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps scheduled services disabled for minimal test gateways", () => {
     const cron = { start: vi.fn(async () => undefined) };
 

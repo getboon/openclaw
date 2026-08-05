@@ -1687,7 +1687,7 @@ export const FIELD_HELP: Record<string, string> = {
   "session.threadBindings.defaultSpawnContext":
     'Default native subagent context for thread-bound spawns. Use "fork" to start from the requester transcript or "isolated" for a clean child. Default: "fork".',
   "session.maintenance":
-    "Automatic session-store maintenance controls for pruning age, entry caps, reset archive retention, and disk budget cleanup. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
+    'Automatic session-store maintenance controls for pruning age, entry caps, reset archive retention, and disk budget cleanup. Default: "enforce"; switch to "warn" to observe impact before trusting live pruning/capping/eviction.',
   "session.maintenance.mode":
     'Determines whether maintenance policies are only reported ("warn") or actively applied ("enforce"). Default: "enforce"; set to "warn" to observe what would be pruned/capped/evicted before trusting it.',
   "session.maintenance.pruneAfter":

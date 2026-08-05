@@ -1,11 +1,16 @@
 // Periodically sweeps every configured agent's session store through the
-// same enforce/warn-aware cleanup the `openclaw sessions cleanup` CLI
-// already uses, and logs a summary every tick, including when nothing
+// *dry-run preview* path of the same cleanup the `openclaw sessions cleanup`
+// CLI already uses, and logs a summary every tick, including when nothing
 // changed. session.maintenance today only runs as a side effect of session
 // writes (commitReplySessionInitialization), so idle/low-traffic stores can
 // go long stretches unevaluated, and every existing prune/cap/disk-budget log
 // line only fires on nonzero effect — "ran, 0 eligible" and "never ran" were
-// otherwise indistinguishable. This intentionally does not change what gets
+// otherwise indistinguishable. dryRun: true keeps this genuinely read-only
+// whatever the operator's session.maintenance.mode is: previewStoreCleanup
+// works on a cloned store, simulates the disk budget and artifact prune, and
+// never takes the session write lock or deletes a file — so an `enforce`
+// deployment gets the same observability as a `warn` one, and the sweep never
+// evicts or prunes on its own. This intentionally does not change what gets
 // protected or evicted; see
 // docs/superpowers/specs/2026-08-05-session-maintenance-sweep-observability-design.md.
 import {
@@ -45,6 +50,9 @@ function logSweepSummary(
     agentId: summary.agentId,
     storePath: summary.storePath,
     mode: summary.mode,
+    // Always true here. Logged so the counts below cannot be misread as work this
+    // sweep performed: they are what the store's configured policy would do.
+    dryRun: summary.dryRun,
     beforeCount: summary.beforeCount,
     afterCount: summary.afterCount,
     pruned: summary.pruned,
@@ -57,6 +65,12 @@ function logSweepSummary(
           overBudget: summary.diskBudget.overBudget,
         }
       : null,
+    // pruneUnreferencedSessionArtifacts logs nothing of its own, so this is the
+    // only place orphaned-artifact pressure becomes visible to operators.
+    unreferencedArtifacts: {
+      removedFiles: summary.unreferencedArtifacts.removedFiles,
+      freedBytes: summary.unreferencedArtifacts.freedBytes,
+    },
     wouldMutate: summary.wouldMutate,
   });
 }
@@ -80,9 +94,11 @@ export function startSessionMaintenanceSweepRunner(opts: {
       try {
         const result = await runCleanup({
           cfg: state.cfg,
-          opts: { allAgents: true, dryRun: false },
+          opts: { allAgents: true, dryRun: true },
         });
-        for (const summary of result.appliedSummaries) {
+        // Dry-run leaves appliedSummaries empty; previewResults[].summary is the
+        // read-only per-store view (same SessionCleanupSummary shape).
+        for (const { summary } of result.previewResults) {
           logSweepSummary(logger, summary);
         }
       } catch (err) {

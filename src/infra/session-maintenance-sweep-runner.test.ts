@@ -1,9 +1,12 @@
 // Tests the session-maintenance sweep runner: immediate + periodic ticks,
-// unconditional per-store summary logging, overlap guarding, config refresh
-// on updateConfig(), and stop() halting future ticks.
+// dry-run-only cleanup calls, unconditional per-store summary logging (every
+// store, every tick), overlap guarding, config refresh on updateConfig(), and
+// stop() halting future ticks.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionCleanupSummary } from "../config/sessions/cleanup-service.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
+  SESSION_MAINTENANCE_SWEEP_INTERVAL_MS,
   startSessionMaintenanceSweepRunner,
   type SessionMaintenanceSweepDeps,
 } from "./session-maintenance-sweep-runner.js";
@@ -12,29 +15,32 @@ function config(): OpenClawConfig {
   return {} as OpenClawConfig;
 }
 
+function summaryFixture(over?: Partial<SessionCleanupSummary>): SessionCleanupSummary {
+  return {
+    agentId: "main",
+    storePath: "/agents/main/sessions/sessions.json",
+    mode: "enforce",
+    dryRun: true,
+    beforeCount: 10,
+    afterCount: 10,
+    missing: 0,
+    dmScopeRetired: 0,
+    pruned: 0,
+    capped: 0,
+    unreferencedArtifacts: { scannedFiles: 4, removedFiles: 0, freedBytes: 0, olderThanMs: 0 },
+    diskBudget: null,
+    wouldMutate: false,
+    ...over,
+  };
+}
+
 function makeDeps(over?: Partial<SessionMaintenanceSweepDeps>) {
   const info = vi.fn();
   const error = vi.fn();
   const runCleanup = vi.fn().mockResolvedValue({
     mode: "enforce",
-    previewResults: [],
-    appliedSummaries: [
-      {
-        agentId: "main",
-        storePath: "/agents/main/sessions/sessions.json",
-        mode: "enforce",
-        dryRun: false,
-        beforeCount: 10,
-        afterCount: 10,
-        missing: 0,
-        dmScopeRetired: 0,
-        pruned: 0,
-        capped: 0,
-        unreferencedArtifacts: { scannedFiles: 0, removedFiles: 0, freedBytes: 0, olderThanMs: 0 },
-        diskBudget: null,
-        wouldMutate: false,
-      },
-    ],
+    previewResults: [{ summary: summaryFixture() }],
+    appliedSummaries: [],
   });
   const deps: SessionMaintenanceSweepDeps = {
     // Cast: the mock resolves a plain literal, not the exact
@@ -44,7 +50,7 @@ function makeDeps(over?: Partial<SessionMaintenanceSweepDeps>) {
     // progress-nudge-runner.scheduler.test.ts.
     runCleanup: runCleanup as unknown as SessionMaintenanceSweepDeps["runCleanup"],
     log: { info, error },
-    intervalMs: 60 * 60_000,
+    intervalMs: SESSION_MAINTENANCE_SWEEP_INTERVAL_MS,
     ...over,
   };
   return { deps, runCleanup, info, error };
@@ -67,18 +73,97 @@ describe("startSessionMaintenanceSweepRunner", () => {
     const runner = startSessionMaintenanceSweepRunner({ cfg, deps });
     await vi.advanceTimersByTimeAsync(0);
     expect(runCleanup).toHaveBeenCalledTimes(1);
-    expect(runCleanup).toHaveBeenCalledWith({ cfg, opts: { allAgents: true, dryRun: false } });
+    // dryRun: true keeps the sweep read-only regardless of the operator's
+    // configured session.maintenance.mode — observability, never eviction.
+    expect(runCleanup).toHaveBeenCalledWith({ cfg, opts: { allAgents: true, dryRun: true } });
     expect(info).toHaveBeenCalledWith(
       "session maintenance sweep",
       expect.objectContaining({
         agentId: "main",
         storePath: "/agents/main/sessions/sessions.json",
         mode: "enforce",
+        dryRun: true,
         beforeCount: 10,
         afterCount: 10,
         pruned: 0,
         capped: 0,
+        unreferencedArtifacts: { removedFiles: 0, freedBytes: 0 },
         wouldMutate: false,
+      }),
+    );
+    runner.stop();
+  });
+
+  it("logs the previewed artifact-cleanup counts", async () => {
+    const { deps, info } = makeDeps({
+      runCleanup: vi.fn().mockResolvedValue({
+        mode: "enforce",
+        previewResults: [
+          {
+            summary: summaryFixture({
+              unreferencedArtifacts: {
+                scannedFiles: 12,
+                removedFiles: 3,
+                freedBytes: 4096,
+                olderThanMs: 86_400_000,
+              },
+              wouldMutate: true,
+            }),
+          },
+        ],
+        appliedSummaries: [],
+      }) as unknown as SessionMaintenanceSweepDeps["runCleanup"],
+    });
+    const runner = startSessionMaintenanceSweepRunner({ cfg: config(), deps });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(info).toHaveBeenCalledWith(
+      "session maintenance sweep",
+      expect.objectContaining({
+        unreferencedArtifacts: { removedFiles: 3, freedBytes: 4096 },
+        wouldMutate: true,
+      }),
+    );
+    runner.stop();
+  });
+
+  it("logs one summary per previewed store", async () => {
+    const { deps, info } = makeDeps({
+      runCleanup: vi.fn().mockResolvedValue({
+        mode: "enforce",
+        previewResults: [
+          { summary: summaryFixture({ agentId: "main", storePath: "/a/sessions.json" }) },
+          {
+            summary: summaryFixture({
+              agentId: "second",
+              storePath: "/b/sessions.json",
+              beforeCount: 7,
+              afterCount: 5,
+              pruned: 2,
+              wouldMutate: true,
+            }),
+          },
+        ],
+        appliedSummaries: [],
+      }) as unknown as SessionMaintenanceSweepDeps["runCleanup"],
+    });
+    const runner = startSessionMaintenanceSweepRunner({ cfg: config(), deps });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(info).toHaveBeenCalledTimes(2);
+    expect(info).toHaveBeenNthCalledWith(
+      1,
+      "session maintenance sweep",
+      expect.objectContaining({ agentId: "main", storePath: "/a/sessions.json", pruned: 0 }),
+    );
+    expect(info).toHaveBeenNthCalledWith(
+      2,
+      "session maintenance sweep",
+      expect.objectContaining({
+        agentId: "second",
+        storePath: "/b/sessions.json",
+        beforeCount: 7,
+        afterCount: 5,
+        pruned: 2,
+        wouldMutate: true,
       }),
     );
     runner.stop();
@@ -89,9 +174,9 @@ describe("startSessionMaintenanceSweepRunner", () => {
     const runner = startSessionMaintenanceSweepRunner({ cfg: config(), deps });
     await vi.advanceTimersByTimeAsync(0);
     expect(runCleanup).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    await vi.advanceTimersByTimeAsync(SESSION_MAINTENANCE_SWEEP_INTERVAL_MS);
     expect(runCleanup).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    await vi.advanceTimersByTimeAsync(SESSION_MAINTENANCE_SWEEP_INTERVAL_MS);
     expect(runCleanup).toHaveBeenCalledTimes(3);
     runner.stop();
   });
@@ -112,7 +197,7 @@ describe("startSessionMaintenanceSweepRunner", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(runCleanup).toHaveBeenCalledTimes(1);
     // Next interval fires while the first sweep is still in flight.
-    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    await vi.advanceTimersByTimeAsync(SESSION_MAINTENANCE_SWEEP_INTERVAL_MS);
     expect(runCleanup).toHaveBeenCalledTimes(1);
     resolveFirst?.();
     // advanceTimersByTimeAsync(0) also flushes the pending microtask queue,
@@ -121,7 +206,7 @@ describe("startSessionMaintenanceSweepRunner", () => {
     // reliably resolve under vi.useFakeTimers().
     await vi.advanceTimersByTimeAsync(0);
     expect(runCleanup).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    await vi.advanceTimersByTimeAsync(SESSION_MAINTENANCE_SWEEP_INTERVAL_MS);
     expect(runCleanup).toHaveBeenCalledTimes(2);
     runner.stop();
   });
@@ -132,10 +217,10 @@ describe("startSessionMaintenanceSweepRunner", () => {
     await vi.advanceTimersByTimeAsync(0);
     const nextCfg = { session: { maintenance: { mode: "warn" as const } } } as OpenClawConfig;
     runner.updateConfig(nextCfg);
-    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    await vi.advanceTimersByTimeAsync(SESSION_MAINTENANCE_SWEEP_INTERVAL_MS);
     expect(runCleanup).toHaveBeenLastCalledWith({
       cfg: nextCfg,
-      opts: { allAgents: true, dryRun: false },
+      opts: { allAgents: true, dryRun: true },
     });
     runner.stop();
   });
@@ -145,7 +230,7 @@ describe("startSessionMaintenanceSweepRunner", () => {
     const runner = startSessionMaintenanceSweepRunner({ cfg: config(), deps });
     await vi.advanceTimersByTimeAsync(0);
     runner.stop();
-    await vi.advanceTimersByTimeAsync(3 * 60 * 60_000);
+    await vi.advanceTimersByTimeAsync(3 * SESSION_MAINTENANCE_SWEEP_INTERVAL_MS);
     expect(runCleanup).toHaveBeenCalledTimes(1);
   });
 
@@ -162,8 +247,20 @@ describe("startSessionMaintenanceSweepRunner", () => {
     expect(error).toHaveBeenCalledWith("session maintenance sweep failed", {
       error: "boom",
     });
-    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    await vi.advanceTimersByTimeAsync(SESSION_MAINTENANCE_SWEEP_INTERVAL_MS);
     expect(runCleanup).toHaveBeenCalledTimes(2);
     runner.stop();
+  });
+
+  it("constructs with the real cleanup/logger defaults without throwing", () => {
+    // No deps: exercises the production wiring (real runSessionsCleanup + subsystem
+    // logger). Construction must return a handle synchronously; the immediate tick is
+    // async and swallows its own failures, and stop() clears the interval so no real
+    // periodic sweep outlives the test.
+    let runner: ReturnType<typeof startSessionMaintenanceSweepRunner> | undefined;
+    expect(() => {
+      runner = startSessionMaintenanceSweepRunner({ cfg: config() });
+    }).not.toThrow();
+    runner?.stop();
   });
 });
