@@ -11,8 +11,7 @@
 // never takes the session write lock or deletes a file — so an `enforce`
 // deployment gets the same observability as a `warn` one, and the sweep never
 // evicts or prunes on its own. This intentionally does not change what gets
-// protected or evicted; see
-// docs/superpowers/specs/2026-08-05-session-maintenance-sweep-observability-design.md.
+// protected or evicted.
 //
 // Cost tradeoff, disclosed rather than hidden: each tick still does a real
 // (read-only) load + clone of every configured store, once per hour and once
