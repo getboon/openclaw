@@ -172,12 +172,27 @@ describe("resolveMSTeamsOutboundFilePlan", () => {
     ).toEqual({ kind: "undeliverable", reason: "missing-token-provider" });
   });
 
-  it("is undeliverable with the token-provider reason for an image too when a site is configured but no token provider", () => {
+  it("still inlines a small image when a site is configured but no token provider is available", () => {
+    // Inline base64 delivery needs neither a site nor a token provider — a
+    // small image stays deliverable regardless of why the upload path is
+    // unusable, instead of turning a working delivery into an error notice.
     expect(
       resolveMSTeamsOutboundFilePlan({
         conversationType: "channel",
         contentType: "image/png",
         bufferSize: 10,
+        sharePointSiteId: "contoso.sharepoint.com,guid1,guid2",
+        hasTokenProvider: false,
+      }),
+    ).toEqual({ kind: "inline-image" });
+  });
+
+  it("is undeliverable with the token-provider reason for a large image when a site is configured but no token provider", () => {
+    expect(
+      resolveMSTeamsOutboundFilePlan({
+        conversationType: "channel",
+        contentType: "image/png",
+        bufferSize: FILE_CONSENT_THRESHOLD_BYTES,
         sharePointSiteId: "contoso.sharepoint.com,guid1,guid2",
         hasTokenProvider: false,
       }),

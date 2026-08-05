@@ -59,19 +59,22 @@ export function resolveMSTeamsOutboundFilePlan(params: {
     return { kind: "inline-image" };
   }
 
-  if (params.sharePointSiteId) {
-    if (params.hasTokenProvider) {
-      return { kind: "sharepoint-upload", siteId: params.sharePointSiteId };
-    }
-    return { kind: "undeliverable", reason: "missing-token-provider" };
+  if (params.sharePointSiteId && params.hasTokenProvider) {
+    return { kind: "sharepoint-upload", siteId: params.sharePointSiteId };
   }
 
+  // No working upload path (no site, or a site with no usable token
+  // provider). A small image still needs neither — it can go out inline
+  // without depending on whatever broke the upload path.
   const isImage = params.contentType?.startsWith("image/") ?? false;
   if (isImage && params.bufferSize < FILE_CONSENT_THRESHOLD_BYTES) {
     return { kind: "inline-image" };
   }
 
-  return { kind: "undeliverable", reason: "missing-sharepoint-site" };
+  return {
+    kind: "undeliverable",
+    reason: params.sharePointSiteId ? "missing-token-provider" : "missing-sharepoint-site",
+  };
 }
 
 const UNDELIVERABLE_REASON_TEXT: Record<MSTeamsUndeliverableReason, string> = {
