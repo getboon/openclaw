@@ -1706,7 +1706,11 @@ async function deliverOutboundPayloadsCore(
         );
         continue;
       }
-      if (payload.auditTrace && !effectivePayload.auditTrace) {
+      if (
+        payload.auditTrace &&
+        !effectivePayload.auditTrace &&
+        effectivePayload.text === payload.text
+      ) {
         effectivePayload = {
           ...effectivePayload,
           auditTrace: payload.auditTrace,

@@ -492,6 +492,50 @@ describe("deliverOutboundPayloads", () => {
     expect(sendMatrix).toHaveBeenCalledWith("!room:example", text, expect.anything());
   });
 
+  it("rechecks hook-rewritten text without restoring the original grounding evidence", async () => {
+    hookMocks.runner.hasHooks.mockImplementation(
+      (hookName?: string) => hookName === "reply_payload_sending",
+    );
+    hookMocks.runner.runReplyPayloadSending.mockResolvedValueOnce({
+      payload: {
+        text: "Done - 99 pages verified.",
+      },
+    });
+    const sendMatrix = vi.fn().mockResolvedValue({ messageId: "m1", roomId: "!room:example" });
+
+    await deliverOutboundPayloads({
+      cfg: matrixChunkConfig,
+      channel: "matrix",
+      to: "!room:example",
+      payloads: [
+        {
+          text: "Done - 22 pages verified.",
+          auditTrace: {
+            schemaVersion: 1,
+            visibleTools: ["takeoff"],
+            toolInvocations: [{ name: "takeoff", status: "ok" }],
+            evidence: [{ kind: "tool_outcome", tool: "takeoff", status: "ok" }],
+            confidence: "high",
+            disposition: "completed",
+            reason: "tool_execution_succeeded",
+          },
+        },
+      ],
+      deps: { matrix: sendMatrix },
+      replyPayloadSendingHook: {
+        kind: "final",
+        channel: "matrix",
+        context: { channelId: "matrix", conversationId: "!room:example" },
+      },
+    });
+
+    expect(sendMatrix).toHaveBeenCalledWith(
+      "!room:example",
+      "I don't have a tool result supporting that statement yet.",
+      expect.anything(),
+    );
+  });
+
   it("reports unsupported durable final delivery when required capabilities are missing", async () => {
     setActivePluginRegistry(
       createTestRegistry([

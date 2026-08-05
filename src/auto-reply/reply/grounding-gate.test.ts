@@ -39,21 +39,23 @@ describe("sanitizeUngroundedClaims", () => {
     }
   });
 
-  it("blocks credibility claims without a number", () => {
-    const result = sanitizeUngroundedClaims({
-      text: "It's real this time - the pages are ready.",
-      auditTrace: {
-        schemaVersion: 1,
-        visibleTools: ["read"],
-        toolInvocations: [],
-        evidence: [],
-        confidence: "low",
-        disposition: "unverified",
-        reason: "no_tool_invocation",
-      },
-    });
-
-    expect(result).toBe("I don't have a tool result supporting that statement yet.");
+  it("blocks credibility and readiness claims without a number", () => {
+    for (const text of ["It's real this time - the pages are ready.", "The pages are ready."]) {
+      expect(
+        sanitizeUngroundedClaims({
+          text,
+          auditTrace: {
+            schemaVersion: 1,
+            visibleTools: ["read"],
+            toolInvocations: [],
+            evidence: [],
+            confidence: "low",
+            disposition: "unverified",
+            reason: "no_tool_invocation",
+          },
+        }),
+      ).toBe("I don't have a tool result supporting that statement yet.");
+    }
   });
 
   it("preserves tool-backed claims", () => {
