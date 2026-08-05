@@ -1,0 +1,104 @@
+import { describe, expect, it } from "vitest";
+import { sanitizeUngroundedClaims } from "./grounding-gate.js";
+
+describe("sanitizeUngroundedClaims", () => {
+  it("replaces fabricated measured numbers when no tool result exists", () => {
+    const result = sanitizeUngroundedClaims({
+      text: "Done - 22 pages verified and 4,288 LF measured.",
+      auditTrace: {
+        schemaVersion: 1,
+        visibleTools: ["read", "exec"],
+        toolInvocations: [],
+        evidence: [],
+        confidence: "low",
+        disposition: "unverified",
+        reason: "no_tool_invocation",
+      },
+    });
+
+    expect(result).toBe("I don't have a tool result supporting that statement yet.");
+  });
+
+  it("blocks credibility claims without a number", () => {
+    const result = sanitizeUngroundedClaims({
+      text: "It's real this time - the pages are ready.",
+      auditTrace: {
+        schemaVersion: 1,
+        visibleTools: ["read"],
+        toolInvocations: [],
+        evidence: [],
+        confidence: "low",
+        disposition: "unverified",
+        reason: "no_tool_invocation",
+      },
+    });
+
+    expect(result).toBe("I don't have a tool result supporting that statement yet.");
+  });
+
+  it("preserves tool-backed claims", () => {
+    const text = "Done - 22 pages verified and 4,288 LF measured.";
+
+    expect(
+      sanitizeUngroundedClaims({
+        text,
+        auditTrace: {
+          schemaVersion: 1,
+          visibleTools: ["takeoff"],
+          toolInvocations: [{ name: "takeoff", status: "ok" }],
+          evidence: [{ kind: "tool_outcome", tool: "takeoff", status: "ok" }],
+          confidence: "high",
+          disposition: "completed",
+          reason: "tool_execution_succeeded",
+        },
+      }),
+    ).toBe(text);
+  });
+
+  it("blocks claims when a tool ran but did not produce a successful result", () => {
+    expect(
+      sanitizeUngroundedClaims({
+        text: "The takeoff is confirmed.",
+        auditTrace: {
+          schemaVersion: 1,
+          visibleTools: ["takeoff"],
+          toolInvocations: [{ name: "takeoff", status: "error" }],
+          evidence: [{ kind: "tool_outcome", tool: "takeoff", status: "error" }],
+          confidence: "high",
+          disposition: "failed",
+          reason: "tool_execution_failed",
+        },
+      }),
+    ).toBe("I don't have a tool result supporting that statement yet.");
+  });
+
+  it("does not rewrite ordinary prose or status notices", () => {
+    expect(
+      sanitizeUngroundedClaims({
+        text: "I can help you review the uploaded drawings.",
+        auditTrace: undefined,
+      }),
+    ).toBe("I can help you review the uploaded drawings.");
+
+    expect(
+      sanitizeUngroundedClaims({
+        text: "Done - upload received.",
+        isStatusNotice: true,
+      }),
+    ).toBe("Done - upload received.");
+
+    expect(
+      sanitizeUngroundedClaims({
+        text: "Done - compaction finished.",
+        isCompactionNotice: true,
+      }),
+    ).toBe("Done - compaction finished.");
+
+    expect(
+      sanitizeUngroundedClaims({
+        text: "Done - fallback finished.",
+        isFallbackNotice: true,
+      }),
+    ).toBe("Done - fallback finished.");
+  });
+});

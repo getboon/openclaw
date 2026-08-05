@@ -118,6 +118,18 @@ describe("buildAgentSystemPrompt", () => {
     );
   });
 
+  it("includes grounding guidance for claims that need tool evidence", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/workspace",
+      toolNames: ["read"],
+    });
+
+    expect(prompt).toContain("## Grounding");
+    expect(prompt).toContain("Successful tool results and project records are the source of truth");
+    expect(prompt).toContain("carried provenance");
+    expect(prompt).toContain("reconcile contradictions with the record");
+  });
+
   it("omits extended sections in minimal prompt mode", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",

@@ -3,6 +3,7 @@ import { expectDefined } from "@openclaw/normalization-core";
 // sends, commit hooks, diagnostics, transcript mirroring, and payload outcomes.
 import { hasTrustedMessageAuditListeners } from "../../audit/message-audit-events.js";
 import { resolveChunkMode, resolveTextChunkLimit } from "../../auto-reply/chunk.js";
+import { sanitizeUngroundedClaims } from "../../auto-reply/reply/grounding-gate.js";
 import { runReplyPayloadSendingHook } from "../../auto-reply/reply/reply-payload-sending-hook.js";
 import type { ReplyPayload } from "../../auto-reply/types.js";
 import { createRenderedMessageBatchPlan } from "../../channels/message/rendered-batch.js";
@@ -927,6 +928,13 @@ function normalizePayloadsForChannelDelivery(
   const normalizedPayloads: NormalizedPayloadForChannelDelivery[] = [];
   for (const entry of plan) {
     let sanitizedPayload = stripInternalRuntimeScaffoldingFromPayload(entry.payload);
+    const groundedText = sanitizeUngroundedClaims(sanitizedPayload);
+    if (groundedText !== sanitizedPayload.text) {
+      sanitizedPayload = {
+        ...sanitizedPayload,
+        text: groundedText,
+      };
+    }
     if (handler.sanitizeText && sanitizedPayload.text) {
       if (!handler.shouldSkipPlainTextSanitization?.(sanitizedPayload)) {
         sanitizedPayload = {
@@ -2482,7 +2490,7 @@ async function deliverOutboundPayloadsCore(
       const normalizedEffectivePayload = renderedHandler.normalizePayload
         ? renderedHandler.normalizePayload(renderedPayload)
         : renderedPayload;
-      const effectivePayload = normalizedEffectivePayload
+      let effectivePayload = normalizedEffectivePayload
         ? normalizeEmptyPayloadForDelivery(
             stripInternalRuntimeScaffoldingFromPayload(normalizedEffectivePayload),
           )
@@ -2499,6 +2507,13 @@ async function deliverOutboundPayloadsCore(
           }),
         );
         continue;
+      }
+      const groundedText = sanitizeUngroundedClaims(effectivePayload);
+      if (groundedText !== effectivePayload.text) {
+        effectivePayload = {
+          ...effectivePayload,
+          text: groundedText,
+        };
       }
       const effectivePayloadSummary = buildPayloadSummary(effectivePayload);
       assertStableMediaFanout(params, payloadIndex, originalMediaCount, effectivePayloadSummary);
