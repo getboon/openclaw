@@ -1198,7 +1198,7 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
           await (await loadMSTeamsChannelRuntime()).probeMSTeams(cfg.channels?.msteams),
         formatCapabilitiesProbe: ({ probe }) => {
           const teamsProbe = probe;
-          const lines: Array<{ text: string; tone?: "error" }> = [];
+          const lines: Array<{ text: string; tone?: "error" | "warn" }> = [];
           const appId = typeof teamsProbe?.appId === "string" ? teamsProbe.appId.trim() : "";
           if (appId) {
             lines.push({ text: `App: ${appId}` });
@@ -1223,6 +1223,9 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
             } else if (graph.ok) {
               lines.push({ text: "Graph: ok" });
             }
+          }
+          for (const warning of teamsProbe?.warnings ?? []) {
+            lines.push({ text: warning, tone: "warn" });
           }
           return lines;
         },

@@ -25,6 +25,13 @@ export type ProbeMSTeamsResult = BaseProbeResult<string> & {
     scopes?: string[];
     userPrincipalName?: string;
   };
+  /**
+   * Non-fatal configuration notices, e.g. missing sharePointSiteId. A bot has
+   * no personal OneDrive (app-only tokens can't call /me/drive), so without
+   * this config, file/document sends in group chats and channels resolve to
+   * an explicit undeliverable notice instead of an attachment.
+   */
+  warnings?: string[];
 };
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -116,11 +123,19 @@ export async function probeMSTeams(cfg?: MSTeamsConfig): Promise<ProbeMSTeamsRes
         delegatedAuth = { ok: false, error: "failed to load delegated tokens" };
       }
     }
+    const warnings: string[] = [];
+    if (!cfg?.sharePointSiteId) {
+      warnings.push(
+        'channels.msteams.sharePointSiteId is not set — file/document sends in group chats and channels will return an undeliverable notice instead of an attachment (see "Sending files in group chats" in docs/channels/msteams.md).',
+      );
+    }
+
     return {
       ok: true,
       appId: creds.appId,
       ...(graph ? { graph } : {}),
       ...(delegatedAuth ? { delegatedAuth } : {}),
+      ...(warnings.length > 0 ? { warnings } : {}),
     };
   } catch (err) {
     return {

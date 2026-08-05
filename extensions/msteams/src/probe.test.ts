@@ -85,6 +85,22 @@ describe("msteams probe", () => {
       ok: true,
       appId: "app",
       graph: { ok: true, roles: undefined, scopes: undefined },
+      warnings: [expect.stringContaining("sharePointSiteId is not set")],
+    });
+  });
+
+  it("omits the SharePoint warning when a site is configured", async () => {
+    const cfg = {
+      enabled: true,
+      appId: "app",
+      appPassword: "pw",
+      tenantId: "tenant",
+      sharePointSiteId: "contoso.sharepoint.com,guid1,guid2",
+    } as unknown as MSTeamsConfig;
+    await expect(probeMSTeams(cfg)).resolves.toEqual({
+      ok: true,
+      appId: "app",
+      graph: { ok: true, roles: undefined, scopes: undefined },
     });
   });
 
@@ -131,6 +147,7 @@ describe("msteams probe", () => {
           userPrincipalName: "user@example.com",
           error: "token expired (will auto-refresh on next use)",
         },
+        warnings: [expect.stringContaining("sharePointSiteId is not set")],
       });
     } finally {
       nowSpy.mockRestore();

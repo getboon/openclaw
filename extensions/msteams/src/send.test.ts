@@ -25,7 +25,6 @@ const mockState = vi.hoisted(() => ({
   updateMSTeamsActivityWithReference: vi.fn(async () => ({ id: "updated" })),
   deleteMSTeamsActivityWithReference: vi.fn(async () => {}),
   uploadAndShareSharePoint: vi.fn(),
-  uploadAndShareOneDrive: vi.fn(),
   getDriveItemProperties: vi.fn(),
   createMSTeamsTokenProvider: vi.fn(),
   buildMSTeamsPollCard: vi.fn(() => ({
@@ -64,10 +63,14 @@ vi.mock("./file-consent-helpers.js", () => ({
   prepareFileConsentActivityFs: mockState.prepareFileConsentActivityFs,
 }));
 
-vi.mock("./media-helpers.js", () => ({
-  extractFilename: mockState.extractFilename,
-  extractMessageId: () => "message-1",
-}));
+vi.mock("./media-helpers.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./media-helpers.js")>();
+  return {
+    ...actual,
+    extractFilename: mockState.extractFilename,
+    extractMessageId: () => "message-1",
+  };
+});
 
 vi.mock("./messenger.js", () => ({
   sendMSTeamsMessages: mockState.sendMSTeamsMessages,
@@ -97,7 +100,6 @@ vi.mock("./runtime.js", () => ({
 vi.mock("./graph-upload.js", () => ({
   uploadAndShareSharePoint: mockState.uploadAndShareSharePoint,
   getDriveItemProperties: mockState.getDriveItemProperties,
-  uploadAndShareOneDrive: mockState.uploadAndShareOneDrive,
 }));
 
 vi.mock("./polls.js", () => ({
@@ -245,7 +247,6 @@ describe("sendMessageMSTeams", () => {
     mockState.updateMSTeamsActivityWithReference.mockReset();
     mockState.deleteMSTeamsActivityWithReference.mockReset();
     mockState.uploadAndShareSharePoint.mockReset();
-    mockState.uploadAndShareOneDrive.mockReset();
     mockState.getDriveItemProperties.mockReset();
 
     mockState.extractFilename.mockResolvedValue("fallback.bin");
@@ -495,7 +496,12 @@ describe("sendMessageMSTeams", () => {
     expect(mockState.sendMSTeamsActivityWithReference).not.toHaveBeenCalled();
   });
 
-  it("threads OneDrive file links when no SharePoint site is configured", async () => {
+  // A bot has no personal OneDrive (/me/drive requires a signed-in user, not
+  // the app-only token this plugin has), so there is no working upload path
+  // without sharePointSiteId. Say so explicitly in-thread instead of
+  // attempting (and failing) an upload the agent would otherwise have to
+  // paraphrase as "I cannot".
+  it("produces an explicit undeliverable notice when no SharePoint site is configured", async () => {
     mockState.resolveMSTeamsSendContext.mockResolvedValue(
       createSharePointSendContext({
         conversationId: "19:channel@thread.tacv2",
@@ -512,12 +518,6 @@ describe("sendMessageMSTeams", () => {
       kind: "file",
     });
     mockState.requiresFileConsent.mockReturnValue(false);
-    mockState.uploadAndShareOneDrive.mockResolvedValue({
-      itemId: "item-od-1",
-      webUrl: "https://od.example.com/notes.pdf",
-      shareUrl: "https://od.example.com/share/notes.pdf",
-      name: "notes.pdf",
-    });
 
     await sendMessageMSTeams({
       cfg: {} as OpenClawConfig,
@@ -528,12 +528,46 @@ describe("sendMessageMSTeams", () => {
 
     expect(mockState.uploadAndShareSharePoint).not.toHaveBeenCalled();
     const sendPayload = firstObjectArg(mockState.sendMSTeamsMessages);
+    // Threading must still be preserved for the notice, same as any other send.
     expect(sendPayload.replyStyle).toBe("thread");
     const messages = sendPayload.messages as Array<Record<string, unknown>>;
-    expect(messages[0]?.text).toBe(
-      "notes attached\n\n📎 [notes.pdf](https://od.example.com/share/notes.pdf)",
-    );
+    expect(messages[0]?.text).toContain('I can\'t attach "notes.pdf" directly here');
+    expect(messages[0]?.text).toContain("sharePointSiteId");
+    // The remote source URL is offered as a fallback link.
+    expect(messages[0]?.text).toContain("https://example.com/notes.pdf");
+    expect(messages[0]?.text).toContain("notes attached\n\n");
     expect(mockState.sendMSTeamsActivityWithReference).not.toHaveBeenCalled();
+  });
+
+  it("omits a source link in the undeliverable notice for a local file path", async () => {
+    mockState.resolveMSTeamsSendContext.mockResolvedValue(
+      createSharePointSendContext({
+        conversationId: "19:channel@thread.tacv2",
+        graphChatId: null,
+        conversationType: "channel",
+        replyStyle: "thread",
+        threadActivityId: "thread-root-1",
+      }),
+    );
+    mockState.loadOutboundMediaFromUrl.mockResolvedValueOnce({
+      buffer: Buffer.alloc(100, "pdf"),
+      contentType: "application/pdf",
+      fileName: "notes.pdf",
+      kind: "file",
+    });
+    mockState.requiresFileConsent.mockReturnValue(false);
+
+    await sendMessageMSTeams({
+      cfg: {} as OpenClawConfig,
+      to: "conversation:19:channel@thread.tacv2",
+      text: "notes attached",
+      mediaUrl: "/workspace/notes.pdf",
+    });
+
+    const sendPayload = firstObjectArg(mockState.sendMSTeamsMessages);
+    const messages = sendPayload.messages as Array<Record<string, unknown>>;
+    expect(messages[0]?.text).toContain('I can\'t attach "notes.pdf" directly here');
+    expect(messages[0]?.text).not.toContain("http");
   });
 
   it("keeps SharePoint file links top-level when replyStyle resolves to top-level", async () => {
