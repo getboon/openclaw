@@ -12,12 +12,18 @@ const hoisted = vi.hoisted(() => {
     stop: vi.fn(),
     updateConfig: vi.fn(),
   };
+  const sessionMaintenanceSweepRunner = {
+    stop: vi.fn(),
+    updateConfig: vi.fn(),
+  };
   const stopModelPricingRefresh = vi.fn();
   return {
     heartbeatRunner,
     progressNudgeRunner,
+    sessionMaintenanceSweepRunner,
     startHeartbeatRunner: vi.fn(() => heartbeatRunner),
     startProgressNudgeRunner: vi.fn(() => progressNudgeRunner),
+    startSessionMaintenanceSweepRunner: vi.fn(() => sessionMaintenanceSweepRunner),
     startChannelHealthMonitor: vi.fn(() => ({ stop: vi.fn() })),
     stopModelPricingRefresh,
     startGatewayModelPricingRefresh: vi.fn(() => stopModelPricingRefresh),
@@ -35,6 +41,10 @@ vi.mock("../infra/heartbeat-runner.js", () => ({
 
 vi.mock("../infra/progress-nudge-runner.js", () => ({
   startProgressNudgeRunner: hoisted.startProgressNudgeRunner,
+}));
+
+vi.mock("../infra/session-maintenance-sweep-runner.js", () => ({
+  startSessionMaintenanceSweepRunner: hoisted.startSessionMaintenanceSweepRunner,
 }));
 
 vi.mock("../infra/env.js", () => ({
@@ -80,8 +90,11 @@ describe("server-runtime-services", () => {
     hoisted.heartbeatRunner.updateConfig.mockClear();
     hoisted.progressNudgeRunner.stop.mockClear();
     hoisted.progressNudgeRunner.updateConfig.mockClear();
+    hoisted.sessionMaintenanceSweepRunner.stop.mockClear();
+    hoisted.sessionMaintenanceSweepRunner.updateConfig.mockClear();
     hoisted.startHeartbeatRunner.mockClear();
     hoisted.startProgressNudgeRunner.mockClear();
+    hoisted.startSessionMaintenanceSweepRunner.mockClear();
     hoisted.startChannelHealthMonitor.mockClear();
     hoisted.startGatewayModelPricingRefresh.mockClear();
     hoisted.stopModelPricingRefresh.mockClear();
@@ -172,15 +185,18 @@ describe("server-runtime-services", () => {
 
     expect(hoisted.startHeartbeatRunner).toHaveBeenCalledTimes(1);
     expect(hoisted.startProgressNudgeRunner).toHaveBeenCalledTimes(1);
+    expect(hoisted.startSessionMaintenanceSweepRunner).toHaveBeenCalledTimes(1);
     expect(cron.start).toHaveBeenCalledTimes(1);
-    // The returned handle composes the heartbeat + progress-nudge runners so the
-    // existing stop/updateConfig plumbing drives both. Assert it delegates.
+    // The returned handle composes the heartbeat + progress-nudge + session-maintenance-sweep
+    // runners so the existing stop/updateConfig plumbing drives all three. Assert it delegates.
     services.heartbeatRunner.stop();
     expect(hoisted.heartbeatRunner.stop).toHaveBeenCalledTimes(1);
     expect(hoisted.progressNudgeRunner.stop).toHaveBeenCalledTimes(1);
+    expect(hoisted.sessionMaintenanceSweepRunner.stop).toHaveBeenCalledTimes(1);
     services.heartbeatRunner.updateConfig({} as never);
     expect(hoisted.heartbeatRunner.updateConfig).toHaveBeenCalledTimes(1);
     expect(hoisted.progressNudgeRunner.updateConfig).toHaveBeenCalledTimes(1);
+    expect(hoisted.sessionMaintenanceSweepRunner.updateConfig).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1_250);
     await vi.dynamicImportSettled();
     expect(log.child).toHaveBeenNthCalledWith(1, "delivery-recovery");
@@ -332,6 +348,7 @@ describe("server-runtime-services", () => {
     });
 
     expect(hoisted.startHeartbeatRunner).not.toHaveBeenCalled();
+    expect(hoisted.startSessionMaintenanceSweepRunner).not.toHaveBeenCalled();
     expect(cron.start).not.toHaveBeenCalled();
     expect(hoisted.recoverPendingDeliveries).not.toHaveBeenCalled();
     expect(hoisted.recoverPendingRestartContinuationDeliveries).not.toHaveBeenCalled();

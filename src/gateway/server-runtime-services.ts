@@ -4,6 +4,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isVitestRuntimeEnv } from "../infra/env.js";
 import { startHeartbeatRunner, type HeartbeatRunner } from "../infra/heartbeat-runner.js";
 import { startProgressNudgeRunner } from "../infra/progress-nudge-runner.js";
+import { startSessionMaintenanceSweepRunner } from "../infra/session-maintenance-sweep-runner.js";
 import type { PluginMetadataRegistryView } from "../plugins/plugin-metadata-snapshot.types.js";
 import { isGatewayModelPricingEnabled } from "./model-pricing-config.js";
 import type { startGatewayMaintenanceTimers } from "./server-maintenance.js";
@@ -228,19 +229,25 @@ export function activateGatewayScheduledServices(params: {
     return { heartbeatRunner: createNoopHeartbeatRunner(), stopModelPricingRefresh: () => {} };
   }
   const heartbeatRunnerHandle = startHeartbeatRunner({ cfg: params.cfgAtStart });
-  // The progress-nudge runner is a sibling gateway-scheduled background loop
-  // with the same lifecycle as the heartbeat runner (start together, stop on
-  // close, updateConfig on reload). Compose the two into one handle so the
-  // existing shutdown/reload plumbing drives both without a new state field.
+  // The progress-nudge and session-maintenance-sweep runners are sibling
+  // gateway-scheduled background loops with the same lifecycle as the
+  // heartbeat runner (start together, stop on close, updateConfig on
+  // reload). Compose them into one handle so the existing shutdown/reload
+  // plumbing drives all three without a new state field.
   const progressNudgeRunner = startProgressNudgeRunner({ cfg: params.cfgAtStart });
+  const sessionMaintenanceSweepRunner = startSessionMaintenanceSweepRunner({
+    cfg: params.cfgAtStart,
+  });
   const heartbeatRunner: HeartbeatRunner = {
     stop: () => {
       heartbeatRunnerHandle.stop();
       progressNudgeRunner.stop();
+      sessionMaintenanceSweepRunner.stop();
     },
     updateConfig: (cfg) => {
       heartbeatRunnerHandle.updateConfig(cfg);
       progressNudgeRunner.updateConfig(cfg);
+      sessionMaintenanceSweepRunner.updateConfig(cfg);
     },
   };
   if (params.startCron !== false) {
