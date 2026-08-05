@@ -5,8 +5,8 @@
 // writes (commitReplySessionInitialization), so idle/low-traffic stores can
 // go long stretches unevaluated, and every existing prune/cap/disk-budget log
 // line only fires on nonzero effect — "ran, 0 eligible" and "never ran" were
-// otherwise indistinguishable (ENG-17504). This intentionally does not
-// change what gets protected or evicted; see
+// otherwise indistinguishable. This intentionally does not change what gets
+// protected or evicted; see
 // docs/superpowers/specs/2026-08-05-session-maintenance-sweep-observability-design.md.
 import {
   runSessionsCleanup,

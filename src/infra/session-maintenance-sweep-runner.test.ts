@@ -1,6 +1,6 @@
 // Tests the session-maintenance sweep runner: immediate + periodic ticks,
 // unconditional per-store summary logging, overlap guarding, config refresh
-// on updateConfig(), and stop() halting future ticks (ENG-17504).
+// on updateConfig(), and stop() halting future ticks.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
