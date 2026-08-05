@@ -28,7 +28,7 @@ indistinguishable from a genuine customer conversation to this heuristic — eve
 2079 entries is protected, so `pruneStaleEntries`/`capEntryCount` both correctly compute
 "0 eligible" on every run, forever. The 5 sampled customer hosts show the identical pattern
 because their real traffic is predominantly group/channel/thread conversations too, which,
-per the documented contract, is *supposed* to be preserved rather than evicted.
+per the documented contract, is _supposed_ to be preserved rather than evicted.
 
 So this is not "enforcement silently fails to run." It runs, reads the right config, and
 correctly computes zero effect for a fleet shaped like this. Two real gaps remain:
@@ -40,7 +40,7 @@ correctly computes zero effect for a fleet shaped like this. Two real gaps remai
    by grepping logs.
 2. **Reactive-only cadence.** The sweep only runs as a side effect of
    `commitReplySessionInitialization` (a session write). Low-traffic/idle stores can go long
-   stretches without ever being (re-)evaluated, even for the synthetic/DM entries that *are*
+   stretches without ever being (re-)evaluated, even for the synthetic/DM entries that _are_
    eligible.
 
 ### Explicit non-goal

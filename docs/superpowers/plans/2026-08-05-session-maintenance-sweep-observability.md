@@ -2,6 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Superseded, do not resume verbatim:** Task 1's code blocks below call
+> `runCleanup`/`runSessionsCleanup` with `dryRun: false` and read
+> `result.appliedSummaries`. A whole-branch review caught that this makes the
+> sweep mutate/delete real state (forces the entry cap every tick and deletes
+> orphaned artifact files), contradicting this plan's own "zero change to what
+> gets protected or evicted" goal. The shipped code uses `dryRun: true` and
+> reads `result.previewResults[].summary` instead — see
+> `src/infra/session-maintenance-sweep-runner.ts` and the design spec's
+> "Explicit non-goal" section for the corrected, actual behavior. Treat this
+> plan as historical record of the initial design, not a resumable recipe.
+
 **Goal:** Make `session.maintenance` enforcement observable and reliably-scheduled — without changing what it protects or evicts — by running the existing `openclaw sessions cleanup` sweep on a periodic gateway timer and logging its outcome every tick, even when nothing changed.
 
 **Architecture:** A new self-contained runner module (`src/infra/session-maintenance-sweep-runner.ts`), modeled directly on the existing `startProgressNudgeRunner`/`startHeartbeatRunner` shape (start/stop/updateConfig lifecycle, injectable deps for tests), calls the already-tested `runSessionsCleanup({ allAgents: true })` on a fixed hourly interval plus once immediately on start, and logs an unconditional per-store summary. It is composed into the existing `heartbeatRunner` handle returned by `activateGatewayScheduledServices`, exactly the way `progressNudgeRunner` already is, so no new shutdown/reload wiring is needed anywhere else.
@@ -22,10 +33,12 @@
 ### Task 1: `session-maintenance-sweep-runner` module
 
 **Files:**
+
 - Create: `src/infra/session-maintenance-sweep-runner.ts`
 - Test: `src/infra/session-maintenance-sweep-runner.test.ts`
 
 **Interfaces:**
+
 - Consumes: `runSessionsCleanup(params: { cfg: OpenClawConfig; opts: { allAgents?: boolean; dryRun?: boolean } }): Promise<{ mode; previewResults; appliedSummaries: SessionCleanupSummary[] }>` from `../config/sessions/cleanup-service.js`. `SessionCleanupSummary` has fields `agentId: string`, `storePath: string`, `mode: "enforce" | "warn"`, `beforeCount: number`, `afterCount: number`, `pruned: number`, `capped: number`, `diskBudget: { totalBytesBefore; totalBytesAfter; maxBytes; overBudget; ... } | null`, `wouldMutate: boolean`.
 - Produces: `startSessionMaintenanceSweepRunner(opts: { cfg: OpenClawConfig; deps?: SessionMaintenanceSweepDeps }): SessionMaintenanceSweepRunner`, where `SessionMaintenanceSweepRunner = { stop: () => void; updateConfig: (cfg: OpenClawConfig) => void }`. Task 2 imports exactly this function and type from `../infra/session-maintenance-sweep-runner.js`.
 
@@ -254,7 +267,10 @@ export type SessionMaintenanceSweepDeps = {
   intervalMs?: number;
 };
 
-function logSweepSummary(logger: SessionMaintenanceSweepLogger, summary: SessionCleanupSummary): void {
+function logSweepSummary(
+  logger: SessionMaintenanceSweepLogger,
+  summary: SessionCleanupSummary,
+): void {
   logger.info("session maintenance sweep", {
     agentId: summary.agentId,
     storePath: summary.storePath,
@@ -348,10 +364,12 @@ scripts/committer "feat(sessions): add periodic session-maintenance sweep runner
 ### Task 2: Wire the runner into gateway scheduled services
 
 **Files:**
+
 - Modify: `src/gateway/server-runtime-services.ts:213-269` (`activateGatewayScheduledServices`)
 - Modify: `src/gateway/server-runtime-services.test.ts`
 
 **Interfaces:**
+
 - Consumes: `startSessionMaintenanceSweepRunner` from Task 1 (`../infra/session-maintenance-sweep-runner.js`).
 - Produces: no new exports — `activateGatewayScheduledServices`'s existing return shape (`{ heartbeatRunner: HeartbeatRunner; stopModelPricingRefresh: () => void }`) is unchanged; `heartbeatRunner.stop()`/`.updateConfig()` now also delegate to the sweep runner.
 
@@ -360,10 +378,10 @@ scripts/committer "feat(sessions): add periodic session-maintenance sweep runner
 In `src/gateway/server-runtime-services.test.ts`, add to the hoisted mock block (after the `progressNudgeRunner` entry):
 
 ```typescript
-  const sessionMaintenanceSweepRunner = {
-    stop: vi.fn(),
-    updateConfig: vi.fn(),
-  };
+const sessionMaintenanceSweepRunner = {
+  stop: vi.fn(),
+  updateConfig: vi.fn(),
+};
 ```
 
 and to the returned object:
@@ -384,31 +402,31 @@ vi.mock("../infra/session-maintenance-sweep-runner.js", () => ({
 In the `beforeEach`, add clears alongside the progress-nudge ones:
 
 ```typescript
-    hoisted.sessionMaintenanceSweepRunner.stop.mockClear();
-    hoisted.sessionMaintenanceSweepRunner.updateConfig.mockClear();
-    hoisted.startSessionMaintenanceSweepRunner.mockClear();
+hoisted.sessionMaintenanceSweepRunner.stop.mockClear();
+hoisted.sessionMaintenanceSweepRunner.updateConfig.mockClear();
+hoisted.startSessionMaintenanceSweepRunner.mockClear();
 ```
 
 In `"activates heartbeat, cron, and delivery recovery after sidecars are ready"`, add after the existing progress-nudge assertions:
 
 ```typescript
-    expect(hoisted.startSessionMaintenanceSweepRunner).toHaveBeenCalledTimes(1);
+expect(hoisted.startSessionMaintenanceSweepRunner).toHaveBeenCalledTimes(1);
 ```
 
 and after the existing `services.heartbeatRunner.stop()` / `.updateConfig()` assertions:
 
 ```typescript
-    expect(hoisted.sessionMaintenanceSweepRunner.stop).toHaveBeenCalledTimes(1);
+expect(hoisted.sessionMaintenanceSweepRunner.stop).toHaveBeenCalledTimes(1);
 ```
 
 ```typescript
-    expect(hoisted.sessionMaintenanceSweepRunner.updateConfig).toHaveBeenCalledTimes(1);
+expect(hoisted.sessionMaintenanceSweepRunner.updateConfig).toHaveBeenCalledTimes(1);
 ```
 
 In `"keeps scheduled services disabled for minimal test gateways"`, add:
 
 ```typescript
-    expect(hoisted.startSessionMaintenanceSweepRunner).not.toHaveBeenCalled();
+expect(hoisted.startSessionMaintenanceSweepRunner).not.toHaveBeenCalled();
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -428,49 +446,49 @@ import { startSessionMaintenanceSweepRunner } from "../infra/session-maintenance
 Then in `activateGatewayScheduledServices`, replace:
 
 ```typescript
-  const heartbeatRunnerHandle = startHeartbeatRunner({ cfg: params.cfgAtStart });
-  // The progress-nudge runner is a sibling gateway-scheduled background loop
-  // with the same lifecycle as the heartbeat runner (start together, stop on
-  // close, updateConfig on reload). Compose the two into one handle so the
-  // existing shutdown/reload plumbing drives both without a new state field.
-  const progressNudgeRunner = startProgressNudgeRunner({ cfg: params.cfgAtStart });
-  const heartbeatRunner: HeartbeatRunner = {
-    stop: () => {
-      heartbeatRunnerHandle.stop();
-      progressNudgeRunner.stop();
-    },
-    updateConfig: (cfg) => {
-      heartbeatRunnerHandle.updateConfig(cfg);
-      progressNudgeRunner.updateConfig(cfg);
-    },
-  };
+const heartbeatRunnerHandle = startHeartbeatRunner({ cfg: params.cfgAtStart });
+// The progress-nudge runner is a sibling gateway-scheduled background loop
+// with the same lifecycle as the heartbeat runner (start together, stop on
+// close, updateConfig on reload). Compose the two into one handle so the
+// existing shutdown/reload plumbing drives both without a new state field.
+const progressNudgeRunner = startProgressNudgeRunner({ cfg: params.cfgAtStart });
+const heartbeatRunner: HeartbeatRunner = {
+  stop: () => {
+    heartbeatRunnerHandle.stop();
+    progressNudgeRunner.stop();
+  },
+  updateConfig: (cfg) => {
+    heartbeatRunnerHandle.updateConfig(cfg);
+    progressNudgeRunner.updateConfig(cfg);
+  },
+};
 ```
 
 with:
 
 ```typescript
-  const heartbeatRunnerHandle = startHeartbeatRunner({ cfg: params.cfgAtStart });
-  // The progress-nudge and session-maintenance-sweep runners are sibling
-  // gateway-scheduled background loops with the same lifecycle as the
-  // heartbeat runner (start together, stop on close, updateConfig on
-  // reload). Compose them into one handle so the existing shutdown/reload
-  // plumbing drives all three without a new state field.
-  const progressNudgeRunner = startProgressNudgeRunner({ cfg: params.cfgAtStart });
-  const sessionMaintenanceSweepRunner = startSessionMaintenanceSweepRunner({
-    cfg: params.cfgAtStart,
-  });
-  const heartbeatRunner: HeartbeatRunner = {
-    stop: () => {
-      heartbeatRunnerHandle.stop();
-      progressNudgeRunner.stop();
-      sessionMaintenanceSweepRunner.stop();
-    },
-    updateConfig: (cfg) => {
-      heartbeatRunnerHandle.updateConfig(cfg);
-      progressNudgeRunner.updateConfig(cfg);
-      sessionMaintenanceSweepRunner.updateConfig(cfg);
-    },
-  };
+const heartbeatRunnerHandle = startHeartbeatRunner({ cfg: params.cfgAtStart });
+// The progress-nudge and session-maintenance-sweep runners are sibling
+// gateway-scheduled background loops with the same lifecycle as the
+// heartbeat runner (start together, stop on close, updateConfig on
+// reload). Compose them into one handle so the existing shutdown/reload
+// plumbing drives all three without a new state field.
+const progressNudgeRunner = startProgressNudgeRunner({ cfg: params.cfgAtStart });
+const sessionMaintenanceSweepRunner = startSessionMaintenanceSweepRunner({
+  cfg: params.cfgAtStart,
+});
+const heartbeatRunner: HeartbeatRunner = {
+  stop: () => {
+    heartbeatRunnerHandle.stop();
+    progressNudgeRunner.stop();
+    sessionMaintenanceSweepRunner.stop();
+  },
+  updateConfig: (cfg) => {
+    heartbeatRunnerHandle.updateConfig(cfg);
+    progressNudgeRunner.updateConfig(cfg);
+    sessionMaintenanceSweepRunner.updateConfig(cfg);
+  },
+};
 ```
 
 This sits after the existing `if (params.minimalTestGateway) { return ...; }` early return, so the new runner is skipped for minimal test gateways exactly like `heartbeatRunnerHandle`/`progressNudgeRunner` already are — no separate gate needed.
@@ -492,10 +510,12 @@ scripts/committer "feat(gateway): schedule the session-maintenance sweep runner 
 ### Task 3: Fix stale `session.maintenance.mode` default documentation
 
 **Files:**
+
 - Modify: `src/config/types.base.ts:254`
 - Modify: `src/config/schema.help.ts:1691-1692`
 
 **Interfaces:**
+
 - Consumes: none (doc-only strings).
 - Produces: none (no other task depends on this task's output).
 
@@ -509,13 +529,13 @@ gateway OOM"), and `docs/gateway/config-agents.md:1277,1313` already documents t
 In `src/config/types.base.ts`, change line 254 from:
 
 ```typescript
-  /** Whether to enforce maintenance or warn only. Default: "warn". */
+/** Whether to enforce maintenance or warn only. Default: "warn". */
 ```
 
 to:
 
 ```typescript
-  /** Whether to enforce maintenance or warn only. Default: "enforce". */
+/** Whether to enforce maintenance or warn only. Default: "enforce". */
 ```
 
 - [ ] **Step 2: Fix the CLI help string in `schema.help.ts`**

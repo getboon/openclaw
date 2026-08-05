@@ -1,5 +1,6 @@
 // Gateway post-ready runtime services.
 // Starts delayed maintenance, cron, heartbeat, recovery, and pricing refresh work.
+import { getRuntimeConfig } from "../config/config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isVitestRuntimeEnv } from "../infra/env.js";
 import { startHeartbeatRunner, type HeartbeatRunner } from "../infra/heartbeat-runner.js";
@@ -242,8 +243,17 @@ export function activateGatewayScheduledServices(params: {
   // the sweep runs a real (dry-run) cleanup preview against configured agent stores
   // on start, which has nothing useful to read in most gateway tests and would add
   // stray log noise.
+  //
+  // getConfig overrides the runner's own updateConfig()-cached default with a live
+  // read: session.* config paths never trigger restartHeartbeat (see the runner's
+  // SessionMaintenanceSweepDeps.getConfig doc), so without this the sweep would keep
+  // reading the config it was constructed with until an unrelated reload happened to
+  // touch heartbeat/model config too.
   const sessionMaintenanceSweepRunner: SessionMaintenanceSweepRunner = !isVitestRuntimeEnv()
-    ? startSessionMaintenanceSweepRunner({ cfg: params.cfgAtStart })
+    ? startSessionMaintenanceSweepRunner({
+        cfg: params.cfgAtStart,
+        deps: { getConfig: () => getRuntimeConfig() },
+      })
     : { stop: () => {}, updateConfig: () => {} };
   const heartbeatRunner: HeartbeatRunner = {
     stop: () => {

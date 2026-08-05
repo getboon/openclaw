@@ -13,10 +13,17 @@
 // evicts or prunes on its own. This intentionally does not change what gets
 // protected or evicted; see
 // docs/superpowers/specs/2026-08-05-session-maintenance-sweep-observability-design.md.
+//
+// Cost tradeoff, disclosed rather than hidden: each tick still does a real
+// (read-only) load + clone of every configured store, once per hour and once
+// on startup. On a store already large enough to be under heap pressure, that
+// transiently adds load — this sweep trades a bounded, hourly, read-only cost
+// for the visibility that was otherwise unobtainable from logs alone.
 import {
   runSessionsCleanup,
   type SessionCleanupSummary,
 } from "../config/sessions/cleanup-service.js";
+import { resolveSessionStoreTargets, type SessionStoreTarget } from "../config/sessions/targets.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 
@@ -38,6 +45,21 @@ type SessionMaintenanceSweepLogger = {
 /** Injectable seams so tests can drive ticks without real session stores or timers. */
 export type SessionMaintenanceSweepDeps = {
   runCleanup?: typeof runSessionsCleanup;
+  resolveTargets?: typeof resolveSessionStoreTargets;
+  /**
+   * Defaults to the constructor's `cfg`, refreshed via `updateConfig()`.
+   * `session.*` config paths (session.store, session.maintenance.*) are
+   * classified `kind: "none"` in the gateway's reload plan
+   * (config-reload-plan.ts) because nearly every other session-config reader
+   * re-resolves live config per call, so no reload action was ever needed for
+   * them. This runner is the first long-lived consumer that instead caches a
+   * snapshot across ticks — `updateConfig()` only fires when the reload plan
+   * sets `restartHeartbeat`, which a session-only config change never does.
+   * The gateway wiring overrides this default with a live `getRuntimeConfig()`
+   * read so a live session.maintenance/session.store change is picked up on
+   * the sweep's own next tick instead of silently waiting for a full restart.
+   */
+  getConfig?: () => OpenClawConfig;
   log?: SessionMaintenanceSweepLogger;
   intervalMs?: number;
 };
@@ -80,31 +102,55 @@ export function startSessionMaintenanceSweepRunner(opts: {
   deps?: SessionMaintenanceSweepDeps;
 }): SessionMaintenanceSweepRunner {
   const runCleanup = opts.deps?.runCleanup ?? runSessionsCleanup;
+  const resolveTargets = opts.deps?.resolveTargets ?? resolveSessionStoreTargets;
   const logger = opts.deps?.log ?? log;
   const intervalMs = opts.deps?.intervalMs ?? SESSION_MAINTENANCE_SWEEP_INTERVAL_MS;
 
   const state = { cfg: opts.cfg, stopped: false };
+  const getConfig = opts.deps?.getConfig ?? (() => state.cfg);
   let inFlight: Promise<void> | null = null;
+
+  const sweepTarget = async (cfg: OpenClawConfig, target: SessionStoreTarget): Promise<void> => {
+    try {
+      const result = await runCleanup({
+        cfg,
+        opts: { dryRun: true },
+        targets: [target],
+      });
+      // Dry-run leaves appliedSummaries empty; previewResults[].summary is the
+      // read-only per-store view (same SessionCleanupSummary shape).
+      for (const { summary } of result.previewResults) {
+        logSweepSummary(logger, summary);
+      }
+    } catch (err) {
+      // Scoped to this one target: a corrupt/unreadable store must not hide
+      // the fleet-wide observability this runner exists to provide for every
+      // OTHER configured store.
+      logger.error("session maintenance sweep failed for store", {
+        agentId: target.agentId,
+        storePath: target.storePath,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
 
   const tick = (): Promise<void> => {
     if (inFlight) {
       return inFlight;
     }
     inFlight = (async () => {
+      const cfg = getConfig();
+      let targets: SessionStoreTarget[];
       try {
-        const result = await runCleanup({
-          cfg: state.cfg,
-          opts: { allAgents: true, dryRun: true },
-        });
-        // Dry-run leaves appliedSummaries empty; previewResults[].summary is the
-        // read-only per-store view (same SessionCleanupSummary shape).
-        for (const { summary } of result.previewResults) {
-          logSweepSummary(logger, summary);
-        }
+        targets = resolveTargets(cfg, { allAgents: true });
       } catch (err) {
-        logger.error("session maintenance sweep failed", {
+        logger.error("session maintenance sweep failed to resolve stores", {
           error: err instanceof Error ? err.message : String(err),
         });
+        return;
+      }
+      for (const target of targets) {
+        await sweepTarget(cfg, target);
       }
     })().finally(() => {
       inFlight = null;
