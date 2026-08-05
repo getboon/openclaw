@@ -1706,6 +1706,12 @@ async function deliverOutboundPayloadsCore(
         );
         continue;
       }
+      if (payload.auditTrace && !effectivePayload.auditTrace) {
+        effectivePayload = {
+          ...effectivePayload,
+          auditTrace: payload.auditTrace,
+        };
+      }
       const groundedText = sanitizeUngroundedClaims(effectivePayload);
       if (groundedText !== effectivePayload.text) {
         effectivePayload = {

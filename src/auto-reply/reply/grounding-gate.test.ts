@@ -19,6 +19,26 @@ describe("sanitizeUngroundedClaims", () => {
     expect(result).toBe("I don't have a tool result supporting that statement yet.");
   });
 
+  it("blocks grounding claims when auditTrace is absent", () => {
+    expect(
+      sanitizeUngroundedClaims({
+        text: "22 pages verified.",
+      }),
+    ).toBe("I don't have a tool result supporting that statement yet.");
+  });
+
+  it("blocks processed-set credibility variants and standalone completion claims", () => {
+    for (const text of [
+      "Pulled from the processed set.",
+      "Pulled straight from the processed set.",
+      "Done.",
+    ]) {
+      expect(sanitizeUngroundedClaims({ text })).toBe(
+        "I don't have a tool result supporting that statement yet.",
+      );
+    }
+  });
+
   it("blocks credibility claims without a number", () => {
     const result = sanitizeUngroundedClaims({
       text: "It's real this time - the pages are ready.",
@@ -82,6 +102,12 @@ describe("sanitizeUngroundedClaims", () => {
 
     expect(
       sanitizeUngroundedClaims({
+        text: "Done - here's how to set that up.",
+      }),
+    ).toBe("Done - here's how to set that up.");
+
+    expect(
+      sanitizeUngroundedClaims({
         text: "Done - upload received.",
         isStatusNotice: true,
       }),
@@ -100,5 +126,14 @@ describe("sanitizeUngroundedClaims", () => {
         isFallbackNotice: true,
       }),
     ).toBe("Done - fallback finished.");
+
+    for (const flags of [{ isError: true }, { isReasoning: true }, { isCommentary: true }]) {
+      expect(
+        sanitizeUngroundedClaims({
+          text: "22 pages verified.",
+          ...flags,
+        }),
+      ).toBe("22 pages verified.");
+    }
   });
 });
