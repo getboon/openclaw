@@ -44,7 +44,7 @@ describe("resolveMSTeamsOutboundFilePlan", () => {
     ).toEqual({ kind: "inline-image" });
   });
 
-  it("inlines an image in a group chat regardless of SharePoint config", () => {
+  it("inlines a small image in a group chat with no SharePoint site configured", () => {
     expect(
       resolveMSTeamsOutboundFilePlan({
         conversationType: "groupChat",
@@ -56,7 +56,7 @@ describe("resolveMSTeamsOutboundFilePlan", () => {
     ).toEqual({ kind: "inline-image" });
   });
 
-  it("inlines an image in a channel regardless of SharePoint config", () => {
+  it("inlines a small image in a channel with no SharePoint site configured", () => {
     expect(
       resolveMSTeamsOutboundFilePlan({
         conversationType: "channel",
@@ -66,6 +66,20 @@ describe("resolveMSTeamsOutboundFilePlan", () => {
         hasTokenProvider: true,
       }),
     ).toEqual({ kind: "inline-image" });
+  });
+
+  it("is undeliverable for a large image in a channel with no SharePoint site configured", () => {
+    // Teams caps inline message size, so a large image with no upload path
+    // has no safe delivery shape — silently inlining it could fail the send.
+    expect(
+      resolveMSTeamsOutboundFilePlan({
+        conversationType: "channel",
+        contentType: "image/png",
+        bufferSize: FILE_CONSENT_THRESHOLD_BYTES,
+        sharePointSiteId: undefined,
+        hasTokenProvider: true,
+      }),
+    ).toEqual({ kind: "undeliverable", reason: "missing-sharepoint-site" });
   });
 
   it("uploads to SharePoint for a non-image in a group chat when a site is configured", () => {
@@ -86,6 +100,33 @@ describe("resolveMSTeamsOutboundFilePlan", () => {
         conversationType: "channel",
         contentType: "application/pdf",
         bufferSize: 10,
+        sharePointSiteId: "contoso.sharepoint.com,guid1,guid2",
+        hasTokenProvider: true,
+      }),
+    ).toEqual({ kind: "sharepoint-upload", siteId: "contoso.sharepoint.com,guid1,guid2" });
+  });
+
+  it("uploads a small image to SharePoint in a channel when a site is configured", () => {
+    // A configured site must take priority over inlining even for images —
+    // otherwise a working upload+link path silently regresses to inline
+    // base64 with no permanent share link.
+    expect(
+      resolveMSTeamsOutboundFilePlan({
+        conversationType: "channel",
+        contentType: "image/png",
+        bufferSize: 10,
+        sharePointSiteId: "contoso.sharepoint.com,guid1,guid2",
+        hasTokenProvider: true,
+      }),
+    ).toEqual({ kind: "sharepoint-upload", siteId: "contoso.sharepoint.com,guid1,guid2" });
+  });
+
+  it("uploads a large image to SharePoint in a channel when a site is configured", () => {
+    expect(
+      resolveMSTeamsOutboundFilePlan({
+        conversationType: "channel",
+        contentType: "image/png",
+        bufferSize: FILE_CONSENT_THRESHOLD_BYTES,
         sharePointSiteId: "contoso.sharepoint.com,guid1,guid2",
         hasTokenProvider: true,
       }),
@@ -116,9 +157,10 @@ describe("resolveMSTeamsOutboundFilePlan", () => {
     ).toEqual({ kind: "undeliverable", reason: "missing-sharepoint-site" });
   });
 
-  it("is undeliverable for a non-image in a channel with a site configured but no token provider", () => {
-    // The resolver owns this decision fully so callers never have to re-derive
-    // an undeliverable reason by hand when a token provider is unavailable.
+  it("is undeliverable with a distinct reason when a site is configured but no token provider is available", () => {
+    // Must not conflate this with "missing-sharepoint-site" — the site IS
+    // configured, so telling an admin to configure it would misdiagnose the
+    // real problem (the bot's Graph credentials aren't available).
     expect(
       resolveMSTeamsOutboundFilePlan({
         conversationType: "channel",
@@ -127,7 +169,19 @@ describe("resolveMSTeamsOutboundFilePlan", () => {
         sharePointSiteId: "contoso.sharepoint.com,guid1,guid2",
         hasTokenProvider: false,
       }),
-    ).toEqual({ kind: "undeliverable", reason: "missing-sharepoint-site" });
+    ).toEqual({ kind: "undeliverable", reason: "missing-token-provider" });
+  });
+
+  it("is undeliverable with the token-provider reason for an image too when a site is configured but no token provider", () => {
+    expect(
+      resolveMSTeamsOutboundFilePlan({
+        conversationType: "channel",
+        contentType: "image/png",
+        bufferSize: 10,
+        sharePointSiteId: "contoso.sharepoint.com,guid1,guid2",
+        hasTokenProvider: false,
+      }),
+    ).toEqual({ kind: "undeliverable", reason: "missing-token-provider" });
   });
 });
 
@@ -160,6 +214,15 @@ describe("buildMSTeamsUndeliverableFileNotice", () => {
     expect(notice).toBe(
       'Here\'s what I found:\n\nI can\'t attach "proposal.xlsx" directly here — file attachments aren\'t set up for this channel/group yet (an admin needs to configure "sharePointSiteId").',
     );
+  });
+
+  it("uses a distinct message for a missing token provider, not the sharePointSiteId hint", () => {
+    const notice = buildMSTeamsUndeliverableFileNotice({
+      fileName: "proposal.xlsx",
+      reason: "missing-token-provider",
+    });
+    expect(notice).toContain("Graph credentials");
+    expect(notice).not.toContain("sharePointSiteId");
   });
 });
 

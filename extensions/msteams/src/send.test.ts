@@ -496,6 +496,50 @@ describe("sendMessageMSTeams", () => {
     expect(mockState.sendMSTeamsActivityWithReference).not.toHaveBeenCalled();
   });
 
+  // A configured SharePoint site must take priority over inlining images
+  // too — otherwise a working upload+link path silently regresses to inline
+  // base64 with no permanent share link.
+  it("uploads an image to SharePoint instead of inlining it when a site is configured", async () => {
+    mockState.resolveMSTeamsSendContext.mockResolvedValue(
+      createSharePointSendContext({
+        conversationId: "19:channel@thread.tacv2",
+        graphChatId: null,
+        siteId: "site-123",
+        conversationType: "channel",
+        replyStyle: "thread",
+        threadActivityId: "thread-root-1",
+      }),
+    );
+    mockState.loadOutboundMediaFromUrl.mockResolvedValueOnce({
+      buffer: Buffer.alloc(10, "png"),
+      contentType: "image/png",
+      fileName: "diagram.png",
+      kind: "image",
+    });
+    mockState.requiresFileConsent.mockReturnValue(false);
+    mockState.uploadAndShareSharePoint.mockResolvedValue({
+      itemId: "item-1",
+      webUrl: "https://sp.example.com/diagram.png",
+      shareUrl: "https://sp.example.com/share/diagram.png",
+      name: "diagram.png",
+    });
+
+    await sendMessageMSTeams({
+      cfg: {} as OpenClawConfig,
+      to: "conversation:19:channel@thread.tacv2",
+      text: "here is the diagram",
+      mediaUrl: "https://example.com/diagram.png",
+    });
+
+    expect(mockState.uploadAndShareSharePoint).toHaveBeenCalledOnce();
+    const sendPayload = firstObjectArg(mockState.sendMSTeamsMessages);
+    const messages = sendPayload.messages as Array<Record<string, unknown>>;
+    expect(messages[0]?.text).toBe(
+      "here is the diagram\n\n📎 [diagram.png](https://sp.example.com/share/diagram.png)",
+    );
+    expect(messages[0]?.mediaUrl).toBeUndefined();
+  });
+
   // A bot has no personal OneDrive (/me/drive requires a signed-in user, not
   // the app-only token this plugin has), so there is no working upload path
   // without sharePointSiteId. Say so explicitly in-thread instead of

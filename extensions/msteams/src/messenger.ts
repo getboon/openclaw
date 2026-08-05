@@ -292,6 +292,23 @@ export async function buildActivity(
   }
 
   if (msg.mediaUrl) {
+    // A data: URL is already-resolved inline media — e.g. send.ts's own
+    // inline-image plan branch builds one and routes it back through this
+    // same reply path via sendTextWithMedia/sendMSTeamsMessages. loadWebMedia
+    // only understands http(s) and local file paths; anything else falls
+    // into its local-path branch and tries (and fails) to read the data: URL
+    // as a filesystem path. Attach it directly instead of reprocessing it.
+    if (msg.mediaUrl.startsWith("data:")) {
+      activity.attachments = [
+        {
+          name: await extractFilename(msg.mediaUrl),
+          contentType: await getMimeType(msg.mediaUrl),
+          contentUrl: msg.mediaUrl,
+        },
+      ];
+      return activity;
+    }
+
     // Route local paths and remote URLs through the same download-and-decide
     // pipeline (loadWebMedia handles both). A local/remote split here used to
     // let remote media (e.g. a link to a generated report) skip consent/

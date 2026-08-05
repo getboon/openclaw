@@ -1,5 +1,6 @@
 // Msteams module resolves the single outbound-file delivery decision shared by
 // the proactive send path (send.ts) and the in-turn reply path (messenger.ts).
+import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { requiresFileConsent } from "./file-consent-helpers.js";
 
 /** Consent threshold: Teams only accepts base64 inline for images under this size. */
@@ -7,7 +8,7 @@ export const FILE_CONSENT_THRESHOLD_BYTES = 4 * 1024 * 1024;
 /** Default cap for outbound media when no channel-level override is configured. */
 export const MSTEAMS_MAX_MEDIA_BYTES = 100 * 1024 * 1024;
 
-export type MSTeamsUndeliverableReason = "missing-sharepoint-site";
+export type MSTeamsUndeliverableReason = "missing-sharepoint-site" | "missing-token-provider";
 
 export type MSTeamsOutboundFilePlan =
   | { kind: "consent" }
@@ -19,10 +20,12 @@ export type MSTeamsOutboundFilePlan =
  * Decide how (or whether) an outbound file can reach the user, given the
  * conversation type and the file's own properties. Personal chats always use
  * FileConsentCard for anything but a small image (requiresFileConsent below).
- * Group chats/channels can only deliver a real file via SharePoint — there is
- * no app-only-token path to a bot's own OneDrive (`/me/drive` requires a
- * signed-in user), so without `sharePointSiteId` a non-image file is
- * undeliverable rather than attempted-and-failed.
+ * Group chats/channels prefer SharePoint upload when it's actually usable —
+ * there is no app-only-token path to a bot's own OneDrive (`/me/drive`
+ * requires a signed-in user) — falling back to inline base64 only for a
+ * small-enough image, and to an explicit undeliverable notice otherwise
+ * (Teams caps inline message size, so a large image with no upload path has
+ * no safe delivery shape either).
  */
 export function resolveMSTeamsOutboundFilePlan(params: {
   conversationType: string | undefined;
@@ -48,15 +51,24 @@ export function resolveMSTeamsOutboundFilePlan(params: {
     return { kind: "consent" };
   }
 
-  const isImage = params.contentType?.startsWith("image/") ?? false;
-  if (isImage) {
+  // requiresFileConsent is unconditionally true for personal + non-image, so
+  // reaching here for personal means a small image; upload/link concerns
+  // below only apply to group chats/channels.
+  const isPersonal = normalizeOptionalLowercaseString(params.conversationType) === "personal";
+  if (isPersonal) {
     return { kind: "inline-image" };
   }
 
-  // requiresFileConsent is unconditionally true for personal + non-image, so
-  // reaching here for a non-image means conversationType is groupChat/channel.
-  if (params.sharePointSiteId && params.hasTokenProvider) {
-    return { kind: "sharepoint-upload", siteId: params.sharePointSiteId };
+  if (params.sharePointSiteId) {
+    if (params.hasTokenProvider) {
+      return { kind: "sharepoint-upload", siteId: params.sharePointSiteId };
+    }
+    return { kind: "undeliverable", reason: "missing-token-provider" };
+  }
+
+  const isImage = params.contentType?.startsWith("image/") ?? false;
+  if (isImage && params.bufferSize < FILE_CONSENT_THRESHOLD_BYTES) {
+    return { kind: "inline-image" };
   }
 
   return { kind: "undeliverable", reason: "missing-sharepoint-site" };
@@ -65,6 +77,8 @@ export function resolveMSTeamsOutboundFilePlan(params: {
 const UNDELIVERABLE_REASON_TEXT: Record<MSTeamsUndeliverableReason, string> = {
   "missing-sharepoint-site":
     'file attachments aren\'t set up for this channel/group yet (an admin needs to configure "sharePointSiteId")',
+  "missing-token-provider":
+    "file attachments can't be uploaded right now (the bot's Microsoft Graph credentials aren't available)",
 };
 
 /**

@@ -903,6 +903,73 @@ describe("msteams messenger", () => {
     });
   });
 
+  describe("buildActivity media handling", () => {
+    const personalRef: StoredConversationReference = {
+      activityId: "activity123",
+      user: { id: "user123", name: "User" },
+      agent: { id: "bot123", name: "Bot" },
+      conversation: { id: "conv123", conversationType: "personal" },
+      channelId: "msteams",
+      serviceUrl: "https://smba.trafficmanager.net/amer/",
+    };
+
+    const channelRef: StoredConversationReference = {
+      activityId: "activity123",
+      user: { id: "user123", name: "User" },
+      agent: { id: "bot123", name: "Bot" },
+      conversation: { id: "19:channel@thread.tacv2", conversationType: "channel" },
+      channelId: "msteams",
+      serviceUrl: "https://smba.trafficmanager.net/amer/",
+    };
+
+    // A data: URL is already-resolved inline media — e.g. send.ts's own
+    // inline-image plan builds one and routes it back through this same
+    // reply path. loadWebMedia doesn't understand the data: scheme and would
+    // try (and fail) to read it as a local file path, breaking every
+    // proactive image send, including the 1:1 DM path this covers.
+    it("attaches a data: URL directly without reprocessing it through loadWebMedia", async () => {
+      loadWebMediaSpy().mockClear();
+      const dataUrl = "data:image/png;base64,aGVsbG8=";
+
+      const activity = await buildActivity({ mediaUrl: dataUrl }, personalRef);
+
+      expect(loadWebMediaSpy()).not.toHaveBeenCalled();
+      const attachments = activity.attachments as Array<Record<string, unknown>>;
+      expect(attachments).toHaveLength(1);
+      expect(attachments[0]?.contentUrl).toBe(dataUrl);
+      expect(attachments[0]?.contentType).toBe("image/png");
+    });
+
+    // A configured SharePoint site must take priority over inlining for
+    // images too — otherwise a working upload+link path silently regresses
+    // to inline base64 with no permanent share link.
+    it("uploads an image to SharePoint instead of inlining it when a site is configured", async () => {
+      loadWebMediaSpy().mockResolvedValueOnce({
+        buffer: Buffer.from("fake-image-bytes"),
+        contentType: "image/png",
+        fileName: "diagram.png",
+        kind: "image",
+      });
+      graphUploadMockState.uploadAndShareSharePoint.mockResolvedValueOnce({
+        itemId: "item-1",
+        webUrl: "https://sp.example.com/diagram.png",
+        shareUrl: "https://sp.example.com/share/diagram.png",
+        name: "diagram.png",
+      });
+
+      const activity = await buildActivity(
+        { mediaUrl: "https://example.com/diagram.png" },
+        channelRef,
+        { getAccessToken: async () => "token" },
+        "contoso.sharepoint.com,guid1,guid2",
+      );
+
+      expect(graphUploadMockState.uploadAndShareSharePoint).toHaveBeenCalledOnce();
+      expect(activity.attachments).toBeUndefined();
+      expect(activity.text).toBe("📎 [diagram.png](https://sp.example.com/share/diagram.png)");
+    });
+  });
+
   // Regression coverage for #58774: proactive Teams sends fail with HTTP 403
   // when the Bot Framework connector does not see `tenantId` / `aadObjectId`
   // on the outbound conversation reference.
