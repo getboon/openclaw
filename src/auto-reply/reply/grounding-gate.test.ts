@@ -122,13 +122,6 @@ describe("sanitizeUngroundedClaims", () => {
       }),
     ).toBe("Done - compaction finished.");
 
-    expect(
-      sanitizeUngroundedClaims({
-        text: "Done - fallback finished.",
-        isFallbackNotice: true,
-      }),
-    ).toBe("Done - fallback finished.");
-
     for (const flags of [{ isError: true }, { isReasoning: true }, { isCommentary: true }]) {
       expect(
         sanitizeUngroundedClaims({

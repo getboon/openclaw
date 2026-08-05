@@ -769,6 +769,32 @@ function emitMessageDeliveryError(params: {
   });
 }
 
+/**
+ * A `reply_payload_sending` hook may return a freshly constructed payload
+ * object that only sets `text`, silently dropping the notice/error/reasoning
+ * classification the grounding gate uses to skip non-claim payloads. Restore
+ * those flags from the pre-hook payload so a hook cannot cause an internal
+ * notice to be mistaken for a fabricated claim. `auditTrace` is evidence for
+ * this specific claim text, so it only carries over when the hook left the
+ * text unchanged.
+ */
+function restoreDroppedGroundingContext(
+  original: ReplyPayload,
+  effective: ReplyPayload,
+): ReplyPayload {
+  const restored: ReplyPayload = {
+    ...effective,
+    isError: effective.isError || original.isError,
+    isReasoning: effective.isReasoning || original.isReasoning,
+    isCompactionNotice: effective.isCompactionNotice || original.isCompactionNotice,
+    isStatusNotice: effective.isStatusNotice || original.isStatusNotice,
+  };
+  if (original.auditTrace && !effective.auditTrace && effective.text === original.text) {
+    restored.auditTrace = original.auditTrace;
+  }
+  return restored;
+}
+
 function normalizeEmptyPayloadForDelivery(payload: ReplyPayload): ReplyPayload | null {
   const text = typeof payload.text === "string" ? payload.text : "";
   if (!text.trim()) {
@@ -1706,16 +1732,7 @@ async function deliverOutboundPayloadsCore(
         );
         continue;
       }
-      if (
-        payload.auditTrace &&
-        !effectivePayload.auditTrace &&
-        effectivePayload.text === payload.text
-      ) {
-        effectivePayload = {
-          ...effectivePayload,
-          auditTrace: payload.auditTrace,
-        };
-      }
+      effectivePayload = restoreDroppedGroundingContext(payload, effectivePayload);
       const groundedText = sanitizeUngroundedClaims(effectivePayload);
       if (groundedText !== effectivePayload.text) {
         effectivePayload = {

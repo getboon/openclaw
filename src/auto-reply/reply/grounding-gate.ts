@@ -32,9 +32,7 @@ export function sanitizeUngroundedClaims(params: {
   auditTrace?: AgentDecisionTrace;
   isError?: boolean;
   isReasoning?: boolean;
-  isCommentary?: boolean;
   isCompactionNotice?: boolean;
-  isFallbackNotice?: boolean;
   isStatusNotice?: boolean;
 }): string | undefined {
   const text = params.text;
@@ -42,9 +40,10 @@ export function sanitizeUngroundedClaims(params: {
     !text ||
     params.isError === true ||
     params.isReasoning === true ||
-    params.isCommentary === true ||
+    // `boon` has no `isCommentary` payload concept (present on upstream `main`).
+    // Preserve #80's exclusion via a widening read so it self-heals if added.
+    (params as { isCommentary?: boolean }).isCommentary === true ||
     params.isCompactionNotice === true ||
-    params.isFallbackNotice === true ||
     params.isStatusNotice === true ||
     hasSuccessfulToolResult(params.auditTrace) ||
     (!containsGroundingClaim(text) && !STANDALONE_COMPLETION_CLAIM_RE.test(text))

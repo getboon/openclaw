@@ -536,6 +536,34 @@ describe("deliverOutboundPayloads", () => {
     );
   });
 
+  it("preserves status-notice classification when an outbound hook reconstructs the payload", async () => {
+    hookMocks.runner.hasHooks.mockImplementation(
+      (hookName?: string) => hookName === "reply_payload_sending",
+    );
+    hookMocks.runner.runReplyPayloadSending.mockResolvedValueOnce({
+      payload: {
+        text: "Pulled from the processed set.",
+      },
+    });
+    const sendMatrix = vi.fn().mockResolvedValue({ messageId: "m1", roomId: "!room:example" });
+    const text = "Pulled from the processed set.";
+
+    await deliverOutboundPayloads({
+      cfg: matrixChunkConfig,
+      channel: "matrix",
+      to: "!room:example",
+      payloads: [{ text, isStatusNotice: true }],
+      deps: { matrix: sendMatrix },
+      replyPayloadSendingHook: {
+        kind: "final",
+        channel: "matrix",
+        context: { channelId: "matrix", conversationId: "!room:example" },
+      },
+    });
+
+    expect(sendMatrix).toHaveBeenCalledWith("!room:example", text, expect.anything());
+  });
+
   it("reports unsupported durable final delivery when required capabilities are missing", async () => {
     setActivePluginRegistry(
       createTestRegistry([
