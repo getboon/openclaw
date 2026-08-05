@@ -36,7 +36,7 @@ Create `src/infra/session-maintenance-sweep-runner.test.ts`:
 ```typescript
 // Tests the session-maintenance sweep runner: immediate + periodic ticks,
 // unconditional per-store summary logging, overlap guarding, config refresh
-// on updateConfig(), and stop() halting future ticks (ENG-17504).
+// on updateConfig(), and stop() halting future ticks.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
@@ -222,7 +222,7 @@ Create `src/infra/session-maintenance-sweep-runner.ts`:
 // writes (commitReplySessionInitialization), so idle/low-traffic stores can
 // go long stretches unevaluated, and every existing prune/cap/disk-budget log
 // line only fires on nonzero effect — "ran, 0 eligible" and "never ran" were
-// otherwise indistinguishable (ENG-17504). This intentionally does not
+// otherwise indistinguishable. This intentionally does not
 // change what gets protected or evicted; see
 // docs/superpowers/specs/2026-08-05-session-maintenance-sweep-observability-design.md.
 import {
@@ -340,7 +340,7 @@ Expected: PASS (6 tests).
 
 ```bash
 pnpm format:fix src/infra/session-maintenance-sweep-runner.ts src/infra/session-maintenance-sweep-runner.test.ts
-scripts/committer "feat(sessions): add periodic session-maintenance sweep runner with unconditional summary logging (ENG-17504)" src/infra/session-maintenance-sweep-runner.ts src/infra/session-maintenance-sweep-runner.test.ts
+scripts/committer "feat(sessions): add periodic session-maintenance sweep runner with unconditional summary logging" src/infra/session-maintenance-sweep-runner.ts src/infra/session-maintenance-sweep-runner.test.ts
 ```
 
 ---
@@ -484,7 +484,7 @@ Expected: PASS (all cases, including the new/extended assertions).
 
 ```bash
 pnpm format:fix src/gateway/server-runtime-services.ts src/gateway/server-runtime-services.test.ts
-scripts/committer "feat(gateway): schedule the session-maintenance sweep runner alongside heartbeat/progress-nudge (ENG-17504)" src/gateway/server-runtime-services.ts src/gateway/server-runtime-services.test.ts
+scripts/committer "feat(gateway): schedule the session-maintenance sweep runner alongside heartbeat/progress-nudge" src/gateway/server-runtime-services.ts src/gateway/server-runtime-services.test.ts
 ```
 
 ---
@@ -545,7 +545,7 @@ which the new wording satisfies via "Default".)
 - [ ] **Step 4: Commit**
 
 ```bash
-scripts/committer "docs(sessions): fix stale session.maintenance.mode default docs (enforce, not warn) (ENG-17504)" src/config/types.base.ts src/config/schema.help.ts
+scripts/committer "docs(sessions): fix stale session.maintenance.mode default docs (enforce, not warn)" src/config/types.base.ts src/config/schema.help.ts
 ```
 
 ---

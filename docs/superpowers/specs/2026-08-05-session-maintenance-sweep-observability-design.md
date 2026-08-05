@@ -1,4 +1,4 @@
-# Session maintenance sweep observability + reliable cadence (ENG-17504)
+# Session maintenance sweep observability + reliable cadence
 
 ## Problem
 
