@@ -326,6 +326,35 @@ describe("handleMessageUpdate text signatures", () => {
     expect(context.state.lastStreamedAssistantCleaned).toBe("Hello");
   });
 
+  it("does not leak a bare single-char N as a partial reply while NO_REPLY streams in (ENG-16955)", () => {
+    const onAgentEvent = vi.fn();
+    const onPartialReply = vi.fn();
+    const accumulator = createStreamingDirectiveAccumulator();
+    const context = createMessageUpdateContext({
+      onAgentEvent,
+      onPartialReply,
+      consumePartialReplyDirectives: vi.fn((text: string, options?: { final?: boolean }) =>
+        accumulator.consume(text, options),
+      ),
+    });
+
+    const createNonPhaseEvent = (delta: string) =>
+      ({
+        type: "message_update",
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: {
+          type: "text_delta",
+          delta,
+        },
+      }) as never;
+
+    handleMessageUpdate(context, createNonPhaseEvent("N"));
+    handleMessageUpdate(context, createNonPhaseEvent("O_REPLY"));
+
+    expect(onAgentEvent).not.toHaveBeenCalled();
+    expect(onPartialReply).not.toHaveBeenCalled();
+  });
+
   it("keeps stripped reply directives out of later plain deltas", () => {
     const onAgentEvent = vi.fn();
     const context = createMessageUpdateContext({ onAgentEvent });

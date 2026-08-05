@@ -1160,4 +1160,12 @@ describe("createAcpVisibleTextAccumulator", () => {
       delta: "Actual answer",
     });
   });
+
+  it("does not leak a bare single-char N as its own visible reply (ENG-16955)", () => {
+    const acc = createAcpVisibleTextAccumulator();
+
+    expect(acc.consume("N")).toBeNull();
+    expect(acc.consume("NO_REPLY")).toBeNull();
+    expect(acc.finalize()).toBe("");
+  });
 });
