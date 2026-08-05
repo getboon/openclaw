@@ -138,9 +138,15 @@ export function startSessionMaintenanceSweepRunner(opts: {
       return inFlight;
     }
     inFlight = (async () => {
-      const cfg = getConfig();
+      let cfg: OpenClawConfig;
       let targets: SessionStoreTarget[];
       try {
+        // getConfig() shares this try/catch with resolveTargets(): the gateway
+        // wires it to getRuntimeConfig(), which can throw on validation
+        // failure, and an uncaught throw here would reject the tick's promise
+        // unhandled (fired via `void tick()`) and silently kill the loop —
+        // the opposite of this runner's whole purpose.
+        cfg = getConfig();
         targets = resolveTargets(cfg, { allAgents: true });
       } catch (err) {
         logger.error("session maintenance sweep failed to resolve stores", {

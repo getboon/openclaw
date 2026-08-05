@@ -257,6 +257,28 @@ describe("startSessionMaintenanceSweepRunner", () => {
     runner.stop();
   });
 
+  it("logs an error and keeps ticking when getConfig itself throws", async () => {
+    // getConfig() shares the resolveTargets try/catch specifically so a
+    // throwing config resolver (e.g. getRuntimeConfig() failing validation in
+    // production) can't reject the tick unhandled and silently kill the loop.
+    const getConfig = vi.fn().mockImplementation(() => {
+      throw new Error("config validation failed");
+    });
+    const { deps, resolveTargets, runCleanup, error } = makeDeps({ getConfig });
+    const runner = startSessionMaintenanceSweepRunner({ cfg: config(), deps });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolveTargets).not.toHaveBeenCalled();
+    expect(runCleanup).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith("session maintenance sweep failed to resolve stores", {
+      error: "config validation failed",
+    });
+    // Recovers on the next tick once getConfig stops throwing.
+    getConfig.mockReturnValue(config());
+    await vi.advanceTimersByTimeAsync(SESSION_MAINTENANCE_SWEEP_INTERVAL_MS);
+    expect(runCleanup).toHaveBeenCalledTimes(1);
+    runner.stop();
+  });
+
   it("sweeps again on each interval tick", async () => {
     const { deps, runCleanup } = makeDeps();
     const runner = startSessionMaintenanceSweepRunner({ cfg: config(), deps });
