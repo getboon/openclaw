@@ -113,33 +113,76 @@ const prepareDeps = {
   resolveApiKeyForProfile,
 };
 
+type CliSkillRuntimeInputs = ReturnType<typeof resolveSandboxSkillRuntimeInputs>;
+
+async function loadCliSkillRuntimeInputs(params: {
+  config: RunCliAgentParams["config"];
+  sessionKey: string;
+  skillsSnapshot: RunCliAgentParams["skillsSnapshot"];
+  workspaceDir: string;
+}): Promise<CliSkillRuntimeInputs> {
+  const sandboxWorkspace = await ensureSandboxWorkspaceForSession({
+    config: params.config,
+    sessionKey: params.sessionKey,
+    workspaceDir: params.workspaceDir,
+  });
+  return resolveSandboxSkillRuntimeInputs({
+    sandbox: sandboxWorkspace
+      ? {
+          enabled: true,
+          ...(sandboxWorkspace.containerWorkdir
+            ? { containerWorkdir: sandboxWorkspace.containerWorkdir }
+            : {}),
+          ...(sandboxWorkspace.skillsEligibility
+            ? { skillsEligibility: sandboxWorkspace.skillsEligibility }
+            : {}),
+          ...(sandboxWorkspace.skillsWorkspaceDir
+            ? { skillsWorkspaceDir: sandboxWorkspace.skillsWorkspaceDir }
+            : {}),
+          ...(sandboxWorkspace.workspaceAccess
+            ? { workspaceAccess: sandboxWorkspace.workspaceAccess }
+            : {}),
+        }
+      : null,
+    effectiveWorkspace: sandboxWorkspace?.workspaceDir ?? params.workspaceDir,
+    skillsSnapshot: params.skillsSnapshot,
+  });
+}
+
 function resolveCliSkillSnapshotForRun(params: {
   agentId: string;
   config: RunCliAgentParams["config"];
   explicitSkillName?: string;
+  skillRuntimeInputs: CliSkillRuntimeInputs;
   skillsSnapshot: RunCliAgentParams["skillsSnapshot"];
-  workspaceDir: string;
 }): RunCliAgentParams["skillsSnapshot"] {
   if (
     !params.explicitSkillName ||
-    params.skillsSnapshot?.commandSkills?.some((skill) => skill.name === params.explicitSkillName)
+    params.skillRuntimeInputs.skillsSnapshot?.commandSkills?.some(
+      (skill) => skill.name === params.explicitSkillName,
+    )
   ) {
     return params.skillsSnapshot;
   }
   const { skillEntries } = resolveEmbeddedRunSkillEntries({
-    workspaceDir: params.workspaceDir,
+    workspaceDir: params.skillRuntimeInputs.skillsWorkspaceDir,
     config: params.config,
     agentId: params.agentId,
-    skillsSnapshot: params.skillsSnapshot,
+    eligibility: params.skillRuntimeInputs.skillsEligibility,
+    skillsSnapshot: params.skillRuntimeInputs.skillsSnapshot,
     explicitSkillName: params.explicitSkillName,
+    workspaceOnly: params.skillRuntimeInputs.workspaceOnly,
   });
   const selected = resolveExplicitSkillForRun({
     entries: skillEntries,
     explicitSkillName: params.explicitSkillName,
   });
+  if (!selected) {
+    throw new Error(`Explicit skill ${params.explicitSkillName} is unavailable`);
+  }
   return {
     ...(params.skillsSnapshot ?? { prompt: "", skills: [] }),
-    commandSkills: selected ? [selected] : [],
+    commandSkills: [selected],
   };
 }
 
@@ -148,49 +191,22 @@ async function resolveCliSkillsPrompt(params: {
   config: RunCliAgentParams["config"];
   explicitSkillName?: string;
   sessionKey: string;
+  skillRuntimeInputs?: CliSkillRuntimeInputs;
   skillsSnapshot: RunCliAgentParams["skillsSnapshot"];
   workspaceDir: string;
 }): Promise<string> {
-  const sandboxWorkspace = await ensureSandboxWorkspaceForSession({
-    config: params.config,
-    sessionKey: params.sessionKey,
-    workspaceDir: params.workspaceDir,
-  });
-  if (!sandboxWorkspace) {
-    return resolveSkillsPromptForRun({
+  const skillRuntimeInputs =
+    params.skillRuntimeInputs ??
+    (await loadCliSkillRuntimeInputs({
+      config: params.config,
+      sessionKey: params.sessionKey,
       skillsSnapshot: params.skillsSnapshot,
       workspaceDir: params.workspaceDir,
-      config: params.config,
-      agentId: params.agentId,
-      explicitSkillName: params.explicitSkillName,
-    });
-  }
-
-  const {
-    skillsEligibility,
-    skillsPromptWorkspaceDir,
-    skillsSnapshot: skillsSnapshotForRun,
-    skillsWorkspaceDir,
-    workspaceOnly,
-  } = resolveSandboxSkillRuntimeInputs({
-    sandbox: {
-      enabled: true,
-      ...(sandboxWorkspace.containerWorkdir
-        ? { containerWorkdir: sandboxWorkspace.containerWorkdir }
-        : {}),
-      ...(sandboxWorkspace.skillsEligibility
-        ? { skillsEligibility: sandboxWorkspace.skillsEligibility }
-        : {}),
-      ...(sandboxWorkspace.skillsWorkspaceDir
-        ? { skillsWorkspaceDir: sandboxWorkspace.skillsWorkspaceDir }
-        : {}),
-      ...(sandboxWorkspace.workspaceAccess
-        ? { workspaceAccess: sandboxWorkspace.workspaceAccess }
-        : {}),
-    },
-    effectiveWorkspace: sandboxWorkspace.workspaceDir,
-    skillsSnapshot: params.skillsSnapshot,
-  });
+    }));
+  const { skillsEligibility, skillsPromptWorkspaceDir, skillsWorkspaceDir, workspaceOnly } =
+    skillRuntimeInputs;
+  const skillsSnapshotForRun =
+    skillRuntimeInputs.skillsSnapshot === undefined ? undefined : params.skillsSnapshot;
   const { shouldLoadSkillEntries, skillEntries } = resolveEmbeddedRunSkillEntries({
     workspaceDir: skillsWorkspaceDir,
     config: params.config,
@@ -462,6 +478,27 @@ export async function prepareCliRunContext(
     seenSignatures: params.bootstrapPromptWarningSignaturesSeen,
     previousSignature: params.bootstrapPromptWarningSignature,
   });
+  const skillSessionKey = params.sessionKey?.trim() || params.sessionId;
+  const skillRuntimeInputs =
+    !isSideQuestion && params.explicitSkillName
+      ? await loadCliSkillRuntimeInputs({
+          config: params.config,
+          sessionKey: skillSessionKey,
+          skillsSnapshot: params.skillsSnapshot,
+          workspaceDir,
+        })
+      : resolveSandboxSkillRuntimeInputs({
+          sandbox: null,
+          effectiveWorkspace: workspaceDir,
+          skillsSnapshot: params.skillsSnapshot,
+        });
+  const skillsSnapshotForRun = resolveCliSkillSnapshotForRun({
+    config: params.config,
+    agentId: sessionAgentId,
+    skillRuntimeInputs,
+    skillsSnapshot: params.skillsSnapshot,
+    explicitSkillName: params.explicitSkillName,
+  });
   const bundleMcpEnabled =
     !isSideQuestion && backendResolved.bundleMcp && params.disableTools !== true;
   let mcpLoopbackRuntime = bundleMcpEnabled ? prepareDeps.getActiveMcpLoopbackRuntime() : undefined;
@@ -546,13 +583,6 @@ export async function prepareCliRunContext(
     authProfileId: effectiveAuthProfileId,
     authCredential,
     preparedExecution,
-  });
-  const skillsSnapshotForRun = resolveCliSkillSnapshotForRun({
-    workspaceDir,
-    config: params.config,
-    agentId: sessionAgentId,
-    skillsSnapshot: params.skillsSnapshot,
-    explicitSkillName: params.explicitSkillName,
   });
   const authEpoch = await resolveCliAuthEpoch({
     provider: params.provider,
@@ -713,11 +743,12 @@ export async function prepareCliRunContext(
       ? ""
       : await resolveCliSkillsPrompt({
           skillsSnapshot: skillsSnapshotForRun,
-          workspaceDir,
           config: params.config,
           agentId: sessionAgentId,
           explicitSkillName: params.explicitSkillName,
-          sessionKey: params.sessionKey?.trim() || params.sessionId,
+          sessionKey: skillSessionKey,
+          skillRuntimeInputs: params.explicitSkillName ? skillRuntimeInputs : undefined,
+          workspaceDir,
         });
   const runtimeChannel = isSideQuestion
     ? undefined

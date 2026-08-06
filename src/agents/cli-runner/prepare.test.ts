@@ -2794,6 +2794,112 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
     }
   });
 
+  it("reloads an explicit command skill from the sandbox skill workspace", async () => {
+    const { dir, sessionFile } = createSessionFile();
+    const hostSkillDir = path.join(dir, "skills", "steel-prices");
+    const hostSkillPath = path.join(hostSkillDir, "SKILL.md");
+    const materializedWorkspace = path.join(dir, "state", "sandbox-skills");
+    const materializedSkillDir = path.join(materializedWorkspace, "skills", "steel-prices");
+    const materializedSkillPath = path.join(materializedSkillDir, "SKILL.md");
+    fs.mkdirSync(hostSkillDir, { recursive: true });
+    fs.writeFileSync(
+      hostSkillPath,
+      [
+        "---",
+        "name: steel-prices",
+        "description: Host skill copy.",
+        "disable-model-invocation: true",
+        "---",
+      ].join("\n"),
+      "utf-8",
+    );
+    fs.mkdirSync(materializedSkillDir, { recursive: true });
+    fs.writeFileSync(
+      materializedSkillPath,
+      [
+        "---",
+        "name: steel-prices",
+        "description: Sandboxed skill copy.",
+        "disable-model-invocation: true",
+        "---",
+      ].join("\n"),
+      "utf-8",
+    );
+    ensureSandboxWorkspaceForSessionMock.mockResolvedValue({
+      workspaceDir: dir,
+      containerWorkdir: "/workspace",
+      skillsWorkspaceDir: materializedWorkspace,
+      workspaceAccess: "rw",
+    });
+    setClaudeCliBackendForPrepareTest();
+    const prepareClaudeCliSkillsPlugin = vi.fn(
+      async (_params: { explicitSkillName?: string; skillsSnapshot?: SkillSnapshot }) => ({
+        args: ["--plugin-dir", path.join(dir, "openclaw-skills")],
+        cleanup: vi.fn(async () => undefined),
+        pluginDir: path.join(dir, "openclaw-skills"),
+      }),
+    );
+    setCliRunnerPrepareTestDeps({ prepareClaudeCliSkillsPlugin });
+
+    try {
+      await prepareCliRunContext({
+        sessionId: "session-test",
+        sessionKey: "agent:main:sandboxed-user",
+        sessionFile,
+        workspaceDir: dir,
+        prompt: "look up steel prices",
+        provider: "claude-cli",
+        model: "opus",
+        timeoutMs: 1_000,
+        runId: "run-claude-sandboxed-explicit-skill",
+        explicitSkillName: "steel-prices",
+        config: createCliBackendConfig(),
+        skillsSnapshot: {
+          prompt: "",
+          skills: [{ name: "steel-prices" }],
+          resolvedSkills: [],
+        },
+      });
+
+      const pluginParams = prepareClaudeCliSkillsPlugin.mock.calls[0]?.[0];
+      expect(pluginParams?.skillsSnapshot?.commandSkills?.[0]?.filePath).toBe(
+        materializedSkillPath,
+      );
+      expect(ensureSandboxWorkspaceForSessionMock).toHaveBeenCalledTimes(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an explicit command skill that is unavailable after reload", async () => {
+    const { dir, sessionFile } = createSessionFile();
+    setClaudeCliBackendForPrepareTest();
+
+    try {
+      await expect(
+        prepareCliRunContext({
+          sessionId: "session-test",
+          sessionFile,
+          workspaceDir: dir,
+          prompt: "run missing skill",
+          provider: "claude-cli",
+          model: "opus",
+          timeoutMs: 1_000,
+          runId: "run-claude-missing-explicit-skill",
+          explicitSkillName: "missing-skill",
+          config: createCliBackendConfig(),
+          skillsSnapshot: {
+            prompt: "",
+            skills: [{ name: "missing-skill" }],
+            resolvedSkills: [],
+          },
+        }),
+      ).rejects.toThrow("Explicit skill missing-skill is unavailable");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("omits Claude CLI prompt skills when the native skills plugin can carry them", async () => {
     const { dir, sessionFile } = createSessionFile();
     const skillDir = path.join(dir, "skills", "weather");

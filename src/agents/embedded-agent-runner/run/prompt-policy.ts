@@ -9,7 +9,9 @@ export function resolveRunPromptPolicy(params: {
   promptMode: PromptMode;
   skillsPrompt: string | undefined;
 } {
-  if (!params.toolsAllow?.length) {
+  const hasUnrestrictedTools =
+    params.toolsAllow === undefined || params.toolsAllow.some((entry) => entry.trim() === "*");
+  if (hasUnrestrictedTools) {
     return {
       promptMode: params.promptMode,
       skillsPrompt: params.skillsPrompt,

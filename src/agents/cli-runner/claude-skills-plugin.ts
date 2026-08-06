@@ -44,16 +44,21 @@ export function isClaudeCliSkillFileAccessible(skillFilePath: string): boolean {
   }
 }
 
+export function selectClaudePluginSkills(
+  snapshot?: SkillSnapshot,
+  explicitSkillName?: string,
+): NonNullable<SkillSnapshot["resolvedSkills"]> {
+  if (!explicitSkillName) {
+    return snapshot?.resolvedSkills ?? [];
+  }
+  return (snapshot?.commandSkills ?? []).filter((skill) => skill.name === explicitSkillName);
+}
+
 async function collectClaudePluginSkills(
   snapshot?: SkillSnapshot,
   explicitSkillName?: string,
 ): Promise<MaterializedSkill[]> {
-  const availableSkills = explicitSkillName
-    ? (snapshot?.commandSkills ?? snapshot?.resolvedSkills ?? [])
-    : (snapshot?.resolvedSkills ?? []);
-  const skills = explicitSkillName
-    ? availableSkills.filter((skill) => skill.name === explicitSkillName)
-    : availableSkills;
+  const skills = selectClaudePluginSkills(snapshot, explicitSkillName);
   if (skills.length === 0) {
     return [];
   }

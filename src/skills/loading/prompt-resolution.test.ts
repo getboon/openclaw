@@ -158,6 +158,27 @@ describe("resolveSkillsPromptForRun", () => {
     expect(prompt).toBe("");
   });
 
+  it("does not authorize an explicit skill from prompt-visible snapshot skills", () => {
+    const promptVisible = createCanonicalFixtureSkill({
+      name: "internal-skill",
+      description: "Internal",
+      filePath: "/app/skills/internal-skill/SKILL.md",
+      baseDir: "/app/skills/internal-skill",
+      source: "openclaw-workspace",
+    });
+    const prompt = resolveSkillsPromptForRun({
+      skillsSnapshot: {
+        prompt: "NORMAL SNAPSHOT",
+        skills: [{ name: "internal-skill" }],
+        resolvedSkills: [promptVisible],
+      },
+      explicitSkillName: "internal-skill",
+      workspaceDir: "/tmp/openclaw",
+    });
+
+    expect(prompt).toBe("");
+  });
+
   it("inherits agents.defaults.skills when rebuilding prompt for an agent", () => {
     const visible: SkillEntry = {
       skill: createCanonicalFixtureSkill({

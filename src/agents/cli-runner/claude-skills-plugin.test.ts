@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createCanonicalFixtureSkill } from "../../skills/test-support/test-helpers.js";
 import type { SkillSnapshot } from "../../skills/types.js";
-import { prepareClaudeCliSkillsPlugin } from "./claude-skills-plugin.js";
+import { prepareClaudeCliSkillsPlugin, selectClaudePluginSkills } from "./claude-skills-plugin.js";
 
 const cleanupDirs = new Set<string>();
 
@@ -29,6 +29,19 @@ async function createSkill(root: string, name: string, disableModelInvocation = 
 }
 
 describe("prepareClaudeCliSkillsPlugin", () => {
+  it("does not select an explicit skill from prompt-visible snapshot skills", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-cli-skill-test-"));
+    cleanupDirs.add(root);
+    const visible = await createSkill(root, "internal");
+    const snapshot = {
+      prompt: "visible",
+      skills: [{ name: visible.name }],
+      resolvedSkills: [visible],
+    } satisfies SkillSnapshot;
+
+    expect(selectClaudePluginSkills(snapshot, "internal")).toEqual([]);
+  });
+
   it("materializes only the explicitly selected command skill", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-cli-skill-test-"));
     cleanupDirs.add(root);

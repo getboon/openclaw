@@ -1523,7 +1523,6 @@ export function resolveExplicitSkillForRun(params: {
       ? filterUserInvocableSkillEntries(params.entries).map((entry) => entry.skill)
       : undefined) ??
     params.skillsSnapshot?.commandSkills ??
-    params.skillsSnapshot?.resolvedSkills ??
     [];
   return candidates.find((skill) => skill.name === params.explicitSkillName);
 }
