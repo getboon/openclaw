@@ -1755,6 +1755,50 @@ describe("followup queue collect routing", () => {
     expect(calls[1]?.prompt).toContain("(from Owner)");
   });
 
+  it("splits collect batches when explicit skill selection changes", async () => {
+    const key = `test-collect-explicit-skill-split-${Date.now()}`;
+    const calls: FollowupRun[] = [];
+    const done = createDeferred<void>();
+    const runFollowup = async (run: FollowupRun) => {
+      calls.push(run);
+      if (calls.length === 2) {
+        done.resolve();
+      }
+    };
+    const settings: QueueSettings = {
+      mode: "collect",
+      debounceMs: 0,
+      cap: 50,
+      dropPolicy: "summarize",
+    };
+
+    for (const [prompt, explicitSkillName] of [
+      ["run the weather skill", "weather"],
+      ["run the steel skill", "steel-prices"],
+    ] as const) {
+      const item = createRun({
+        prompt,
+        originatingChannel: "slack",
+        originatingTo: "channel:A",
+      });
+      enqueueFollowupRun(
+        key,
+        {
+          ...item,
+          run: { ...item.run, explicitSkillName },
+        },
+        settings,
+      );
+    }
+
+    scheduleFollowupDrain(key, runFollowup);
+    await done.promise;
+
+    expect(calls.map((call) => call.run.explicitSkillName)).toEqual(["weather", "steel-prices"]);
+    expect(calls[0]?.prompt).not.toContain("run the steel skill");
+    expect(calls[1]?.prompt).not.toContain("run the weather skill");
+  });
+
   it("keeps one collect batch when authorization context matches", async () => {
     const key = `test-collect-auth-match-${Date.now()}`;
     const calls: FollowupRun[] = [];

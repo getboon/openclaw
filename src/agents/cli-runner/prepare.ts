@@ -26,7 +26,10 @@ import { buildAgentHookContextChannelFields } from "../../plugins/hook-agent-con
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { isSubagentSessionKey } from "../../routing/session-key.js";
 import { annotateInterSessionPromptText } from "../../sessions/input-provenance.js";
-import { resolveSkillsPromptForRun } from "../../skills/loading/workspace.js";
+import {
+  resolveExplicitSkillForRun,
+  resolveSkillsPromptForRun,
+} from "../../skills/loading/workspace.js";
 import { resolveEmbeddedRunSkillEntries } from "../../skills/runtime/embedded-run-entries.js";
 import { resolveUserPath } from "../../utils.js";
 import { normalizeMessageChannel } from "../../utils/message-channel.js";
@@ -110,9 +113,40 @@ const prepareDeps = {
   resolveApiKeyForProfile,
 };
 
+function resolveCliSkillSnapshotForRun(params: {
+  agentId: string;
+  config: RunCliAgentParams["config"];
+  explicitSkillName?: string;
+  skillsSnapshot: RunCliAgentParams["skillsSnapshot"];
+  workspaceDir: string;
+}): RunCliAgentParams["skillsSnapshot"] {
+  if (
+    !params.explicitSkillName ||
+    params.skillsSnapshot?.commandSkills?.some((skill) => skill.name === params.explicitSkillName)
+  ) {
+    return params.skillsSnapshot;
+  }
+  const { skillEntries } = resolveEmbeddedRunSkillEntries({
+    workspaceDir: params.workspaceDir,
+    config: params.config,
+    agentId: params.agentId,
+    skillsSnapshot: params.skillsSnapshot,
+    explicitSkillName: params.explicitSkillName,
+  });
+  const selected = resolveExplicitSkillForRun({
+    entries: skillEntries,
+    explicitSkillName: params.explicitSkillName,
+  });
+  return {
+    ...(params.skillsSnapshot ?? { prompt: "", skills: [] }),
+    commandSkills: selected ? [selected] : [],
+  };
+}
+
 async function resolveCliSkillsPrompt(params: {
   agentId: string;
   config: RunCliAgentParams["config"];
+  explicitSkillName?: string;
   sessionKey: string;
   skillsSnapshot: RunCliAgentParams["skillsSnapshot"];
   workspaceDir: string;
@@ -128,6 +162,7 @@ async function resolveCliSkillsPrompt(params: {
       workspaceDir: params.workspaceDir,
       config: params.config,
       agentId: params.agentId,
+      explicitSkillName: params.explicitSkillName,
     });
   }
 
@@ -162,6 +197,7 @@ async function resolveCliSkillsPrompt(params: {
     agentId: params.agentId,
     eligibility: skillsEligibility,
     skillsSnapshot: skillsSnapshotForRun,
+    explicitSkillName: params.explicitSkillName,
     workspaceOnly,
   });
   const promptSkillEntries = mapSandboxSkillEntriesForPrompt({
@@ -176,6 +212,7 @@ async function resolveCliSkillsPrompt(params: {
     config: params.config,
     agentId: params.agentId,
     eligibility: skillsEligibility,
+    explicitSkillName: params.explicitSkillName,
   });
 }
 
@@ -510,6 +547,13 @@ export async function prepareCliRunContext(
     authCredential,
     preparedExecution,
   });
+  const skillsSnapshotForRun = resolveCliSkillSnapshotForRun({
+    workspaceDir,
+    config: params.config,
+    agentId: sessionAgentId,
+    skillsSnapshot: params.skillsSnapshot,
+    explicitSkillName: params.explicitSkillName,
+  });
   const authEpoch = await resolveCliAuthEpoch({
     provider: params.provider,
     agentDir,
@@ -534,7 +578,8 @@ export async function prepareCliRunContext(
     ? { args: [], cleanup: async () => {} }
     : await prepareDeps.prepareClaudeCliSkillsPlugin({
         backendId: backendResolved.id,
-        skillsSnapshot: params.skillsSnapshot,
+        skillsSnapshot: skillsSnapshotForRun,
+        explicitSkillName: params.explicitSkillName,
       });
   const preparedCleanup =
     preparedBackendCleanup || claudeSkillsPlugin.args.length > 0
@@ -667,10 +712,11 @@ export async function prepareCliRunContext(
     isSideQuestion || claudeSkillsPlugin.args.length > 0
       ? ""
       : await resolveCliSkillsPrompt({
-          skillsSnapshot: params.skillsSnapshot,
+          skillsSnapshot: skillsSnapshotForRun,
           workspaceDir,
           config: params.config,
           agentId: sessionAgentId,
+          explicitSkillName: params.explicitSkillName,
           sessionKey: params.sessionKey?.trim() || params.sessionId,
         });
   const runtimeChannel = isSideQuestion
@@ -866,6 +912,7 @@ export async function prepareCliRunContext(
       ...params,
       config: contextEngineConfig,
       prompt: preparedPrompt,
+      skillsSnapshot: skillsSnapshotForRun,
       ...(requireExplicitMessageTarget ? { requireExplicitMessageTarget: true } : {}),
     };
 
@@ -932,6 +979,7 @@ export async function prepareCliRunContext(
       ...params,
       config: contextEngineConfig,
       prompt: preparedPrompt,
+      skillsSnapshot: skillsSnapshotForRun,
       ...(requireExplicitMessageTarget ? { requireExplicitMessageTarget: true } : {}),
     };
 

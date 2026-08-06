@@ -9,12 +9,14 @@ import { WORKSPACE_SKILLS_PROMPT_FORMAT_VERSION } from "../types.js";
 import type { SkillEligibilityContext, SkillSnapshot } from "../types.js";
 import { getSkillsSnapshotVersion, shouldRefreshSnapshotForVersion } from "./refresh-state.js";
 import { ensureSkillsWatcher } from "./refresh.js";
-import { hydrateResolvedSkills } from "./snapshot-hydration.js";
+import { hydrateRuntimeSkills } from "./snapshot-hydration.js";
 
-const resolvedSkillsCache = new Map<string, SkillSnapshot["resolvedSkills"]>();
-const RESOLVED_SKILLS_CACHE_MAX = 10;
+type RuntimeSkillsSnapshot = Pick<SkillSnapshot, "commandSkills" | "resolvedSkills">;
 
-/** Inputs that make a resolved skill snapshot reusable within a process. */
+const runtimeSkillsCache = new Map<string, RuntimeSkillsSnapshot>();
+const RUNTIME_SKILLS_CACHE_MAX = 10;
+
+/** Inputs that make runtime skill snapshots reusable within a process. */
 export type ReusableSkillSnapshotParams = {
   workspaceDir: string;
   config: OpenClawConfig;
@@ -34,7 +36,7 @@ export type ReusableSkillSnapshotResult = {
 };
 
 export function resetResolvedSkillsCacheForTests(): void {
-  resolvedSkillsCache.clear();
+  runtimeSkillsCache.clear();
 }
 
 function fingerprintSkillSnapshotConfig(config: OpenClawConfig): string {
@@ -44,12 +46,15 @@ function fingerprintSkillSnapshotConfig(config: OpenClawConfig): string {
     .digest("hex");
 }
 
-function cacheResolvedSkills(cacheKey: string, snapshot: SkillSnapshot): SkillSnapshot {
-  resolvedSkillsCache.set(cacheKey, snapshot.resolvedSkills);
-  if (resolvedSkillsCache.size > RESOLVED_SKILLS_CACHE_MAX) {
-    const oldest = resolvedSkillsCache.keys().next().value;
+function cacheRuntimeSkills(cacheKey: string, snapshot: SkillSnapshot): SkillSnapshot {
+  runtimeSkillsCache.set(cacheKey, {
+    commandSkills: snapshot.commandSkills,
+    resolvedSkills: snapshot.resolvedSkills,
+  });
+  if (runtimeSkillsCache.size > RUNTIME_SKILLS_CACHE_MAX) {
+    const oldest = runtimeSkillsCache.keys().next().value;
     if (oldest !== undefined) {
-      resolvedSkillsCache.delete(oldest);
+      runtimeSkillsCache.delete(oldest);
     }
   }
   return snapshot;
@@ -93,17 +98,18 @@ export function resolveReusableWorkspaceSkillSnapshot(
   ]);
 
   const cachedRebuild = (): SkillSnapshot => {
-    if (resolvedSkillsCache.has(snapshotCacheKey)) {
-      return { resolvedSkills: resolvedSkillsCache.get(snapshotCacheKey) } as SkillSnapshot;
+    const cached = runtimeSkillsCache.get(snapshotCacheKey);
+    if (cached) {
+      return cached as SkillSnapshot;
     }
-    return cacheResolvedSkills(snapshotCacheKey, buildSnapshot());
+    return cacheRuntimeSkills(snapshotCacheKey, buildSnapshot());
   };
 
   const snapshot =
     !params.existingSnapshot || shouldRefresh
-      ? cacheResolvedSkills(snapshotCacheKey, buildSnapshot())
+      ? cacheRuntimeSkills(snapshotCacheKey, buildSnapshot())
       : params.hydrateExisting === false
         ? params.existingSnapshot
-        : hydrateResolvedSkills(params.existingSnapshot, cachedRebuild);
+        : hydrateRuntimeSkills(params.existingSnapshot, cachedRebuild);
   return { snapshot, shouldRefresh, snapshotVersion };
 }

@@ -11,12 +11,19 @@ export function resolveEmbeddedRunSkillEntries(params: {
   agentId?: string;
   eligibility?: SkillEligibilityContext;
   skillsSnapshot?: SkillSnapshot;
+  explicitSkillName?: string;
   workspaceOnly?: boolean;
 }): {
   shouldLoadSkillEntries: boolean;
   skillEntries: SkillEntry[];
 } {
-  const shouldLoadSkillEntries = !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
+  const hasExplicitSkill =
+    !params.explicitSkillName ||
+    params.skillsSnapshot?.commandSkills?.some(
+      (skill) => skill.name === params.explicitSkillName,
+    ) === true;
+  const shouldLoadSkillEntries =
+    !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills || !hasExplicitSkill;
   const config = resolveSkillRuntimeConfig(params.config);
   return {
     shouldLoadSkillEntries,

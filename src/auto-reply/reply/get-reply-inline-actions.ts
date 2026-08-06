@@ -137,6 +137,7 @@ type InlineActionResult =
       directives: InlineDirectives;
       abortedLastRun: boolean;
       cleanedBody: string;
+      explicitSkillName?: string;
     };
 
 function extractTextFromToolResult(result: unknown): string | null {
@@ -332,6 +333,7 @@ export async function handleInlineActions(params: {
           skillCommands,
         })
       : null;
+  let explicitSkillName: string | undefined;
   if (skillInvocation) {
     if (!command.isAuthorizedSender) {
       logVerbose(
@@ -420,6 +422,7 @@ export async function handleInlineActions(params: {
       }
     }
 
+    explicitSkillName = skillInvocation.command.skillName;
     const rewrittenBody = skillInvocation.command.promptTemplate
       ? expandBundleCommandPromptTemplate(
           skillInvocation.command.promptTemplate,
@@ -577,6 +580,7 @@ export async function handleInlineActions(params: {
       directives,
       abortedLastRun,
       cleanedBody,
+      ...(explicitSkillName ? { explicitSkillName } : {}),
     };
   }
   const remainingBodyAfterInlineStatus = (() => {
@@ -617,5 +621,6 @@ export async function handleInlineActions(params: {
     directives,
     abortedLastRun,
     cleanedBody,
+    ...(explicitSkillName ? { explicitSkillName } : {}),
   };
 }

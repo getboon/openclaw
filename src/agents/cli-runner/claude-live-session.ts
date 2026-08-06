@@ -285,13 +285,20 @@ function buildClaudeLiveFingerprint(params: {
 }): string {
   const normalizeMcpConfigPath = Boolean(params.context.preparedBackend.mcpConfigHash);
   const skillSnapshot = params.context.params.skillsSnapshot;
+  const explicitSkillName = params.context.params.explicitSkillName;
+  const pluginSkills = explicitSkillName
+    ? (skillSnapshot?.commandSkills ?? skillSnapshot?.resolvedSkills ?? []).filter(
+        (skill) => skill.name === explicitSkillName,
+      )
+    : (skillSnapshot?.resolvedSkills ?? []);
   const skillsFingerprint = skillSnapshot
     ? sha256(
         JSON.stringify({
           promptHash: sha256(skillSnapshot.prompt),
           skillFilter: skillSnapshot.skillFilter,
           skills: skillSnapshot.skills,
-          resolvedSkills: (skillSnapshot.resolvedSkills ?? []).map((skill) => ({
+          explicitSkillName,
+          pluginSkills: pluginSkills.map((skill) => ({
             name: skill.name,
             description: skill.description,
             filePath: skill.filePath,

@@ -44,8 +44,16 @@ export function isClaudeCliSkillFileAccessible(skillFilePath: string): boolean {
   }
 }
 
-async function collectClaudePluginSkills(snapshot?: SkillSnapshot): Promise<MaterializedSkill[]> {
-  const skills = snapshot?.resolvedSkills ?? [];
+async function collectClaudePluginSkills(
+  snapshot?: SkillSnapshot,
+  explicitSkillName?: string,
+): Promise<MaterializedSkill[]> {
+  const availableSkills = explicitSkillName
+    ? (snapshot?.commandSkills ?? snapshot?.resolvedSkills ?? [])
+    : (snapshot?.resolvedSkills ?? []);
+  const skills = explicitSkillName
+    ? availableSkills.filter((skill) => skill.name === explicitSkillName)
+    : availableSkills;
   if (skills.length === 0) {
     return [];
   }
@@ -93,12 +101,13 @@ async function linkOrCopySkillDir(params: { sourceDir: string; targetDir: string
 export async function prepareClaudeCliSkillsPlugin(params: {
   backendId: string;
   skillsSnapshot?: SkillSnapshot;
+  explicitSkillName?: string;
 }): Promise<{ args: string[]; cleanup: () => Promise<void>; pluginDir?: string }> {
   if (normalizeLowercaseStringOrEmpty(params.backendId) !== CLAUDE_CLI_BACKEND_ID) {
     return { args: [], cleanup: async () => {} };
   }
 
-  const skills = await collectClaudePluginSkills(params.skillsSnapshot);
+  const skills = await collectClaudePluginSkills(params.skillsSnapshot, params.explicitSkillName);
   if (skills.length === 0) {
     return { args: [], cleanup: async () => {} };
   }

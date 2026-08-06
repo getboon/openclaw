@@ -830,6 +830,15 @@ describe("Session Store Cache", () => {
               source: "transient",
             }),
           ],
+          commandSkills: [
+            createCanonicalFixtureSkill({
+              name: "alpha",
+              description: "alpha command skill",
+              filePath: "/skills/alpha/SKILL.md",
+              baseDir: "/skills/alpha",
+              source: "transient",
+            }),
+          ],
         } as SessionEntry["skillsSnapshot"],
       }),
       takeCacheOwnership: true,
@@ -839,6 +848,7 @@ describe("Session Store Cache", () => {
     expect(disk["session:1"].displayName).toBe("After");
     expect(disk["session:1"].skillsSnapshot?.prompt).toBe("short prompt");
     expect("resolvedSkills" in (disk["session:1"].skillsSnapshot ?? {})).toBe(false);
+    expect("commandSkills" in (disk["session:1"].skillsSnapshot ?? {})).toBe(false);
   });
 
   it("restores the writer-owned cache when update result proves the store unchanged", async () => {

@@ -25,6 +25,7 @@ const {
     prompt: "",
     skills: [] as unknown[],
     resolvedSkills: [] as unknown[],
+    commandSkills: [] as unknown[],
   })),
   ensureSkillsWatcherMock: vi.fn(),
   getSkillsSnapshotVersionMock: vi.fn(() => 1),
@@ -53,7 +54,12 @@ describe("resolveReusableWorkspaceSkillSnapshot", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetResolvedSkillsCacheForTests();
-    buildWorkspaceSkillSnapshotMock.mockReturnValue({ prompt: "", skills: [], resolvedSkills: [] });
+    buildWorkspaceSkillSnapshotMock.mockReturnValue({
+      prompt: "",
+      skills: [],
+      resolvedSkills: [],
+      commandSkills: [],
+    });
     ensureSkillsWatcherMock.mockImplementation(() => undefined);
     getSkillsSnapshotVersionMock.mockReturnValue(1);
     shouldRefreshSnapshotForVersionMock.mockImplementation((cached = 0, next = 0) =>
@@ -162,6 +168,7 @@ describe("resolveReusableWorkspaceSkillSnapshot", () => {
         prompt: "",
         skills: [],
         resolvedSkills: config?.channels?.discord?.token ? [{ name: "discord" }] : [],
+        commandSkills: config?.channels?.discord?.token ? [{ name: "discord" }] : [],
       };
     });
 
@@ -191,6 +198,7 @@ describe("resolveReusableWorkspaceSkillSnapshot", () => {
       prompt: "",
       skills: [],
       resolvedSkills: [{ name: "discord" }],
+      commandSkills: [{ name: "discord" }],
     });
 
     const snapshot = strippedSnapshot("discord");

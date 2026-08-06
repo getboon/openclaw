@@ -2542,6 +2542,7 @@ export async function runAgentTurnWithFallback(params: {
                     images: currentTurnImages.images,
                     imageOrder: currentTurnImages.imageOrder,
                     skillsSnapshot: params.followupRun.run.skillsSnapshot,
+                    explicitSkillName: params.followupRun.run.explicitSkillName,
                     messageChannel: params.followupRun.originatingChannel ?? undefined,
                     messageProvider: hookMessageProvider,
                     currentChannelId:

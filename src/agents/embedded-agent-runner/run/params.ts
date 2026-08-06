@@ -133,6 +133,8 @@ export type RunEmbeddedAgentParams = {
   agentDir?: string;
   config?: OpenClawConfig;
   skillsSnapshot?: SkillSnapshot;
+  /** Skill selected by an authorized explicit chat command for this run. */
+  explicitSkillName?: string;
   prompt: string;
   /** User-visible prompt body to submit and persist; runtime context travels separately. */
   transcriptPrompt?: string;
