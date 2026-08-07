@@ -3162,6 +3162,7 @@ export async function runEmbeddedAttempt(
           runId: params.runId,
           ...(params.sessionKey && { sessionKey: params.sessionKey }),
           ...(params.sessionId && { sessionId: params.sessionId }),
+          ...(params.senderId && { senderId: params.senderId }),
           provider: params.provider,
           model: params.modelId,
           api: params.model.api,

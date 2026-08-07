@@ -702,6 +702,93 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     });
   });
 
+  it("emits Boon usage headers (session + user) from ctx without mutating caller headers", async () => {
+    async function* stream() {
+      yield { type: "text", text: "ok" };
+    }
+    const capturedOptions: Array<Parameters<StreamFn>[2]> = [];
+    const callerOptions = { headers: { "X-Custom": "kept" } };
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      ((
+        _model: Parameters<StreamFn>[0],
+        _context: Parameters<StreamFn>[1],
+        options: Parameters<StreamFn>[2],
+      ) => {
+        capturedOptions.push(options);
+        return stream();
+      }) as unknown as StreamFn,
+      {
+        runId: "run-boon",
+        sessionId: "thread-42",
+        senderId: "teams-alice",
+        provider: "anthropic",
+        model: "claude",
+        trace: createDiagnosticTraceContext({
+          traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+          spanId: "00f067aa0ba902b7",
+          traceFlags: "01",
+        }),
+        nextCallId: () => "call-boon",
+      },
+    );
+
+    await drain(
+      wrapped({} as never, {} as never, callerOptions) as unknown as AsyncIterable<unknown>,
+    );
+
+    const headers = readRecordField(
+      requireRecord(capturedOptions[0], "captured stream options"),
+      "headers",
+      "captured stream headers",
+    );
+    expect(headers["x-boon-session-id"]).toBe("thread-42");
+    expect(headers["x-boon-user-id"]).toBe("teams-alice");
+    expect(headers["X-Custom"]).toBe("kept"); // caller header preserved
+    expect(typeof headers.traceparent).toBe("string"); // composes with traceparent
+    // Caller's original headers object is not mutated.
+    expect(callerOptions.headers).toEqual({ "X-Custom": "kept" });
+  });
+
+  it("omits Boon usage headers when ctx has neither session nor sender", async () => {
+    async function* stream() {
+      yield { type: "text", text: "ok" };
+    }
+    const capturedOptions: Array<Parameters<StreamFn>[2]> = [];
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      ((
+        _model: Parameters<StreamFn>[0],
+        _context: Parameters<StreamFn>[1],
+        options: Parameters<StreamFn>[2],
+      ) => {
+        capturedOptions.push(options);
+        return stream();
+      }) as unknown as StreamFn,
+      {
+        runId: "run-none",
+        provider: "anthropic",
+        model: "claude",
+        trace: createDiagnosticTraceContext({
+          traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+          spanId: "00f067aa0ba902b7",
+          traceFlags: "01",
+        }),
+        nextCallId: () => "call-none",
+      },
+    );
+
+    await drain(
+      wrapped({} as never, {} as never, { headers: {} }) as unknown as AsyncIterable<unknown>,
+    );
+
+    const headers = readRecordField(
+      requireRecord(capturedOptions[0], "captured stream options"),
+      "headers",
+      "captured stream headers",
+    );
+    expect(headers).not.toHaveProperty("x-boon-session-id");
+    expect(headers).not.toHaveProperty("x-boon-user-id");
+  });
+
   it("emits error events when stream iteration fails", async () => {
     const requestId = "req_provider_123";
     const stream = {

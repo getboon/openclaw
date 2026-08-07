@@ -42,6 +42,7 @@ type ModelCallDiagnosticContext = {
   runId: string;
   sessionKey?: string;
   sessionId?: string;
+  senderId?: string;
   provider: string;
   model: string;
   api?: string;
@@ -95,6 +96,11 @@ const MODEL_CALL_STREAM_PROGRESS_INTERVAL_MS = 30_000;
 const MODEL_CALL_STREAM_PROGRESS_REASON = "model_call:stream_progress";
 const MODEL_CALL_STREAM_RETURN_TIMEOUT_MS = 1000;
 const TRACEPARENT_HEADER_NAME = "traceparent";
+// Boon usage-attribution headers (ENG-16470): the gateway records these on each
+// LLM request log so boon-core can break token usage down per session / per user.
+// Header names are lowercase; downstream readers (Go net/http) canonicalize.
+const BOON_SESSION_HEADER_NAME = "x-boon-session-id";
+const BOON_USER_HEADER_NAME = "x-boon-user-id";
 type ModelCallStreamOptions = Parameters<StreamFn>[2];
 
 function utf8JsonByteLength(value: unknown): number | undefined {
@@ -542,6 +548,31 @@ function withDiagnosticTraceparentHeader(
   };
 }
 
+// withBoonUsageHeaders adds the Boon per-turn attribution headers (ENG-16470)
+// to the outbound model-call request: X-Boon-Session-ID (the per-thread session
+// id) and X-Boon-User-ID (the sending chat user). Empty values are omitted so we
+// never emit blank headers. Composes on top of the traceparent wrapper —
+// preserves its onPayload accounting by spreading the already-wrapped options.
+function withBoonUsageHeaders(
+  options: ModelCallStreamOptions,
+  ctx: ModelCallDiagnosticContext,
+): ModelCallStreamOptions {
+  if (!ctx.sessionId && !ctx.senderId) {
+    return options;
+  }
+  const headers: Record<string, string> = { ...(options?.headers ?? {}) };
+  if (ctx.sessionId) {
+    headers[BOON_SESSION_HEADER_NAME] = ctx.sessionId;
+  }
+  if (ctx.senderId) {
+    headers[BOON_USER_HEADER_NAME] = ctx.senderId;
+  }
+  return {
+    ...options,
+    headers,
+  };
+}
+
 async function safeReturnIterator(iterator: AsyncIterator<unknown>): Promise<void> {
   let returnResult: unknown;
   try {
@@ -735,7 +766,10 @@ export function wrapStreamFnWithDiagnosticModelCallEvents(
       modelContent,
       contentCapture: ctx.contentCapture,
     };
-    const propagatedOptions = withDiagnosticTraceparentHeader(options, trace, state);
+    const propagatedOptions = withBoonUsageHeaders(
+      withDiagnosticTraceparentHeader(options, trace, state),
+      ctx,
+    );
 
     try {
       const result = streamFn(model, streamContext, propagatedOptions);
