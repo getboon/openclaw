@@ -560,7 +560,7 @@ function withBoonUsageHeaders(
   if (!ctx.sessionId && !ctx.senderId) {
     return options;
   }
-  const headers: Record<string, string> = { ...(options?.headers ?? {}) };
+  const headers: Record<string, string> = { ...options?.headers };
   if (ctx.sessionId) {
     headers[BOON_SESSION_HEADER_NAME] = ctx.sessionId;
   }
