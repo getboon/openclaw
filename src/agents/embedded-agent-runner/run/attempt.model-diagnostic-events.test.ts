@@ -720,7 +720,9 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
       {
         runId: "run-boon",
         sessionId: "thread-42",
-        senderId: "teams-alice",
+        senderId: "U0123ABCD",
+        senderName: "Alice",
+        senderSource: "slack",
         provider: "anthropic",
         model: "claude",
         trace: createDiagnosticTraceContext({
@@ -742,7 +744,9 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
       "captured stream headers",
     );
     expect(headers["x-boon-session-id"]).toBe("thread-42");
-    expect(headers["x-boon-user-id"]).toBe("teams-alice");
+    expect(headers["x-boon-user-id"]).toBe("U0123ABCD");
+    expect(headers["x-boon-user-name"]).toBe("Alice");
+    expect(headers["x-boon-user-source"]).toBe("slack");
     expect(headers["X-Custom"]).toBe("kept"); // caller header preserved
     expect(typeof headers.traceparent).toBe("string"); // composes with traceparent
     // Caller's original headers object is not mutated.
@@ -787,6 +791,8 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     );
     expect(headers).not.toHaveProperty("x-boon-session-id");
     expect(headers).not.toHaveProperty("x-boon-user-id");
+    expect(headers).not.toHaveProperty("x-boon-user-name");
+    expect(headers).not.toHaveProperty("x-boon-user-source");
   });
 
   it("emits error events when stream iteration fails", async () => {

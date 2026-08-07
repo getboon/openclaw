@@ -43,6 +43,8 @@ type ModelCallDiagnosticContext = {
   sessionKey?: string;
   sessionId?: string;
   senderId?: string;
+  senderName?: string;
+  senderSource?: string;
   provider: string;
   model: string;
   api?: string;
@@ -98,9 +100,13 @@ const MODEL_CALL_STREAM_RETURN_TIMEOUT_MS = 1000;
 const TRACEPARENT_HEADER_NAME = "traceparent";
 // Boon usage-attribution headers (ENG-16470): the gateway records these on each
 // LLM request log so boon-core can break token usage down per session / per user.
-// Header names are lowercase; downstream readers (Go net/http) canonicalize.
+// user-id is the stable per-platform id; user-name + user-source make it legible
+// in the dashboard (e.g. "Alice" via "slack"). Header names are lowercase;
+// downstream readers (Go net/http) canonicalize.
 const BOON_SESSION_HEADER_NAME = "x-boon-session-id";
 const BOON_USER_HEADER_NAME = "x-boon-user-id";
+const BOON_USER_NAME_HEADER_NAME = "x-boon-user-name";
+const BOON_USER_SOURCE_HEADER_NAME = "x-boon-user-source";
 type ModelCallStreamOptions = Parameters<StreamFn>[2];
 
 function utf8JsonByteLength(value: unknown): number | undefined {
@@ -550,14 +556,16 @@ function withDiagnosticTraceparentHeader(
 
 // withBoonUsageHeaders adds the Boon per-turn attribution headers (ENG-16470)
 // to the outbound model-call request: X-Boon-Session-ID (the per-thread session
-// id) and X-Boon-User-ID (the sending chat user). Empty values are omitted so we
-// never emit blank headers. Composes on top of the traceparent wrapper —
-// preserves its onPayload accounting by spreading the already-wrapped options.
+// id), X-Boon-User-ID (the stable per-platform user id), and — to make that id
+// legible in the dashboard — X-Boon-User-Name and X-Boon-User-Source (the
+// originating platform, e.g. "slack"). Empty values are omitted so we never emit
+// blank headers. Composes on top of the traceparent wrapper — preserves its
+// onPayload accounting by spreading the already-wrapped options.
 function withBoonUsageHeaders(
   options: ModelCallStreamOptions,
   ctx: ModelCallDiagnosticContext,
 ): ModelCallStreamOptions {
-  if (!ctx.sessionId && !ctx.senderId) {
+  if (!ctx.sessionId && !ctx.senderId && !ctx.senderName && !ctx.senderSource) {
     return options;
   }
   const headers: Record<string, string> = { ...options?.headers };
@@ -566,6 +574,12 @@ function withBoonUsageHeaders(
   }
   if (ctx.senderId) {
     headers[BOON_USER_HEADER_NAME] = ctx.senderId;
+  }
+  if (ctx.senderName) {
+    headers[BOON_USER_NAME_HEADER_NAME] = ctx.senderName;
+  }
+  if (ctx.senderSource) {
+    headers[BOON_USER_SOURCE_HEADER_NAME] = ctx.senderSource;
   }
   return {
     ...options,
