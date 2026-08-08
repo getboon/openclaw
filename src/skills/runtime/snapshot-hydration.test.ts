@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { SessionSkillSnapshot } from "../../config/sessions/types.js";
 import { createCanonicalFixtureSkill } from "../test-support/test-helpers.js";
-import { hydrateResolvedSkills } from "./snapshot-hydration.js";
+import { hydrateRuntimeSkills } from "./snapshot-hydration.js";
 
 function makeFixtureSkill(name: string, bodySize = 3000) {
   const source = `# ${name}\n\n${"x".repeat(bodySize)}`;
@@ -15,24 +15,25 @@ function makeFixtureSkill(name: string, bodySize = 3000) {
   });
 }
 
-describe("hydrateResolvedSkills", () => {
-  it("returns the same snapshot when resolvedSkills is already populated", () => {
+describe("hydrateRuntimeSkills", () => {
+  it("returns the same snapshot when both runtime skill lists are already populated", () => {
     const snapshot: SessionSkillSnapshot = {
       prompt: "p",
       skills: [{ name: "x" }],
       resolvedSkills: [makeFixtureSkill("x", 100)],
+      commandSkills: [makeFixtureSkill("x", 100)],
       version: 1,
     };
     let buildCalls = 0;
-    const result = hydrateResolvedSkills(snapshot, () => {
+    const result = hydrateRuntimeSkills(snapshot, () => {
       buildCalls += 1;
-      return { prompt: "rebuilt", skills: [], resolvedSkills: [], version: 99 };
+      return { resolvedSkills: [], commandSkills: [] };
     });
     expect(result).toBe(snapshot);
     expect(buildCalls).toBe(0);
   });
 
-  it("rebuilds resolvedSkills only when missing and preserves persisted fields", () => {
+  it("rebuilds runtime skill lists when missing and preserves persisted fields", () => {
     const stripped: SessionSkillSnapshot = {
       prompt: "original-prompt",
       skills: [{ name: "x" }],
@@ -40,14 +41,13 @@ describe("hydrateResolvedSkills", () => {
       version: 7,
     };
     const rebuiltSkills = [makeFixtureSkill("x", 200)];
+    const rebuiltCommands = [makeFixtureSkill("command", 200)];
     let buildCalls = 0;
-    const result = hydrateResolvedSkills(stripped, () => {
+    const result = hydrateRuntimeSkills(stripped, () => {
       buildCalls += 1;
       return {
-        prompt: "DIFFERENT-PROMPT",
-        skills: [{ name: "y" }],
         resolvedSkills: rebuiltSkills,
-        version: 99,
+        commandSkills: rebuiltCommands,
       };
     });
     expect(buildCalls).toBe(1);
@@ -56,19 +56,24 @@ describe("hydrateResolvedSkills", () => {
     expect(result.skillFilter).toEqual(["x"]);
     expect(result.version).toBe(7);
     expect(result.resolvedSkills).toBe(rebuiltSkills);
+    expect(result.commandSkills).toBe(rebuiltCommands);
   });
 
-  it("treats an empty resolvedSkills array as populated", () => {
+  it("treats empty runtime skill arrays as populated", () => {
     const snapshot: SessionSkillSnapshot = {
       prompt: "",
       skills: [],
       resolvedSkills: [],
+      commandSkills: [],
       version: 1,
     };
     let buildCalls = 0;
-    const result = hydrateResolvedSkills(snapshot, () => {
+    const result = hydrateRuntimeSkills(snapshot, () => {
       buildCalls += 1;
-      return { prompt: "", skills: [], resolvedSkills: [makeFixtureSkill("x")], version: 1 };
+      return {
+        resolvedSkills: [makeFixtureSkill("x")],
+        commandSkills: [makeFixtureSkill("x")],
+      };
     });
     expect(result).toBe(snapshot);
     expect(buildCalls).toBe(0);

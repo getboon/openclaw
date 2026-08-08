@@ -109,6 +109,8 @@ export type RunCliAgentParams = {
   images?: ImageContent[];
   imageOrder?: PromptImageOrderEntry[];
   skillsSnapshot?: SkillSnapshot;
+  /** Skill selected by an authorized explicit chat command for this run. */
+  explicitSkillName?: string;
   messageChannel?: string;
   messageProvider?: string;
   currentChannelId?: string;

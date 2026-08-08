@@ -494,6 +494,7 @@ export async function executePreparedCliRun(
       ? await prepareClaudeCliSkillsPlugin({
           backendId: context.backendResolved.id,
           skillsSnapshot: params.skillsSnapshot,
+          explicitSkillName: params.explicitSkillName,
         })
       : undefined;
   let fallbackClaudeSkillsPluginCleanupOwned = false;

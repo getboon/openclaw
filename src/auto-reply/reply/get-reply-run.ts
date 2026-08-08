@@ -406,6 +406,7 @@ type RunPreparedReplyParams = {
   commandAuthorized: boolean;
   command: ReturnType<typeof buildCommandContext>;
   commandSource?: string;
+  explicitSkillName?: string;
   allowTextCommands: boolean;
   directives: InlineDirectives;
   defaultActivation: Parameters<typeof buildGroupIntro>[0]["defaultActivation"];
@@ -1346,6 +1347,7 @@ export async function runPreparedReply(
       cwd: normalizeOptionalString(sessionEntry?.spawnedCwd),
       config: cfg,
       skillsSnapshot,
+      explicitSkillName: params.explicitSkillName,
       provider,
       model,
       hasSessionModelOverride: runHasSessionModelOverride,

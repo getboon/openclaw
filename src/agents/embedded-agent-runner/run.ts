@@ -2103,6 +2103,7 @@ async function runEmbeddedAgentInternal(
             workspaceDir: resolvedWorkspace,
             cwd: params.cwd,
             agentDir,
+            explicitSkillName: params.explicitSkillName,
             config: params.config,
             allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
             contextEngine,

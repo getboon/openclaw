@@ -118,6 +118,8 @@ export type FollowupRun = {
     cwd?: string;
     config: OpenClawConfig;
     skillsSnapshot?: SkillSnapshot;
+    /** Skill selected by an authorized explicit chat command for this run. */
+    explicitSkillName?: string;
     provider: string;
     model: string;
     hasSessionModelOverride?: boolean;
