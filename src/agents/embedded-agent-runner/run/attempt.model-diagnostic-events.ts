@@ -98,7 +98,7 @@ const MODEL_CALL_STREAM_PROGRESS_INTERVAL_MS = 30_000;
 const MODEL_CALL_STREAM_PROGRESS_REASON = "model_call:stream_progress";
 const MODEL_CALL_STREAM_RETURN_TIMEOUT_MS = 1000;
 const TRACEPARENT_HEADER_NAME = "traceparent";
-// Boon usage-attribution headers (ENG-16470): the gateway records these on each
+// Boon usage-attribution headers: the gateway records these on each
 // LLM request log so boon-core can break token usage down per session / per user.
 // user-id is the stable per-platform id; user-name + user-source make it legible
 // in the dashboard (e.g. "Alice" via "slack"). Header names are lowercase;
@@ -554,32 +554,48 @@ function withDiagnosticTraceparentHeader(
   };
 }
 
-// withBoonUsageHeaders adds the Boon per-turn attribution headers (ENG-16470)
-// to the outbound model-call request: X-Boon-Session-ID (the per-thread session
+// A header value is user-controlled (e.g. a Slack display name), so it can carry
+// CR/LF or other control characters that the fetch/SDK header layer rejects —
+// which would fail the entire model call. Strip control characters; if nothing
+// safe remains, the header is omitted rather than emitted blank.
+function sanitizeHeaderValue(value: string): string {
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\u0000-\u001F\u007F]/g, "").trim();
+}
+
+// withBoonUsageHeaders adds the Boon per-turn attribution headers to the
+// outbound model-call request: X-Boon-Session-ID (the per-thread session
 // id), X-Boon-User-ID (the stable per-platform user id), and — to make that id
 // legible in the dashboard — X-Boon-User-Name and X-Boon-User-Source (the
-// originating platform, e.g. "slack"). Empty values are omitted so we never emit
-// blank headers. Composes on top of the traceparent wrapper — preserves its
-// onPayload accounting by spreading the already-wrapped options.
+// originating platform, e.g. "slack"). Empty/invalid values are omitted so we
+// never emit a blank or control-character-bearing header. Composes on top of the
+// traceparent wrapper — preserves its onPayload accounting by spreading the
+// already-wrapped options.
 function withBoonUsageHeaders(
   options: ModelCallStreamOptions,
   ctx: ModelCallDiagnosticContext,
 ): ModelCallStreamOptions {
-  if (!ctx.sessionId && !ctx.senderId && !ctx.senderName && !ctx.senderSource) {
-    return options;
-  }
+  const entries: Array<[string, string | undefined]> = [
+    [BOON_SESSION_HEADER_NAME, ctx.sessionId],
+    [BOON_USER_HEADER_NAME, ctx.senderId],
+    [BOON_USER_NAME_HEADER_NAME, ctx.senderName],
+    [BOON_USER_SOURCE_HEADER_NAME, ctx.senderSource],
+  ];
   const headers: Record<string, string> = { ...options?.headers };
-  if (ctx.sessionId) {
-    headers[BOON_SESSION_HEADER_NAME] = ctx.sessionId;
+  let added = false;
+  for (const [name, raw] of entries) {
+    if (!raw) {
+      continue;
+    }
+    const safe = sanitizeHeaderValue(raw);
+    if (!safe) {
+      continue;
+    }
+    headers[name] = safe;
+    added = true;
   }
-  if (ctx.senderId) {
-    headers[BOON_USER_HEADER_NAME] = ctx.senderId;
-  }
-  if (ctx.senderName) {
-    headers[BOON_USER_NAME_HEADER_NAME] = ctx.senderName;
-  }
-  if (ctx.senderSource) {
-    headers[BOON_USER_SOURCE_HEADER_NAME] = ctx.senderSource;
+  if (!added) {
+    return options;
   }
   return {
     ...options,

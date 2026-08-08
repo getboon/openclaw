@@ -795,6 +795,70 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(headers).not.toHaveProperty("x-boon-user-source");
   });
 
+  // Capture the outbound headers for a given partial diagnostic ctx.
+  async function boonHeadersFor(
+    partialCtx: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    async function* stream() {
+      yield { type: "text", text: "ok" };
+    }
+    const captured: Array<Parameters<StreamFn>[2]> = [];
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      ((
+        _m: Parameters<StreamFn>[0],
+        _c: Parameters<StreamFn>[1],
+        options: Parameters<StreamFn>[2],
+      ) => {
+        captured.push(options);
+        return stream();
+      }) as unknown as StreamFn,
+      {
+        runId: "run-x",
+        provider: "anthropic",
+        model: "claude",
+        trace: createDiagnosticTraceContext({
+          traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+          spanId: "00f067aa0ba902b7",
+          traceFlags: "01",
+        }),
+        nextCallId: () => "call-x",
+        ...partialCtx,
+      },
+    );
+    await drain(
+      wrapped({} as never, {} as never, { headers: {} }) as unknown as AsyncIterable<unknown>,
+    );
+    return readRecordField(
+      requireRecord(captured[0], "captured stream options"),
+      "headers",
+      "captured stream headers",
+    );
+  }
+
+  it("emits each usage header independently of the others", async () => {
+    const sessionOnly = await boonHeadersFor({ sessionId: "thread-1" });
+    expect(sessionOnly["x-boon-session-id"]).toBe("thread-1");
+    expect(sessionOnly).not.toHaveProperty("x-boon-user-id");
+    expect(sessionOnly).not.toHaveProperty("x-boon-user-name");
+
+    const userOnly = await boonHeadersFor({ senderId: "U9", senderName: "Bob" });
+    expect(userOnly["x-boon-user-id"]).toBe("U9");
+    expect(userOnly["x-boon-user-name"]).toBe("Bob");
+    expect(userOnly).not.toHaveProperty("x-boon-session-id");
+  });
+
+  it("strips control characters from header values and omits all-control values", async () => {
+    const headers = await boonHeadersFor({
+      senderId: "U1",
+      senderName: "Alice\r\nX-Injected: evil",
+      senderSource: "\n\r\t", // only control chars → omitted
+    });
+    // CR/LF removed so no header injection / no rejected control chars.
+    expect(headers["x-boon-user-name"]).toBe("AliceX-Injected: evil");
+    expect(String(headers["x-boon-user-name"])).not.toMatch(/[\r\n]/);
+    expect(headers).not.toHaveProperty("x-boon-user-source");
+  });
+
   it("emits error events when stream iteration fails", async () => {
     const requestId = "req_provider_123";
     const stream = {
