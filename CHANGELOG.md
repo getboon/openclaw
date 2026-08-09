@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.15
+
+Preserves explicit `/skill <name>` context through workflow runs so restricted-tool runs can execute the selected skill instead of returning a generic capability refusal.
+
+- **#107 (ENG-17282):** authorized `/skill <name>` commands were rewritten into generic model text, discarding the selected skill identity before agent execution; restricted-tool workflow runs then stripped the entire skills prompt, leaving the model with no access to the selected skill's instructions. Carries the authorized explicit skill identity through queueing and both the embedded and CLI-backed runners; restricted-tool runs now retain only the selected skill's prompt instead of dropping it. Separates normal prompt-visible skills from user-invocable command skills so hidden skills aren't exposed during ordinary runs, reloads runtime-only command skill data after a cold session resume, and strips it from persisted session state. Paired with `anychat-boon-web` #35 and `boon` #13818 (deploy order: OpenClaw first, anychat-boon-web second, boon-core producer last).
+- Base = `2026.6.11-boon.14`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.15` in lockstep. No other code changes; #107 was merged onto `boon` before this release.
+
 ## 2026.6.11-boon.14
 
 An observable, reliably-scheduled session-maintenance sweep, a Teams file-send fix for channels/groups without SharePoint configured, a fix for a leaked bare "N" on streamed silent turns, and a security dependency sweep off high/critical advisories.
