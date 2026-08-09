@@ -8,9 +8,10 @@ minimumReleaseAge: 2880
 
 minimumReleaseAgeExclude:
   # GHSA-2v37-7h3g-55p8 / GHSA-28wg-ghj8-5hjv (nanoid non-secure-generator
-  # infinite loop). Both patched versions were published 2026-08-07T16:41:06Z —
-  # inside the 2880-min aging window as of this fix, so they need an explicit
-  # exclude entry (same pattern as the other pinned CVE-fix versions below).
+  # infinite loop). nanoid@3.3.17 was published 2026-08-03T10:39:22Z and
+  # nanoid@5.1.16 was published 2026-06-24T18:37:08Z; listed here so pnpm's
+  # release-age gate doesn't block resolving to these exact pinned versions
+  # (same pattern as the other pinned CVE-fix versions below).
   - "nanoid@3.3.17"
   - "nanoid@5.1.16"
   - "@openclaw/crabline@0.1.6"

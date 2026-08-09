@@ -51,7 +51,14 @@ function isPlainObject(value) {
 
 function readWorkspaceOverrides() {
   const workspace = parseYaml(readFileSync(path.join(ROOT_DIR, "pnpm-workspace.yaml"), "utf8"));
-  return normalizeOverrides(workspace?.overrides);
+  const overrides = normalizeOverrides(workspace?.overrides);
+  // pnpm's flat "parent>child" selector syntax (used to scope an override to one
+  // dependency chain, e.g. "postcss>nanoid") isn't valid npm override syntax and
+  // isn't a real package name — passing it through crashes `npm install` with
+  // EINVALIDTAGNAME. These selectors exist so *pnpm* resolves the pinned version;
+  // the equivalent npm-nested scoping for shrinkwrap purposes is already derived
+  // from the regenerated pnpm-lock.yaml by readPnpmLockScopedVersionOverrides().
+  return Object.fromEntries(Object.entries(overrides).filter(([key]) => !key.includes(">")));
 }
 
 function readWorkspacePackageExtensions() {
