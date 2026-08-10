@@ -1281,12 +1281,18 @@ export async function dispatchReplyFromConfig(
   });
   const sessionAgentCfg = resolveAgentConfig(cfg, sessionAgentId);
   // Every visible reply-turn gets a lane deadline derived from the same
-  // resolver the agent run itself uses, plus settle grace — so a hung
-  // resolver can never retain the lane/status indefinitely even when
-  // agents.defaults.timeoutSeconds is unset (the resolver's own 48h default
-  // applies, not "no deadline"). `timeoutSeconds: 0` still means no timeout
-  // (resolveAgentTimeoutMs's own sentinel), consistent everywhere else.
-  const configuredTurnDeadlineMs = addTimerTimeoutGraceMs(resolveAgentTimeoutMs({ cfg }), 15_000);
+  // resolver the agent run itself uses (including the caller's own
+  // timeoutOverrideSeconds, e.g. a heartbeat turn requesting an unbounded
+  // run), plus settle grace — so a hung resolver can never retain the
+  // lane/status indefinitely even when agents.defaults.timeoutSeconds is
+  // unset (the resolver's own 48h default applies, not "no deadline").
+  // `agents.defaults.timeoutSeconds` itself has no "0 means no timeout"
+  // sentinel (the schema is `positive()`, so 0 isn't a valid config value);
+  // that sentinel only exists for a per-run overrideSeconds, mirrored here.
+  const configuredTurnDeadlineMs = addTimerTimeoutGraceMs(
+    resolveAgentTimeoutMs({ cfg, overrideSeconds: params.replyOptions?.timeoutOverrideSeconds }),
+    15_000,
+  );
   const verboseProgress = createShouldEmitVerboseProgress({
     sessionKey: acpDispatchSessionKey,
     storePath: sessionStoreEntry.storePath,
