@@ -197,18 +197,23 @@ function buildNonTerminalToolStatusText(params: {
   // toolMetas has no other entries to derive a count from (e.g. legacy
   // callers with an empty toolMetas array).
   const didNotFinishCount = Math.max(1, params.totalToolCount - params.completedToolCount);
-  const header =
-    didNotFinishCount === 1 ? "One step didn't finish" : `${didNotFinishCount} steps didn't finish`;
+  const isMultiple = didNotFinishCount > 1;
+  const header = isMultiple ? `${didNotFinishCount} steps didn't finish` : "One step didn't finish";
+  // Only the most recent failure's identity/reason is tracked (lastToolError
+  // is a single slot), so when multiple steps failed the label and closing
+  // guidance say so explicitly rather than implying "Step:" is the full list.
+  const stepLabel = isMultiple ? "Most recent step" : "Step";
   const steps =
     params.completedToolCount > 0
       ? ` (${params.completedToolCount} of ${params.totalToolCount} steps completed)`
       : "";
   const reason = params.reasonText ? ` — ${params.reasonText}` : "";
   const detail = params.detailSuffix ? `: ${params.detailSuffix}` : "";
+  const closing = isMultiple
+    ? "The reply above may be missing what those steps produced. Ask me to redo them if something looks off."
+    : "The reply above may be missing what that step produced. Ask me to redo that step if something looks off.";
   return (
-    `↻ ${header}${steps}.\n` +
-    `Step: ${params.actionSummary}${reason}${detail}\n` +
-    `The reply above may be missing what that step produced. Ask me to redo that step if something looks off.`
+    `↻ ${header}${steps}.\n${stepLabel}: ${params.actionSummary}${reason}${detail}\n` + closing
   );
 }
 

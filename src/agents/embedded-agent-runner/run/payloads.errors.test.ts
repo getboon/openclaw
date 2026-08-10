@@ -1072,6 +1072,12 @@ describe("buildEmbeddedRunPayloads", () => {
     // Header pluralizes with the count of steps that didn't finish (2), not a
     // hardcoded singular "One step" regardless of how many actually failed.
     expect(warning?.text).toContain("2 steps didn't finish");
+    // The label and closing guidance stay plural-consistent with the header
+    // instead of naming a single "Step:" while multiple steps failed.
+    expect(warning?.text).toContain("Most recent step:");
+    expect(warning?.text).toMatch(/redo them/i);
+    expect(warning?.text).not.toMatch(/\bStep:/);
+    expect(warning?.text).not.toMatch(/redo that step/i);
   });
 
   it("wraps markdown-capable mutating tool warnings so mention-looking names stay inert", () => {
