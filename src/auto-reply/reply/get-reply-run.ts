@@ -1334,8 +1334,9 @@ export async function runPreparedReply(
       channelContext: ctx.ChannelContext ?? sessionCtx.ChannelContext,
       senderName: normalizeOptionalString(sessionCtx.SenderName),
       // Originating platform (slack/msteams/boon-web/…) for usage attribution.
-      // System-event providers (heartbeat/cron-event) are not real channels — omit
-      // them so system model calls don't create bogus per-source usage buckets.
+      // System-event providers (heartbeat/cron-event/exec-event — whatever
+      // isSystemEventProvider matches) are not real channels, so omit them and
+      // avoid bogus per-source usage buckets for system model calls.
       senderSource: isSystemEventProvider(sessionCtx.Provider)
         ? undefined
         : normalizeOptionalString(sessionCtx.Provider),

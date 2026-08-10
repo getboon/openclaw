@@ -859,6 +859,18 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(headers).not.toHaveProperty("x-boon-user-source");
   });
 
+  it("strips non-ASCII (emoji / U+2028) that the header layer can't carry", async () => {
+    const headers = await boonHeadersFor({
+      senderId: "U1",
+      senderName: "Alice\u{1F600}Cooper", // emoji embedded, no surrounding spaces
+      senderSource: "\u{1F680}", // only an emoji → nothing printable → omitted
+    });
+    expect(headers["x-boon-user-name"]).toBe("AliceCooper");
+    // Only printable ASCII survives.
+    expect(String(headers["x-boon-user-name"])).toMatch(/^[ -~]*$/);
+    expect(headers).not.toHaveProperty("x-boon-user-source");
+  });
+
   it("emits error events when stream iteration fails", async () => {
     const requestId = "req_provider_123";
     const stream = {

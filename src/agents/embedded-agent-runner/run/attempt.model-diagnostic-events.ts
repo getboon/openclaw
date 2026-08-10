@@ -555,12 +555,13 @@ function withDiagnosticTraceparentHeader(
 }
 
 // A header value is user-controlled (e.g. a Slack display name), so it can carry
-// CR/LF or other control characters that the fetch/SDK header layer rejects —
-// which would fail the entire model call. Strip control characters; if nothing
-// safe remains, the header is omitted rather than emitted blank.
+// bytes the fetch/SDK header layer rejects — CR/LF and other C0 controls, DEL,
+// or non-ASCII such as emoji and the JS line separators U+2028/U+2029 — any of
+// which would fail the entire model call. Keep only printable ASCII (0x20-0x7E);
+// if nothing safe remains, the caller omits the header rather than emit it blank.
+// The stable identity still rides X-Boon-User-ID; the name is a best-effort label.
 function sanitizeHeaderValue(value: string): string {
-  // eslint-disable-next-line no-control-regex
-  return value.replace(/[\u0000-\u001F\u007F]/g, "").trim();
+  return value.replace(/[^ -~]/g, "").trim();
 }
 
 // withBoonUsageHeaders adds the Boon per-turn attribution headers to the
