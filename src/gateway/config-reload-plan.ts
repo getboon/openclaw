@@ -86,7 +86,7 @@ const BASE_RELOAD_RULES: ReloadRule[] = [
   // reads a live cfg via updateConfig() — without this rule the tail
   // `{prefix:"agents", kind:"none"}` rule swallows the diff and a fleet
   // reconcile of maxNudges/thresholdSeconds/etc needs a gateway restart to
-  // take effect (ENG-17107).
+  // take effect.
   {
     prefix: "agents.defaults.progressNudge",
     kind: "hot",

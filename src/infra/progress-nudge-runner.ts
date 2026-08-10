@@ -32,7 +32,7 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 import { MAX_SAFE_TIMEOUT_DELAY_MS, resolveSafeTimeoutDelayMs } from "../utils/timer-delay.js";
-import { onAgentEvent, type AgentEventPayload } from "./agent-events.js";
+import { getAgentRunContext, onAgentEvent, type AgentEventPayload } from "./agent-events.js";
 import { isWithinActiveHours } from "./heartbeat-active-hours.js";
 import { buildOutboundSessionContext } from "./outbound/session-context.js";
 import { resolveHeartbeatDeliveryTargetWithSessionRoute } from "./outbound/targets.js";
@@ -79,6 +79,8 @@ export type ProgressNudgeDeps = {
   resolveStartedAt?: (sessionKey: string) => number | undefined;
   resolveThreadId?: (sessionKey: string) => string | number | undefined;
   getRunPhase?: (sessionKey: string) => string | undefined;
+  resolveActiveSessionId?: (sessionKey: string) => string | undefined;
+  resolveRunSessionId?: (runId: string) => string | undefined;
   subscribeAgentEvents?: (listener: (evt: AgentEventPayload) => void) => () => void;
   subscribeTerminal?: (listener: (evt: ReplyRunTerminalEvent) => void) => () => void;
   resolveDeliveryTarget?: typeof resolveHeartbeatDeliveryTargetWithSessionRoute;
@@ -170,6 +172,11 @@ export function startProgressNudgeRunner(opts: {
   const resolveThreadId = deps.resolveThreadId ?? resolveActiveReplyRunThreadId;
   const getRunPhase =
     deps.getRunPhase ?? ((sessionKey: string) => replyRunRegistry.get(sessionKey)?.phase);
+  const resolveActiveSessionId =
+    deps.resolveActiveSessionId ??
+    ((sessionKey: string) => replyRunRegistry.resolveSessionId(sessionKey));
+  const resolveRunSessionId =
+    deps.resolveRunSessionId ?? ((runId: string) => getAgentRunContext(runId)?.sessionId);
   const subscribeAgentEvents = deps.subscribeAgentEvents ?? onAgentEvent;
   const subscribeTerminal = deps.subscribeTerminal ?? onReplyRunTerminal;
   const resolveDeliveryTarget =
@@ -442,6 +449,18 @@ export function startProgressNudgeRunner(opts: {
 
   const handleAgentEvent = (evt: AgentEventPayload): void => {
     if (!evt.sessionKey || (evt.stream !== "item" && evt.stream !== "tool")) {
+      return;
+    }
+    // Tool/item events never carry their own sessionId (only lifecycle events
+    // do), so correlate via the run context instead: a delayed event from a
+    // run that is no longer the active reply-run for this sessionKey (e.g. a
+    // force-cleared/aborted prior turn whose async tool call reports late)
+    // must not overwrite the anchor's progress text with stale content from
+    // an unrelated request. Fail open when either side is unresolvable
+    // (e.g. in tests) rather than silently dropping all progress text.
+    const activeSessionId = resolveActiveSessionId(evt.sessionKey);
+    const runSessionId = resolveRunSessionId(evt.runId);
+    if (activeSessionId && runSessionId && activeSessionId !== runSessionId) {
       return;
     }
     const progressText = evt.data?.progressText;

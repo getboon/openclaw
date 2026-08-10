@@ -156,10 +156,15 @@ describe("startProgressNudgeRunner scheduler", () => {
   });
 
   it("caps at maxNudges", async () => {
-    const { deps, sendMessage } = makeDeps();
+    const editMessage = vi.fn().mockResolvedValue(true);
+    const { deps, sendMessage } = makeDeps({ editMessage });
     const runner = startProgressNudgeRunner({ cfg: config({ maxNudges: 2 }), deps });
     await vi.advanceTimersByTimeAsync(300_000);
-    expect(sendMessage).toHaveBeenCalledTimes(2);
+    // The anchor is sent once, then edited once more (maxNudges: 2 total
+    // refreshes) — exercise the anchor path explicitly rather than relying on
+    // the default editMessage falling through to a real (plugin-less) send.
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(editMessage).toHaveBeenCalledTimes(1);
     runner.stop();
   });
 

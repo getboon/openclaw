@@ -1,6 +1,7 @@
 /** Main reply dispatch pipeline from finalized config/context to delivery payloads. */
 import crypto from "node:crypto";
 import { isParentOwnedBackgroundAcpSession } from "@openclaw/acp-core/session-interaction-mode";
+import { addTimerTimeoutGraceMs } from "@openclaw/normalization-core/number-coercion";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
@@ -34,6 +35,7 @@ import {
   isSubagentEnvelopeSession,
   resolveSubagentCapabilityStore,
 } from "../../agents/subagent-capabilities.js";
+import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { isToolAllowedByPolicies } from "../../agents/tool-policy-match.js";
 import { mergeAlsoAllowPolicy, resolveToolProfilePolicy } from "../../agents/tool-policy.js";
 import {
@@ -1278,13 +1280,13 @@ export async function dispatchReplyFromConfig(
     fallbackAgentId: ctx.AgentId,
   });
   const sessionAgentCfg = resolveAgentConfig(cfg, sessionAgentId);
-  const configuredAgentTimeoutSeconds = cfg.agents?.defaults?.timeoutSeconds;
-  const configuredTurnDeadlineMs =
-    typeof configuredAgentTimeoutSeconds === "number" &&
-    Number.isFinite(configuredAgentTimeoutSeconds) &&
-    configuredAgentTimeoutSeconds > 0
-      ? configuredAgentTimeoutSeconds * 1000 + 15_000
-      : undefined;
+  // Every visible reply-turn gets a lane deadline derived from the same
+  // resolver the agent run itself uses, plus settle grace — so a hung
+  // resolver can never retain the lane/status indefinitely even when
+  // agents.defaults.timeoutSeconds is unset (the resolver's own 48h default
+  // applies, not "no deadline"). `timeoutSeconds: 0` still means no timeout
+  // (resolveAgentTimeoutMs's own sentinel), consistent everywhere else.
+  const configuredTurnDeadlineMs = addTimerTimeoutGraceMs(resolveAgentTimeoutMs({ cfg }), 15_000);
   const verboseProgress = createShouldEmitVerboseProgress({
     sessionKey: acpDispatchSessionKey,
     storePath: sessionStoreEntry.storePath,
@@ -3481,7 +3483,7 @@ export async function dispatchReplyFromConfig(
     // to any recipient never reached the user, even though the turn itself
     // produced an answer — record the reply-operation outcome as failed so
     // terminal-event listeners (e.g. the progress-nudge failure notice) don't
-    // treat this as a silent success (ENG-17107). Diagnostics timing below
+    // treat this as a silent success. Diagnostics timing below
     // stays "completed": it measures dispatch duration, not delivery success.
     if (attemptedFinalDelivery && finalDeliveryFailed) {
       dispatchReplyOperation?.fail(
