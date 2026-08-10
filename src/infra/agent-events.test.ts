@@ -449,6 +449,28 @@ describe("agent-events sequencing", () => {
     expect(receivedSessionKey).toBeUndefined();
   });
 
+  test("preserves sessionKey for hidden progress events", () => {
+    resetAgentRunContextForTest();
+    registerAgentRunContext("run-hidden-progress", {
+      sessionKey: "session-quietchat-progress",
+      isControlUiVisible: false,
+    });
+
+    let receivedSessionKey: string | undefined;
+    const stop = onAgentEvent((evt) => {
+      receivedSessionKey = evt.sessionKey;
+    });
+    emitAgentEvent({
+      runId: "run-hidden-progress",
+      stream: "tool",
+      data: { progressText: "the uploaded documents" },
+      sessionKey: "session-quietchat-progress",
+    });
+    stop();
+
+    expect(receivedSessionKey).toBe("session-quietchat-progress");
+  });
+
   test("preserves sessionKey for lifecycle events hidden from Control UI", () => {
     resetAgentRunContextForTest();
     registerAgentRunContext("run-hidden-lifecycle", {

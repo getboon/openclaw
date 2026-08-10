@@ -444,7 +444,14 @@ export function emitAgentEvent(event: Omit<AgentEventPayload, "seq" | "ts">) {
   // unavailable by the time the terminal event arrives. Terminal failures are
   // emitted on the lifecycle stream with `phase: "error"`; the separate error
   // stream remains redacted for hidden runs because it is observational only.
-  const preserveSessionKey = isControlUiVisible || event.stream === "lifecycle";
+  // Channel-routed progress events stay hidden from Control UI, but internal
+  // observers such as the progress-nudge runner still need the route identity
+  // to associate tool/item progress with the active reply run.
+  const preserveSessionKey =
+    isControlUiVisible ||
+    event.stream === "lifecycle" ||
+    event.stream === "tool" ||
+    event.stream === "item";
   const sessionKey = preserveSessionKey ? (eventSessionKey ?? context?.sessionKey) : undefined;
   // Stamp lifecycle events with the owning sessionId (see AgentEventPayload) at
   // emit time, since the run context can be cleared before the terminal persists.

@@ -1278,6 +1278,13 @@ export async function dispatchReplyFromConfig(
     fallbackAgentId: ctx.AgentId,
   });
   const sessionAgentCfg = resolveAgentConfig(cfg, sessionAgentId);
+  const configuredAgentTimeoutSeconds = cfg.agents?.defaults?.timeoutSeconds;
+  const configuredTurnDeadlineMs =
+    typeof configuredAgentTimeoutSeconds === "number" &&
+    Number.isFinite(configuredAgentTimeoutSeconds) &&
+    configuredAgentTimeoutSeconds > 0
+      ? configuredAgentTimeoutSeconds * 1000 + 15_000
+      : undefined;
   const verboseProgress = createShouldEmitVerboseProgress({
     sessionKey: acpDispatchSessionKey,
     storePath: sessionStoreEntry.storePath,
@@ -1369,6 +1376,7 @@ export async function dispatchReplyFromConfig(
       resetTriggered: false,
       routeThreadId,
       upstreamAbortSignal: params.replyOptions?.abortSignal,
+      deadlineMs: configuredTurnDeadlineMs,
       waitForActive: !allowActivePreDispatch && !allowSlackRoutedThreadBypass,
       ...(shouldRecoverStaleVisibleOperation ? { waitTimeoutMs: visibleReplyRecoveryWaitMs } : {}),
     });
@@ -1414,6 +1422,7 @@ export async function dispatchReplyFromConfig(
           resetTriggered: false,
           routeThreadId,
           upstreamAbortSignal: params.replyOptions?.abortSignal,
+          deadlineMs: configuredTurnDeadlineMs,
           waitForActive: replyOperationStillActive,
           waitTimeoutMs: visibleReplyRecoveryWaitMs,
         });
@@ -3468,6 +3477,18 @@ export async function dispatchReplyFromConfig(
     const counts = dispatcher.getQueuedCounts();
     counts.final += routedFinalCount;
     commitInboundDedupeIfClaimed();
+    // A final payload that was neither queued for later delivery nor routed
+    // to any recipient never reached the user, even though the turn itself
+    // produced an answer — record the reply-operation outcome as failed so
+    // terminal-event listeners (e.g. the progress-nudge failure notice) don't
+    // treat this as a silent success (ENG-17107). Diagnostics timing below
+    // stays "completed": it measures dispatch duration, not delivery success.
+    if (attemptedFinalDelivery && finalDeliveryFailed) {
+      dispatchReplyOperation?.fail(
+        "delivery_failed",
+        new Error("final reply delivery failed: not queued, nothing routed"),
+      );
+    }
     recordAgentDispatchCompleted("completed");
     recordProcessed(
       "completed",

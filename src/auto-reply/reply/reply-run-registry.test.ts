@@ -124,6 +124,72 @@ describe("reply run registry", () => {
     expect(replyRunRegistry.isActive("agent:main:main")).toBe(false);
   });
 
+  it("force-clears a retained operation when its turn deadline expires", async () => {
+    vi.useFakeTimers();
+    try {
+      const cancel = vi.fn();
+      const events: Array<{ result: unknown }> = [];
+      const off = (await import("./reply-run-registry.js")).onReplyRunTerminal((event) => {
+        events.push({ result: event.result });
+      });
+      const operation = createReplyOperation({
+        sessionKey: "agent:main:deadline",
+        sessionId: "session-deadline",
+        resetTriggered: false,
+        deadlineMs: 100,
+      });
+      operation.retainFailureUntilComplete();
+      operation.attachBackend({
+        kind: "embedded",
+        cancel,
+        isStreaming: () => true,
+      });
+      operation.setPhase("running");
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(operation.result).toMatchObject({ kind: "failed", code: "turn_deadline" });
+      expect(cancel).toHaveBeenCalledWith("superseded");
+      expect(replyRunRegistry.isActive("agent:main:deadline")).toBe(false);
+      expect(events).toHaveLength(1);
+      expect(events[0]?.result).toMatchObject({ kind: "failed", code: "turn_deadline" });
+      off();
+    } finally {
+      await vi.runOnlyPendingTimersAsync();
+      vi.useRealTimers();
+    }
+  });
+
+  it("force-clears a retained failure even after the failure result is set", async () => {
+    vi.useFakeTimers();
+    try {
+      const cancel = vi.fn();
+      const operation = createReplyOperation({
+        sessionKey: "agent:main:retained-failure-deadline",
+        sessionId: "session-retained-failure-deadline",
+        resetTriggered: false,
+        deadlineMs: 100,
+      });
+      operation.retainFailureUntilComplete();
+      operation.attachBackend({
+        kind: "embedded",
+        cancel,
+        isStreaming: () => true,
+      });
+      operation.setPhase("running");
+      operation.fail("run_failed", new Error("delivery stalled"));
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(operation.result).toMatchObject({ kind: "failed", code: "run_failed" });
+      expect(cancel).toHaveBeenCalledWith("superseded");
+      expect(replyRunRegistry.isActive("agent:main:retained-failure-deadline")).toBe(false);
+    } finally {
+      await vi.runOnlyPendingTimersAsync();
+      vi.useRealTimers();
+    }
+  });
+
   it("runs completeThen callbacks after active state clears", () => {
     const operation = createReplyOperation({
       sessionKey: "agent:main:main",

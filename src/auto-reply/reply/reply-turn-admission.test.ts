@@ -112,6 +112,31 @@ describe("reply turn admission", () => {
     }
   });
 
+  it("forwards a turn deadline to the admitted operation", async () => {
+    vi.useFakeTimers();
+    try {
+      const admitted = await admitReplyTurn({
+        sessionKey: "agent:main:discord:channel:deadline",
+        sessionId: "deadline-session",
+        kind: "visible",
+        resetTriggered: false,
+        deadlineMs: 100,
+      });
+
+      expect(admitted.status).toBe("owned");
+      if (admitted.status === "owned") {
+        await vi.advanceTimersByTimeAsync(100);
+        expect(admitted.operation.result).toMatchObject({
+          kind: "failed",
+          code: "turn_deadline",
+        });
+      }
+    } finally {
+      await vi.runOnlyPendingTimersAsync();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps an already-waiting follow-up behind the delivery barrier", async () => {
     const active = createReplyOperation({
       sessionKey: "agent:main:discord:channel:42",

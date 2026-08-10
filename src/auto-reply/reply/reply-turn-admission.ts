@@ -33,6 +33,7 @@ export async function admitReplyTurn(params: {
   resetTriggered: boolean;
   routeThreadId?: string | number;
   upstreamAbortSignal?: AbortSignal;
+  deadlineMs?: number;
   waitTimeoutMs?: number;
   waitForActive?: boolean;
 }): Promise<ReplyTurnAdmission> {
@@ -53,6 +54,7 @@ export async function admitReplyTurn(params: {
           resetTriggered: params.resetTriggered,
           routeThreadId: params.routeThreadId,
           upstreamAbortSignal: params.upstreamAbortSignal,
+          deadlineMs: params.deadlineMs,
           respectFollowupAdmissionBarrier:
             params.kind === "queued_followup" || params.kind === "heartbeat",
         }),
