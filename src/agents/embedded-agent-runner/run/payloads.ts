@@ -178,12 +178,12 @@ function isRecoverableExecClassToolName(toolName: string): boolean {
  * it reads as a hard failure while work actually continued. Middleware
  * (post-processing) failures never reach this builder — they are suppressed
  * upstream in `resolveToolErrorWarningPolicy` because "output unavailable"
- * is not evidence the step itself failed (ENG-17225).
+ * is not evidence the step itself failed.
  *
- * ENG-17225: names the step (redacted action summary) and the classified
- * reason, plus what it means for the reply already delivered — the report
- * that prompted this was a user unable to tell whether their output was
- * trustworthy from "a step didn't complete, but I kept going" alone.
+ * Names the step (redacted action summary) and the classified reason, plus
+ * what it means for the reply already delivered, so a user can tell whether
+ * their output is trustworthy instead of only hearing "a step didn't
+ * complete, but I kept going."
  */
 function buildNonTerminalToolStatusText(params: {
   completedToolCount: number;
@@ -193,6 +193,12 @@ function buildNonTerminalToolStatusText(params: {
   /** Operator-only raw error text appended when verbose (includeDetails). */
   detailSuffix?: string;
 }): string {
+  // At least one step (the current lastToolError) didn't finish even when
+  // toolMetas has no other entries to derive a count from (e.g. legacy
+  // callers with an empty toolMetas array).
+  const didNotFinishCount = Math.max(1, params.totalToolCount - params.completedToolCount);
+  const header =
+    didNotFinishCount === 1 ? "One step didn't finish" : `${didNotFinishCount} steps didn't finish`;
   const steps =
     params.completedToolCount > 0
       ? ` (${params.completedToolCount} of ${params.totalToolCount} steps completed)`
@@ -200,7 +206,7 @@ function buildNonTerminalToolStatusText(params: {
   const reason = params.reasonText ? ` — ${params.reasonText}` : "";
   const detail = params.detailSuffix ? `: ${params.detailSuffix}` : "";
   return (
-    `↻ One step didn't finish${steps}.\n` +
+    `↻ ${header}${steps}.\n` +
     `Step: ${params.actionSummary}${reason}${detail}\n` +
     `The reply above may be missing what that step produced. Ask me to redo that step if something looks off.`
   );
@@ -268,8 +274,8 @@ function resolveToolErrorWarningPolicy(params: {
       includeDetails,
     };
   }
-  // ENG-17225: a middleware (post-processing) failure means the tool's
-  // result couldn't be sanitized — not that the tool itself failed
+  // A middleware (post-processing) failure means the tool's result couldn't
+  // be sanitized — not that the tool itself failed
   // (buildMiddlewareFailureResult, tool-result-middleware.ts:423). The
   // underlying outcome is genuinely unknown, so "a step didn't complete" is a
   // stronger claim than the evidence supports. Suppress entirely when a reply
@@ -681,9 +687,9 @@ export function buildEmbeddedRunPayloads(params: {
             completedToolCount,
             totalToolCount: params.toolMetas.length,
             actionSummary: toolSummary,
-            // ENG-17225: fixed, user-safe classification of why the step
-            // failed — never the raw error text, which may contain shell
-            // output, paths, or provider error bodies.
+            // Fixed, user-safe classification of why the step failed — never
+            // the raw error text, which may contain shell output, paths, or
+            // provider error bodies.
             reasonText: classifyToolFailureReason(params.lastToolError)?.text,
             // Operators (verbose) additionally keep the raw error text.
             detailSuffix: warningPolicy.includeDetails ? params.lastToolError.error : undefined,

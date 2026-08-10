@@ -371,7 +371,7 @@ describe("buildEmbeddedRunPayloads tool-error warnings", () => {
     });
   });
 
-  it("suppresses a middleware tool-error warning once useful assistant output was delivered (ENG-17225)", () => {
+  it("suppresses a middleware tool-error warning once useful assistant output was delivered", () => {
     // A middleware failure means post-processing of the tool's own result
     // failed, not that the tool failed — the outcome is genuinely unknown.
     // Once the turn delivered a real answer, drop the note entirely rather

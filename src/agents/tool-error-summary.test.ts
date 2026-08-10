@@ -1,5 +1,5 @@
 // Proves the fixed, user-safe reason classification used by the non-terminal
-// step-failure note (ENG-17225) — never the raw error text.
+// step-failure note — never the raw error text.
 import { describe, expect, it } from "vitest";
 import { classifyToolFailureReason } from "./tool-error-summary.js";
 
@@ -12,11 +12,14 @@ describe("classifyToolFailureReason", () => {
   });
 
   it.each([
+    ["ETIMEDOUT", "timed_out", "timed out"],
     ["EACCES", "permission_denied", "permission denied"],
     ["EPERM", "permission_denied", "permission denied"],
     ["ENOENT", "not_found", "not found"],
     ["ENOTDIR", "not_found", "not found"],
-    ["ENOTFOUND", "not_found", "not found"],
+    // ENOTFOUND is a DNS lookup failure (getaddrinfo), not a missing
+    // resource — it must classify as network, not not_found.
+    ["ENOTFOUND", "network", "couldn't reach the network"],
     ["ECONNREFUSED", "network", "couldn't reach the network"],
     ["ECONNRESET", "network", "couldn't reach the network"],
   ] as const)("classifies errorCode %s as %s", (errorCode, code, text) => {

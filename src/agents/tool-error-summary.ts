@@ -35,9 +35,9 @@ export function isExecLikeToolName(toolName: string): boolean {
 
 /**
  * Closed set of user-safe reasons a step can fail for. Deliberately small and
- * fixed copy — never the raw error string — so a step-failure note (ENG-17225)
- * stays informative without leaking shell output, stack traces, or provider
- * error text to end users.
+ * fixed copy — never the raw error string — so a step-failure note stays
+ * informative without leaking shell output, stack traces, or provider error
+ * text to end users.
  */
 export type ToolFailureReasonCode =
   | "timed_out"
@@ -46,13 +46,17 @@ export type ToolFailureReasonCode =
   | "network"
   | "exit_error";
 
+const TIMED_OUT_ERROR_CODES = new Set(["ETIMEDOUT"]);
 const PERMISSION_ERROR_CODES = new Set(["EACCES", "EPERM"]);
-const NOT_FOUND_ERROR_CODES = new Set(["ENOENT", "ENOTDIR", "ENOTFOUND"]);
+const NOT_FOUND_ERROR_CODES = new Set(["ENOENT", "ENOTDIR"]);
+// ENOTFOUND is a DNS lookup failure (getaddrinfo), not a missing resource —
+// it belongs with the network codes, not the not-found codes.
 const NETWORK_ERROR_CODES = new Set([
   "ECONNREFUSED",
   "ECONNRESET",
   "EHOSTUNREACH",
   "ENETUNREACH",
+  "ENOTFOUND",
   "EPIPE",
 ]);
 
@@ -93,6 +97,9 @@ function resolveToolFailureReasonCode(
   }
   const errorCode = summary.errorCode?.toUpperCase();
   if (errorCode) {
+    if (TIMED_OUT_ERROR_CODES.has(errorCode)) {
+      return "timed_out";
+    }
     if (PERMISSION_ERROR_CODES.has(errorCode)) {
       return "permission_denied";
     }

@@ -754,11 +754,11 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads[1]?.text).toContain("Write");
   });
 
-  it("reframes a recovered exec timeout on a successful turn as an intermediate status (ENG-17225)", () => {
+  it("reframes a recovered exec timeout on a successful turn as an intermediate status", () => {
     // A recovered exec/bash/process error on a turn that still produced a
     // real reply is non-terminal — the deliverable is the answer, not the command
     // call. Reframe the false "⚠️ Exec failed" badge into a note that names the
-    // step and the classified reason (ENG-17225), not a terminal warning.
+    // step and the classified reason, not a terminal warning.
     const payloads = buildPayloads({
       assistantTexts: ["The script is ready."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -781,7 +781,7 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text).toMatch(/reply above|redo that step/i);
   });
 
-  it("reframes a recovered exec error as an intermediate status when the turn claims success (ENG-17225)", () => {
+  it("reframes a recovered exec error as an intermediate status when the turn claims success", () => {
     const payloads = buildPayloads({
       assistantTexts: ["The script is ready to use and saved in your workspace."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -826,7 +826,7 @@ describe("buildEmbeddedRunPayloads", () => {
 
   it("keeps the recovered-exec note when the failing step was NOT benign housekeeping (ENG-16318)", () => {
     // A recovered exec whose failing tail was real work (not read-only) still
-    // gets the ENG-17225 named-step note — only benign housekeeping is silent.
+    // gets the named-step note — only benign housekeeping is silent.
     const payloads = buildPayloads({
       assistantTexts: ["The build script is ready."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -966,7 +966,7 @@ describe("buildEmbeddedRunPayloads", () => {
     expectSinglePayloadSummary(payloads, { text: warningText ?? "" });
   });
 
-  it("suppresses a middleware (post-processing) tool failure entirely once a reply was delivered (ENG-17225)", () => {
+  it("suppresses a middleware (post-processing) tool failure entirely once a reply was delivered", () => {
     // A middleware failure means the tool's result couldn't be sanitized — not
     // that the tool itself failed (buildMiddlewareFailureResult). Its outcome
     // is genuinely unknown, so "a step didn't complete" overstates the
@@ -996,7 +996,7 @@ describe("buildEmbeddedRunPayloads", () => {
     );
   });
 
-  it("still surfaces a middleware tool failure honestly when the turn produced NO reply (ENG-17225)", () => {
+  it("still surfaces a middleware tool failure honestly when the turn produced NO reply", () => {
     // No user-facing reply → the outcome is not "unknown but fine", it's a
     // genuine failure. The suppression above only applies once a reply exists.
     const payloads = buildPayloads({
@@ -1069,6 +1069,9 @@ describe("buildEmbeddedRunPayloads", () => {
     );
     expect(warning).toBeDefined();
     expect(warning?.text).toContain("1 of 3 steps completed");
+    // Header pluralizes with the count of steps that didn't finish (2), not a
+    // hardcoded singular "One step" regardless of how many actually failed.
+    expect(warning?.text).toContain("2 steps didn't finish");
   });
 
   it("wraps markdown-capable mutating tool warnings so mention-looking names stay inert", () => {
@@ -1088,12 +1091,12 @@ describe("buildEmbeddedRunPayloads", () => {
     });
   });
 
-  it("reframes a recovered bg-process non-zero exit as a named, classified intermediate status (ENG-17225)", () => {
+  it("reframes a recovered bg-process non-zero exit as a named, classified intermediate status", () => {
     // The gandalf `salty-shore` case: a backgrounded process session exits
     // non-zero, the agent RECOVERS (produces a real final reply), the turn
     // succeeds — yet core rendered "⚠️ 🧰 Process: salty-shore failed", giving the
     // user the wrong intuition ("the agent broke"). A recovered exec/bash/process
-    // error on a successful turn is non-terminal — but ENG-17225 supersedes the
+    // error on a successful turn is non-terminal — but this supersedes the
     // earlier choice to hide the process identity here: the terminal "⚠️ failed"
     // path already names it (see the no-reply regression guard below), so
     // hiding it only in the recovered case was an inconsistency, not a
