@@ -42,7 +42,11 @@ import {
   extractAssistantThinking,
   extractAssistantVisibleText,
 } from "../../embedded-agent-utils.js";
-import { isExecLikeToolName, type ToolErrorSummary } from "../../tool-error-summary.js";
+import {
+  classifyToolFailureReason,
+  isExecLikeToolName,
+  type ToolErrorSummary,
+} from "../../tool-error-summary.js";
 import { isLikelyMutatingToolName } from "../../tool-mutation.js";
 
 type ToolMetaEntry = { toolName: string; meta?: string; errored?: boolean };
@@ -167,45 +171,39 @@ function isRecoverableExecClassToolName(toolName: string): boolean {
   return RECOVERABLE_EXEC_CLASS_TOOL_NAMES.has(normalizeOptionalLowercaseString(toolName) ?? "");
 }
 
-function shouldMarkNonTerminalToolErrorWarning(lastToolError: ToolErrorSummary): boolean {
-  // A transient middleware failure is non-terminal.
-  if (lastToolError.middlewareError === true) {
-    return true;
-  }
-  // A recovered command-execution error on a turn that still produced a
-  // real reply (the caller gates this on `hasUserFacingAssistantReply`) is
-  // non-terminal — reframe the false "⚠️ 🧰 Process: <session> failed" badge into
-  // the G4 continuation note instead of a terminal failure banner.
-  return isRecoverableExecClassToolName(lastToolError.toolName);
-}
-
 /**
- * Intermediate-status copy for a NON-TERMINAL tool failure.
+ * Intermediate-status copy for a NON-TERMINAL tool failure: a recovered
+ * command-execution error on a turn that still produced a real reply. A
+ * terminal "⚠️ <tool> failed" banner is the over-eager lie Mona flagged (#53):
+ * it reads as a hard failure while work actually continued. Middleware
+ * (post-processing) failures never reach this builder — they are suppressed
+ * upstream in `resolveToolErrorWarningPolicy` because "output unavailable"
+ * is not evidence the step itself failed (ENG-17225).
  *
- * When a tool errors but the turn kept going — the assistant already produced a
- * reply and prior tools completed — a terminal "⚠️ <tool> failed" banner is the
- * over-eager lie Mona flagged: it reads as a hard failure while work actually
- * continued. The real intermediate content is the assistant reply already
- * emitted alongside this; this line is only a continuation marker.
- *
- * It deliberately does NOT name the tool: the internal tool identity (e.g. the
- * "message" delivery tool) is plumbing that is meaningless — and misleading —
- * to a user. Just report that work continued and how much completed, e.g.
- * "↻ A step didn't complete, but I kept going (2 steps completed)."
+ * ENG-17225: names the step (redacted action summary) and the classified
+ * reason, plus what it means for the reply already delivered — the report
+ * that prompted this was a user unable to tell whether their output was
+ * trustworthy from "a step didn't complete, but I kept going" alone.
  */
 function buildNonTerminalToolStatusText(params: {
   completedToolCount: number;
-  /** Operator-only tool+error detail appended when verbose (includeDetails). */
+  totalToolCount: number;
+  actionSummary: string;
+  reasonText?: string;
+  /** Operator-only raw error text appended when verbose (includeDetails). */
   detailSuffix?: string;
 }): string {
   const steps =
     params.completedToolCount > 0
-      ? ` (${params.completedToolCount} step${
-          params.completedToolCount === 1 ? "" : "s"
-        } completed)`
+      ? ` (${params.completedToolCount} of ${params.totalToolCount} steps completed)`
       : "";
-  const detail = params.detailSuffix ? ` — ${params.detailSuffix}` : "";
-  return `↻ A step didn't complete, but I kept going${steps}${detail}`;
+  const reason = params.reasonText ? ` — ${params.reasonText}` : "";
+  const detail = params.detailSuffix ? `: ${params.detailSuffix}` : "";
+  return (
+    `↻ One step didn't finish${steps}.\n` +
+    `Step: ${params.actionSummary}${reason}${detail}\n` +
+    `The reply above may be missing what that step produced. Ask me to redo that step if something looks off.`
+  );
 }
 
 /**
@@ -269,6 +267,18 @@ function resolveToolErrorWarningPolicy(params: {
       showWarning: !params.hasUserFacingReply && !params.hasUserFacingErrorReply,
       includeDetails,
     };
+  }
+  // ENG-17225: a middleware (post-processing) failure means the tool's
+  // result couldn't be sanitized — not that the tool itself failed
+  // (buildMiddlewareFailureResult, tool-result-middleware.ts:423). The
+  // underlying outcome is genuinely unknown, so "a step didn't complete" is a
+  // stronger claim than the evidence supports. Suppress entirely when a reply
+  // was delivered, same as the sessions_spawn precedent above; a genuine
+  // failure (no reply) still surfaces honestly. Must precede the mutating
+  // branch below, which ignores hasUserFacingReply and would otherwise force
+  // a false "failed" badge for message/write middleware errors.
+  if (params.lastToolError.middlewareError === true) {
+    return { showWarning: !params.hasUserFacingReply, includeDetails };
   }
   const isMutatingToolError =
     params.lastToolError.mutatingAction ?? isLikelyMutatingToolName(params.lastToolError.toolName);
@@ -639,9 +649,12 @@ export function buildEmbeddedRunPayloads(params: {
       );
       // The same non-terminal decision used for the payload metadata below —
       // computed up front so the visible text can be reframed too, not just the
-      // metadata flag.
+      // metadata flag. Middleware failures never reach here as non-terminal:
+      // `resolveToolErrorWarningPolicy` only lets one through when no reply was
+      // delivered, so it stays a genuine terminal failure below.
       const isNonTerminalWarning =
-        hasUserFacingAssistantReply && shouldMarkNonTerminalToolErrorWarning(params.lastToolError);
+        hasUserFacingAssistantReply &&
+        isRecoverableExecClassToolName(params.lastToolError.toolName);
       // ENG-16318: when a real answer was delivered and the exec command that
       // errored was entirely benign housekeeping (e.g. `mkdir … && find /` that
       // hit permission-denied noise), append nothing — not even the "↻ kept
@@ -663,13 +676,18 @@ export function buildEmbeddedRunPayloads(params: {
       const completedToolCount = hasErroredFlags
         ? params.toolMetas.filter((meta) => !meta.errored).length
         : Math.max(0, params.toolMetas.length - 1);
-      // Operators (verbose) keep the concrete tool + error detail; the default
-      // user copy stays tool-name-free.
-      const detailSuffix = warningPolicy.includeDetails
-        ? `${toolSummary}${errorSuffix}`.trim()
-        : undefined;
       const warningText = isNonTerminalWarning
-        ? buildNonTerminalToolStatusText({ completedToolCount, detailSuffix })
+        ? buildNonTerminalToolStatusText({
+            completedToolCount,
+            totalToolCount: params.toolMetas.length,
+            actionSummary: toolSummary,
+            // ENG-17225: fixed, user-safe classification of why the step
+            // failed — never the raw error text, which may contain shell
+            // output, paths, or provider error bodies.
+            reasonText: classifyToolFailureReason(params.lastToolError)?.text,
+            // Operators (verbose) additionally keep the raw error text.
+            detailSuffix: warningPolicy.includeDetails ? params.lastToolError.error : undefined,
+          })
         : `⚠️ ${toolSummary} failed${errorSuffix}`;
       const normalizedWarning = normalizeTextForComparison(warningText);
       const duplicateWarning = normalizedWarning
