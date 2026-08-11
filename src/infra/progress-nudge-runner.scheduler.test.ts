@@ -27,7 +27,11 @@ describe("startProgressNudgeRunner scheduler", () => {
   }
 
   function makeDeps(over?: Partial<ProgressNudgeDeps>) {
-    const sendMessage = vi.fn().mockResolvedValue({ status: "sent" });
+    const sendMessage = vi.fn().mockResolvedValue({
+      status: "sent",
+      results: [],
+      receipt: { primaryPlatformMessageId: "nudge-1" },
+    });
     const resolveDeliveryTarget = vi.fn().mockResolvedValue({
       channel: "slack",
       to: "C123",
@@ -108,22 +112,59 @@ describe("startProgressNudgeRunner scheduler", () => {
   });
 
   it("respects the interval cap between nudges", async () => {
-    const { deps, sendMessage } = makeDeps();
+    const editMessage = vi.fn().mockResolvedValue(true);
+    const { deps, sendMessage } = makeDeps({ editMessage });
     const runner = startProgressNudgeRunner({ cfg: config(), deps });
     await vi.advanceTimersByTimeAsync(46_000); // first nudge at ~45s
     expect(sendMessage).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(20_000); // < 30s interval → no new nudge
     expect(sendMessage).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(20_000); // now past the interval
-    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(editMessage).toHaveBeenCalledTimes(1);
+    runner.stop();
+  });
+
+  it("reuses the progress anchor when a later run crosses the threshold", async () => {
+    const editMessage = vi.fn().mockResolvedValue(true);
+    const { deps, sendMessage, active, startedAt, emitTerminal } = makeDeps({ editMessage });
+    const runner = startProgressNudgeRunner({ cfg: config(), deps });
+
+    await vi.advanceTimersByTimeAsync(46_000);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(editMessage).not.toHaveBeenCalled();
+
+    active.keys = [];
+    emitTerminal({
+      sessionKey: SESSION,
+      sessionId: "first-session",
+      result: { kind: "completed" },
+      startedAt: 0,
+    });
+
+    startedAt.value = 46_000;
+    active.keys = [SESSION];
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(editMessage).toHaveBeenCalledTimes(1);
+    expect(editMessage.mock.calls[0][0]).toMatchObject({
+      messageId: "nudge-1",
+      text: "Still working on your request…",
+    });
     runner.stop();
   });
 
   it("caps at maxNudges", async () => {
-    const { deps, sendMessage } = makeDeps();
+    const editMessage = vi.fn().mockResolvedValue(true);
+    const { deps, sendMessage } = makeDeps({ editMessage });
     const runner = startProgressNudgeRunner({ cfg: config({ maxNudges: 2 }), deps });
     await vi.advanceTimersByTimeAsync(300_000);
-    expect(sendMessage).toHaveBeenCalledTimes(2);
+    // The anchor is sent once, then edited once more (maxNudges: 2 total
+    // refreshes) — exercise the anchor path explicitly rather than relying on
+    // the default editMessage falling through to a real (plugin-less) send.
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(editMessage).toHaveBeenCalledTimes(1);
     runner.stop();
   });
 

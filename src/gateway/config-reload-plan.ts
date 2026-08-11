@@ -82,6 +82,16 @@ const BASE_RELOAD_RULES: ReloadRule[] = [
     kind: "hot",
     actions: ["restart-heartbeat"],
   },
+  // The progress-nudge runner is composed into the same heartbeat handle and
+  // reads a live cfg via updateConfig() — without this rule the tail
+  // `{prefix:"agents", kind:"none"}` rule swallows the diff and a fleet
+  // reconcile of maxNudges/thresholdSeconds/etc needs a gateway restart to
+  // take effect.
+  {
+    prefix: "agents.defaults.progressNudge",
+    kind: "hot",
+    actions: ["restart-heartbeat"],
+  },
   {
     prefix: "agents.defaults.models",
     kind: "hot",

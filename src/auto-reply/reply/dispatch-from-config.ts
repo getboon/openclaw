@@ -1,6 +1,7 @@
 /** Main reply dispatch pipeline from finalized config/context to delivery payloads. */
 import crypto from "node:crypto";
 import { isParentOwnedBackgroundAcpSession } from "@openclaw/acp-core/session-interaction-mode";
+import { addTimerTimeoutGraceMs } from "@openclaw/normalization-core/number-coercion";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
@@ -34,6 +35,7 @@ import {
   isSubagentEnvelopeSession,
   resolveSubagentCapabilityStore,
 } from "../../agents/subagent-capabilities.js";
+import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { isToolAllowedByPolicies } from "../../agents/tool-policy-match.js";
 import { mergeAlsoAllowPolicy, resolveToolProfilePolicy } from "../../agents/tool-policy.js";
 import {
@@ -1278,6 +1280,19 @@ export async function dispatchReplyFromConfig(
     fallbackAgentId: ctx.AgentId,
   });
   const sessionAgentCfg = resolveAgentConfig(cfg, sessionAgentId);
+  // Every visible reply-turn gets a lane deadline derived from the same
+  // resolver the agent run itself uses (including the caller's own
+  // timeoutOverrideSeconds, e.g. a heartbeat turn requesting an unbounded
+  // run), plus settle grace — so a hung resolver can never retain the
+  // lane/status indefinitely even when agents.defaults.timeoutSeconds is
+  // unset (the resolver's own 48h default applies, not "no deadline").
+  // `agents.defaults.timeoutSeconds` itself has no "0 means no timeout"
+  // sentinel (the schema is `positive()`, so 0 isn't a valid config value);
+  // that sentinel only exists for a per-run overrideSeconds, mirrored here.
+  const configuredTurnDeadlineMs = addTimerTimeoutGraceMs(
+    resolveAgentTimeoutMs({ cfg, overrideSeconds: params.replyOptions?.timeoutOverrideSeconds }),
+    15_000,
+  );
   const verboseProgress = createShouldEmitVerboseProgress({
     sessionKey: acpDispatchSessionKey,
     storePath: sessionStoreEntry.storePath,
@@ -1369,6 +1384,7 @@ export async function dispatchReplyFromConfig(
       resetTriggered: false,
       routeThreadId,
       upstreamAbortSignal: params.replyOptions?.abortSignal,
+      deadlineMs: configuredTurnDeadlineMs,
       waitForActive: !allowActivePreDispatch && !allowSlackRoutedThreadBypass,
       ...(shouldRecoverStaleVisibleOperation ? { waitTimeoutMs: visibleReplyRecoveryWaitMs } : {}),
     });
@@ -1414,6 +1430,7 @@ export async function dispatchReplyFromConfig(
           resetTriggered: false,
           routeThreadId,
           upstreamAbortSignal: params.replyOptions?.abortSignal,
+          deadlineMs: configuredTurnDeadlineMs,
           waitForActive: replyOperationStillActive,
           waitTimeoutMs: visibleReplyRecoveryWaitMs,
         });
@@ -3468,6 +3485,18 @@ export async function dispatchReplyFromConfig(
     const counts = dispatcher.getQueuedCounts();
     counts.final += routedFinalCount;
     commitInboundDedupeIfClaimed();
+    // A final payload that was neither queued for later delivery nor routed
+    // to any recipient never reached the user, even though the turn itself
+    // produced an answer — record the reply-operation outcome as failed so
+    // terminal-event listeners (e.g. the progress-nudge failure notice) don't
+    // treat this as a silent success. Diagnostics timing below
+    // stays "completed": it measures dispatch duration, not delivery success.
+    if (attemptedFinalDelivery && finalDeliveryFailed) {
+      dispatchReplyOperation?.fail(
+        "delivery_failed",
+        new Error("final reply delivery failed: not queued, nothing routed"),
+      );
+    }
     recordAgentDispatchCompleted("completed");
     recordProcessed(
       "completed",
