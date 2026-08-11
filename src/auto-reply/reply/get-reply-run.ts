@@ -1334,6 +1334,13 @@ export async function runPreparedReply(
       senderId: normalizeOptionalString(sessionCtx.SenderId),
       channelContext: ctx.ChannelContext ?? sessionCtx.ChannelContext,
       senderName: normalizeOptionalString(sessionCtx.SenderName),
+      // Originating platform (slack/msteams/boon-web/…) for usage attribution.
+      // System-event providers (heartbeat/cron-event/exec-event — whatever
+      // isSystemEventProvider matches) are not real channels, so omit them and
+      // avoid bogus per-source usage buckets for system model calls.
+      senderSource: isSystemEventProvider(sessionCtx.Provider)
+        ? undefined
+        : normalizeOptionalString(sessionCtx.Provider),
       senderUsername: normalizeOptionalString(sessionCtx.SenderUsername),
       senderE164: normalizeOptionalString(sessionCtx.SenderE164),
       // Queued system events are prompt content in the same trusted session;

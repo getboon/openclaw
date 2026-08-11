@@ -42,6 +42,9 @@ type ModelCallDiagnosticContext = {
   runId: string;
   sessionKey?: string;
   sessionId?: string;
+  senderId?: string;
+  senderName?: string;
+  senderSource?: string;
   provider: string;
   model: string;
   api?: string;
@@ -95,6 +98,15 @@ const MODEL_CALL_STREAM_PROGRESS_INTERVAL_MS = 30_000;
 const MODEL_CALL_STREAM_PROGRESS_REASON = "model_call:stream_progress";
 const MODEL_CALL_STREAM_RETURN_TIMEOUT_MS = 1000;
 const TRACEPARENT_HEADER_NAME = "traceparent";
+// Boon usage-attribution headers: the gateway records these on each
+// LLM request log so boon-core can break token usage down per session / per user.
+// user-id is the stable per-platform id; user-name + user-source make it legible
+// in the dashboard (e.g. "Alice" via "slack"). Header names are lowercase;
+// downstream readers (Go net/http) canonicalize.
+const BOON_SESSION_HEADER_NAME = "x-boon-session-id";
+const BOON_USER_HEADER_NAME = "x-boon-user-id";
+const BOON_USER_NAME_HEADER_NAME = "x-boon-user-name";
+const BOON_USER_SOURCE_HEADER_NAME = "x-boon-user-source";
 type ModelCallStreamOptions = Parameters<StreamFn>[2];
 
 function utf8JsonByteLength(value: unknown): number | undefined {
@@ -542,6 +554,56 @@ function withDiagnosticTraceparentHeader(
   };
 }
 
+// A header value is user-controlled (e.g. a Slack display name), so it can carry
+// bytes the fetch/SDK header layer rejects — CR/LF and other C0 controls, DEL,
+// or non-ASCII such as emoji and the JS line separators U+2028/U+2029 — any of
+// which would fail the entire model call. Keep only printable ASCII (0x20-0x7E);
+// if nothing safe remains, the caller omits the header rather than emit it blank.
+// The stable identity still rides X-Boon-User-ID; the name is a best-effort label.
+function sanitizeHeaderValue(value: string): string {
+  return value.replace(/[^ -~]/g, "").trim();
+}
+
+// withBoonUsageHeaders adds the Boon per-turn attribution headers to the
+// outbound model-call request: X-Boon-Session-ID (the per-thread session
+// id), X-Boon-User-ID (the stable per-platform user id), and — to make that id
+// legible in the dashboard — X-Boon-User-Name and X-Boon-User-Source (the
+// originating platform, e.g. "slack"). Empty/invalid values are omitted so we
+// never emit a blank or control-character-bearing header. Composes on top of the
+// traceparent wrapper — preserves its onPayload accounting by spreading the
+// already-wrapped options.
+function withBoonUsageHeaders(
+  options: ModelCallStreamOptions,
+  ctx: ModelCallDiagnosticContext,
+): ModelCallStreamOptions {
+  const entries: Array<[string, string | undefined]> = [
+    [BOON_SESSION_HEADER_NAME, ctx.sessionId],
+    [BOON_USER_HEADER_NAME, ctx.senderId],
+    [BOON_USER_NAME_HEADER_NAME, ctx.senderName],
+    [BOON_USER_SOURCE_HEADER_NAME, ctx.senderSource],
+  ];
+  const headers: Record<string, string> = { ...options?.headers };
+  let added = false;
+  for (const [name, raw] of entries) {
+    if (!raw) {
+      continue;
+    }
+    const safe = sanitizeHeaderValue(raw);
+    if (!safe) {
+      continue;
+    }
+    headers[name] = safe;
+    added = true;
+  }
+  if (!added) {
+    return options;
+  }
+  return {
+    ...options,
+    headers,
+  };
+}
+
 async function safeReturnIterator(iterator: AsyncIterator<unknown>): Promise<void> {
   let returnResult: unknown;
   try {
@@ -735,7 +797,10 @@ export function wrapStreamFnWithDiagnosticModelCallEvents(
       modelContent,
       contentCapture: ctx.contentCapture,
     };
-    const propagatedOptions = withDiagnosticTraceparentHeader(options, trace, state);
+    const propagatedOptions = withBoonUsageHeaders(
+      withDiagnosticTraceparentHeader(options, trace, state),
+      ctx,
+    );
 
     try {
       const result = streamFn(model, streamContext, propagatedOptions);

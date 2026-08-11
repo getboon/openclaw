@@ -87,6 +87,8 @@ export type RunEmbeddedAgentParams = {
   senderName?: string | null;
   senderUsername?: string | null;
   senderE164?: string | null;
+  /** Originating channel/platform (slack, msteams, boon-web, …) for usage attribution. */
+  senderSource?: string | null;
   /** Trusted sender identity bit for command/channel-action auth. */
   senderIsOwner?: boolean;
   /** Device-scoped operator session allowed to review approvals initiated by this run. */
