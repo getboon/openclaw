@@ -21,6 +21,7 @@ import type { ReasoningLevel, ThinkLevel, VerboseLevel } from "../../../auto-rep
 import { isSilentReplyPayloadText, SILENT_REPLY_TOKEN } from "../../../auto-reply/tokens.js";
 import { formatToolAggregate } from "../../../auto-reply/tool-meta.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
+import type { MessagePresentation } from "../../../interactive/payload.js";
 import { hasReplyPayloadContent } from "../../../interactive/payload.js";
 import type { AssistantMessage } from "../../../llm/types.js";
 import { isCronSessionKey } from "../../../routing/session-key.js";
@@ -711,10 +712,24 @@ export function buildEmbeddedRunPayloads(params: {
           })
         : false;
       if (!duplicateWarning && !suppressBenignHousekeepingNote) {
+        // Only the non-terminal reframe gets a Retry button: it is the only
+        // branch where re-attempting makes sense (a terminal "⚠️ … failed"
+        // badge already means the assistant produced no usable reply at all).
+        const retryPresentation: MessagePresentation | undefined = isNonTerminalWarning
+          ? {
+              blocks: [
+                {
+                  type: "buttons",
+                  buttons: [{ label: "Retry", action: { type: "command", command: "/retry" } }],
+                },
+              ],
+            }
+          : undefined;
         replyItems.push({
           text: warningText,
           isError: true,
           nonTerminalToolErrorWarning: isNonTerminalWarning,
+          presentation: retryPresentation,
         });
       }
     }
