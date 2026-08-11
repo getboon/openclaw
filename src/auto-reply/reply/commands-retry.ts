@@ -6,8 +6,13 @@
 import { continueAsNormalPrompt, rejectUnauthorizedCommand } from "./command-gates.js";
 import type { CommandHandler, CommandHandlerResult } from "./commands-types.js";
 
-export const RETRY_NUDGE_TEXT =
-  "Please look at the step that didn't finish in your last reply and redo it.";
+// Deliberately neutral on singular vs. plural: the note this command
+// responds to reads "One step didn't finish" or "N steps didn't finish"
+// depending on how many were unaccounted for, and /retry has no state to
+// know which one preceded it — "what didn't finish ... redo it" reads
+// naturally either way instead of picking a grammatical number that could
+// mismatch the note above it.
+export const RETRY_NUDGE_TEXT = "Please look at what didn't finish in your last reply and redo it.";
 
 const RETRY_COMMAND_PATTERN = /^\/retry\s*$/i;
 

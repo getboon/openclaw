@@ -1010,6 +1010,58 @@ describe("registerSlackInteractionEvents", () => {
     expect(app.client.chat.update).not.toHaveBeenCalled();
   });
 
+  it("falls through to the system-event fallback when the presser is not an authorized command sender", async () => {
+    // Button-press authorization (authorizeSlackBlockAction) and command-sender
+    // authorization (commands.allowFrom) are separate gates. A presser who can
+    // click buttons in this channel but isn't allowlisted as a command sender
+    // must not be silently dropped inside handleSlackMessage with no feedback —
+    // the fallback below must still run.
+    const handleSlackMessage = vi.fn().mockResolvedValue(undefined);
+    const { ctx, getHandler } = createContext({
+      cfg: {
+        commands: {
+          allowFrom: {
+            slack: ["U_OWNER"],
+          },
+        },
+      },
+    });
+    registerSlackInteractionEvents({ ctx: ctx as never, handleSlackMessage });
+
+    const handler = getHandler();
+    const ack = vi.fn().mockResolvedValue(undefined);
+    await handler({
+      ack,
+      body: {
+        user: { id: "U_ALLOWED" },
+        channel: { id: "C1" },
+        container: { channel_id: "C1", message_ts: "100.200", thread_ts: "100.100" },
+        message: {
+          ts: "100.200",
+          text: "One step didn't finish",
+          blocks: [
+            {
+              type: "actions",
+              block_id: "reply_actions",
+              elements: [{ type: "button", action_id: "openclaw:reply_button" }],
+            },
+          ],
+        },
+      },
+      action: {
+        type: "button",
+        action_id: "openclaw:reply_button",
+        block_id: "reply_actions",
+        value: "/retry",
+        action_ts: "150.999",
+        text: { type: "plain_text", text: "Retry" },
+      },
+    });
+
+    expect(handleSlackMessage).not.toHaveBeenCalled();
+    expect(enqueueSystemEventMock).toHaveBeenCalledTimes(1);
+  });
+
   it("still falls through to the system-event fallback for a non-allowlisted button value", async () => {
     const handleSlackMessage = vi.fn().mockResolvedValue(undefined);
     const { ctx, getHandler } = createContext();

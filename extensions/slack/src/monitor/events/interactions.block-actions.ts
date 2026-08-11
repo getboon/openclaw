@@ -755,6 +755,16 @@ async function resolveSlackBlockActionCommandAuthorized(params: {
  * instead of the generic interaction system-event fallback. Only actionable
  * when the caller wired a real handleSlackMessage in (always true in
  * production; interaction-only tests may omit it).
+ *
+ * The caller gates this on `resolveSlackBlockActionCommandAuthorized` first —
+ * button-press authorization (`authorizeSlackBlockAction`) and command-sender
+ * authorization (`commands.allowFrom`/channel `allowFrom`) are separate
+ * checks, and `handleSlackMessage` returns `Promise<void>` with no signal if
+ * the synthetic message is silently dropped inside the real pipeline. Without
+ * the upstream gate, a presser who can click buttons but isn't an authorized
+ * command sender would see nothing at all on press. Skipping this call (not
+ * calling it) lets the existing `enqueueSlackBlockActionEvent` fallback run
+ * instead, which at least surfaces something.
  */
 async function dispatchSlackAllowlistedCommand(params: {
   parsed: ParsedSlackBlockAction;
@@ -995,11 +1005,18 @@ async function handleSlackBlockAction(params: {
     }
   }
   if (pluginInteractionData && isSlackAllowlistedCommand(pluginInteractionData)) {
-    const handledCommand = await dispatchSlackAllowlistedCommand({
+    const isAuthorizedCommandSender = await resolveSlackBlockActionCommandAuthorized({
+      ctx: params.ctx,
       parsed,
-      pluginInteractionData,
-      handleSlackMessage: params.handleSlackMessage,
+      auth,
     });
+    const handledCommand =
+      isAuthorizedCommandSender &&
+      (await dispatchSlackAllowlistedCommand({
+        parsed,
+        pluginInteractionData,
+        handleSlackMessage: params.handleSlackMessage,
+      }));
     if (handledCommand) {
       return;
     }
