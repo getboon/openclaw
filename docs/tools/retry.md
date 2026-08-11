@@ -24,7 +24,7 @@ Behavior:
 - The agent decides how to redo the step using the conversation context it
   already has, including its own prior "step didn't finish" note.
 - If the step fails again, the same note and Retry button appear again.
-- The button works on Telegram, Discord, Microsoft Teams, and Slack; typing
+- The button works on Discord, Microsoft Teams, Slack, and Telegram; typing
   `/retry` directly works everywhere.
 
 ## Related
