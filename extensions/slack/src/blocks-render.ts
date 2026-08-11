@@ -55,7 +55,7 @@ function resolveSlackButtonStyle(
 // its <id> <decision> shape.
 const SLACK_ALLOWLISTED_BARE_COMMANDS = new Set(["/retry"]);
 
-function isSlackAllowlistedCommand(command: string): boolean {
+export function isSlackAllowlistedCommand(command: string): boolean {
   return (
     Boolean(parseExecApprovalCommandText(command)) ||
     SLACK_ALLOWLISTED_BARE_COMMANDS.has(command.trim().toLowerCase())
