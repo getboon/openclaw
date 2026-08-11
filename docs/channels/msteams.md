@@ -910,7 +910,7 @@ Per-user sharing is more secure as only the chat participants can access the fil
 | Personal chat + file                                      | FileConsentCard flow (works without SharePoint)                                                                                                                                                                                                       |
 | Any context + image                                       | Base64-encoded inline (works without SharePoint)                                                                                                                                                                                                      |
 
-`openclaw channels probe msteams` reports a warning when `sharePointSiteId` is unset.
+`openclaw channels status --channel msteams --probe` reports a warning when `sharePointSiteId` is unset.
 
 ### Files stored location
 
