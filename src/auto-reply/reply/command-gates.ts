@@ -29,6 +29,35 @@ export function rejectUnauthorizedCommand(
   return { shouldContinue: false };
 }
 
+/**
+ * Rewrites the current inbound turn (ctx, rootCtx, and command) so it
+ * continues as a normal prompt with the given text, and returns the
+ * standard "continue as a new prompt" result. Shared by /steer's
+ * no-active-run fallback and /retry, which always takes this path.
+ */
+export function continueAsNormalPrompt(
+  params: HandleCommandsParams,
+  message: string,
+): CommandHandlerResult {
+  applyNormalPromptRewrite(params.ctx, message);
+  if (params.rootCtx && params.rootCtx !== params.ctx) {
+    applyNormalPromptRewrite(params.rootCtx, message);
+  }
+  params.command.rawBodyNormalized = message;
+  params.command.commandBodyNormalized = message;
+  return { shouldContinue: true };
+}
+
+function applyNormalPromptRewrite(ctx: HandleCommandsParams["ctx"], message: string): void {
+  const mutableCtx = ctx as Record<string, unknown>;
+  mutableCtx.Body = message;
+  mutableCtx.RawBody = message;
+  mutableCtx.CommandBody = message;
+  mutableCtx.BodyForCommands = message;
+  mutableCtx.BodyForAgent = message;
+  mutableCtx.BodyStripped = message;
+}
+
 export function rejectNonOwnerCommand(
   params: HandleCommandsParams,
   commandLabel: string,
