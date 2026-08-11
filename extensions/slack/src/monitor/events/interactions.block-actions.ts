@@ -15,12 +15,14 @@ import {
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { enqueueSystemEvent } from "openclaw/plugin-sdk/system-event-runtime";
 import { isSlackApprovalAuthorizedSender } from "../../approval-auth.js";
+import { isSlackAllowlistedCommand } from "../../blocks-render.js";
 import { isSlackExecApprovalAuthorizedSender } from "../../exec-approvals.js";
 import { dispatchSlackPluginInteractiveHandler } from "../../interactive-dispatch.js";
 import {
   SLACK_REPLY_BUTTON_ACTION_ID,
   SLACK_REPLY_SELECT_ACTION_ID,
 } from "../../reply-action-ids.js";
+import type { SlackMessageEvent } from "../../types.js";
 import {
   authorizeSlackSystemEventSender,
   resolveSlackCommandIngress,
@@ -33,6 +35,7 @@ import {
   parsePluginBindingApprovalCustomId,
   resolvePluginConversationBindingApproval,
 } from "../conversation.runtime.js";
+import type { SlackMessageHandler } from "../message-handler.js";
 import { escapeSlackMrkdwn } from "../mrkdwn.js";
 
 type InteractionMessageBlock = {
@@ -746,6 +749,50 @@ async function resolveSlackBlockActionCommandAuthorized(params: {
   return commandIngress.commandAccess.authorized;
 }
 
+/**
+ * Route an allowlisted bare command value (e.g. the Retry button's "/retry")
+ * through the same dedup/debounce/auth pipeline a typed Slack message uses,
+ * instead of the generic interaction system-event fallback. Only actionable
+ * when the caller wired a real handleSlackMessage in (always true in
+ * production; interaction-only tests may omit it).
+ *
+ * The caller gates this on `resolveSlackBlockActionCommandAuthorized` first —
+ * button-press authorization (`authorizeSlackBlockAction`) and command-sender
+ * authorization (`commands.allowFrom`/channel `allowFrom`) are separate
+ * checks, and `handleSlackMessage` returns `Promise<void>` with no signal if
+ * the synthetic message is silently dropped inside the real pipeline. Without
+ * the upstream gate, a presser who can click buttons but isn't an authorized
+ * command sender would see nothing at all on press. Skipping this call (not
+ * calling it) lets the existing `enqueueSlackBlockActionEvent` fallback run
+ * instead, which at least surfaces something.
+ */
+async function dispatchSlackAllowlistedCommand(params: {
+  parsed: ParsedSlackBlockAction;
+  pluginInteractionData: string;
+  handleSlackMessage?: SlackMessageHandler;
+}): Promise<boolean> {
+  if (!params.handleSlackMessage || !params.parsed.channelId) {
+    return false;
+  }
+  // Prefer Slack's own action_ts for the synthetic ts so repeated presses on
+  // the same failure note get distinct dedup keys (buildSeenMessageKey keys
+  // on channel+ts); reusing the failure note's own messageTs would make a
+  // second press look like an already-seen duplicate and get dropped.
+  const actionTs = normalizeOptionalString(
+    (params.parsed.typedAction as { action_ts?: unknown }).action_ts,
+  );
+  const syntheticMessage: SlackMessageEvent = {
+    type: "message",
+    user: params.parsed.userId,
+    channel: params.parsed.channelId,
+    ts: actionTs ?? String(Date.now() / 1000),
+    thread_ts: params.parsed.threadTs,
+    text: params.pluginInteractionData,
+  };
+  await params.handleSlackMessage(syntheticMessage, { source: "message" });
+  return true;
+}
+
 function enqueueSlackBlockActionEvent(params: {
   ctx: SlackMonitorContext;
   parsed: ParsedSlackBlockAction;
@@ -888,6 +935,7 @@ async function handleSlackBlockAction(params: {
   trackEvent?: () => void;
   args: SlackActionMiddlewareArgs;
   formatSystemEvent: (payload: Record<string, unknown>) => string;
+  handleSlackMessage?: SlackMessageHandler;
 }): Promise<void> {
   const { ack, body, action, respond } = params.args;
   await ack();
@@ -956,6 +1004,23 @@ async function handleSlackBlockAction(params: {
       return;
     }
   }
+  if (pluginInteractionData && isSlackAllowlistedCommand(pluginInteractionData)) {
+    const isAuthorizedCommandSender = await resolveSlackBlockActionCommandAuthorized({
+      ctx: params.ctx,
+      parsed,
+      auth,
+    });
+    const handledCommand =
+      isAuthorizedCommandSender &&
+      (await dispatchSlackAllowlistedCommand({
+        parsed,
+        pluginInteractionData,
+        handleSlackMessage: params.handleSlackMessage,
+      }));
+    if (handledCommand) {
+      return;
+    }
+  }
   enqueueSlackBlockActionEvent({
     ctx: params.ctx,
     parsed,
@@ -973,6 +1038,7 @@ export function registerSlackBlockActionHandler(params: {
   ctx: SlackMonitorContext;
   trackEvent?: () => void;
   formatSystemEvent: (payload: Record<string, unknown>) => string;
+  handleSlackMessage?: SlackMessageHandler;
 }): void {
   if (typeof params.ctx.app.action !== "function") {
     return;
@@ -983,6 +1049,7 @@ export function registerSlackBlockActionHandler(params: {
       trackEvent: params.trackEvent,
       args,
       formatSystemEvent: params.formatSystemEvent,
+      handleSlackMessage: params.handleSlackMessage,
     });
   });
 }

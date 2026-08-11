@@ -715,6 +715,19 @@ export function buildEmbeddedRunPayloads(params: {
           text: warningText,
           isError: true,
           nonTerminalToolErrorWarning: isNonTerminalWarning,
+          // Only the non-terminal reframe gets a Retry button: it is the only
+          // branch where re-attempting makes sense (a terminal "⚠️ … failed"
+          // badge already means the assistant produced no usable reply at all).
+          presentation: isNonTerminalWarning
+            ? {
+                blocks: [
+                  {
+                    type: "buttons",
+                    buttons: [{ label: "Retry", action: { type: "command", command: "/retry" } }],
+                  },
+                ],
+              }
+            : undefined,
         });
       }
     }

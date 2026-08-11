@@ -781,6 +781,40 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text).toMatch(/reply above|redo that step/i);
   });
 
+  it("attaches a Retry button to the non-terminal step-failure note", () => {
+    const payloads = buildPayloads({
+      assistantTexts: ["The script is ready."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      lastToolError: {
+        toolName: "exec",
+        error: "command timed out",
+        timedOut: true,
+        mutatingAction: true,
+      },
+    });
+
+    const warning = payloads[1];
+    expect(warning?.presentation?.blocks).toEqual([
+      {
+        type: "buttons",
+        buttons: [{ label: "Retry", action: { type: "command", command: "/retry" } }],
+      },
+    ]);
+  });
+
+  it("does not attach a Retry button to a terminal '⚠️ … failed' badge", () => {
+    const payloads = buildPayloads({
+      lastToolError: {
+        toolName: "process",
+        meta: "salty-shore",
+        error: "Process exited with code 1.",
+      },
+    });
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.presentation).toBeUndefined();
+  });
+
   it("reframes a recovered exec error as an intermediate status when the turn claims success", () => {
     const payloads = buildPayloads({
       assistantTexts: ["The script is ready to use and saved in your workspace."],
