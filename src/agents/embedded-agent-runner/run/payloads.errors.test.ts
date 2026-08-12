@@ -94,6 +94,22 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads.map((payload) => payload.text)).not.toContain(errorJson);
   });
 
+  it("marks the assistant-error payload for delivery despite message_tool_only suppression", () => {
+    // A provider/run-level error is exactly the kind of failure signal that
+    // must not vanish just because normal assistant prose is suppressed on
+    // this channel.
+    const payloads = buildPayloads({
+      assistantTexts: [errorJson],
+      lastAssistant: makeAssistant({}),
+      sourceReplyDeliveryMode: "message_tool_only",
+    });
+
+    expectOverloadedFallback(payloads);
+    expect(
+      getReplyPayloadMetadata(payloads[0] as object)?.deliverDespiteSourceReplySuppression,
+    ).toBe(true);
+  });
+
   // Token-exhaustion replies carry plain-language copy with an inline billing
   // link AND a rich-card button (static Boon billing URL). The gateway 402 code
   // (allocation_exhausted / trial_budget_exhausted) lands in errorBody; the
@@ -802,7 +818,12 @@ describe("buildEmbeddedRunPayloads", () => {
     ]);
   });
 
-  it("does not attach a Retry button to a terminal '⚠️ … failed' badge", () => {
+  it("attaches a Retry button and a suppression-bypass mark to a terminal '⚠️ … failed' badge", () => {
+    // A terminal badge means no usable reply exists at all — that is exactly
+    // the state a failed mutating send (e.g. the message tool failing to
+    // deliver a generated file) leaves the user in, so it needs Retry and
+    // must survive message_tool_only delivery suppression just like the
+    // non-terminal reframe does.
     const payloads = buildPayloads({
       lastToolError: {
         toolName: "process",
@@ -812,7 +833,15 @@ describe("buildEmbeddedRunPayloads", () => {
     });
 
     expect(payloads).toHaveLength(1);
-    expect(payloads[0]?.presentation).toBeUndefined();
+    expect(payloads[0]?.presentation?.blocks).toEqual([
+      {
+        type: "buttons",
+        buttons: [{ label: "Retry", action: { type: "command", command: "/retry" } }],
+      },
+    ]);
+    expect(
+      getReplyPayloadMetadata(payloads[0] as object)?.deliverDespiteSourceReplySuppression,
+    ).toBe(true);
   });
 
   it("reframes a recovered exec error as an intermediate status when the turn claims success", () => {
@@ -946,9 +975,32 @@ describe("buildEmbeddedRunPayloads", () => {
       assistantTexts: [text],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
       lastToolError: { toolName: "edit", error: "file missing" },
+      sourceReplyDeliveryMode: "automatic",
     });
 
     expectSinglePayloadSummary(payloads, { text });
+  });
+
+  it("still shows a failed message-tool send when the acknowledging prose is message_tool_only-private", () => {
+    // message_tool_only prose is dropped at dispatch (only payloads marked
+    // deliverDespiteSourceReplySuppression survive). A model writing
+    // "I couldn't send the file" there is not an acknowledgement the user saw
+    // — it is text nobody will ever see, so it must not disable the failure
+    // badge for the one signal that actually reaches the user.
+    const text = "I couldn't send the spreadsheet, so it wasn't delivered.";
+    const payloads = buildPayloads({
+      assistantTexts: [text],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      lastToolError: { toolName: "message", error: "Unknown target", mutatingAction: true },
+      sourceReplyDeliveryMode: "message_tool_only",
+    });
+
+    const warning = payloads.find((payload) => payload.isError === true);
+    expect(warning).toBeDefined();
+    expect(warning?.text).toContain("failed");
+    expect(getReplyPayloadMetadata(warning as object)?.deliverDespiteSourceReplySuppression).toBe(
+      true,
+    );
   });
 
   it("suppresses exec warnings when assistant output explicitly acknowledges the command failure", () => {

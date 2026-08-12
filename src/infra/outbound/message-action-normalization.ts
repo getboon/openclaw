@@ -12,14 +12,29 @@ import {
 import { applyTargetToParams } from "./channel-target.js";
 import { actionHasTarget, actionRequiresTarget } from "./message-action-spec.js";
 
+/**
+ * Whether a resolved action target came from the agent's own args or was
+ * injected from the live inbound tool context (the current conversation).
+ * A tool-context target is core's own inference, not something the agent
+ * typed — resolution failures for it must be softened differently than a
+ * target the agent explicitly chose (see `resolveActionTarget`).
+ */
+export type MessageActionTargetSource = "agent" | "tool-context";
+
+export type NormalizedMessageActionInput = {
+  args: Record<string, unknown>;
+  targetSource: MessageActionTargetSource;
+};
+
 /** Normalizes message-action args before target validation and dispatch. */
 export function normalizeMessageActionInput(params: {
   action: ChannelMessageActionName;
   args: Record<string, unknown>;
   toolContext?: ChannelThreadingToolContext;
-}): Record<string, unknown> {
+}): NormalizedMessageActionInput {
   const normalizedArgs = { ...params.args };
   const { action, toolContext } = params;
+  let targetSource: MessageActionTargetSource = "agent";
   const explicitChannel = normalizeOptionalString(normalizedArgs.channel) ?? "";
   const inferredChannel =
     explicitChannel || normalizeMessageChannel(toolContext?.currentChannelProvider) || "";
@@ -48,6 +63,7 @@ export function normalizeMessageActionInput(params: {
       normalizeOptionalString(toolContext?.currentMessagingTarget);
     if (inferredTarget) {
       normalizedArgs.target = inferredTarget;
+      targetSource = "tool-context";
     }
   }
 
@@ -76,5 +92,5 @@ export function normalizeMessageActionInput(params: {
     throw new Error(`Action ${action} requires a target.`);
   }
 
-  return normalizedArgs;
+  return { args: normalizedArgs, targetSource };
 }
