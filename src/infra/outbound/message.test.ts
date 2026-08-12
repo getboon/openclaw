@@ -543,10 +543,12 @@ describe("sendMessage", () => {
     // error) reads as a plain success with no failure signal anywhere.
     // `error` (not e.g. `deliveryError`) is what makes `isToolResultError`
     // classify the message tool's result as a real failure once this becomes
-    // a tool's `details`.
+    // a tool's `details`. It must be a plain string, not the raw `Error`:
+    // tool-result sanitization redacts objects via `Object.entries`, which
+    // never sees an `Error`'s non-enumerable `message`/`stack` and would
+    // otherwise reduce it to `{}`.
     expect(result.deliveryStatus).toBe("failed");
-    expect(result.error).toBeInstanceOf(Error);
-    expect((result.error as Error).message).toBe("transport unavailable");
+    expect(result.error).toBe("transport unavailable");
 
     expectDeliveryCallFields({
       bestEffort: true,

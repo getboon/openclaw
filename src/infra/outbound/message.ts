@@ -7,6 +7,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { OutboundMediaAccess } from "../../media/load-options.js";
 import type { PollInput } from "../../polls.js";
 import { normalizePollInput } from "../../polls.js";
+import { formatErrorMessage } from "../errors.js";
 import { resolveOutboundChannelPlugin } from "./channel-resolution.js";
 import { resolveMessageChannelSelection } from "./channel-selection.js";
 import {
@@ -102,17 +103,22 @@ export type MessageSendResult = {
   result?: OutboundDeliveryResult | { messageId: string };
   deliveryStatus?: "suppressed" | "failed";
   /**
-   * Underlying send error when `deliveryStatus` is `"failed"` — present only
-   * for `bestEffort` sends, where the caller asked not to throw but still
-   * needs a real failure to be tellable from a delivered message. This result
-   * becomes a tool's `details` verbatim (see `jsonResult` in
+   * Underlying send error message when `deliveryStatus` is `"failed"` —
+   * present only for `bestEffort` sends, where the caller asked not to throw
+   * but still needs a real failure to be tellable from a delivered message.
+   * This result becomes a tool's `details` verbatim (see `jsonResult` in
    * `src/agents/tools/common.ts`), and `isToolResultError`
    * (`src/agents/tool-result-error.ts`) already treats a truthy `error` field
    * as a failed tool call — naming it `error` (not e.g. `deliveryError`) is
    * what makes a failed bestEffort send become a real `lastToolError` instead
-   * of silently reading as success.
+   * of silently reading as success. Formatted to a plain string (not the raw
+   * `Error`) because tool-result sanitization (`sanitizeToolResult` /
+   * `redactStringsDeep` in `src/agents/embedded-agent-subscribe.tools.ts`)
+   * walks objects via `Object.entries`, which never sees an `Error`
+   * instance's non-enumerable `message`/`stack` and would otherwise reduce it
+   * to `{}` before `extractToolErrorMessage` reads it.
    */
-  error?: unknown;
+  error?: string;
   dryRun?: boolean;
 };
 
@@ -424,7 +430,7 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
     // failure signal anywhere.
     const bestEffortFailure =
       params.bestEffort === true && (send.status === "failed" || send.status === "partial_failed")
-        ? { failed: true as const, error: send.error }
+        ? { failed: true as const, error: formatErrorMessage(send.error) }
         : { failed: false as const };
 
     return {
