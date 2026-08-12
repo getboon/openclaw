@@ -335,6 +335,25 @@ describe("sanitizeToolResult", () => {
     expect(text).not.toContain("custom-secret-abc123");
     expect(text).toContain("custom…c123");
   });
+
+  it("preserves a bestEffort MessageSendResult's error message, but reduces a raw Error to {}", () => {
+    // src/infra/outbound/message.ts formats a failed bestEffort send's error
+    // to a plain string specifically because redactStringsDeep walks objects
+    // via Object.entries, which never sees an Error's non-enumerable
+    // message/stack. This locks in that survival property end to end.
+    const details = {
+      channel: "anychat-boon-web",
+      to: "thread-668",
+      deliveryStatus: "failed" as const,
+      error: 'Unknown target "thread-668" for Boon Web.',
+    };
+    const sanitized = sanitizeToolResult({ details });
+    expect(extractToolErrorMessage(sanitized)).toContain("Unknown target");
+
+    const detailsWithRawError = { ...details, error: new Error(details.error) };
+    const sanitizedWithRawError = sanitizeToolResult({ details: detailsWithRawError });
+    expect(extractToolErrorMessage(sanitizedWithRawError)).toBeUndefined();
+  });
 });
 
 describe("sanitizeToolArgs", () => {

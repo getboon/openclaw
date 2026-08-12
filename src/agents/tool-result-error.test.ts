@@ -2,10 +2,6 @@
 // path a bestEffort message send relies on to become a real tool failure
 // instead of silently reading as success.
 import { describe, expect, it } from "vitest";
-import {
-  extractToolErrorMessage,
-  sanitizeToolResult,
-} from "../agents/embedded-agent-subscribe.tools.js";
 import { isToolResultError, readToolResultStatus } from "./tool-result-error.js";
 
 describe("isToolResultError", () => {
@@ -25,25 +21,6 @@ describe("isToolResultError", () => {
       error: "Unknown target",
     };
     expect(isToolResultError({ details: messageSendResult })).toBe(true);
-  });
-
-  it("survives tool-result sanitization as a readable message — a raw Error instance would not", () => {
-    // sanitizeToolResult/redactStringsDeep walks objects via Object.entries,
-    // which never sees an Error instance's non-enumerable message/stack and
-    // would silently reduce it to {}. message.ts formats to a plain string
-    // specifically so extractToolErrorMessage can still read it here.
-    const details = {
-      channel: "anychat-boon-web",
-      to: "thread-668",
-      deliveryStatus: "failed" as const,
-      error: 'Unknown target "thread-668" for Boon Web.',
-    };
-    const sanitized = sanitizeToolResult({ details });
-    expect(extractToolErrorMessage(sanitized)).toContain("Unknown target");
-
-    const detailsWithRawError = { ...details, error: new Error(details.error) };
-    const sanitizedWithRawError = sanitizeToolResult({ details: detailsWithRawError });
-    expect(extractToolErrorMessage(sanitizedWithRawError)).toBeUndefined();
   });
 
   it("treats a successful send with no error field as not failed", () => {
