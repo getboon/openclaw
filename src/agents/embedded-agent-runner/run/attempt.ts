@@ -3187,6 +3187,10 @@ export async function runEmbeddedAttempt(
           ...(params.senderId && { senderId: params.senderId }),
           ...(params.senderName && { senderName: params.senderName }),
           ...(params.senderSource && { senderSource: params.senderSource }),
+          ...(params.messageThreadId != null &&
+            String(params.messageThreadId) !== "" && {
+              threadId: String(params.messageThreadId),
+            }),
           provider: params.provider,
           model: params.modelId,
           api: params.model.api,

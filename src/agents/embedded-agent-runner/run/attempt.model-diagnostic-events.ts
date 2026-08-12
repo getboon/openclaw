@@ -45,6 +45,7 @@ type ModelCallDiagnosticContext = {
   senderId?: string;
   senderName?: string;
   senderSource?: string;
+  threadId?: string;
   provider: string;
   model: string;
   api?: string;
@@ -107,6 +108,10 @@ const BOON_SESSION_HEADER_NAME = "x-boon-session-id";
 const BOON_USER_HEADER_NAME = "x-boon-user-id";
 const BOON_USER_NAME_HEADER_NAME = "x-boon-user-name";
 const BOON_USER_SOURCE_HEADER_NAME = "x-boon-user-source";
+// The Boon web-chat thread id (AgentChatThread.id). boon-core joins it to the
+// chat title so the usage dashboard shows a readable session name instead of the
+// opaque per-session UUID. Absent for non-web surfaces (Slack/Teams) → omitted.
+const BOON_THREAD_HEADER_NAME = "x-boon-thread-id";
 type ModelCallStreamOptions = Parameters<StreamFn>[2];
 
 function utf8JsonByteLength(value: unknown): number | undefined {
@@ -568,8 +573,10 @@ function sanitizeHeaderValue(value: string): string {
 // outbound model-call request: X-Boon-Session-ID (the per-thread session
 // id), X-Boon-User-ID (the stable per-platform user id), and — to make that id
 // legible in the dashboard — X-Boon-User-Name and X-Boon-User-Source (the
-// originating platform, e.g. "slack"). Empty/invalid values are omitted so we
-// never emit a blank or control-character-bearing header. Composes on top of the
+// originating platform, e.g. "slack") — plus X-Boon-Thread-Id (the web-chat
+// thread id, resolved to the chat title for a readable session name). Empty/
+// invalid values are omitted so we never emit a blank or control-character-bearing
+// header. Composes on top of the
 // traceparent wrapper — preserves its onPayload accounting by spreading the
 // already-wrapped options.
 function withBoonUsageHeaders(
@@ -581,6 +588,7 @@ function withBoonUsageHeaders(
     [BOON_USER_HEADER_NAME, ctx.senderId],
     [BOON_USER_NAME_HEADER_NAME, ctx.senderName],
     [BOON_USER_SOURCE_HEADER_NAME, ctx.senderSource],
+    [BOON_THREAD_HEADER_NAME, ctx.threadId],
   ];
   const headers: Record<string, string> = { ...options?.headers };
   let added = false;
