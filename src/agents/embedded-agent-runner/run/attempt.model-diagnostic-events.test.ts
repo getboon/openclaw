@@ -723,6 +723,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         senderId: "U0123ABCD",
         senderName: "Alice",
         senderSource: "slack",
+        threadId: "4242",
         provider: "anthropic",
         model: "claude",
         trace: createDiagnosticTraceContext({
@@ -747,6 +748,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(headers["x-boon-user-id"]).toBe("U0123ABCD");
     expect(headers["x-boon-user-name"]).toBe("Alice");
     expect(headers["x-boon-user-source"]).toBe("slack");
+    expect(headers["x-boon-thread-id"]).toBe("4242");
     expect(headers["X-Custom"]).toBe("kept"); // caller header preserved
     expect(typeof headers.traceparent).toBe("string"); // composes with traceparent
     // Caller's original headers object is not mutated.
@@ -793,6 +795,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(headers).not.toHaveProperty("x-boon-user-id");
     expect(headers).not.toHaveProperty("x-boon-user-name");
     expect(headers).not.toHaveProperty("x-boon-user-source");
+    expect(headers).not.toHaveProperty("x-boon-thread-id");
   });
 
   // Capture the outbound headers for a given partial diagnostic ctx.
@@ -845,6 +848,11 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(userOnly["x-boon-user-id"]).toBe("U9");
     expect(userOnly["x-boon-user-name"]).toBe("Bob");
     expect(userOnly).not.toHaveProperty("x-boon-session-id");
+
+    const threadOnly = await boonHeadersFor({ threadId: "4242" });
+    expect(threadOnly["x-boon-thread-id"]).toBe("4242");
+    expect(threadOnly).not.toHaveProperty("x-boon-session-id");
+    expect(threadOnly).not.toHaveProperty("x-boon-user-id");
   });
 
   it("strips control characters from header values and omits all-control values", async () => {
