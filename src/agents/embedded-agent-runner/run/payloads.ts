@@ -363,6 +363,14 @@ export function buildEmbeddedRunPayloads(params: {
     interactive?: ReplyPayload["interactive"];
     channelData?: Record<string, unknown>;
     nonTerminalToolErrorWarning?: boolean;
+    /**
+     * A run-level or tool-failure notice must reach the user even when
+     * `message_tool_only` would otherwise suppress plain assistant prose —
+     * that suppression exists to avoid double-sending a reply the message
+     * tool already delivered, not to hide the one signal a failed delivery
+     * has left.
+     */
+    deliverDespiteSourceSuppression?: boolean;
     sourceReplyMirror?: {
       idempotencyKey?: string;
     };
@@ -472,6 +480,7 @@ export function buildEmbeddedRunPayloads(params: {
     replyItems.push({
       text: errorText,
       isError: true,
+      deliverDespiteSourceSuppression: true,
       ...(exhaustionPresentation ? { presentation: exhaustionPresentation } : {}),
     });
   }
@@ -610,6 +619,13 @@ export function buildEmbeddedRunPayloads(params: {
   let hasUserFacingAssistantReply = hasSourceReplyPayload || deliveredSourceReplyViaMessageTool;
   const hasUserFacingErrorReply = replyItems.some((item) => item.isError === true);
   let hasUserFacingFailureAcknowledgement = false;
+  // In message_tool_only, plain assistant prose is private by contract and is
+  // dropped at dispatch (only payloads marked deliverDespiteSourceSuppression
+  // survive). Text the user will never see cannot count as a delivered reply
+  // or as an acknowledgement that a mutating tool failed — otherwise a model
+  // that merely wrote "I couldn't send the file" silently disables the
+  // failure badge for a delivery no one saw.
+  const assistantProseReachesUser = params.sourceReplyDeliveryMode !== "message_tool_only";
   for (const text of answerTexts) {
     const {
       text: cleanedText,
@@ -630,9 +646,11 @@ export function buildEmbeddedRunPayloads(params: {
       replyToTag,
       replyToCurrent,
     });
-    hasUserFacingAssistantReply = true;
-    if (cleanedText && hasExplicitMutatingToolFailureAcknowledgement(cleanedText)) {
-      hasUserFacingFailureAcknowledgement = true;
+    if (assistantProseReachesUser) {
+      hasUserFacingAssistantReply = true;
+      if (cleanedText && hasExplicitMutatingToolFailureAcknowledgement(cleanedText)) {
+        hasUserFacingFailureAcknowledgement = true;
+      }
     }
   }
 
@@ -715,19 +733,25 @@ export function buildEmbeddedRunPayloads(params: {
           text: warningText,
           isError: true,
           nonTerminalToolErrorWarning: isNonTerminalWarning,
-          // Only the non-terminal reframe gets a Retry button: it is the only
-          // branch where re-attempting makes sense (a terminal "⚠️ … failed"
-          // badge already means the assistant produced no usable reply at all).
-          presentation: isNonTerminalWarning
-            ? {
-                blocks: [
-                  {
-                    type: "buttons",
-                    buttons: [{ label: "Retry", action: { type: "command", command: "/retry" } }],
-                  },
-                ],
-              }
-            : undefined,
+          // Retry applies to both branches: the non-terminal reframe (a step
+          // didn't finish but a reply landed) and the terminal badge (a
+          // mutating send/write failed outright — e.g. the message tool
+          // failing to deliver the user's deliverable). Re-running makes
+          // sense either way; only a benign/suppressed warning has no Retry
+          // because it never becomes a visible payload at all.
+          presentation: {
+            blocks: [
+              {
+                type: "buttons",
+                buttons: [{ label: "Retry", action: { type: "command", command: "/retry" } }],
+              },
+            ],
+          },
+          // A terminal failure of a mutating send is exactly the state the
+          // customer's deliverable can go missing in — it must reach the user
+          // even under message_tool_only, where plain prose is suppressed to
+          // avoid double-sending a reply the message tool already delivered.
+          deliverDespiteSourceSuppression: true,
         });
       }
     }
@@ -753,6 +777,9 @@ export function buildEmbeddedRunPayloads(params: {
         setReplyPayloadMetadata(payload, {
           nonTerminalToolErrorWarning: true,
         });
+      }
+      if (item.deliverDespiteSourceSuppression) {
+        markReplyPayloadForSourceSuppressionDelivery(payload);
       }
       if (!item.isError && !item.isReasoning && params.assistantMessageIndex !== undefined) {
         setReplyPayloadMetadata(payload, {

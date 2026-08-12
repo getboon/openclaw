@@ -538,10 +538,34 @@ describe("sendMessage", () => {
       },
       "best-effort send message result",
     );
+    // bestEffort suppresses the throw, but the result must still say the send
+    // failed — otherwise a genuinely failed send (bad target, transport
+    // error) reads as a plain success with no failure signal anywhere.
+    // `error` (not e.g. `deliveryError`) is what makes `isToolResultError`
+    // classify the message tool's result as a real failure once this becomes
+    // a tool's `details`.
+    expect(result.deliveryStatus).toBe("failed");
+    expect(result.error).toBeInstanceOf(Error);
+    expect((result.error as Error).message).toBe("transport unavailable");
 
     expectDeliveryCallFields({
       bestEffort: true,
       queuePolicy: "best_effort",
     });
+  });
+
+  it("marks a best-effort send as delivered (no failure status) when it actually succeeds", async () => {
+    mocks.deliverOutboundPayloads.mockResolvedValueOnce([{ channel: "forum", messageId: "m1" }]);
+
+    const result = await sendMessage({
+      cfg: {},
+      channel: "forum",
+      to: "123456",
+      content: "hi",
+      bestEffort: true,
+    });
+
+    expect(result.deliveryStatus).toBeUndefined();
+    expect(result.error).toBeUndefined();
   });
 });
