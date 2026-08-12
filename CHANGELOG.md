@@ -2,6 +2,15 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.17
+
+Fixes a silent failure delivering agent-generated files/text into Boon Web conversations via the `message` tool, adds a `/retry` command and button so a failed step can be redone without a full turn re-run, and locks in regression coverage for the ENG-17107 reply-turn deadline fix.
+
+- **#121 (ENG-17862):** the `message` tool's `target` auto-fill (core's own inference from the live conversation, not something the agent typed) could fail to resolve on a Boon Web conversation id, and that failure was silently swallowed — the customer saw "Still working on your request…" nudges and then nothing: no file, no error. Target resolution now falls back to the existing normalized path only for a core-injected target; an agent-supplied target still fails loudly, unchanged. Also closes two related gaps found in the same fix: a `bestEffort` send that actually failed previously reported success with no signal at all, and a failed mutating send in `message_tool_only` delivery mode was being dropped by a suppression gate meant only to prevent double-sending a reply the message tool already delivered — it now reaches the user with a Retry affordance. Companion `anychat-boon-web` #53 (deploy core first).
+- **#117:** adds a `/retry` chat command and a Retry button to the non-terminal step-failure note, so a user can ask the agent to redo the named step without a full turn re-run — the note previously only offered copy-only guidance with no actual affordance. `/retry` reuses `/steer`'s "continue as a normal prompt" pattern (extracted into a shared `continueAsNormalPrompt` helper) rather than replaying the failed tool call verbatim, since the note only ever fires for non-idempotent `exec`/`bash`/`process` failures. Also fixes the button's dispatch, which only worked on Telegram out of the box: Microsoft Teams command buttons now use the same `imBack` wrapper as the app's welcome-card buttons (fixing every command button on Teams, not just Retry), and a Slack button press is now routed through the account's real inbound-message handler instead of a generic system event.
+- **#120 (ENG-17107):** test-only. Adds regression coverage in `dispatch-from-config.test.ts` asserting the reply-turn lane deadline honors a caller's `replyOptions.timeoutOverrideSeconds` (introduced by #114) instead of always deriving from `agents.defaults.timeoutSeconds` alone — closes the coverage gap so a future refactor of the deadline computation can't silently reintroduce the "Still working…" loop. No production code changed.
+- Base = `2026.6.11-boon.16`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.17` in lockstep. No other code changes; #117, #120, and #121 were merged onto `boon` before this release.
+
 ## 2026.6.11-boon.16
 
 Ends the "Still working on your request…" stuck loop with an anchored nudge and a guaranteed terminal turn outcome, names the step and reason behind a silently-swallowed tool failure, and emits per-session/per-user identity headers on model calls so token usage can be attributed.
