@@ -1,4 +1,5 @@
 // Tests dispatch-from-config runtime selection, hooks, and provider handoff.
+import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 import { beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { clearAgentHarnesses, registerAgentHarness } from "../../agents/harness/registry.js";
 import type { ChannelMessagingAdapter } from "../../channels/plugins/types.core.js";
@@ -409,6 +410,13 @@ vi.mock("./abort.runtime.js", () => ({
   },
 }));
 
+vi.mock("./reply-turn-admission.js", async () => {
+  const actual = await vi.importActual<typeof import("./reply-turn-admission.js")>(
+    "./reply-turn-admission.js",
+  );
+  return { ...actual, admitReplyTurn: vi.fn(actual.admitReplyTurn) };
+});
+
 vi.mock("../../logging/diagnostic.js", () => ({
   logMessageDispatchCompleted: diagnosticMocks.logMessageDispatchCompleted,
   logMessageDispatchStarted: diagnosticMocks.logMessageDispatchStarted,
@@ -616,6 +624,7 @@ let tryDispatchAcpReplyHook: typeof import("../../plugin-sdk/acp-runtime.js").tr
 let createReplyOperation: typeof import("./reply-run-registry.js").createReplyOperation;
 let replyRunRegistry: typeof import("./reply-run-registry.js").replyRunRegistry;
 let replyRunTesting: typeof import("./reply-run-registry.js").__testing;
+let admitReplyTurn: typeof import("./reply-turn-admission.js").admitReplyTurn;
 type DispatchReplyArgs = Parameters<
   typeof import("./dispatch-from-config.js").dispatchReplyFromConfig
 >[0];
@@ -634,6 +643,7 @@ beforeAll(async () => {
     replyRunRegistry,
     __testing: replyRunTesting,
   } = await import("./reply-run-registry.js"));
+  ({ admitReplyTurn } = await import("./reply-turn-admission.js"));
 });
 
 function createDispatcher(): ReplyDispatcher {
@@ -1125,6 +1135,36 @@ describe("dispatchReplyFromConfig", () => {
     expect(runtimePluginMocks.ensureRuntimePluginsLoaded.mock.invocationCallOrder[0]).toBeLessThan(
       hookMocks.runner.hasHooks.mock.invocationCallOrder[0],
     );
+  });
+
+  it("honors the caller's timeoutOverrideSeconds in the reply-turn lane deadline", async () => {
+    setNoAbort();
+    vi.mocked(admitReplyTurn).mockClear();
+    const cfg = {
+      agents: { defaults: { timeoutSeconds: 5 } },
+    } as const satisfies OpenClawConfig;
+    const dispatcher = createDispatcher();
+    const ctx = buildTestCtx({
+      Provider: "whatsapp",
+      SessionKey: "agent:main:main",
+    });
+
+    const replyResolver = async () => ({ text: "hi" }) satisfies ReplyPayload;
+    await dispatchReplyFromConfig({
+      ctx,
+      cfg,
+      dispatcher,
+      replyOptions: { timeoutOverrideSeconds: 0 },
+      replyResolver,
+    });
+
+    const admissionParams = firstMockArg(vi.mocked(admitReplyTurn), "reply-turn admission") as {
+      deadlineMs?: number;
+    };
+    // A caller-requested overrideSeconds of 0 means "no timeout" and must win over the much
+    // shorter agents.defaults.timeoutSeconds, or a heartbeat/no-timeout turn could still be
+    // killed by the lane deadline while the agent run itself keeps going.
+    expect(admissionParams.deadlineMs).toBe(MAX_TIMER_TIMEOUT_MS);
   });
 
   it("returns session metadata changes marked during reply resolution", async () => {
