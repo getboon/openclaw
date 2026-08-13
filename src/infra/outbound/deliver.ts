@@ -1,6 +1,7 @@
 // Outbound delivery core runs plugin hooks, queue durability, channel adapter
 // sends, commit hooks, diagnostics, transcript mirroring, and payload outcomes.
 import { resolveChunkMode, resolveTextChunkLimit } from "../../auto-reply/chunk.js";
+import { sanitizeUngroundedClaims } from "../../auto-reply/reply/grounding-gate.js";
 import { runReplyPayloadSendingHook } from "../../auto-reply/reply/reply-payload-sending-hook.js";
 import type { ReplyPayload } from "../../auto-reply/types.js";
 import { createRenderedMessageBatchPlan } from "../../channels/message/rendered-batch.js";
@@ -768,6 +769,32 @@ function emitMessageDeliveryError(params: {
   });
 }
 
+/**
+ * A `reply_payload_sending` hook may return a freshly constructed payload
+ * object that only sets `text`, silently dropping the notice/error/reasoning
+ * classification the grounding gate uses to skip non-claim payloads. Restore
+ * those flags from the pre-hook payload so a hook cannot cause an internal
+ * notice to be mistaken for a fabricated claim. `auditTrace` is evidence for
+ * this specific claim text, so it only carries over when the hook left the
+ * text unchanged.
+ */
+function restoreDroppedGroundingContext(
+  original: ReplyPayload,
+  effective: ReplyPayload,
+): ReplyPayload {
+  const restored: ReplyPayload = {
+    ...effective,
+    isError: effective.isError || original.isError,
+    isReasoning: effective.isReasoning || original.isReasoning,
+    isCompactionNotice: effective.isCompactionNotice || original.isCompactionNotice,
+    isStatusNotice: effective.isStatusNotice || original.isStatusNotice,
+  };
+  if (original.auditTrace && !effective.auditTrace && effective.text === original.text) {
+    restored.auditTrace = original.auditTrace;
+  }
+  return restored;
+}
+
 function normalizeEmptyPayloadForDelivery(payload: ReplyPayload): ReplyPayload | null {
   const text = typeof payload.text === "string" ? payload.text : "";
   if (!text.trim()) {
@@ -796,6 +823,13 @@ function normalizePayloadsForChannelDelivery(
   const normalizedPayloads: NormalizedPayloadForChannelDelivery[] = [];
   for (const entry of plan) {
     let sanitizedPayload = stripInternalRuntimeScaffoldingFromPayload(entry.payload);
+    const groundedText = sanitizeUngroundedClaims(sanitizedPayload);
+    if (groundedText !== sanitizedPayload.text) {
+      sanitizedPayload = {
+        ...sanitizedPayload,
+        text: groundedText,
+      };
+    }
     if (handler.sanitizeText && sanitizedPayload.text) {
       if (!handler.shouldSkipPlainTextSanitization?.(sanitizedPayload)) {
         sanitizedPayload = {
@@ -1680,7 +1714,7 @@ async function deliverOutboundPayloadsCore(
       const normalizedEffectivePayload = renderedHandler.normalizePayload
         ? renderedHandler.normalizePayload(renderedPayload)
         : renderedPayload;
-      const effectivePayload = normalizedEffectivePayload
+      let effectivePayload = normalizedEffectivePayload
         ? normalizeEmptyPayloadForDelivery(
             stripInternalRuntimeScaffoldingFromPayload(normalizedEffectivePayload),
           )
@@ -1697,6 +1731,14 @@ async function deliverOutboundPayloadsCore(
           }),
         );
         continue;
+      }
+      effectivePayload = restoreDroppedGroundingContext(payload, effectivePayload);
+      const groundedText = sanitizeUngroundedClaims(effectivePayload);
+      if (groundedText !== effectivePayload.text) {
+        effectivePayload = {
+          ...effectivePayload,
+          text: groundedText,
+        };
       }
       payloadSummary = buildPayloadSummary(effectivePayload);
       const deliveryHandler = await getDeliveryHandler(payloadSummary.mediaUrls);

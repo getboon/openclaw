@@ -374,6 +374,196 @@ describe("deliverOutboundPayloads", () => {
     expect(results).toEqual([{ channel: "matrix", messageId: "m1", roomId: "!room:example" }]);
   });
 
+  it("blocks ungrounded measured claims before the channel adapter sends them", async () => {
+    const sendMatrix = vi.fn().mockResolvedValue({ messageId: "m1", roomId: "!room:example" });
+
+    await deliverOutboundPayloads({
+      cfg: matrixChunkConfig,
+      channel: "matrix",
+      to: "!room:example",
+      payloads: [{ text: "Done - 22 pages verified and 4,288 LF measured." }],
+      deps: { matrix: sendMatrix },
+    });
+
+    expect(sendMatrix).toHaveBeenCalledWith(
+      "!room:example",
+      "I don't have a tool result supporting that statement yet.",
+      expect.anything(),
+    );
+  });
+
+  it("allows measured claims when the terminal payload carries successful tool evidence", async () => {
+    const sendMatrix = vi.fn().mockResolvedValue({ messageId: "m1", roomId: "!room:example" });
+    const text = "Done - 22 pages verified and 4,288 LF measured.";
+
+    await deliverOutboundPayloads({
+      cfg: matrixChunkConfig,
+      channel: "matrix",
+      to: "!room:example",
+      payloads: [
+        {
+          text,
+          auditTrace: {
+            schemaVersion: 1,
+            visibleTools: ["takeoff"],
+            toolInvocations: [{ name: "takeoff", status: "ok" }],
+            evidence: [{ kind: "tool_outcome", tool: "takeoff", status: "ok" }],
+            confidence: "high",
+            disposition: "completed",
+            reason: "tool_execution_succeeded",
+          },
+        },
+      ],
+      deps: { matrix: sendMatrix },
+    });
+
+    expect(sendMatrix).toHaveBeenCalledWith("!room:example", text, expect.anything());
+  });
+
+  it("rechecks claims after outbound hooks rewrite the payload", async () => {
+    hookMocks.runner.hasHooks.mockImplementation(
+      (hookName?: string) => hookName === "reply_payload_sending",
+    );
+    hookMocks.runner.runReplyPayloadSending.mockResolvedValueOnce({
+      payload: {
+        text: "Done - 22 pages verified.",
+      },
+    });
+    const sendMatrix = vi.fn().mockResolvedValue({ messageId: "m1", roomId: "!room:example" });
+
+    await deliverOutboundPayloads({
+      cfg: matrixChunkConfig,
+      channel: "matrix",
+      to: "!room:example",
+      payloads: [{ text: "Upload received." }],
+      deps: { matrix: sendMatrix },
+      replyPayloadSendingHook: {
+        kind: "final",
+        channel: "matrix",
+        context: { channelId: "matrix", conversationId: "!room:example" },
+      },
+    });
+
+    expect(sendMatrix).toHaveBeenCalledWith(
+      "!room:example",
+      "I don't have a tool result supporting that statement yet.",
+      expect.anything(),
+    );
+  });
+
+  it("preserves grounding evidence when an outbound hook reconstructs the payload", async () => {
+    hookMocks.runner.hasHooks.mockImplementation(
+      (hookName?: string) => hookName === "reply_payload_sending",
+    );
+    hookMocks.runner.runReplyPayloadSending.mockResolvedValueOnce({
+      payload: {
+        text: "Done - 22 pages verified.",
+      },
+    });
+    const sendMatrix = vi.fn().mockResolvedValue({ messageId: "m1", roomId: "!room:example" });
+    const text = "Done - 22 pages verified.";
+
+    await deliverOutboundPayloads({
+      cfg: matrixChunkConfig,
+      channel: "matrix",
+      to: "!room:example",
+      payloads: [
+        {
+          text,
+          auditTrace: {
+            schemaVersion: 1,
+            visibleTools: ["takeoff"],
+            toolInvocations: [{ name: "takeoff", status: "ok" }],
+            evidence: [{ kind: "tool_outcome", tool: "takeoff", status: "ok" }],
+            confidence: "high",
+            disposition: "completed",
+            reason: "tool_execution_succeeded",
+          },
+        },
+      ],
+      deps: { matrix: sendMatrix },
+      replyPayloadSendingHook: {
+        kind: "final",
+        channel: "matrix",
+        context: { channelId: "matrix", conversationId: "!room:example" },
+      },
+    });
+
+    expect(sendMatrix).toHaveBeenCalledWith("!room:example", text, expect.anything());
+  });
+
+  it("rechecks hook-rewritten text without restoring the original grounding evidence", async () => {
+    hookMocks.runner.hasHooks.mockImplementation(
+      (hookName?: string) => hookName === "reply_payload_sending",
+    );
+    hookMocks.runner.runReplyPayloadSending.mockResolvedValueOnce({
+      payload: {
+        text: "Done - 99 pages verified.",
+      },
+    });
+    const sendMatrix = vi.fn().mockResolvedValue({ messageId: "m1", roomId: "!room:example" });
+
+    await deliverOutboundPayloads({
+      cfg: matrixChunkConfig,
+      channel: "matrix",
+      to: "!room:example",
+      payloads: [
+        {
+          text: "Done - 22 pages verified.",
+          auditTrace: {
+            schemaVersion: 1,
+            visibleTools: ["takeoff"],
+            toolInvocations: [{ name: "takeoff", status: "ok" }],
+            evidence: [{ kind: "tool_outcome", tool: "takeoff", status: "ok" }],
+            confidence: "high",
+            disposition: "completed",
+            reason: "tool_execution_succeeded",
+          },
+        },
+      ],
+      deps: { matrix: sendMatrix },
+      replyPayloadSendingHook: {
+        kind: "final",
+        channel: "matrix",
+        context: { channelId: "matrix", conversationId: "!room:example" },
+      },
+    });
+
+    expect(sendMatrix).toHaveBeenCalledWith(
+      "!room:example",
+      "I don't have a tool result supporting that statement yet.",
+      expect.anything(),
+    );
+  });
+
+  it("preserves status-notice classification when an outbound hook reconstructs the payload", async () => {
+    hookMocks.runner.hasHooks.mockImplementation(
+      (hookName?: string) => hookName === "reply_payload_sending",
+    );
+    hookMocks.runner.runReplyPayloadSending.mockResolvedValueOnce({
+      payload: {
+        text: "Pulled from the processed set.",
+      },
+    });
+    const sendMatrix = vi.fn().mockResolvedValue({ messageId: "m1", roomId: "!room:example" });
+    const text = "Pulled from the processed set.";
+
+    await deliverOutboundPayloads({
+      cfg: matrixChunkConfig,
+      channel: "matrix",
+      to: "!room:example",
+      payloads: [{ text, isStatusNotice: true }],
+      deps: { matrix: sendMatrix },
+      replyPayloadSendingHook: {
+        kind: "final",
+        channel: "matrix",
+        context: { channelId: "matrix", conversationId: "!room:example" },
+      },
+    });
+
+    expect(sendMatrix).toHaveBeenCalledWith("!room:example", text, expect.anything());
+  });
+
   it("reports unsupported durable final delivery when required capabilities are missing", async () => {
     setActivePluginRegistry(
       createTestRegistry([
