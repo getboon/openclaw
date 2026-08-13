@@ -4,6 +4,7 @@ import {
   classify5xxSource,
   diagnosticErrorCategory,
   diagnosticErrorFailureKind,
+  diagnosticFailoverDetailSuffix,
   diagnosticHttpStatusCode,
   diagnosticProviderRequestIdHash,
 } from "./diagnostic-error-metadata.js";
@@ -159,6 +160,84 @@ describe("diagnostic error metadata", () => {
       });
       // Falls back to the status band without throwing.
       expect(classify5xxSource(502, errorLike)).toBe("gateway_origin_5xx");
+    });
+  });
+
+  describe("diagnosticFailoverDetailSuffix", () => {
+    it("formats a FailoverError-shaped error's reason/status/code/provider/model/rawError as a log suffix", () => {
+      const err = {
+        name: "FailoverError",
+        reason: "schema",
+        status: 429,
+        code: "invalid_request_error",
+        provider: "anthropic",
+        model: "claude-opus-4-6",
+        rawError: "invalid_request_error: tool_use.input failed schema validation",
+      };
+      expect(diagnosticFailoverDetailSuffix(err)).toBe(
+        ' reason="schema" status="429" code="invalid_request_error" provider="anthropic" model="claude-opus-4-6" rawError="invalid_request_error: tool_use.input failed schema validation"',
+      );
+    });
+
+    it("returns an empty string when no failover detail properties are present", () => {
+      expect(diagnosticFailoverDetailSuffix(new Error("plain failure"))).toBe("");
+    });
+
+    it("ignores an unrelated error that merely has coincidentally-named reason/rawError properties", () => {
+      // Only a real FailoverError shape (name + reason) should surface detail —
+      // otherwise an unrelated error type gets mislabeled as failover detail.
+      const unrelated = {
+        name: "SomeOtherError",
+        reason: "not-a-failover-reason",
+        rawError: "unrelated raw text",
+      };
+      expect(diagnosticFailoverDetailSuffix(unrelated)).toBe("");
+    });
+
+    it("escapes embedded double quotes and backslashes so a JSON rawError can't break the log line", () => {
+      const err = {
+        name: "FailoverError",
+        reason: "schema",
+        rawError: '{"error":{"type":"invalid_request_error","path":"C:\\\\models"}}',
+      };
+      expect(diagnosticFailoverDetailSuffix(err)).toBe(
+        ' reason="schema" rawError="{\\"error\\":{\\"type\\":\\"invalid_request_error\\",\\"path\\":\\"C:\\\\\\\\models\\"}}"',
+      );
+    });
+
+    it("single-lines and truncates an oversized rawError", () => {
+      const longRaw = `line one\nline two ${"x".repeat(250)}`;
+      const suffix = diagnosticFailoverDetailSuffix({
+        name: "FailoverError",
+        reason: "schema",
+        rawError: longRaw,
+      });
+      expect(suffix).not.toContain("\n");
+      expect(suffix.length).toBeLessThan(longRaw.length);
+    });
+
+    it("bounds the escaped output even when escaping would expand it past the raw length cap", () => {
+      // Escaping must run before truncation: a rawError dense with quotes/backslashes
+      // roughly doubles in length when escaped, and the cap must apply to that
+      // final escaped string, not let escaping blow past it afterward.
+      const denseRaw = '"\\'.repeat(150);
+      const suffix = diagnosticFailoverDetailSuffix({
+        name: "FailoverError",
+        reason: "schema",
+        rawError: denseRaw,
+      });
+      const rawErrorValue = /rawError="(.*)"$/.exec(suffix)?.[1] ?? "";
+      expect(rawErrorValue.length).toBeLessThanOrEqual(201);
+    });
+
+    it("does not invoke throwing getters while reading failover detail properties", () => {
+      const errorLike = { name: "FailoverError", reason: "schema" };
+      Object.defineProperty(errorLike, "rawError", {
+        get() {
+          throw new Error("should not read getter");
+        },
+      });
+      expect(diagnosticFailoverDetailSuffix(errorLike)).toBe(' reason="schema"');
     });
   });
 });

@@ -273,3 +273,64 @@ export function diagnosticProviderRequestIdHash(err: unknown): string | undefine
   );
   return fromMessage ? hashDiagnosticIdentifier(fromMessage) : undefined;
 }
+
+const FAILOVER_DETAIL_PROPS = [
+  "reason",
+  "status",
+  "code",
+  "provider",
+  "model",
+  "rawError",
+] as const;
+const MAX_FAILOVER_DETAIL_VALUE_CHARS = 200;
+
+function readDirectStringProperty(err: unknown, key: string): string | undefined {
+  const value = readOwnDataProperty(err, key);
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function readDirectLoggableProperty(err: unknown, key: string): string | undefined {
+  const value = readOwnDataProperty(err, key);
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : undefined;
+}
+
+// Mirrors isFailoverError's own-property duck-type check (agents/failover-error.ts)
+// without importing it, so an unrelated error can't be mislabeled as failover detail.
+function isFailoverErrorShaped(err: unknown): boolean {
+  return (
+    readDirectStringProperty(err, "name") === "FailoverError" &&
+    typeof readOwnDataProperty(err, "reason") === "string"
+  );
+}
+
+// Escapes first, then bounds length, so the "\"" this guards against can't
+// itself push the result past the length bound.
+function formatFailoverDetailValue(value: string): string {
+  const singleLine = value.replace(/[\r\n]+/g, " ").trim();
+  const escaped = singleLine.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return escaped.length > MAX_FAILOVER_DETAIL_VALUE_CHARS
+    ? `${escaped.slice(0, MAX_FAILOVER_DETAIL_VALUE_CHARS)}…`
+    : escaped;
+}
+
+// FailoverError.message is consumer-audience-redacted copy, never the raw
+// provider failure (see CONSUMER_ERROR_COPY in embedded-agent-helpers/errors.ts).
+// This recovers the detail from FailoverError's own data properties instead.
+/** Formats a FailoverError-shaped error's reason/status/code/provider/model/rawError as a bounded, single-line log suffix. */
+export function diagnosticFailoverDetailSuffix(err: unknown): string {
+  if (!isFailoverErrorShaped(err)) {
+    return "";
+  }
+  let suffix = "";
+  for (const prop of FAILOVER_DETAIL_PROPS) {
+    const value = readDirectLoggableProperty(err, prop);
+    if (!value) {
+      continue;
+    }
+    suffix += ` ${prop}="${formatFailoverDetailValue(value)}"`;
+  }
+  return suffix;
+}
