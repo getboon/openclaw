@@ -278,6 +278,14 @@ export function startProgressNudgeRunner(opts: {
           agentId,
         });
         if (edited) {
+          log.info("progress-nudge: delivered", {
+            sessionKey,
+            mode: "edit",
+            channel: delivery.channel,
+            threadId,
+            messageId: nudgeState.anchorMessageId,
+            nudgeCount: nudgeState.nudgeCount,
+          });
           return;
         }
       } catch (err) {
@@ -311,6 +319,18 @@ export function startProgressNudgeRunner(opts: {
       result.results.find((item) => typeof item.messageId === "string")?.messageId;
     if (messageId && nudgeState) {
       nudgeState.anchorMessageId = messageId;
+    }
+    // "suppressed" means nothing actually went out (e.g. a silent-reply policy
+    // hook cancelled it) — only a real "sent" outcome is a delivery to log.
+    if (result.status === "sent") {
+      log.info("progress-nudge: delivered", {
+        sessionKey,
+        mode: "send",
+        channel: delivery.channel,
+        threadId,
+        messageId,
+        nudgeCount: nudgeState?.nudgeCount,
+      });
     }
   };
 
@@ -416,7 +436,18 @@ export function startProgressNudgeRunner(opts: {
       evt.sessionKey,
       Number.isFinite(evt.startedAt) ? evt.startedAt : undefined,
     );
-    entry.anchorRetainUntilMs = now() + PROGRESS_NUDGE_ANCHOR_RETENTION_MS;
+    // A `completed` run delivered its real answer, so the exchange is over — the
+    // next long turn on this sessionKey is new work and owes a fresh, visible
+    // nudge, not a silent edit of a message the user already saw resolved.
+    // Anything else (failed/aborted/no-result) is the impatient-follow-up
+    // pattern the anchor exists to collapse: keep it, or a stuck run plus a
+    // retry goes back to spamming a new "Still working…" per attempt.
+    if (evt.result?.kind === "completed") {
+      entry.anchorMessageId = undefined;
+      entry.anchorRetainUntilMs = undefined;
+    } else {
+      entry.anchorRetainUntilMs = now() + PROGRESS_NUDGE_ANCHOR_RETENTION_MS;
+    }
     // "Went long" is decided from elapsed run time, not from whether a nudge
     // happened to fire — a run that crosses the threshold then fails BETWEEN poll
     // ticks (so nudgeCount is still 0) has still been silent long enough to owe a
