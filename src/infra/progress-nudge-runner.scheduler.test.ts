@@ -167,7 +167,7 @@ describe("startProgressNudgeRunner scheduler", () => {
   it("posts a fresh visible nudge for a new run after the prior run completed", async () => {
     // A `completed` prior run delivered its real answer — the exchange is over,
     // so the next long turn on this sessionKey is new work and must NOT edit a
-    // message the user already saw resolved (the ENG-17875 delivery gap: within
+    // message the user already saw resolved (the anchor-delivery gap: within
     // the anchor's retention window, a later long turn silently rewrote an
     // earlier, already-answered "Still working…" instead of posting visibly).
     const editMessage = vi.fn().mockResolvedValue(true);

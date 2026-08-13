@@ -320,14 +320,18 @@ export function startProgressNudgeRunner(opts: {
     if (messageId && nudgeState) {
       nudgeState.anchorMessageId = messageId;
     }
-    log.info("progress-nudge: delivered", {
-      sessionKey,
-      mode: "send",
-      channel: delivery.channel,
-      threadId,
-      messageId,
-      nudgeCount: nudgeState?.nudgeCount,
-    });
+    // "suppressed" means nothing actually went out (e.g. a silent-reply policy
+    // hook cancelled it) — only a real "sent" outcome is a delivery to log.
+    if (result.status === "sent") {
+      log.info("progress-nudge: delivered", {
+        sessionKey,
+        mode: "send",
+        channel: delivery.channel,
+        threadId,
+        messageId,
+        nudgeCount: nudgeState?.nudgeCount,
+      });
+    }
   };
 
   const maybeNudgeSession = async (sessionKey: string, nowMs: number): Promise<void> => {
