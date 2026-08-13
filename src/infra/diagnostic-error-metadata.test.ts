@@ -230,6 +230,50 @@ describe("diagnostic error metadata", () => {
       expect(rawErrorValue.length).toBeLessThanOrEqual(201);
     });
 
+    it("strips control characters (ESC, bell, line/paragraph separators) instead of leaving them in the log", () => {
+      const esc = String.fromCharCode(27);
+      const bell = String.fromCharCode(7);
+      const lineSeparator = String.fromCharCode(8232);
+      const paragraphSeparator = String.fromCharCode(8233);
+      const controlHeavyRaw =
+        "bad" +
+        esc +
+        "value" +
+        lineSeparator +
+        "with" +
+        paragraphSeparator +
+        "control" +
+        bell +
+        "chars";
+      const suffix = diagnosticFailoverDetailSuffix({
+        name: "FailoverError",
+        reason: "schema",
+        rawError: controlHeavyRaw,
+      });
+      expect(suffix).not.toContain(esc);
+      expect(suffix).not.toContain(bell);
+      expect(suffix).not.toContain(lineSeparator);
+      expect(suffix).not.toContain(paragraphSeparator);
+      expect(suffix).toContain("rawError=");
+    });
+
+    it("never truncates mid-escape-pair, leaving a dangling backslash before the closing quote", () => {
+      // 199 plain chars, then a quote (which escapes to a 2-char "\"" pair
+      // starting right at the 200-char cap) plus trailing text so the value
+      // is long enough to require truncation. A naive slice(0, 200) would cut
+      // between the pair's backslash and its quote, corrupting the log line.
+      const raw = `${"x".repeat(199)}"${"y".repeat(50)}`;
+      const suffix = diagnosticFailoverDetailSuffix({
+        name: "FailoverError",
+        reason: "schema",
+        rawError: raw,
+      });
+      const rawErrorValue = /rawError="(.*)"$/.exec(suffix)?.[1] ?? "";
+      // A well-formed value never ends in an odd (unpaired) run of backslashes.
+      const trailingBackslashes = /\\*$/.exec(rawErrorValue.replace(/…$/, ""))?.[0].length ?? 0;
+      expect(trailingBackslashes % 2).toBe(0);
+    });
+
     it("does not invoke throwing getters while reading failover detail properties", () => {
       const errorLike = { name: "FailoverError", reason: "schema" };
       Object.defineProperty(errorLike, "rawError", {

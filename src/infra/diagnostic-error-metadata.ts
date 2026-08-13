@@ -306,14 +306,47 @@ function isFailoverErrorShaped(err: unknown): boolean {
   );
 }
 
-// Escapes first, then bounds length, so the "\"" this guards against can't
-// itself push the result past the length bound.
+// Mirrors sanitizeForConsole's control-char filter (agents/console-sanitize.ts)
+// without importing it: strips non-whitespace control chars a terminal/log
+// parser could act on; \t/\n/\r and unicode line/paragraph separators are
+// left for the whitespace flatten below instead of stripped here.
+function stripFailoverDetailControlChars(text: string): string {
+  return Array.from(text)
+    .filter((char) => {
+      const code = char.charCodeAt(0);
+      return !(
+        code <= 0x08 ||
+        code === 0x0b ||
+        code === 0x0c ||
+        (code >= 0x0e && code <= 0x1f) ||
+        code === 0x7f
+      );
+    })
+    .join("");
+}
+
+// A truncation cut can land inside an escaped `\\` or `\"` pair, leaving a
+// dangling backslash that then escapes the log line's own closing quote.
+// Back off by one char whenever the trailing backslash run is unpaired.
+function truncateEscapedAtWholeUnit(escaped: string, maxChars: number): string {
+  if (escaped.length <= maxChars) {
+    return escaped;
+  }
+  let cut = maxChars;
+  let trailingBackslashRun = 0;
+  for (let i = cut - 1; i >= 0 && escaped[i] === "\\"; i--) {
+    trailingBackslashRun++;
+  }
+  if (trailingBackslashRun % 2 === 1) {
+    cut -= 1;
+  }
+  return `${escaped.slice(0, cut)}…`;
+}
+
 function formatFailoverDetailValue(value: string): string {
-  const singleLine = value.replace(/[\r\n]+/g, " ").trim();
+  const singleLine = stripFailoverDetailControlChars(value).replace(/\s+/g, " ").trim();
   const escaped = singleLine.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  return escaped.length > MAX_FAILOVER_DETAIL_VALUE_CHARS
-    ? `${escaped.slice(0, MAX_FAILOVER_DETAIL_VALUE_CHARS)}…`
-    : escaped;
+  return truncateEscapedAtWholeUnit(escaped, MAX_FAILOVER_DETAIL_VALUE_CHARS);
 }
 
 // FailoverError.message is consumer-audience-redacted copy, never the raw
