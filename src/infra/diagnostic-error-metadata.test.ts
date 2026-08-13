@@ -230,9 +230,10 @@ describe("diagnostic error metadata", () => {
       expect(rawErrorValue.length).toBeLessThanOrEqual(201);
     });
 
-    it("strips control characters (ESC, bell, line/paragraph separators) instead of leaving them in the log", () => {
+    it("strips control characters (ESC, bell, C1, line/paragraph separators) instead of leaving them in the log", () => {
       const esc = String.fromCharCode(27);
       const bell = String.fromCharCode(7);
+      const c1 = String.fromCharCode(0x9d);
       const lineSeparator = String.fromCharCode(8232);
       const paragraphSeparator = String.fromCharCode(8233);
       const controlHeavyRaw =
@@ -244,6 +245,7 @@ describe("diagnostic error metadata", () => {
         paragraphSeparator +
         "control" +
         bell +
+        c1 +
         "chars";
       const suffix = diagnosticFailoverDetailSuffix({
         name: "FailoverError",
@@ -252,6 +254,7 @@ describe("diagnostic error metadata", () => {
       });
       expect(suffix).not.toContain(esc);
       expect(suffix).not.toContain(bell);
+      expect(suffix).not.toContain(c1);
       expect(suffix).not.toContain(lineSeparator);
       expect(suffix).not.toContain(paragraphSeparator);
       expect(suffix).toContain("rawError=");

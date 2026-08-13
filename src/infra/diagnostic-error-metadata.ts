@@ -1,5 +1,6 @@
 // Extracts provider diagnostic metadata from error objects and text.
 import crypto from "node:crypto";
+import { sanitizeControlCharsForLogging } from "./control-char-sanitize.js";
 
 const HTTP_STATUS_MIN = 100;
 const HTTP_STATUS_MAX = 599;
@@ -306,25 +307,6 @@ function isFailoverErrorShaped(err: unknown): boolean {
   );
 }
 
-// Mirrors sanitizeForConsole's control-char filter (agents/console-sanitize.ts)
-// without importing it: strips non-whitespace control chars a terminal/log
-// parser could act on; \t/\n/\r and unicode line/paragraph separators are
-// left for the whitespace flatten below instead of stripped here.
-function stripFailoverDetailControlChars(text: string): string {
-  return Array.from(text)
-    .filter((char) => {
-      const code = char.charCodeAt(0);
-      return !(
-        code <= 0x08 ||
-        code === 0x0b ||
-        code === 0x0c ||
-        (code >= 0x0e && code <= 0x1f) ||
-        code === 0x7f
-      );
-    })
-    .join("");
-}
-
 // A truncation cut can land inside an escaped `\\` or `\"` pair, leaving a
 // dangling backslash that then escapes the log line's own closing quote.
 // Back off by one char whenever the trailing backslash run is unpaired.
@@ -344,7 +326,7 @@ function truncateEscapedAtWholeUnit(escaped: string, maxChars: number): string {
 }
 
 function formatFailoverDetailValue(value: string): string {
-  const singleLine = stripFailoverDetailControlChars(value).replace(/\s+/g, " ").trim();
+  const singleLine = sanitizeControlCharsForLogging(value);
   const escaped = singleLine.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   return truncateEscapedAtWholeUnit(escaped, MAX_FAILOVER_DETAIL_VALUE_CHARS);
 }
