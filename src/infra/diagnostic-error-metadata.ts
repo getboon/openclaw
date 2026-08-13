@@ -345,7 +345,11 @@ export function diagnosticFailoverDetailSuffix(err: unknown): string {
     if (!value) {
       continue;
     }
-    suffix += ` ${prop}="${formatFailoverDetailValue(value)}"`;
+    const formatted = formatFailoverDetailValue(value);
+    if (!formatted) {
+      continue;
+    }
+    suffix += ` ${prop}="${formatted}"`;
   }
   return suffix;
 }

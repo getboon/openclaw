@@ -277,6 +277,19 @@ describe("diagnostic error metadata", () => {
       expect(trailingBackslashes % 2).toBe(0);
     });
 
+    it("omits a field entirely when its value is nothing but stripped control characters", () => {
+      // rawError of only control chars is truthy pre-sanitize but sanitizes to
+      // "", which must omit the field rather than emit a spurious rawError="".
+      const c1 = String.fromCharCode(0x9d);
+      const suffix = diagnosticFailoverDetailSuffix({
+        name: "FailoverError",
+        reason: "schema",
+        rawError: c1,
+      });
+      expect(suffix).toBe(' reason="schema"');
+      expect(suffix).not.toContain("rawError=");
+    });
+
     it("does not invoke throwing getters while reading failover detail properties", () => {
       const errorLike = { name: "FailoverError", reason: "schema" };
       Object.defineProperty(errorLike, "rawError", {

@@ -9,5 +9,8 @@ export function sanitizeForConsole(text: string | undefined, maxChars = 200): st
     return undefined;
   }
   const sanitized = sanitizeControlCharsForLogging(trimmed);
+  if (!sanitized) {
+    return undefined;
+  }
   return sanitized.length > maxChars ? `${sanitized.slice(0, maxChars)}…` : sanitized;
 }

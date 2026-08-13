@@ -10,6 +10,17 @@ describe("sanitizeForConsole", () => {
     expect(sanitizeForConsole("   ")).toBeUndefined();
   });
 
+  it("returns undefined when the input is entirely stripped control characters", () => {
+    // A lone control char survives .trim() (it isn't whitespace) but is fully
+    // stripped by the sanitizer, so callers' `?? fallback` must still fire
+    // instead of receiving a blank string.
+    const c1 = String.fromCharCode(0x9d);
+    const esc = String.fromCharCode(0x1b);
+    expect(sanitizeForConsole(c1)).toBeUndefined();
+    expect(sanitizeForConsole(esc)).toBeUndefined();
+    expect(sanitizeForConsole(c1) ?? "-").toBe("-");
+  });
+
   it("strips control characters and flattens whitespace", () => {
     const esc = String.fromCharCode(0x1b);
     const c1 = String.fromCharCode(0x9d);
