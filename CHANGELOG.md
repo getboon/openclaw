@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.18
+
+Emits the Boon web-chat thread id on model calls so per-session token usage can be labelled with a readable chat title instead of an opaque UUID.
+
+- **#123 (ENG-16470):** Boon web-chat turns carry a chat thread id (`AgentChatThread.id`) that never left the gateway, so the usage dashboard's _Group by session_ could only show the opaque per-session UUID. Emits it as `x-boon-thread-id` on outbound model calls, reusing the exact printable-ASCII sanitize + omit-if-empty pattern already used for `x-boon-session-id` / `x-boon-user-*`, wired at the same single model-call choke point. `ModelCallDiagnosticContext` gains `threadId`, populated in the runner from the `messageThreadId` that already flowed in from the transport `MsgContext`. Purely additive: non-web surfaces (Slack/Teams) have no `messageThreadId`, so the header is omitted and downstream degrades to the raw session id. Completes the producer side of the readable-session-name work begun by #109 (boon.16). Companions: `anychat-boon-web` (surface `MessageThreadId`), `boon-llm-gateway` #81 (forward the header), `boon` #13971 (ingest + join + dashboard) — the gateway ignores unknown headers, so deploy order across the four repos is free.
+- Base = `2026.6.11-boon.17`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.18` in lockstep. No other code changes; #123 was merged onto `boon` before this release.
+
 ## 2026.6.11-boon.17
 
 Fixes a silent failure delivering agent-generated files/text into Boon Web conversations via the `message` tool, adds a `/retry` command and button so a failed step can be redone without a full turn re-run, and locks in regression coverage for the ENG-17107 reply-turn deadline fix.
