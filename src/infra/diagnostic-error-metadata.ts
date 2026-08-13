@@ -1,5 +1,6 @@
 // Extracts provider diagnostic metadata from error objects and text.
 import crypto from "node:crypto";
+import { sanitizeControlCharsForLogging } from "./control-char-sanitize.js";
 
 const HTTP_STATUS_MIN = 100;
 const HTTP_STATUS_MAX = 599;
@@ -272,4 +273,83 @@ export function diagnosticProviderRequestIdHash(err: unknown): string | undefine
     extractProviderRequestIdFromText(readDirectMessage(candidate)),
   );
   return fromMessage ? hashDiagnosticIdentifier(fromMessage) : undefined;
+}
+
+const FAILOVER_DETAIL_PROPS = [
+  "reason",
+  "status",
+  "code",
+  "provider",
+  "model",
+  "rawError",
+] as const;
+const MAX_FAILOVER_DETAIL_VALUE_CHARS = 200;
+
+function readDirectStringProperty(err: unknown, key: string): string | undefined {
+  const value = readOwnDataProperty(err, key);
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function readDirectLoggableProperty(err: unknown, key: string): string | undefined {
+  const value = readOwnDataProperty(err, key);
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : undefined;
+}
+
+// Mirrors isFailoverError's own-property duck-type check (agents/failover-error.ts)
+// without importing it, so an unrelated error can't be mislabeled as failover detail.
+function isFailoverErrorShaped(err: unknown): boolean {
+  return (
+    readDirectStringProperty(err, "name") === "FailoverError" &&
+    typeof readOwnDataProperty(err, "reason") === "string"
+  );
+}
+
+// A truncation cut can land inside an escaped `\\` or `\"` pair, leaving a
+// dangling backslash that then escapes the log line's own closing quote.
+// Back off by one char whenever the trailing backslash run is unpaired.
+function truncateEscapedAtWholeUnit(escaped: string, maxChars: number): string {
+  if (escaped.length <= maxChars) {
+    return escaped;
+  }
+  let cut = maxChars;
+  let trailingBackslashRun = 0;
+  for (let i = cut - 1; i >= 0 && escaped[i] === "\\"; i--) {
+    trailingBackslashRun++;
+  }
+  if (trailingBackslashRun % 2 === 1) {
+    cut -= 1;
+  }
+  return `${escaped.slice(0, cut)}…`;
+}
+
+function formatFailoverDetailValue(value: string): string {
+  const singleLine = sanitizeControlCharsForLogging(value);
+  const escaped = singleLine.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return truncateEscapedAtWholeUnit(escaped, MAX_FAILOVER_DETAIL_VALUE_CHARS);
+}
+
+// FailoverError.message is consumer-audience-redacted copy, never the raw
+// provider failure (see CONSUMER_ERROR_COPY in embedded-agent-helpers/errors.ts).
+// This recovers the detail from FailoverError's own data properties instead.
+/** Formats a FailoverError-shaped error's reason/status/code/provider/model/rawError as a bounded, single-line log suffix. */
+export function diagnosticFailoverDetailSuffix(err: unknown): string {
+  if (!isFailoverErrorShaped(err)) {
+    return "";
+  }
+  let suffix = "";
+  for (const prop of FAILOVER_DETAIL_PROPS) {
+    const value = readDirectLoggableProperty(err, prop);
+    if (!value) {
+      continue;
+    }
+    const formatted = formatFailoverDetailValue(value);
+    if (!formatted) {
+      continue;
+    }
+    suffix += ` ${prop}="${formatted}"`;
+  }
+  return suffix;
 }
