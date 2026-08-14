@@ -41,6 +41,21 @@ is `steer`. If the mode is `followup` or `collect`, normal messages do not enter
 this steering path; they wait until the active run finishes. For the explicit
 `/steer <message>` command, see [Steer](/tools/steer).
 
+## One long tool call still feels serial
+
+A single long-running tool call (a big batch job, a large document pass) has
+no model boundary to steer into until it finishes — the session stays busy for
+the whole call, so a quick follow-up sent mid-call waits rather than answers
+immediately. This is expected: steering injects _between_ tool calls, not
+_during_ one.
+
+If a task is expected to run long, delegate it to a sub-agent instead of
+running it inline: set `agents.defaults.subagents.delegationMode: "prefer"`
+(see [Sub-agents](/tools/subagents)) so the main session stays free to answer
+quick questions while the delegated task runs concurrently. See
+[Parallel specialist lanes](/concepts/parallel-specialist-lanes) for the wider
+pattern.
+
 ## Modes
 
 | Mode        | Active-run behavior                                    | Later behavior                                                                      |
@@ -88,3 +103,5 @@ boundary.
 - [Steer](/tools/steer)
 - [Messages](/concepts/messages)
 - [Agent loop](/concepts/agent-loop)
+- [Parallel specialist lanes](/concepts/parallel-specialist-lanes)
+- [Sub-agents](/tools/subagents)

@@ -124,4 +124,5 @@ network work unless this lane explicitly owns it.
 
 - [Multi-agent routing](/concepts/multi-agent)
 - [Command queue](/concepts/queue)
+- [Steering queue](/concepts/queue-steering)
 - [Sub-agents](/tools/subagents)
