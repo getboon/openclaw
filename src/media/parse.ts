@@ -1,3 +1,4 @@
+import { mimeTypeFromFilePath } from "@openclaw/media-core/mime";
 // Media parse helpers normalize media references from user and channel input.
 import {
   extractEmbeddedIpv4FromIpv6,
@@ -43,6 +44,58 @@ function cleanCandidate(raw: string) {
   const stripped = raw.replace(/^[`"'[{(]+/, "").replace(/[`"'\\})\],]+$/, "");
   const jsonSuffixMatch = TRAILING_SERIALIZED_JSON_AFTER_EXT_RE.exec(stripped);
   return jsonSuffixMatch?.[1] ?? stripped;
+}
+
+/** Longest extension we will treat as a fused-prose boundary (".jpeg" is 4). */
+const MAX_GLUED_MEDIA_EXT_LEN = 5;
+
+/**
+ * ENG-18014 — the system prompt requires `MEDIA:<path>` on its own line, but
+ * when the model forgets the newline the prose fuses onto the path
+ * ("…Bid_Form.xlsxHere's the earthwork"). MEDIA_TOKEN_RE captures greedily to
+ * end-of-line, so the fused run is taken as the path, resolves to nothing, and
+ * no attachment is produced — the raw server path then reaches the user.
+ *
+ * Re-split the first token at a KNOWN media extension so the path resolves and
+ * the prose survives as visible text (invalid parts are re-emitted downstream).
+ * Only a real extension may split, so a dotted directory segment (".openclaw")
+ * is left intact, and only a following alphanumeric counts as prose — a
+ * trailing `"` is serialized-JSON junk that cleanCandidate already trims and
+ * must stay invisible.
+ */
+function splitGluedMediaExtension(payload: string): { payload: string; split: boolean } {
+  const firstToken = /^\S+/.exec(payload)?.[0];
+  if (!firstToken) {
+    return { payload, split: false };
+  }
+
+  // Right-to-left: the real extension is the rightmost one, so a mid-name
+  // extension cannot hijack the boundary ("report.pdf2024.xlsxHere" must split
+  // at .xlsx, not .pdf). `dot > 0` also ends the scan without a negative
+  // fromIndex, which lastIndexOf would clamp to 0 and loop on forever.
+  for (let dot = firstToken.lastIndexOf("."); dot > 0; dot = firstToken.lastIndexOf(".", dot - 1)) {
+    const run = /^[A-Za-z0-9]*/.exec(firstToken.slice(dot + 1))?.[0] ?? "";
+    // The full alphanumeric run IS the candidate extension. If it is already a
+    // known one, nothing is fused on — what follows is punctuation or
+    // serialized-JSON that cleanCandidate trims. Testing prefixes here instead
+    // would truncate `.xlsx` to `.xls` (and `.docx`/`.pptx`/`.html` likewise),
+    // dropping the attachment and leaking the tail as visible text.
+    if (run.length === 0 || mimeTypeFromFilePath(`x.${run}`)) {
+      continue;
+    }
+    // `run.length - 1` guarantees at least one character survives the split, so
+    // the boundary always has prose on the far side.
+    for (let len = Math.min(MAX_GLUED_MEDIA_EXT_LEN, run.length - 1); len >= 1; len -= 1) {
+      const ext = firstToken.slice(dot, dot + 1 + len);
+      if (!mimeTypeFromFilePath(`x${ext}`)) {
+        continue;
+      }
+      const end = dot + 1 + len;
+      const rest = `${firstToken.slice(end)}${payload.slice(firstToken.length)}`;
+      return { payload: `${firstToken.slice(0, end)} ${rest}`, split: true };
+    }
+  }
+  return { payload, split: false };
 }
 
 const WINDOWS_DRIVE_RE = /^[a-zA-Z]:[\\/]/;
@@ -582,8 +635,10 @@ export function splitMediaFromOutput(
 
       const payload = match[1];
       const unwrapped = unwrapQuoted(payload);
-      const payloadValue = unwrapped ?? payload;
-      const parts = unwrapped ? [unwrapped] : payload.split(/\s+/).filter(Boolean);
+      // A quoted path is explicit — never re-split it (ENG-18014).
+      const glued = unwrapped ? { payload, split: false } : splitGluedMediaExtension(payload);
+      const payloadValue = unwrapped ?? glued.payload;
+      const parts = unwrapped ? [unwrapped] : glued.payload.split(/\s+/).filter(Boolean);
       const mediaStartIndex = media.length;
       let validCount = 0;
       const invalidParts: string[] = [];
@@ -603,8 +658,12 @@ export function splitMediaFromOutput(
       const trimmedPayload = payloadValue.trim();
       const looksLikeLocalPath =
         looksLikeLocalFilePath(trimmedPayload) || trimmedPayload.startsWith("file://");
+      // Skipped after a fused-prose split (ENG-18014): the whitespace we just
+      // introduced is a prose boundary, not part of a filename, so re-joining
+      // it here would rebuild the very path that failed to resolve.
       if (
         !unwrapped &&
+        !glued.split &&
         validCount === 1 &&
         invalidParts.length > 0 &&
         /\s/.test(payloadValue) &&
@@ -621,7 +680,7 @@ export function splitMediaFromOutput(
         }
       }
 
-      if (!hasValidMedia && !unwrapped && /\s/.test(payloadValue)) {
+      if (!hasValidMedia && !unwrapped && !glued.split && /\s/.test(payloadValue)) {
         const spacedFallback = normalizeMediaSource(cleanCandidate(payloadValue));
         if (isValidMedia(spacedFallback, { allowSpaces: true, allowBareFilename: true })) {
           media.splice(mediaStartIndex, media.length - mediaStartIndex, spacedFallback);
@@ -632,7 +691,12 @@ export function splitMediaFromOutput(
         }
       }
 
-      if (!hasValidMedia) {
+      // Same reasoning as the two guards above (ENG-18014): after a split, the
+      // injected whitespace is a prose boundary. Without this guard a split that
+      // failed to validate (a bare filename with no directory) would be
+      // re-assembled here into a "path" containing the prose AND the injected
+      // space — a string strictly worse than the unsplit original.
+      if (!hasValidMedia && !glued.split) {
         const fallback = normalizeMediaSource(cleanCandidate(payloadValue));
         if (isValidMedia(fallback, { allowSpaces: true, allowBareFilename: true })) {
           media.push(fallback);

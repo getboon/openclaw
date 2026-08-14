@@ -66,8 +66,64 @@ describe("splitMediaFromOutput", () => {
       String.raw`MEDIA:/path/to/image.png\"}],\"details\":{\"provider\":\"openai\"}`,
     ],
     ["/tmp/render,final.png", "MEDIA:/tmp/render,final.png"],
+    // ENG-18014 regression guard. These four extensions have a 1-shorter
+    // extension that is ALSO known (.xlsx/.xls, .docx/.doc, .pptx/.ppt,
+    // .html/.htm), so a boundary search that tries prefixes truncates them
+    // whenever punctuation follows — dropping the attachment and leaking the
+    // tail as visible text. The pre-existing .png row cannot catch this.
+    ["/path/report.xlsx", 'MEDIA:/path/report.xlsx"}],"details":{"provider":"openai"}'],
+    ["/path/report.docx", 'MEDIA:/path/report.docx"}],"details":{"provider":"openai"}'],
+    ["/path/deck.pptx", 'MEDIA:/path/deck.pptx"}],"details":{"provider":"openai"}'],
+    ["/path/page.html", 'MEDIA:/path/page.html"}],"details":{"provider":"openai"}'],
+    ["/ws/Bid_Form.xlsx", "MEDIA:/ws/Bid_Form.xlsx,"],
+    ["/ws/Bid_Form.xlsx", "MEDIA:`/ws/Bid_Form.xlsx`"],
   ] as const)("accepts supported media path variant: %s", (expectedPath, input) => {
     expectAcceptedMediaPathCase(expectedPath, input);
+  });
+
+  // ENG-18014 — the system prompt tells the model to put `MEDIA:<path>` on its
+  // own line, but when it forgets the newline the prose fuses onto the path
+  // ("…Bid_Form.xlsxHere's the earthwork"). MEDIA_TOKEN_RE captures greedily to
+  // end-of-line, so the whole run becomes the "path", resolves to nothing, and
+  // NO attachment is produced — the raw server path then leaks to the customer
+  // (Jaynes thread 800). Split at the known-extension boundary so the file
+  // attaches and the prose survives as visible text.
+  it("splits prose fused onto a media path", () => {
+    expectParsedMediaOutputCase(
+      "MEDIA:/home/ubuntu/workspace/Bid_Form.xlsxHere's the earthwork leveling.",
+      {
+        mediaUrls: ["/home/ubuntu/workspace/Bid_Form.xlsx"],
+        text: "Here's the earthwork leveling.",
+      },
+    );
+  });
+
+  // The boundary is the RIGHTMOST real extension. A left-to-right scan splits
+  // "report.pdf2024.xlsxHere" at .pdf; a prefix-first search inside the run
+  // splits ".json" at ".js" and ".jpeg" at ".jpe".
+  it.each([
+    ["/a/data.json", "MEDIA:/a/data.jsonNow here it is", "Now here it is"],
+    ["/a/photo.jpeg", "MEDIA:/a/photo.jpegHere it is", "Here it is"],
+    [
+      "/tmp/report.pdf2024.xlsx",
+      "MEDIA:/tmp/report.pdf2024.xlsxHere is the file",
+      "Here is the file",
+    ],
+    ["https://example.com/img.png", "MEDIA:https://example.com/img.pngHere it is", "Here it is"],
+  ] as const)("splits at the rightmost real extension: %s", (expectedPath, input, expectedText) => {
+    expectParsedMediaOutputCase(input, { mediaUrls: [expectedPath], text: expectedText });
+  });
+
+  // A dotted directory segment (".openclaw") must not be mistaken for the
+  // extension boundary — only a known media extension may split the token.
+  it("ignores a dotted directory segment when splitting", () => {
+    expectParsedMediaOutputCase(
+      "MEDIA:/home/ubuntu/.openclaw/workspace/a.xlsxHere's the leveling.",
+      {
+        mediaUrls: ["/home/ubuntu/.openclaw/workspace/a.xlsx"],
+        text: "Here's the leveling.",
+      },
+    );
   });
 
   it.each([
