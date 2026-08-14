@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@sentry/node": "8.45.0"
+    "@sentry/node": "8.49.0"
   },
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*"
