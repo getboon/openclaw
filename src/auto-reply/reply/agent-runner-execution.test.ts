@@ -59,7 +59,7 @@ const state = vi.hoisted(() => ({
 const GENERIC_RUN_FAILURE_TEXT =
   "⚠️ Something went wrong while processing your request. Please try again, or use /new to start a fresh session.";
 
-// ENG-15739: previously-generic terminal failures now surface deterministic,
+// Previously-generic terminal failures now surface deterministic,
 // class-specific copy. An unclassified failure maps to this transient class.
 const TRANSIENT_CODED_FAILURE_TEXT = messageOriginCodeCopy("agent_failed_transient_after_retries");
 
@@ -198,6 +198,7 @@ vi.mock("../../agents/embedded-agent-helpers.js", async () => {
     isCompactionFailureError: (message?: string) => state.isCompactionFailureErrorMock(message),
     isContextOverflowError: (message?: string) => state.isContextOverflowErrorMock(message),
     isBillingErrorMessage: actual.isBillingErrorMessage,
+    isEdgeBlockErrorBody: actual.isEdgeBlockErrorBody,
     isLikelyContextOverflowError: (message?: string) =>
       state.isLikelyContextOverflowErrorMock(message),
     isOverloadedErrorMessage: (message: string) => /overloaded|capacity/i.test(message),
@@ -779,9 +780,12 @@ describe("buildContextOverflowRecoveryText", () => {
       primaryModel: "qwen3.6-plus",
     });
 
-    expect(text).toContain("kept this conversation mapped to the current session");
+    expect(text).toContain("Your history is preserved");
+    expect(text).toContain("checkpoint");
     expect(text).toContain("reserveTokensFloor");
+    // Never tell the user to start over to keep working.
     expect(text).not.toContain("reset our conversation");
+    expect(text).not.toContain("/new");
   });
 
   it("falls back to session entry model when runtimeProvider is not provided", () => {
@@ -2313,6 +2317,33 @@ describe("runAgentTurnWithFallback", () => {
       messageChannel: "telegram",
       messageProvider: "telegram",
       senderId: "sender-static",
+    });
+  });
+
+  it("forwards explicit skill selection to CLI backends", async () => {
+    state.isCliProviderMock.mockReturnValue(true);
+    state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => ({
+      result: await params.run("claude-cli", "claude-sonnet-4-6"),
+      provider: "claude-cli",
+      model: "claude-sonnet-4-6",
+      attempts: [],
+    }));
+    state.runCliAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "final" }],
+      meta: {},
+    });
+
+    const followupRun = createFollowupRun();
+    followupRun.run.provider = "claude-cli";
+    followupRun.run.model = "claude-sonnet-4-6";
+    followupRun.run.explicitSkillName = "steel-prices";
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback(createMinimalRunAgentTurnParams({ followupRun }));
+
+    expect(result.kind).toBe("success");
+    expectMockCallArgFields(state.runCliAgentMock, 0, "CLI run params", {
+      explicitSkillName: "steel-prices",
     });
   });
 
@@ -5866,6 +5897,99 @@ describe("runAgentTurnWithFallback", () => {
     }
   });
 
+  it("rides out an edge block that classifies as timeout (HTML body), not just rate_limit", async () => {
+    vi.useFakeTimers();
+    try {
+      // Post-fix shape: an edge/WAF HTML 429 now classifies as `timeout`, but
+      // the preserved HTML body still marks it as a pure-transient edge block
+      // worth riding out. Two exhaustions then a recovery — no surfaced error.
+      const makeTimeoutEdgeBlockError = () =>
+        Object.assign(new Error("All models failed (2)"), {
+          name: "FallbackSummaryError",
+          attempts: [
+            {
+              provider: "boon-llm-gateway",
+              model: "claude-opus-4-6",
+              error: "429 <!doctype html><html><title>Blocked</title></html>",
+              reason: "timeout",
+              status: 408,
+            },
+            {
+              provider: "boon-llm-gateway",
+              model: "claude-sonnet-4-6",
+              error: "429 <!doctype html><html><title>Blocked</title></html>",
+              reason: "timeout",
+              status: 408,
+            },
+          ],
+          soonestCooldownExpiry: null,
+        });
+      state.runWithModelFallbackMock
+        .mockRejectedValueOnce(makeTimeoutEdgeBlockError())
+        .mockRejectedValueOnce(makeTimeoutEdgeBlockError())
+        .mockImplementationOnce(async (params: FallbackRunnerParams) => ({
+          result: await params.run("boon-llm-gateway", "claude-opus-4-6"),
+          provider: "boon-llm-gateway",
+          model: "claude-opus-4-6",
+          attempts: [],
+        }));
+      state.runEmbeddedAgentMock.mockResolvedValueOnce({
+        payloads: [{ text: "recovered reply" }],
+        meta: {},
+      });
+
+      const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+      const resultPromise = runAgentTurnWithFallback({
+        ...createMinimalRunAgentTurnParams({ followupRun: createFollowupRun() }),
+        sessionKey: "main",
+        getActiveSessionEntry: () => undefined,
+      });
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(state.runWithModelFallbackMock).toHaveBeenCalledTimes(3);
+      expect(result.kind).toBe("success");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does NOT ride out a genuine model timeout with no HTML body — surfaces once", async () => {
+    vi.useFakeTimers();
+    try {
+      // A real model idle/timeout (no HTML edge body) must not be swept into the
+      // long edge-block backoff loop. It surfaces on the first exhaustion.
+      const err = Object.assign(new Error("All models failed (1)"), {
+        name: "FallbackSummaryError",
+        attempts: [
+          {
+            provider: "anthropic",
+            model: "claude",
+            error: "LLM request timed out.",
+            reason: "timeout",
+            status: 408,
+          },
+        ],
+        soonestCooldownExpiry: null,
+      });
+      state.runWithModelFallbackMock.mockRejectedValue(err);
+
+      const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+      const resultPromise = runAgentTurnWithFallback({
+        ...createMinimalRunAgentTurnParams({ followupRun: createFollowupRun() }),
+        sessionKey: "main",
+        getActiveSessionEntry: () => undefined,
+      });
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(state.runWithModelFallbackMock).toHaveBeenCalledTimes(1);
+      expect(result.kind).toBe("final");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does NOT auto-retry when a real cooldown expiry is known — surfaces the countdown immediately", async () => {
     vi.useFakeTimers();
     try {
@@ -6301,7 +6425,7 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      // ENG-15739: an unclassified failure now surfaces deterministic
+      // An unclassified failure now surfaces deterministic
       // class-specific copy instead of the single generic string.
       expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
       expect(result.payload.text).not.toBe(GENERIC_RUN_FAILURE_TEXT);
@@ -6512,7 +6636,7 @@ describe("runAgentTurnWithFallback", () => {
 
       expect(result.kind).toBe("final");
       if (result.kind === "final") {
-        // disallow policy surfaces the failure in groups; ENG-15739 makes that
+        // disallow policy surfaces the failure in groups; this makes that
         // surfaced text the deterministic coded copy, not the generic string.
         expect(result.payload.text).not.toBe(SILENT_REPLY_TOKEN);
         expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
@@ -6556,7 +6680,7 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      // Per-surface disallow surfaces the failure; ENG-15739 makes it coded.
+      // Per-surface disallow surfaces the failure; this makes it coded.
       expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
     }
   });
@@ -6708,7 +6832,7 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      // ENG-15739: DM surfaces the deterministic coded copy for this class.
+      // DM surfaces the deterministic coded copy for this class.
       expect(result.payload.text).toBe(TRANSIENT_CODED_FAILURE_TEXT);
       expect(result.payload.text).not.toBe(GENERIC_RUN_FAILURE_TEXT);
     }
@@ -6824,7 +6948,7 @@ describe("runAgentTurnWithFallback", () => {
     }
   });
 
-  it("preserves neutral billing guidance for OAuth failover errors", async () => {
+  it("shows Boon top-up billing copy for OAuth failover errors", async () => {
     state.runEmbeddedAgentMock.mockRejectedValueOnce(
       new FailoverError(formatBillingErrorMessage("Anthropic", "claude-sonnet-4-5", "oauth"), {
         reason: "billing",
@@ -6839,13 +6963,15 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      expect(result.payload.text).toContain("check your account for subscription or usage limits");
+      // Boon fork: all billing failures point at the Boon billing page, never
+      // provider-API-key wording.
+      expect(result.payload.text).toContain("out of Boon Agent tokens");
+      expect(result.payload.text).toContain("app.getboon.ai/billing?open=agent");
       expect(result.payload.text).not.toContain("API key");
-      expect(result.payload.text).not.toContain("top up");
     }
   });
 
-  it("preserves neutral billing guidance after fallback exhaustion", async () => {
+  it("shows Boon top-up billing copy after fallback exhaustion", async () => {
     state.runWithModelFallbackMock.mockRejectedValueOnce(
       Object.assign(new Error("All models failed (1): openai/gpt-5.5: billing"), {
         name: "FallbackSummaryError",
@@ -6867,9 +6993,9 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      expect(result.payload.text).toContain("check your account for subscription or usage limits");
+      expect(result.payload.text).toContain("out of Boon Agent tokens");
+      expect(result.payload.text).toContain("app.getboon.ai/billing?open=agent");
       expect(result.payload.text).not.toContain("API key");
-      expect(result.payload.text).not.toContain("top up");
     }
   });
 
@@ -6943,7 +7069,7 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      expect(result.payload.text).toContain("kept this conversation mapped to the current session");
+      expect(result.payload.text).toContain("Your history is preserved");
       expect(result.payload.text).toContain("reserveTokensFloor");
       expectRecordFields(requireRecord(getReplyPayloadMetadata(result.payload), "reply metadata"), {
         deliverDespiteSourceReplySuppression: true,
@@ -6986,7 +7112,7 @@ describe("runAgentTurnWithFallback", () => {
 
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
-      expect(result.payload.text).toContain("kept this conversation mapped to the current session");
+      expect(result.payload.text).toContain("Your history is preserved");
       expect(result.payload.text).toContain("reserveTokensFloor");
       expectRecordFields(requireRecord(getReplyPayloadMetadata(result.payload), "reply metadata"), {
         deliverDespiteSourceReplySuppression: true,
@@ -8210,7 +8336,7 @@ describe("resolveTransientRetryBackoffMs", () => {
   });
 });
 
-describe("runAgentTurnWithFallback — contextual coded copy (ENG-15739)", () => {
+describe("runAgentTurnWithFallback — contextual coded copy", () => {
   const directCtx = {
     Provider: "discord",
     Surface: "discord",

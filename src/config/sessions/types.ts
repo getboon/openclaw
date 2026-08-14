@@ -62,7 +62,10 @@ export type SessionCompactionCheckpointReason =
   | "manual"
   | "auto-threshold"
   | "overflow-retry"
-  | "timeout-retry";
+  | "timeout-retry"
+  // Captured at a terminal context-overflow block when no prior checkpoint exists,
+  // so history-preserving branch/restore is always reachable from the block.
+  | "overflow-block";
 
 export type SessionCompactionTranscriptReference = {
   sessionId: string;
@@ -654,14 +657,13 @@ export type SessionSkillSnapshot = {
   /** Normalized agent-level filter used to build this snapshot; undefined means unrestricted. */
   skillFilter?: string[];
   /**
-   * Runtime-only, never persisted. Carries the full parsed Skill[] (including
-   * each SKILL.md body) so the embedded runner can skip a workspace skill
-   * scan within a turn. Stripped from sessions.json on every read and write
-   * via normalizeSessionStore — see store-load.ts. On a cold session resume
-   * this is undefined and src/skills/runtime/embedded-run-entries.ts
-   * rebuilds it by reloading skill entries from disk.
+   * Runtime-only model-visible skills. Runtime skill lists are stripped from
+   * sessions.json on every read and write via normalizeSessionStore, then
+   * rebuilt from disk on a cold session resume.
    */
   resolvedSkills?: Skill[];
+  /** Runtime-only user-invocable skills, including command-only hidden skills. */
+  commandSkills?: Skill[];
   version?: number;
 };
 

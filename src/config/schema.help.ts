@@ -1161,6 +1161,10 @@ export const FIELD_HELP: Record<string, string> = {
     "Claude-family prompt overlay applied by the Anthropic provider (including Anthropic-API-compatible gateways) to matching Claude model ids.",
   "agents.defaults.promptOverlays.claude.personality":
     'Concise, guided-choice interaction-style layer for Claude-family models ("concise" or "on" enables it, the default; "off" disables it). Reduces verbosity and offers short A/B/C narrowing prompts instead of long responses.',
+  "agents.defaults.messaging":
+    "Presentation controls for user-facing assistant and operational messages such as model-fallback notices and LLM error copy.",
+  "agents.defaults.messaging.audience":
+    'Who assistant operational and error copy is written for. "operator" (default) keeps raw diagnostic text with model ids and failure reasons; "consumer" rewrites it into plain, reassuring language and strips internal detail. Raw detail is always kept in logs and structured events regardless of this setting.',
   "agents.defaults.envelopeTimezone":
     'Timezone for message envelopes ("utc", "local", "user", or an IANA timezone string).',
   "agents.defaults.envelopeTimestamp":
@@ -1683,9 +1687,9 @@ export const FIELD_HELP: Record<string, string> = {
   "session.threadBindings.defaultSpawnContext":
     'Default native subagent context for thread-bound spawns. Use "fork" to start from the requester transcript or "isolated" for a clean child. Default: "fork".',
   "session.maintenance":
-    "Automatic session-store maintenance controls for pruning age, entry caps, reset archive retention, and disk budget cleanup. Start in warn mode to observe impact, then enforce once thresholds are tuned.",
+    'Automatic session-store maintenance controls for pruning age, entry caps, reset archive retention, and disk budget cleanup. Default: "enforce"; switch to "warn" to observe impact before trusting live pruning/capping/eviction.',
   "session.maintenance.mode":
-    'Determines whether maintenance policies are only reported ("warn") or actively applied ("enforce"). Keep "warn" during rollout and switch to "enforce" after validating safe thresholds.',
+    'Determines whether maintenance policies are only reported ("warn") or actively applied ("enforce"). Default: "enforce"; set to "warn" to observe what would be pruned/capped/evicted before trusting it.',
   "session.maintenance.pruneAfter":
     "Removes entries older than this duration (for example `30d` or `12h`) during maintenance passes. Use this as the primary age-retention control and align it with data retention policy.",
   "session.maintenance.pruneDays":

@@ -1013,11 +1013,11 @@ describe("block reply coalescer", () => {
     coalescer.stop();
   });
 
-  it("preserves compaction notice markers across flushes", async () => {
+  it("preserves notice markers across flushes", async () => {
     const flushes: Array<{
       text?: string;
       isCompactionNotice?: boolean;
-      isFallbackNotice?: boolean;
+      isStatusNotice?: boolean;
     }> = [];
     const coalescer = createBlockReplyCoalescer({
       config: { minChars: 1, maxChars: 200, idleMs: 0, joiner: "\n\n" },
@@ -1026,25 +1026,25 @@ describe("block reply coalescer", () => {
         flushes.push({
           text: payload.text,
           isCompactionNotice: payload.isCompactionNotice,
-          isFallbackNotice: payload.isFallbackNotice,
+          isStatusNotice: payload.isStatusNotice,
         });
       },
     });
 
     coalescer.enqueue({ text: "Compacting context...", isCompactionNotice: true });
-    coalescer.enqueue({ text: "Model Fallback: openai/gpt-5.5", isFallbackNotice: true });
+    coalescer.enqueue({ text: "Working on it…", isStatusNotice: true });
     await coalescer.flush({ force: true });
 
     expect(flushes).toEqual([
       {
         text: "Compacting context...",
         isCompactionNotice: true,
-        isFallbackNotice: undefined,
+        isStatusNotice: undefined,
       },
       {
-        text: "Model Fallback: openai/gpt-5.5",
+        text: "Working on it…",
         isCompactionNotice: undefined,
-        isFallbackNotice: true,
+        isStatusNotice: true,
       },
     ]);
     coalescer.stop();

@@ -1107,7 +1107,7 @@ export async function dispatchCronDelivery(
           to: delivery.to,
           accountId: delivery.accountId,
           threadId: delivery.threadId,
-          // ENG-14117: a scheduled job set to post top-level suppresses threading
+          // A scheduled job set to post top-level suppresses threading
           // so the completion lands as a fresh channel-root message; channels
           // that thread (MS Teams) map this to a per-send top-level override.
           threadSuppressed: resolveCronDeliveryThreadSuppressed(params.job),

@@ -210,6 +210,7 @@ export const es: TranslationMap = {
     autoThreshold: "umbral automático",
     overflowRetry: "reintento por desbordamiento",
     timeoutRetry: "reintento por tiempo de espera",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} tokens",
     tokensBefore: "{count} tokens antes",
     tokenDeltaUnavailable: "delta de tokens no disponible",

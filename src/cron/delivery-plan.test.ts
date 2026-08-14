@@ -44,7 +44,7 @@ describe("resolveCronDeliveryPlan", () => {
     expect(hasExplicitCronDeliveryTarget(plan)).toBe(true);
   });
 
-  it("carries the captured turn source origin so delivery resolution can pin it (ENG-14833)", () => {
+  it("carries the captured turn source origin so delivery resolution can pin it", () => {
     const plan = resolveCronDeliveryPlan(
       makeCronJob({
         payload: { kind: "agentTurn", message: "report progress" },

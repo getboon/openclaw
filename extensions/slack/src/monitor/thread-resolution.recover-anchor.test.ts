@@ -1,4 +1,4 @@
-// Slack tests cover thread-anchor recovery via conversations.history (ENG-16286).
+// Slack tests cover thread-anchor recovery via conversations.history.
 //
 // When a streaming reply's thread_ts is rejected as invalid_thread_ts (the user
 // deleted/edited the anchoring message, or the anchor was a non-root reply

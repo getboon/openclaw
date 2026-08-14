@@ -209,6 +209,7 @@ export const ar: TranslationMap = {
     autoThreshold: "عتبة تلقائية",
     overflowRetry: "إعادة المحاولة عند التجاوز",
     timeoutRetry: "إعادة المحاولة عند انتهاء المهلة",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} رموز",
     tokensBefore: "{count} رموز قبل",
     tokenDeltaUnavailable: "تغيّر الرموز غير متاح",

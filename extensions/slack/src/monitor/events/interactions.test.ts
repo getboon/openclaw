@@ -957,6 +957,149 @@ describe("registerSlackInteractionEvents", () => {
     expect(app.client.chat.update).toHaveBeenCalledTimes(1);
   });
 
+  it("routes an allowlisted command button (Retry) through the real message pipeline", async () => {
+    const handleSlackMessage = vi.fn().mockResolvedValue(undefined);
+    const { ctx, getHandler, app } = createContext();
+    registerSlackInteractionEvents({ ctx: ctx as never, handleSlackMessage });
+
+    const handler = getHandler();
+    const ack = vi.fn().mockResolvedValue(undefined);
+    await handler({
+      ack,
+      body: {
+        user: { id: "U123" },
+        channel: { id: "C1" },
+        container: { channel_id: "C1", message_ts: "100.200", thread_ts: "100.100" },
+        message: {
+          ts: "100.200",
+          text: "One step didn't finish",
+          blocks: [
+            {
+              type: "actions",
+              block_id: "reply_actions",
+              elements: [{ type: "button", action_id: "openclaw:reply_button" }],
+            },
+          ],
+        },
+      },
+      action: {
+        type: "button",
+        action_id: "openclaw:reply_button",
+        block_id: "reply_actions",
+        value: "/retry",
+        action_ts: "150.999",
+        text: { type: "plain_text", text: "Retry" },
+      },
+    });
+
+    expect(ack).toHaveBeenCalled();
+    expect(handleSlackMessage).toHaveBeenCalledTimes(1);
+    expect(handleSlackMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "message",
+        user: "U123",
+        channel: "C1",
+        ts: "150.999",
+        thread_ts: "100.100",
+        text: "/retry",
+      }),
+      { source: "message" },
+    );
+    // Routed as a real typed message, not the generic interaction fallback.
+    expect(enqueueSystemEventMock).not.toHaveBeenCalled();
+    expect(app.client.chat.update).not.toHaveBeenCalled();
+  });
+
+  it("falls through to the system-event fallback when the presser is not an authorized command sender", async () => {
+    // Button-press authorization (authorizeSlackBlockAction) and command-sender
+    // authorization (commands.allowFrom) are separate gates. A presser who can
+    // click buttons in this channel but isn't allowlisted as a command sender
+    // must not be silently dropped inside handleSlackMessage with no feedback —
+    // the fallback below must still run.
+    const handleSlackMessage = vi.fn().mockResolvedValue(undefined);
+    const { ctx, getHandler } = createContext({
+      cfg: {
+        commands: {
+          allowFrom: {
+            slack: ["U_OWNER"],
+          },
+        },
+      },
+    });
+    registerSlackInteractionEvents({ ctx: ctx as never, handleSlackMessage });
+
+    const handler = getHandler();
+    const ack = vi.fn().mockResolvedValue(undefined);
+    await handler({
+      ack,
+      body: {
+        user: { id: "U_ALLOWED" },
+        channel: { id: "C1" },
+        container: { channel_id: "C1", message_ts: "100.200", thread_ts: "100.100" },
+        message: {
+          ts: "100.200",
+          text: "One step didn't finish",
+          blocks: [
+            {
+              type: "actions",
+              block_id: "reply_actions",
+              elements: [{ type: "button", action_id: "openclaw:reply_button" }],
+            },
+          ],
+        },
+      },
+      action: {
+        type: "button",
+        action_id: "openclaw:reply_button",
+        block_id: "reply_actions",
+        value: "/retry",
+        action_ts: "150.999",
+        text: { type: "plain_text", text: "Retry" },
+      },
+    });
+
+    expect(handleSlackMessage).not.toHaveBeenCalled();
+    expect(enqueueSystemEventMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("still falls through to the system-event fallback for a non-allowlisted button value", async () => {
+    const handleSlackMessage = vi.fn().mockResolvedValue(undefined);
+    const { ctx, getHandler } = createContext();
+    registerSlackInteractionEvents({ ctx: ctx as never, handleSlackMessage });
+
+    const handler = getHandler();
+    const ack = vi.fn().mockResolvedValue(undefined);
+    await handler({
+      ack,
+      body: {
+        user: { id: "U123" },
+        channel: { id: "C1" },
+        container: { channel_id: "C1", message_ts: "100.200", thread_ts: "100.100" },
+        message: {
+          ts: "100.200",
+          text: "fallback",
+          blocks: [
+            {
+              type: "actions",
+              block_id: "reply_actions",
+              elements: [{ type: "button", action_id: "openclaw:reply_button" }],
+            },
+          ],
+        },
+      },
+      action: {
+        type: "button",
+        action_id: "openclaw:reply_button",
+        block_id: "reply_actions",
+        value: "codex",
+        text: { type: "plain_text", text: "codex" },
+      },
+    });
+
+    expect(handleSlackMessage).not.toHaveBeenCalled();
+    expect(enqueueSystemEventMock).toHaveBeenCalledTimes(1);
+  });
+
   it("uses unique interaction ids for repeated Slack actions on the same message", async () => {
     dispatchPluginInteractiveHandlerMock.mockResolvedValue({
       matched: true,

@@ -27,6 +27,7 @@ type TransportOutputShape = {
   errorCode?: string;
   errorType?: string;
   errorBody?: string;
+  errorStatus?: number;
 };
 
 const EMPTY_TOOL_RESULT_TEXT = "(no output)";
@@ -137,6 +138,7 @@ type TransportErrorDetails = {
   errorCode?: string;
   errorType?: string;
   errorBody?: string;
+  errorStatus?: number;
 };
 
 function readStringLikeProperty(value: unknown, key: string): string | undefined {
@@ -186,6 +188,29 @@ function normalizeTransportErrorBody(value: unknown): string | undefined {
   return truncateErrorDetail(redactSensitiveText(text), 500);
 }
 
+function readNumericErrorStatus(value: unknown): number | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const source = value as {
+    status?: unknown;
+    statusCode?: unknown;
+    errorStatus?: unknown;
+  };
+  for (const candidate of [source.status, source.statusCode, source.errorStatus]) {
+    if (typeof candidate === "number" && Number.isFinite(candidate)) {
+      return candidate;
+    }
+    if (typeof candidate === "string") {
+      const parsed = Number.parseInt(candidate, 10);
+      if (Number.isFinite(parsed) && String(parsed) === candidate.trim()) {
+        return parsed;
+      }
+    }
+  }
+  return undefined;
+}
+
 function extractTransportErrorDetails(error: unknown): TransportErrorDetails {
   const errorObject = error && typeof error === "object" ? error : undefined;
   const nestedError = readObjectProperty(errorObject, "error");
@@ -202,11 +227,13 @@ function extractTransportErrorDetails(error: unknown): TransportErrorDetails {
     normalizeTransportErrorBody(readStringLikeProperty(errorObject, "body")) ??
     normalizeTransportErrorBody(readObjectProperty(errorObject, "body")) ??
     normalizeTransportErrorBody(nestedError);
+  const errorStatus = readNumericErrorStatus(errorObject);
 
   return {
     ...(errorCode ? { errorCode } : {}),
     ...(errorType ? { errorType } : {}),
     ...(errorBody ? { errorBody } : {}),
+    ...(errorStatus !== undefined ? { errorStatus } : {}),
   };
 }
 

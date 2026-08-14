@@ -12,7 +12,7 @@ scenario:
       - channels.qa-channel
   objective: >-
     Verify a cron created in one conversation delivers to that origin conversation even after a
-    concurrent conversation contaminates the shared session's lastChannel/lastTo (ENG-14833).
+    concurrent conversation contaminates the shared session's lastChannel/lastTo.
   successCriteria:
     - The shared main session's lastTo is contaminated to the second (unrelated) conversation.
     - The forced cron run delivers exactly one message to the originating conversation.

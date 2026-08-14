@@ -1,4 +1,4 @@
-/** Formats model-fallback notice state for UI/status messages and persisted transition tracking. */
+/** Resolves model-fallback transitions and formats reason/attempt summaries for lifecycle events + persisted notice-state tracking. */
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { formatRawAssistantErrorForUi } from "../agents/embedded-agent-helpers.js";
 import { areRuntimeModelRefsEquivalent } from "../agents/model-runtime-aliases.js";
@@ -90,38 +90,6 @@ function buildFallbackAttemptSummaries(attempts: RuntimeFallbackAttempt[]): stri
   return attempts.map((attempt) =>
     truncateFallbackReasonPart(formatFallbackAttemptSummary(attempt)),
   );
-}
-
-/** Builds the visible notice shown when runtime falls back from the selected model. */
-export function buildFallbackNotice(params: {
-  selectedProvider: string;
-  selectedModel: string;
-  activeProvider: string;
-  activeModel: string;
-  attempts: RuntimeFallbackAttempt[];
-  cfg?: OpenClawConfig;
-}): string | null {
-  const selected = formatProviderModelRef(params.selectedProvider, params.selectedModel);
-  const active = formatProviderModelRef(params.activeProvider, params.activeModel);
-  if (areRuntimeModelRefsEquivalent(selected, active, { config: params.cfg })) {
-    return null;
-  }
-  const reasonSummary = buildFallbackReasonSummary(params.attempts);
-  return `↪️ Model Fallback: ${active} (selected ${selected}; ${reasonSummary})`;
-}
-
-/** Builds the visible notice shown when runtime returns to the selected model. */
-export function buildFallbackClearedNotice(params: {
-  selectedProvider: string;
-  selectedModel: string;
-  previousActiveModel?: string;
-}): string {
-  const selected = formatProviderModelRef(params.selectedProvider, params.selectedModel);
-  const previous = normalizeOptionalString(params.previousActiveModel);
-  if (previous && previous !== selected) {
-    return `↪️ Model Fallback cleared: ${selected} (was ${previous})`;
-  }
-  return `↪️ Model Fallback cleared: ${selected}`;
 }
 
 type ResolvedFallbackTransition = {

@@ -956,6 +956,12 @@ export function buildAgentSystemPrompt(params: {
     params.fsWorkspaceOnly === true
       ? "tools.fs.workspaceOnly is enabled: scratch/temp/meta files that file tools must later read/write/edit must stay inside the workspace, preferably as relative paths under `.openclaw/tmp/`. Do not write files to `/tmp/...` with exec if a later read/write/edit/apply_patch tool needs them; use `.openclaw/tmp/...` instead."
       : "";
+  // ENG-16318: keep filesystem searches scoped to the workspace, and never
+  // report benign bookkeeping steps as task failures. A `find /` is slow and
+  // hits permission-denied noise; a scratch mkdir/ls that fails is not the
+  // task failing.
+  const workspaceSearchGuidance =
+    "Scope filesystem searches (find/ls/grep) to your workspace, not `/` — searching from the filesystem root is slow and hits permission-denied noise. Scratch and housekeeping steps (mkdir, ls, find) are bookkeeping: if one fails it is not the task failing, so do not report it as an error.";
   const safetySection = [
     "## Safety",
     "No independent goals: no self-preservation, replication, resource acquisition, power-seeking, or long-term plans beyond the user's request.",
@@ -1028,6 +1034,7 @@ export function buildAgentSystemPrompt(params: {
     displayWorkspaceDir,
     workspaceGuidance,
     workspaceOnlyGuidance,
+    workspaceSearchGuidance,
     workspaceNotes,
     bootstrapMode: params.bootstrapMode,
     bootstrapSystemPromptSections,
@@ -1168,6 +1175,7 @@ export function buildAgentSystemPrompt(params: {
       `Your working directory is: ${displayWorkspaceDir}`,
       workspaceGuidance,
       workspaceOnlyGuidance,
+      workspaceSearchGuidance,
       ...workspaceNotes,
       "",
       ...docsSection,

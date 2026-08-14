@@ -1,4 +1,4 @@
-// Slack tests cover invalid-thread finalize-error classification (ENG-16286).
+// Slack tests cover invalid-thread finalize-error classification.
 import { describe, expect, it } from "vitest";
 import { isInvalidThreadSlackError } from "./streaming.js";
 

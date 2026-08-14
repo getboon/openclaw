@@ -299,6 +299,15 @@ export interface AssistantMessage {
   errorCode?: string;
   errorType?: string;
   errorBody?: string;
+  /**
+   * Numeric HTTP status of a failed provider response, when the transport
+   * captured it. Gateway-relayed upstream 5xx errors (e.g. Bedrock 503)
+   * carry only a JSON body with no leading "NNN " prefix, so the failover
+   * classifier cannot recover the status from `errorMessage` text alone.
+   * Threading it here lets `buildAssistantFailoverSignal` feed the real
+   * status into the classifier's HTTP-status path (ENG-16815).
+   */
+  errorStatus?: number;
   timestamp: number; // Unix timestamp in milliseconds
 }
 

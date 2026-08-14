@@ -36,7 +36,7 @@ export type ChannelOutboundContext = {
   formatting?: OutboundDeliveryFormattingOptions;
   threadId?: string | number | null;
   /**
-   * Portable "post at the top level, do not thread" intent (ENG-14117). Set by a
+   * Portable "post at the top level, do not thread" intent. Set by a
    * scheduled cron told to post a fresh channel message or the message tool's
    * `topLevel`/`threadId:null` param. Channels that thread (e.g. MS Teams) map
    * this to a per-send top-level override; absent/false keeps normal threading.

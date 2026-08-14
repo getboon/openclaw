@@ -64,6 +64,38 @@ describe("buildModelCallEndedCapture", () => {
     });
     expect(capture?.contexts?.run).toEqual({ run_id: "r1", session_id: undefined, call_id: "c1" });
   });
+
+  it("tags a relayed upstream provider 5xx (Bedrock 503) with error_class + http_status (ENG-16922)", () => {
+    const capture = buildModelCallEndedCapture(
+      modelCall({ httpStatus: 503, errorClass: "upstream_provider_5xx", errorCategory: "Error" }),
+      HOST,
+    );
+    expect(capture?.tags).toMatchObject({ error_class: "upstream_provider_5xx" });
+    expect(capture?.extra).toMatchObject({ http_status: 503 });
+    // errorClass + status lead the title so Sentry fingerprints it separately.
+    expect(capture?.message).toBe(
+      "model_call_ended: upstream_provider_5xx, http_status=503, Error",
+    );
+  });
+
+  it("tags a gateway-synthesized 502 as gateway_origin_5xx (ENG-16922)", () => {
+    const capture = buildModelCallEndedCapture(
+      modelCall({ httpStatus: 502, errorClass: "gateway_origin_5xx", errorCategory: "Error" }),
+      HOST,
+    );
+    expect(capture?.tags).toMatchObject({ error_class: "gateway_origin_5xx" });
+    expect(capture?.extra).toMatchObject({ http_status: 502 });
+    expect(capture?.message).toBe("model_call_ended: gateway_origin_5xx, http_status=502, Error");
+  });
+
+  it("omits error_class when the failure carries no 5xx classification", () => {
+    const capture = buildModelCallEndedCapture(
+      modelCall({ failureKind: "connection_reset", errorCategory: "Error" }),
+      HOST,
+    );
+    expect(capture?.tags).not.toHaveProperty("error_class");
+    expect(capture?.extra).toMatchObject({ http_status: undefined });
+  });
 });
 
 describe("buildAgentEndCapture", () => {

@@ -341,6 +341,8 @@ function formatCheckpointReason(reason: SessionCompactionCheckpoint["reason"]): 
       return t("sessionsView.overflowRetry");
     case "timeout-retry":
       return t("sessionsView.timeoutRetry");
+    case "overflow-block":
+      return t("sessionsView.overflowBlock");
     default:
       return reason;
   }

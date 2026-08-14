@@ -30,7 +30,7 @@ export const DeliveryThreadIdFieldSchema = z.union([
   z.number().finite(),
 ]);
 
-/** Reply-style override for a cron completion send (ENG-14117). */
+/** Reply-style override for a cron completion send. */
 export const DeliveryReplyStyleFieldSchema = z.preprocess(
   trimLowercaseStringPreprocess,
   z.enum(["thread", "top-level"]),

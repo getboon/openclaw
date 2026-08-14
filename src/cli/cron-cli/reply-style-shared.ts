@@ -1,4 +1,4 @@
-// Cron CLI parsing helper for the --reply-style delivery flag (ENG-14117).
+// Cron CLI parsing helper for the --reply-style delivery flag.
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,

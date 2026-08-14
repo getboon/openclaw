@@ -1,6 +1,6 @@
 // Boon fork default for `channels.msteams.alwaysFetchGraphMessage`.
 //
-// Every Teams tenant in the Boon fleet observed the ENG-14349 Bot Framework
+// Every Teams tenant in the Boon fleet observed the Bot Framework
 // stub-stripping regression — inbound activities arrive without the
 // `<attachment id=...>` HTML stub AND without `reference`-typed entries even
 // with RSC consent granted, so attachments silently vanish unless the Graph

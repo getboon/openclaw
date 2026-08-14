@@ -6,7 +6,7 @@ describe("normalizeToolMetas", () => {
   it("preserves the per-call `errored` flag so multi-failure step counts stay accurate", () => {
     // Regression: this boundary previously dropped `errored`, which silently
     // defeated the payload-side per-outcome step count and forced the buggy
-    // `length - 1` fallback (ENG-15627 G4 / cubic P2 review follow-up).
+    // `length - 1` fallback (cubic P2 review follow-up).
     const normalized = normalizeToolMetas([
       { toolName: "bash", meta: "ls", errored: false },
       { toolName: "read", meta: "config.json", errored: true },
@@ -21,6 +21,19 @@ describe("normalizeToolMetas", () => {
     const normalized = normalizeToolMetas([{ toolName: "web_search", meta: "q=hi" }]);
     expect(normalized).toHaveLength(1);
     expect("errored" in normalized[0]).toBe(false);
+  });
+
+  it("carries forward the `blocked` status so the audit trace can classify denied calls", () => {
+    // Regression (ENG-16854): the collector marks approval-unavailable /
+    // never-started calls `status:"blocked"` with `errored:false`. If this
+    // boundary drops `status`, buildTraceToolSummary sees `{errored:false}` and
+    // mis-classifies a permission-blocked call as `ok` — reporting a blocked run
+    // as a verified success.
+    const normalized = normalizeToolMetas([
+      { toolName: "exec", status: "blocked", errored: false },
+      { toolName: "read", errored: false },
+    ]);
+    expect(normalized.map((entry) => entry.status)).toEqual(["blocked", undefined]);
   });
 
   it("drops entries without a usable tool name", () => {

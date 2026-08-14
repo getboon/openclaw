@@ -1,8 +1,7 @@
-/** Tests model fallback notice formatting and transition state tracking. */
+/** Tests model fallback transition state tracking and reason/attempt summaries. */
 import { afterEach, describe, expect, it } from "vitest";
 import { testing as cliBackendsTesting } from "../agents/cli-backends.js";
 import {
-  buildFallbackNotice,
   resolveActiveFallbackState,
   resolveFallbackTransition,
   type FallbackNoticeState,
@@ -207,44 +206,33 @@ describe("fallback-state", () => {
     expect(setupBackendLookups).toBe(2);
   });
 
-  it("does not build a fallback notice for equivalent CLI runtime aliases", () => {
-    registerAnthropicCliBackendForTest();
-
-    expect(
-      buildFallbackNotice({
-        selectedProvider: "anthropic",
-        selectedModel: "claude-opus-4-7",
-        activeProvider: "claude-cli",
-        activeModel: "claude-opus-4-7",
-        attempts: [],
-      }),
-    ).toBeNull();
-  });
-
   it.each(["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "o3"])(
-    "does not build a fallback notice for the OpenAI Codex runtime provider alias with %s",
+    "does not treat the OpenAI Codex runtime provider alias as a fallback with %s",
     (model) => {
-      expect(
-        buildFallbackNotice({
-          selectedProvider: "openai",
-          selectedModel: model,
-          activeProvider: "openai",
-          activeModel: model,
-          attempts: [],
-        }),
-      ).toBeNull();
+      const resolved = resolveFallbackTransition({
+        selectedProvider: "openai",
+        selectedModel: model,
+        activeProvider: "openai",
+        activeModel: model,
+        attempts: [],
+        state: {},
+      });
+      expect(resolved.fallbackActive).toBe(false);
     },
   );
 
   it("still reports fallback when the OpenAI Codex runtime switches model ids", () => {
-    expect(
-      buildFallbackNotice({
-        selectedProvider: "openai",
-        selectedModel: "gpt-5.5",
-        activeProvider: "openai",
-        activeModel: "gpt-5.4",
-        attempts: [],
-      }),
-    ).toContain("selected openai/gpt-5.5");
+    const resolved = resolveFallbackTransition({
+      selectedProvider: "openai",
+      selectedModel: "gpt-5.5",
+      activeProvider: "openai",
+      activeModel: "gpt-5.4",
+      attempts: [],
+      state: {},
+    });
+    expect(resolved.fallbackActive).toBe(true);
+    expect(resolved.fallbackTransitioned).toBe(true);
+    expect(resolved.selectedModelRef).toBe("openai/gpt-5.5");
+    expect(resolved.activeModelRef).toBe("openai/gpt-5.4");
   });
 });

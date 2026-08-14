@@ -350,7 +350,7 @@ function coerceDelivery(delivery: UnknownRecord) {
   applyParsedDeliveryField(next, delivery, "threadId", parsed.threadId);
   applyParsedDeliveryField(next, delivery, "replyStyle", parsed.replyStyle);
   applyParsedDeliveryField(next, delivery, "accountId", parsed.accountId);
-  // Turn source fields prevent cross-channel contamination in shared sessions (ENG-14833).
+  // Turn source fields prevent cross-channel contamination in shared sessions.
   applyParsedDeliveryField(next, delivery, "turnSourceChannel", parsed.turnSourceChannel);
   applyParsedDeliveryField(next, delivery, "turnSourceTo", parsed.turnSourceTo);
   applyParsedDeliveryField(next, delivery, "turnSourceAccountId", parsed.turnSourceAccountId);

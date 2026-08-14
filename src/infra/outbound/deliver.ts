@@ -644,7 +644,7 @@ type DeliverOutboundPayloadsCoreParams = {
   replyToMode?: ReplyToMode;
   formatting?: OutboundDeliveryFormattingOptions;
   threadId?: string | number | null;
-  /** Portable top-level intent forwarded to channel adapters (ENG-14117). */
+  /** Portable top-level intent forwarded to channel adapters. */
   threadSuppressed?: boolean;
   identity?: OutboundIdentity;
   deps?: OutboundSendDeps;

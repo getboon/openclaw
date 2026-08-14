@@ -208,6 +208,7 @@ export const th: TranslationMap = {
     autoThreshold: "เกณฑ์อัตโนมัติ",
     overflowRetry: "ลองใหม่เมื่อเกินขีดจำกัด",
     timeoutRetry: "ลองใหม่เมื่อหมดเวลา",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} โทเค็น",
     tokensBefore: "{count} โทเค็นก่อนหน้า",
     tokenDeltaUnavailable: "ไม่สามารถแสดงส่วนต่างของโทเค็นได้",

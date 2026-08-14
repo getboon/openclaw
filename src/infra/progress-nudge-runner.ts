@@ -21,6 +21,7 @@ import {
   type ReplyRunTerminalEvent,
 } from "../auto-reply/reply/reply-run-registry.js";
 import { sendDurableMessageBatch } from "../channels/message/runtime.js";
+import { dispatchChannelMessageAction } from "../channels/plugins/message-action-dispatch.js";
 import { getRuntimeConfig } from "../config/config.js";
 import { resolveStorePath } from "../config/sessions/paths.js";
 import { loadSessionStore } from "../config/sessions/store-load.js";
@@ -31,7 +32,7 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolveAgentIdFromSessionKey } from "../routing/session-key.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 import { MAX_SAFE_TIMEOUT_DELAY_MS, resolveSafeTimeoutDelayMs } from "../utils/timer-delay.js";
-import { onAgentEvent, type AgentEventPayload } from "./agent-events.js";
+import { getAgentRunContext, onAgentEvent, type AgentEventPayload } from "./agent-events.js";
 import { isWithinActiveHours } from "./heartbeat-active-hours.js";
 import { buildOutboundSessionContext } from "./outbound/session-context.js";
 import { resolveHeartbeatDeliveryTargetWithSessionRoute } from "./outbound/targets.js";
@@ -59,6 +60,9 @@ type NudgeState = {
   lastNudgeSentAtMs?: number;
   nudgeCount: number;
   errorNudgeSent: boolean;
+  anchorMessageId?: string;
+  anchorRetainUntilMs?: number;
+  runStartedAtMs?: number;
   /** Latest tool/item progress text seen on the agent-event bus for this session. */
   progressText?: string;
 };
@@ -75,10 +79,23 @@ export type ProgressNudgeDeps = {
   resolveStartedAt?: (sessionKey: string) => number | undefined;
   resolveThreadId?: (sessionKey: string) => string | number | undefined;
   getRunPhase?: (sessionKey: string) => string | undefined;
+  resolveActiveSessionId?: (sessionKey: string) => string | undefined;
+  resolveRunSessionId?: (runId: string) => string | undefined;
   subscribeAgentEvents?: (listener: (evt: AgentEventPayload) => void) => () => void;
   subscribeTerminal?: (listener: (evt: ReplyRunTerminalEvent) => void) => () => void;
   resolveDeliveryTarget?: typeof resolveHeartbeatDeliveryTargetWithSessionRoute;
   sendMessage?: typeof sendDurableMessageBatch;
+  editMessage?: (params: {
+    cfg: OpenClawConfig;
+    channel: string;
+    to: string;
+    accountId?: string | null;
+    threadId?: string | number;
+    messageId: string;
+    text: string;
+    sessionKey: string;
+    agentId: string;
+  }) => Promise<boolean>;
 };
 
 function resolveProgressNudgeConfig(cfg: OpenClawConfig): ResolvedProgressNudgeConfig {
@@ -105,6 +122,7 @@ function resolveProgressNudgeConfig(cfg: OpenClawConfig): ResolvedProgressNudgeC
  */
 const PROGRESS_NUDGE_MAX_TICK_MS = 15_000;
 const PROGRESS_NUDGE_MIN_TICK_MS = 5_000;
+const PROGRESS_NUDGE_ANCHOR_RETENTION_MS = 10 * 60_000;
 function resolveTickMs(resolved: ResolvedProgressNudgeConfig): number {
   const bound = Math.min(resolved.thresholdMs, resolved.intervalMs, PROGRESS_NUDGE_MAX_TICK_MS);
   return Math.max(PROGRESS_NUDGE_MIN_TICK_MS, bound);
@@ -154,11 +172,38 @@ export function startProgressNudgeRunner(opts: {
   const resolveThreadId = deps.resolveThreadId ?? resolveActiveReplyRunThreadId;
   const getRunPhase =
     deps.getRunPhase ?? ((sessionKey: string) => replyRunRegistry.get(sessionKey)?.phase);
+  const resolveActiveSessionId =
+    deps.resolveActiveSessionId ??
+    ((sessionKey: string) => replyRunRegistry.resolveSessionId(sessionKey));
+  const resolveRunSessionId =
+    deps.resolveRunSessionId ?? ((runId: string) => getAgentRunContext(runId)?.sessionId);
   const subscribeAgentEvents = deps.subscribeAgentEvents ?? onAgentEvent;
   const subscribeTerminal = deps.subscribeTerminal ?? onReplyRunTerminal;
   const resolveDeliveryTarget =
     deps.resolveDeliveryTarget ?? resolveHeartbeatDeliveryTargetWithSessionRoute;
   const sendMessage = deps.sendMessage ?? sendDurableMessageBatch;
+  const editMessage =
+    deps.editMessage ??
+    (async (params) => {
+      const result = await dispatchChannelMessageAction({
+        cfg: params.cfg,
+        channel: params.channel as never,
+        action: "edit",
+        params: {
+          channelId: params.to,
+          to: params.to,
+          threadId: params.threadId,
+          messageId: params.messageId,
+          content: params.text,
+          text: params.text,
+          message: params.text,
+        },
+        accountId: params.accountId,
+        sessionKey: params.sessionKey,
+        agentId: params.agentId,
+      });
+      return result !== null;
+    });
 
   const state = {
     cfg: opts.cfg ?? getRuntimeConfig(),
@@ -170,11 +215,29 @@ export function startProgressNudgeRunner(opts: {
   };
   let overflowWarned = false;
 
-  const getOrCreateNudgeState = (sessionKey: string): NudgeState => {
+  const getOrCreateNudgeState = (
+    sessionKey: string,
+    runStartedAtMs?: number,
+    nowMs = now(),
+  ): NudgeState => {
     let entry = state.nudges.get(sessionKey);
     if (!entry) {
-      entry = { nudgeCount: 0, errorNudgeSent: false };
+      entry = { nudgeCount: 0, errorNudgeSent: false, runStartedAtMs };
       state.nudges.set(sessionKey, entry);
+      return entry;
+    }
+    if (entry.anchorRetainUntilMs !== undefined && nowMs >= entry.anchorRetainUntilMs) {
+      entry.anchorMessageId = undefined;
+      entry.anchorRetainUntilMs = undefined;
+    }
+    if (runStartedAtMs !== undefined) {
+      if (entry.runStartedAtMs !== undefined && entry.runStartedAtMs !== runStartedAtMs) {
+        entry.lastNudgeSentAtMs = undefined;
+        entry.nudgeCount = 0;
+        entry.errorNudgeSent = false;
+        entry.progressText = undefined;
+      }
+      entry.runStartedAtMs = runStartedAtMs;
     }
     return entry;
   };
@@ -183,6 +246,7 @@ export function startProgressNudgeRunner(opts: {
     sessionKey: string,
     text: string,
     threadIdOverride?: string | number,
+    nudgeState?: NudgeState,
   ): Promise<void> => {
     const agentId = resolveAgentIdFromSessionKey(sessionKey) || resolveDefaultAgentId(state.cfg);
     const entry = loadSessionEntryForKey(state.cfg, agentId, sessionKey);
@@ -200,6 +264,38 @@ export function startProgressNudgeRunner(opts: {
     // A terminal nudge passes the run's route explicitly (the registry no longer
     // has the run); the in-turn path resolves it live.
     const threadId = threadIdOverride ?? resolveThreadId(sessionKey) ?? delivery.threadId;
+    if (nudgeState?.anchorMessageId) {
+      try {
+        const edited = await editMessage({
+          cfg: state.cfg,
+          channel: delivery.channel,
+          to: delivery.to,
+          accountId: delivery.accountId,
+          threadId,
+          messageId: nudgeState.anchorMessageId,
+          text,
+          sessionKey,
+          agentId,
+        });
+        if (edited) {
+          log.info("progress-nudge: delivered", {
+            sessionKey,
+            mode: "edit",
+            channel: delivery.channel,
+            threadId,
+            messageId: nudgeState.anchorMessageId,
+            nudgeCount: nudgeState.nudgeCount,
+          });
+          return;
+        }
+      } catch (err) {
+        log.debug("progress-nudge: anchor edit failed; sending a replacement", {
+          sessionKey,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      nudgeState.anchorMessageId = undefined;
+    }
     const outboundSession = buildOutboundSessionContext({
       cfg: state.cfg,
       agentId,
@@ -216,6 +312,25 @@ export function startProgressNudgeRunner(opts: {
     });
     if (result.status === "failed" || result.status === "partial_failed") {
       log.warn("progress-nudge: delivery failed", { sessionKey, channel: delivery.channel });
+      return;
+    }
+    const messageId =
+      result.receipt?.primaryPlatformMessageId ??
+      result.results.find((item) => typeof item.messageId === "string")?.messageId;
+    if (messageId && nudgeState) {
+      nudgeState.anchorMessageId = messageId;
+    }
+    // "suppressed" means nothing actually went out (e.g. a silent-reply policy
+    // hook cancelled it) — only a real "sent" outcome is a delivery to log.
+    if (result.status === "sent") {
+      log.info("progress-nudge: delivered", {
+        sessionKey,
+        mode: "send",
+        channel: delivery.channel,
+        threadId,
+        messageId,
+        nudgeCount: nudgeState?.nudgeCount,
+      });
     }
   };
 
@@ -229,7 +344,7 @@ export function startProgressNudgeRunner(opts: {
     if (elapsed < state.resolved.thresholdMs) {
       return;
     }
-    const entry = getOrCreateNudgeState(sessionKey);
+    const entry = getOrCreateNudgeState(sessionKey, startedAt, nowMs);
     if (entry.nudgeCount >= state.resolved.maxNudges) {
       return;
     }
@@ -256,7 +371,7 @@ export function startProgressNudgeRunner(opts: {
     }
     entry.lastNudgeSentAtMs = nowMs;
     entry.nudgeCount += 1;
-    await deliverNudge(sessionKey, renderProgressText(entry.progressText));
+    await deliverNudge(sessionKey, renderProgressText(entry.progressText), undefined, entry);
   };
 
   const tick = async (): Promise<void> => {
@@ -267,8 +382,13 @@ export function startProgressNudgeRunner(opts: {
     const activeKeys = new Set(listActiveSessionKeys());
     // Prune bookkeeping for sessions that are no longer active. Deleting from a
     // Map during key iteration is safe (a deleted key is simply not revisited).
-    for (const key of state.nudges.keys()) {
-      if (!activeKeys.has(key)) {
+    for (const [key, entry] of state.nudges) {
+      if (
+        !activeKeys.has(key) &&
+        (!entry.anchorMessageId ||
+          entry.anchorRetainUntilMs === undefined ||
+          nowMs >= entry.anchorRetainUntilMs)
+      ) {
         state.nudges.delete(key);
       }
     }
@@ -312,16 +432,30 @@ export function startProgressNudgeRunner(opts: {
   };
 
   const handleTerminal = (evt: ReplyRunTerminalEvent): void => {
-    const entry = state.nudges.get(evt.sessionKey);
+    const entry = getOrCreateNudgeState(
+      evt.sessionKey,
+      Number.isFinite(evt.startedAt) ? evt.startedAt : undefined,
+    );
+    // A `completed` run delivered its real answer, so the exchange is over — the
+    // next long turn on this sessionKey is new work and owes a fresh, visible
+    // nudge, not a silent edit of a message the user already saw resolved.
+    // Anything else (failed/aborted/no-result) is the impatient-follow-up
+    // pattern the anchor exists to collapse: keep it, or a stuck run plus a
+    // retry goes back to spamming a new "Still working…" per attempt.
+    if (evt.result?.kind === "completed") {
+      entry.anchorMessageId = undefined;
+      entry.anchorRetainUntilMs = undefined;
+    } else {
+      entry.anchorRetainUntilMs = now() + PROGRESS_NUDGE_ANCHOR_RETENTION_MS;
+    }
     // "Went long" is decided from elapsed run time, not from whether a nudge
     // happened to fire — a run that crosses the threshold then fails BETWEEN poll
     // ticks (so nudgeCount is still 0) has still been silent long enough to owe a
     // failure message. Fall back to the nudge count only if startedAt is missing.
     const elapsed = Number.isFinite(evt.startedAt) ? now() - evt.startedAt : 0;
-    const wentLong =
-      elapsed >= state.resolved.thresholdMs || Boolean(entry && entry.nudgeCount > 0);
+    const wentLong = elapsed >= state.resolved.thresholdMs || entry.nudgeCount > 0;
     const isFailure = evt.result?.kind === "failed" && evt.result.code !== "aborted_by_user";
-    const alreadySent = entry?.errorNudgeSent === true;
+    const alreadySent = entry.errorNudgeSent;
     // Gate on delivery being enabled AND target !== "none" — a disabled target
     // must suppress the terminal failure message too, not just the in-turn nudges.
     const deliveryOn = state.resolved.enabled && state.resolved.target !== "none";
@@ -330,11 +464,10 @@ export function startProgressNudgeRunner(opts: {
       // so a repeat terminal for the same session would otherwise re-fire (the
       // guard must outlive this handler). The tick-prune reclaims the entry once
       // the session is no longer active.
-      const guard = entry ?? getOrCreateNudgeState(evt.sessionKey);
-      guard.errorNudgeSent = true;
+      entry.errorNudgeSent = true;
       // Pass the run's route explicitly: the operation is already out of the
       // registry, so a live thread lookup would come back empty.
-      void deliverNudge(evt.sessionKey, renderErrorText(), evt.routeThreadId).catch(
+      void deliverNudge(evt.sessionKey, renderErrorText(), evt.routeThreadId, entry).catch(
         (err: unknown) => {
           log.error("progress-nudge: error-nudge delivery failed", {
             sessionKey: evt.sessionKey,
@@ -342,14 +475,23 @@ export function startProgressNudgeRunner(opts: {
           });
         },
       );
-      return;
     }
-    // No error nudge to guard — drop bookkeeping now (the common terminal path).
-    state.nudges.delete(evt.sessionKey);
   };
 
   const handleAgentEvent = (evt: AgentEventPayload): void => {
     if (!evt.sessionKey || (evt.stream !== "item" && evt.stream !== "tool")) {
+      return;
+    }
+    // Tool/item events never carry their own sessionId (only lifecycle events
+    // do), so correlate via the run context instead: a delayed event from a
+    // run that is no longer the active reply-run for this sessionKey (e.g. a
+    // force-cleared/aborted prior turn whose async tool call reports late)
+    // must not overwrite the anchor's progress text with stale content from
+    // an unrelated request. Fail open when either side is unresolvable
+    // (e.g. in tests) rather than silently dropping all progress text.
+    const activeSessionId = resolveActiveSessionId(evt.sessionKey);
+    const runSessionId = resolveRunSessionId(evt.runId);
+    if (activeSessionId && runSessionId && activeSessionId !== runSessionId) {
       return;
     }
     const progressText = evt.data?.progressText;

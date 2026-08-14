@@ -65,7 +65,7 @@ OpenClaw separates the selected provider/model from why it was selected. That so
 - **Legacy session override**: older session entries may have `modelOverride` without `modelOverrideSource`. OpenClaw treats those as user overrides so an explicit old selection is not silently converted into fallback behavior.
 - **Cron payload model**: a cron job `payload.model` / `--model` is a job primary, not a user session override. It uses configured fallbacks unless the job provides `payload.fallbacks`; `payload.fallbacks: []` makes the cron run strict.
 
-The auto fallback primary-probe interval is five minutes and is not configurable. OpenClaw remembers recent probes per session and primary model so a failing primary is not retried on every turn. OpenClaw sends a visible notice when a session moves onto fallback and another notice when it returns to the selected primary; it does not repeat the notice on every sticky fallback turn.
+The auto fallback primary-probe interval is five minutes and is not configurable. OpenClaw remembers recent probes per session and primary model so a failing primary is not retried on every turn. Moving onto a fallback and returning to the selected primary are recorded as structured lifecycle events (and logs), not shown to the user; the transition is deduped so a sticky fallback is not re-recorded on every turn.
 
 ## Auth failure skip cache
 
@@ -88,21 +88,11 @@ process-local and clears on Gateway restart.
 The value is a TTL in milliseconds. `0` or an unset value disables the cache.
 Positive values are clamped between 1 second and 10 minutes.
 
-## User-visible fallback notices
+## Fallback is invisible to users
 
-When a session moves onto an auto-selected fallback, OpenClaw sends a status notice in the same reply surface:
+A mid-turn model swap is an internal reliability detail, so OpenClaw never surfaces a fallback or fallback-cleared chat message to the user. The turn streams and completes normally on the fallback model with no extra line drawing attention to the swap.
 
-```text
-↪️ Model Fallback: <fallback> (selected <primary>; <reason>)
-```
-
-When a later probe succeeds and the session returns to the selected primary, OpenClaw sends:
-
-```text
-↪️ Model Fallback cleared: <primary> (was <fallback>)
-```
-
-These notices are operational messages, not assistant content. They are delivered once per state change, including side-effect-only turns when feasible, but sticky fallback turns do not repeat them. Delivery bypasses normal source-reply suppression, the notice does not consume the first assistant reply slot for threaded channels, and it is excluded from text-to-speech and commitment extraction.
+The transition is still fully observable for debugging: it is recorded in logs and emitted as structured `fallback` / `fallback_cleared` lifecycle events (deduped so a sticky fallback does not re-emit every turn), alongside the `model.failover` diagnostic and the `openclaw_model_failover_total` counter described below.
 
 ## Auth storage (keys + OAuth)
 
@@ -344,7 +334,7 @@ That means fallback retries have to coordinate with live model switching:
 - User-driven model overrides are treated as exact selections for fallback policy, so an unreachable selected provider surfaces as a failure instead of being masked by `agents.defaults.model.fallbacks`.
 - Before a fallback retry starts, the reply runner persists the selected fallback override fields to the session entry.
 - Auto fallback overrides remain selected on subsequent turns so OpenClaw does not probe a known-bad primary on every message. OpenClaw periodically probes the configured origin again and clears the auto override when it recovers; `/new`, `/reset`, and `sessions.reset` clear auto-sourced overrides immediately.
-- User replies announce fallback transitions and fallback-cleared recovery once per state change. Sticky fallback turns do not repeat the notice.
+- Fallback transitions and fallback-cleared recovery are emitted as structured lifecycle events once per state change, not surfaced in user replies. Sticky fallback turns do not re-emit the event.
 - `/status` shows the selected model and, when fallback state differs, the active fallback model and reason.
 - Live-session reconciliation prefers persisted session overrides over stale runtime model fields.
 - If a live-switch error points at a later candidate in the active fallback chain, OpenClaw jumps directly to that selected model instead of walking unrelated candidates first.
@@ -382,6 +372,8 @@ The persisted fallback override closes that window, and the narrow rollback keep
 - human-readable error summary
 
 Structured `model_fallback_decision` logs also include flat `fallbackStep*` fields when a candidate fails, is skipped, or a later fallback succeeds. These fields make the attempted transition explicit (`fallbackStepFromModel`, `fallbackStepToModel`, `fallbackStepFromFailureReason`, `fallbackStepFromFailureDetail`, `fallbackStepFinalOutcome`) so log and diagnostic exporters can reconstruct the primary failure even when the terminal fallback also fails.
+
+Every real chain transition also emits a scrapeable `model.failover` diagnostic event, independent of log verbosity, so client-owned fallback stays observable when the gateway no longer ladders. The [Prometheus](/gateway/prometheus) counter `openclaw_model_failover_total` and the [OpenTelemetry](/gateway/opentelemetry) counter `openclaw.model.failover` carry an `outcome` label (`next_fallback`, `chain_exhausted`, `succeeded`, `suspend_lanes`) and a 1-based `tier` label. The `chain_exhausted` series is the signal an operator "fallback chain exhausted" alert fires on.
 
 When every candidate fails, OpenClaw throws `FallbackSummaryError`. The outer reply runner can use that to build a more specific message such as "all models are temporarily rate-limited" and include the soonest cooldown expiry when one is known.
 

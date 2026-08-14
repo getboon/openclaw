@@ -295,7 +295,8 @@ function isProjectableCompactionCheckpoint(
     (checkpoint.reason === "manual" ||
       checkpoint.reason === "auto-threshold" ||
       checkpoint.reason === "overflow-retry" ||
-      checkpoint.reason === "timeout-retry")
+      checkpoint.reason === "timeout-retry" ||
+      checkpoint.reason === "overflow-block")
   );
 }
 
@@ -335,7 +336,8 @@ function buildCompactionCheckpointPreview(
     reason !== "manual" &&
     reason !== "auto-threshold" &&
     reason !== "overflow-retry" &&
-    reason !== "timeout-retry"
+    reason !== "timeout-retry" &&
+    reason !== "overflow-block"
   ) {
     return undefined;
   }

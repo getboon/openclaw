@@ -237,7 +237,7 @@ describe("isBillingErrorMessage", () => {
     expect(isBillingErrorMessage(raw)).toBe(true);
     expect(classifyFailoverReason(raw)).toBe("billing");
   });
-  it("classifies boon-llm-gateway allocation_exhausted as billing (ENG-15627)", () => {
+  it("classifies boon-llm-gateway allocation_exhausted as billing", () => {
     // 429 body from boon-llm-gateway when an org's token allocation is spent.
     // Must NOT fall through to an unclassified failure that leaks the raw code
     // or the generic "LLM request failed." (the Arguijo customer screenshot).
@@ -768,6 +768,45 @@ describe("classifyFailoverReasonFromHttpStatus", () => {
   });
 });
 
+describe("edge/WAF HTML 429 handling (ENG-14852)", () => {
+  // Cloudflare/edge block relayed by the gateway on every model hop. It must
+  // NOT be classified as a provider rate-limit, or a transient edge blip fails
+  // the whole turn as "all models rate-limited".
+  const EDGE_HTML_429 = "429 <!doctype html><html><title>Blocked</title></html>";
+  const CLOUDFLARE_CHALLENGE_429 = `429 <!DOCTYPE html>
+<html lang="en-US">
+  <head><title>Attention Required! | Cloudflare</title></head>
+  <body><span id="challenge-error-text">Enable JavaScript and cookies to continue</span></body>
+</html>`;
+
+  it("classifies an HTML-bodied 429 as timeout, not rate_limit", () => {
+    expect(classifyFailoverReasonFromHttpStatus(429, EDGE_HTML_429)).toBe("timeout");
+    expect(classifyFailoverReason(EDGE_HTML_429)).toBe("timeout");
+  });
+
+  it("classifies a Cloudflare challenge 429 as timeout", () => {
+    expect(classifyFailoverReasonFromHttpStatus(429, CLOUDFLARE_CHALLENGE_429)).toBe("timeout");
+    expect(classifyFailoverReason(CLOUDFLARE_CHALLENGE_429)).toBe("timeout");
+  });
+
+  it("still classifies a plain JSON provider 429 as rate_limit", () => {
+    expect(classifyFailoverReasonFromHttpStatus(429, OPENAI_RATE_LIMIT_MESSAGE)).toBe("rate_limit");
+    expect(classifyFailoverReasonFromHttpStatus(429, "429 Too Many Requests")).toBe("rate_limit");
+  });
+
+  it("still classifies a billing 429 as billing (billing wins over HTML)", () => {
+    const billingHtml429 = `429 <!doctype html><html><body>insufficient credits</body></html>`;
+    expect(classifyFailoverReasonFromHttpStatus(429, billingHtml429)).toBe("billing");
+    expect(classifyFailoverReasonFromHttpStatus(429, "429 insufficient credits")).toBe("billing");
+  });
+
+  it("tags the edge 429 as upstream_html for observability", () => {
+    expect(classifyProviderRuntimeFailureKind({ status: 429, message: EDGE_HTML_429 })).toBe(
+      "upstream_html",
+    );
+  });
+});
+
 describe("classifyFailoverReason HTTP 410 handling", () => {
   it("treats generic 410 text as retryable timeout", () => {
     expect(classifyFailoverReason("410")).toBe("timeout");
@@ -1107,6 +1146,57 @@ describe("classifyAssistantFailoverReason", () => {
         timestamp: 0,
       }),
     ).toBe("model_not_found");
+  });
+
+  it("classifies a gateway-relayed Bedrock 503 api_error as timeout via errorStatus", () => {
+    expect(
+      classifyAssistantFailoverReason({
+        role: "assistant",
+        api: "anthropic-messages",
+        provider: "bedrock",
+        model: "claude-opus-4-8-bedrock",
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "error",
+        errorMessage:
+          '{"type":"error","error":{"type":"api_error","message":"Bedrock is unable to process your request."}}',
+        errorType: "api_error",
+        errorStatus: 503,
+        content: [],
+        timestamp: 0,
+      }),
+    ).toBe("timeout");
+  });
+
+  it("still returns null for a bare Bedrock 503 body when errorStatus is absent (regression guard)", () => {
+    expect(
+      classifyAssistantFailoverReason({
+        role: "assistant",
+        api: "anthropic-messages",
+        provider: "bedrock",
+        model: "claude-opus-4-8-bedrock",
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "error",
+        errorMessage:
+          '{"type":"error","error":{"type":"api_error","message":"Bedrock is unable to process your request."}}',
+        errorType: "api_error",
+        content: [],
+        timestamp: 0,
+      }),
+    ).toBeNull();
   });
 });
 
@@ -1707,5 +1797,26 @@ describe("classifyProviderRuntimeFailureKind", () => {
 
   it("classifies internal server error status prose with code 500 as timeout", () => {
     expect(classifyFailoverReason(INTERNAL_SERVER_ERROR_STATUS_WITH_500_SAMPLE)).toBe("timeout");
+  });
+
+  it("classifyProviderRuntimeFailureKind returns timeout for a Bedrock 503 when status is supplied", () => {
+    expect(
+      classifyProviderRuntimeFailureKind({
+        status: 503,
+        message:
+          '{"type":"error","error":{"type":"api_error","message":"Bedrock is unable to process your request."}}',
+        provider: "bedrock",
+      }),
+    ).toBe("timeout");
+  });
+
+  it("classifyProviderRuntimeFailureKind returns unclassified for the same body without status", () => {
+    expect(
+      classifyProviderRuntimeFailureKind({
+        message:
+          '{"type":"error","error":{"type":"api_error","message":"Bedrock is unable to process your request."}}',
+        provider: "bedrock",
+      }),
+    ).toBe("unclassified");
   });
 });

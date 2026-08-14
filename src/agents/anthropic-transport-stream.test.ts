@@ -345,6 +345,29 @@ describe("anthropic transport stream", () => {
     expect((cancelReason as Error).message).toBe(result.errorMessage);
   });
 
+  it("threads the HTTP status from a non-OK gateway response onto the error", async () => {
+    const body =
+      '{"type":"error","error":{"type":"api_error","message":"Bedrock is unable to process your request."}}';
+    guardedFetchMock.mockResolvedValueOnce(
+      new Response(body, {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const result = await runTransportStream(
+      makeAnthropicTransportModel(),
+      {
+        messages: [{ role: "user", content: "hello" }],
+      } as AnthropicStreamContext,
+      { apiKey: "sk-ant-api" } as AnthropicStreamOptions,
+    );
+
+    expect(result.stopReason).toBe("error");
+    expect(result.errorStatus).toBe(503);
+    expect(result.errorMessage).toContain("Bedrock is unable to process your request.");
+  });
+
   it("honors ANTHROPIC_BASE_URL when model base URL is blank", async () => {
     vi.stubEnv("ANTHROPIC_BASE_URL", " https://anthropic-proxy.example/v1 ");
 

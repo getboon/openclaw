@@ -8,7 +8,7 @@
  * accurate when MORE THAN ONE call errors in a turn), and the collector set it
  * correctly, but this normalization step in between silently discarded it —
  * forcing the buggy `toolMetas.length - 1` fallback that assumes a single
- * failure (ENG-15627 G4 / cubic P2 review follow-up).
+ * failure (cubic P2 review follow-up).
  */
 
 /** Raw entry as collected by the subscription's tool-execution handler. */
@@ -17,6 +17,7 @@ export type RawToolMetaEntry = {
   meta?: string;
   replaySafe?: boolean;
   errored?: boolean;
+  status?: "blocked";
   asyncStarted?: boolean;
   asyncTaskRunId?: string;
   asyncTaskId?: string;
@@ -28,6 +29,7 @@ export type NormalizedToolMetaEntry = {
   meta?: string;
   replaySafe: boolean;
   errored?: boolean;
+  status?: "blocked";
   asyncStarted?: true;
   asyncTaskRunId?: string;
   asyncTaskId?: string;
@@ -56,6 +58,12 @@ export function normalizeToolMetas(
       // counts only successfully-completed tools when more than one call errors.
       if (typeof entry.errored === "boolean") {
         normalized.errored = entry.errored;
+      }
+      // Carry the blocked/permission-denied marker forward so the audit trace
+      // classifies it as `blocked` (not `ok`); the collector sets it for
+      // approval-unavailable/never-started calls (ENG-16854).
+      if (entry.status === "blocked") {
+        normalized.status = "blocked";
       }
       if (entry.asyncStarted === true) {
         normalized.asyncStarted = true;

@@ -777,6 +777,37 @@ describe("handleInlineActions", () => {
     expect(commandArgs.skillCommands).toEqual(skillCommands);
   });
 
+  it("returns the explicitly selected skill for a model-backed command", async () => {
+    const typing = createTypingController();
+    const ctx = buildTestCtx({
+      Body: "/skill office-hours",
+      CommandBody: "/skill office-hours",
+    });
+
+    const result = await handleInlineActions(
+      createHandleInlineActionsInput({
+        ctx,
+        typing,
+        cleanedBody: "/skill office-hours",
+        command: {
+          isAuthorizedSender: true,
+          rawBodyNormalized: "/skill office-hours",
+          commandBodyNormalized: "/skill office-hours",
+        },
+        overrides: {
+          allowTextCommands: true,
+          cfg: { commands: { text: true } },
+          skillCommands: officeHoursSkillCommands(),
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      kind: "continue",
+      explicitSkillName: "office-hours",
+    });
+  });
+
   it("passes requesterAgentIdOverride into inline tool runtimes", async () => {
     const typing = createTypingController();
     const toolExecute = vi.fn(async () => ({ text: "spawned" }));

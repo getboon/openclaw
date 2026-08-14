@@ -306,10 +306,10 @@ export const CronCompletionDestinationSchema = Type.Object(
   { additionalProperties: false },
 );
 
-/** Reply-style override for a cron completion send (ENG-14117). */
+/** Reply-style override for a cron completion send. */
 export const CronReplyStyleSchema = Type.Union([Type.Literal("thread"), Type.Literal("top-level")]);
 
-// ENG-14833: the originating channel/target captured at job creation, carried so delivery
+// The originating channel/target captured at job creation, carried so delivery
 // resolution can pin the origin instead of contaminated shared-session lastChannel/lastTo. Additive
 // optional fields; jobs created before this stay valid without them.
 const CronTurnSourceProperties = {

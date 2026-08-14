@@ -5,12 +5,15 @@ import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
 } from "@openclaw/normalization-core/string-coerce";
+import { resolveMessageAudience } from "../../config/message-audience.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { MessagePresentation, MessagePresentationBlock } from "../../interactive/payload.js";
 import type { AssistantMessage } from "../../llm/types.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
   extractLeadingHttpStatus,
   formatRawAssistantErrorForUi,
+  isCloudflareOrHtmlErrorPage,
   isGenericProviderInternalError,
   parseApiErrorInfo,
 } from "../../shared/assistant-error-format.js";
@@ -42,6 +45,7 @@ import {
   matchesProviderContextOverflow,
 } from "./provider-error-patterns.js";
 import {
+  BOON_BILLING_URL,
   formatBillingErrorMessage,
   formatDiskSpaceErrorCopy,
   formatRateLimitOrOverloadedErrorCopy,
@@ -79,15 +83,203 @@ const PROVIDER_SCHEMA_REJECTION_USER_TEXT =
   "LLM request failed: provider rejected the request schema or tool payload.";
 const MODEL_NOT_FOUND_USER_TEXT =
   "The selected model was not found by the provider. Check the model id or choose a different model.";
-// boon-llm-gateway allocation exhaustion (ENG-15627). Distinct from generic
-// API-key billing copy: a gateway customer authenticates with a single
-// BOON_API_KEY against an org-level allocation, so "switch to a different API
-// key" is meaningless — there is nothing to switch to. Give it dedicated copy.
+// boon-llm-gateway token exhaustion. Distinct from generic API-key billing copy:
+// a Boon user has no provider API key to "switch" — they run against an org-level
+// allocation — so the generic "switch to a different API key" wording is both
+// meaningless and confusing to a non-technical user. Give it dedicated,
+// plain-language copy with the Boon billing page linked INLINE as a markdown
+// link, so every channel (incl. plain-text) is actionable; Slack (mrkdwn) and
+// Teams (markdown) render `[label](url)`. The rich card button
+// (buildTokenExhaustedPresentation) is an additional affordance on Slack/Teams.
+//
+// Static billing URL (not the gateway's top_up_url) so the text link is always
+// present regardless of whether the 402 body threads a URL through; `open=agent`
+// matches the web agent-chat banner deep-link. Imported from
+// sanitize-user-facing-text.ts (single source of truth, shared with the generic
+// billing-error copy).
 const ALLOCATION_EXHAUSTED_USER_TEXT =
-  "⚠️ This account has reached its usage allocation. Top up your allocation or contact your account team, then try again.";
-/** Detect the boon-llm-gateway token-allocation-exhausted signal. */
+  `⚠️ You're out of Boon Agent tokens, so I couldn't finish that. ` +
+  `[Top up your tokens](${BOON_BILLING_URL}) to keep going.`;
+const TRIAL_EXHAUSTED_USER_TEXT =
+  `⚠️ You've used up your free trial, so I couldn't finish that. ` +
+  `[Upgrade your plan](${BOON_BILLING_URL}) to keep chatting with Boon Agent.`;
+/** Button label shown on the paid exhaustion card (web parity). */
+const ALLOCATION_EXHAUSTED_BUTTON_LABEL = "Top up tokens";
+/** Button label shown on the trial exhaustion card (web parity). */
+const TRIAL_EXHAUSTED_BUTTON_LABEL = "Upgrade plan";
+
+// Consumer-audience copy (ENG-16617). When agents.defaults.messaging.audience is
+// "consumer", formatAssistantErrorText returns plain, reassuring copy keyed by
+// the SAME classification the operator path already computes — no second
+// classifier. The raw provider text/reason/attempt detail never reaches these
+// strings; it stays in logs and structured events. Token-exhaustion copy is the
+// deliberate exception (already end-user-grade + button-wired) and is returned
+// above this gate under both audiences.
+type ConsumerCopyCategory =
+  | "auth"
+  | "rate_limit"
+  | "timeout"
+  | "billing"
+  | "context_overflow"
+  | "model_not_found"
+  | "schema"
+  | "generic";
+const CONSUMER_ERROR_COPY: Record<ConsumerCopyCategory, string> = {
+  auth: "I hit a sign-in problem reaching the AI service and couldn't finish that. Please try again in a moment.",
+  rate_limit:
+    "The AI service is busy right now, so I couldn't finish that. Please try again shortly.",
+  timeout:
+    "The AI service took too long to respond, so I couldn't finish that. Please try again in a moment.",
+  billing:
+    "I couldn't complete that because the AI account has hit its usage limit. Please try again later.",
+  context_overflow:
+    "This conversation has grown too long for me to continue in one go. Try starting a new chat or asking for a shorter piece.",
+  model_not_found:
+    "The AI model I tried to use isn't available right now, so I couldn't finish that. Please try again shortly.",
+  schema:
+    "Something went wrong while I was talking to the AI service and I couldn't finish that. Please try again.",
+  generic: "Something went wrong while I was working on that. Please try again in a moment.",
+};
+
+/**
+ * Map an already-classified failure to consumer copy. Reuses the operator
+ * classifier's `providerRuntimeFailureKind` plus the same predicates the
+ * operator branches use — it does not re-match raw text beyond those. Returns a
+ * category for every failure (catch-all "generic"), so consumer mode never falls
+ * through to raw operator text.
+ */
+function resolveConsumerCopyCategory(
+  raw: string,
+  kind: ProviderRuntimeFailureKind,
+  provider: string | undefined,
+): ConsumerCopyCategory {
+  if (
+    kind === "auth_scope" ||
+    kind === "auth_refresh" ||
+    kind === "refresh_timeout" ||
+    kind === "refresh_contention" ||
+    kind === "callback_timeout" ||
+    kind === "callback_validation" ||
+    kind === "auth_html" ||
+    kind === "auth_invalid_token"
+  ) {
+    return "auth";
+  }
+  if (kind === "model_not_found") {
+    return "model_not_found";
+  }
+  if (isContextOverflowError(raw)) {
+    return "context_overflow";
+  }
+  if (kind === "rate_limit") {
+    return "rate_limit";
+  }
+  if (isBilling429MessageForProvider(raw, provider) || isBillingErrorMessage(raw)) {
+    return "billing";
+  }
+  if (
+    kind === "timeout" ||
+    kind === "proxy" ||
+    kind === "upstream_html" ||
+    kind === "dns" ||
+    isTimeoutErrorMessage(raw)
+  ) {
+    return "timeout";
+  }
+  if (kind === "schema" || kind === "replay_invalid") {
+    return "schema";
+  }
+  // The operator path recognizes provider schema/invalid-request rejections here
+  // too (see formatUserFacingAssistantErrorText's parsedErrorType check), so map
+  // them to the same consumer category rather than the generic catch-all.
+  const parsedErrorType = parseApiErrorInfo(raw)?.type?.toLowerCase() ?? "";
+  if (parsedErrorType.includes("invalid_request") || matchesFormatErrorPattern(raw)) {
+    return "schema";
+  }
+  return "generic";
+}
+
+/** Detect the boon-llm-gateway PAID token-allocation-exhausted signal. */
 export function isAllocationExhaustedErrorMessage(raw: string): boolean {
   return /\ballocation[_ ]exhausted\b/i.test(raw) || /\btoken allocation exhausted\b/i.test(raw);
+}
+/** Detect the boon-llm-gateway TRIAL budget-exhausted signal. */
+export function isTrialBudgetExhaustedErrorMessage(raw: string): boolean {
+  return /\btrial[_ ]budget[_ ]exhausted\b/i.test(raw);
+}
+/**
+ * Detect either exhaustion variant (paid allocation OR trial budget). Both are
+ * "you're out of tokens" states the gateway returns as HTTP 402; callers use
+ * this to surface the dedicated top-up/upgrade copy + card.
+ */
+export function isTokenExhaustedErrorMessage(raw: string): boolean {
+  return isAllocationExhaustedErrorMessage(raw) || isTrialBudgetExhaustedErrorMessage(raw);
+}
+
+// The gateway puts the discriminating CODE ("allocation_exhausted" /
+// "trial_budget_exhausted") under the 402 body's `error` key, which the
+// provider-error formatter drops from `errorMessage` (it surfaces only the human
+// `message`). The paid message text happens to contain "token allocation
+// exhausted" so it matches on the prettified message too, but the TRIAL message
+// ("Trial token budget exhausted…") does NOT — only the raw body carries the
+// code. So every exhaustion classification must check BOTH the prettified
+// message and the raw error body. These helpers centralize that.
+function isTrialBudgetExhausted(raw: string, errorBody?: string): boolean {
+  return (
+    isTrialBudgetExhaustedErrorMessage(raw) ||
+    isTrialBudgetExhaustedErrorMessage((errorBody ?? "").trim())
+  );
+}
+function isAllocationExhausted(raw: string, errorBody?: string): boolean {
+  return (
+    isAllocationExhaustedErrorMessage(raw) ||
+    isAllocationExhaustedErrorMessage((errorBody ?? "").trim())
+  );
+}
+function isTokenExhausted(raw: string, errorBody?: string): boolean {
+  return isAllocationExhausted(raw, errorBody) || isTrialBudgetExhausted(raw, errorBody);
+}
+
+/**
+ * Build the portable exhaustion card — a single top-up/upgrade URL button
+ * (pointing at the static Boon billing page) — that both the Slack and Teams
+ * adapters render natively. Returns undefined when neither `raw` nor `errorBody`
+ * is an exhaustion signal, so the caller falls through to a plain-text reply.
+ *
+ * Classifies against BOTH `raw` and `errorBody` (the gateway's code lives only in
+ * the body for trials — see isTrialBudgetExhausted). Uses the static
+ * BOON_BILLING_URL rather than the gateway's top_up_url so the button is always
+ * present and robust.
+ *
+ * The card carries NO text block on purpose: the reply payload's `text` already
+ * holds the exhaustion copy (with the billing link inlined), and both adapters
+ * fold that `text` into the card body (Teams `buildMSTeamsPresentationCard`) /
+ * message (Slack blocks + fallback text). Adding a text block here would double
+ * the copy inside the Teams card. The button is a redundant-but-convenient
+ * second affordance.
+ */
+export function buildTokenExhaustedPresentation(
+  raw: string,
+  errorBody: string | undefined,
+): MessagePresentation | undefined {
+  const trial = isTrialBudgetExhausted(raw, errorBody);
+  const isExhausted = trial || isAllocationExhausted(raw, errorBody);
+  if (!isExhausted) {
+    return undefined;
+  }
+  const blocks: MessagePresentationBlock[] = [
+    {
+      type: "buttons",
+      buttons: [
+        {
+          label: trial ? TRIAL_EXHAUSTED_BUTTON_LABEL : ALLOCATION_EXHAUSTED_BUTTON_LABEL,
+          url: BOON_BILLING_URL,
+          style: "primary",
+        },
+      ],
+    },
+  ];
+  return { tone: "warning", blocks };
 }
 const MAX_FAILOVER_DETAIL_CANDIDATES = 12;
 const MAX_FAILOVER_DETAIL_CHARS = 1_000;
@@ -525,6 +717,20 @@ function isHtmlErrorResponse(raw: string, status?: number): boolean {
   return HTML_BODY_RE.test(rest) && HTML_CLOSE_RE.test(rest);
 }
 
+/**
+ * A gateway/edge WAF (Cloudflare, Render) block: an HTML error page relayed by
+ * the gateway instead of a real provider JSON error. Matches either a full HTML
+ * document (`isHtmlErrorResponse`) or a Cloudflare challenge/block page hint
+ * (`isCloudflareOrHtmlErrorPage`). Shared by the 429 classifier and the
+ * client-side ride-out retry predicate so both key off the same edge signal.
+ */
+export function isEdgeBlockErrorBody(message: string | undefined, status?: number): boolean {
+  if (!message) {
+    return false;
+  }
+  return isHtmlErrorResponse(message, status) || isCloudflareOrHtmlErrorPage(message);
+}
+
 function isTransportHtmlErrorStatus(status: number | undefined): boolean {
   return (
     status === 408 ||
@@ -813,6 +1019,14 @@ function classifyFailoverClassificationFromHttpStatus(
     }
     if (message && isBilling429MessageForProvider(message, provider)) {
       return toReasonClassification("billing");
+    }
+    // A Cloudflare/edge WAF in front of the gateway returns an HTML "Blocked"
+    // 429 that the gateway relays on every model hop. It is an external edge
+    // blip, not a provider rate-limit — classify as transient timeout so it
+    // fails over / rides out instead of surfacing "all models rate-limited".
+    // Billing 429s are handled above and still win.
+    if (isEdgeBlockErrorBody(message, status)) {
+      return toReasonClassification("timeout");
     }
     return toReasonClassification("rate_limit");
   }
@@ -1311,7 +1525,10 @@ function buildAssistantFailoverSignal(
   opts?: { provider?: string },
 ): FailoverSignal {
   return {
-    status: extractLeadingHttpStatus(msg.errorMessage?.trim() ?? "")?.code,
+    status:
+      typeof msg.errorStatus === "number" && Number.isFinite(msg.errorStatus)
+        ? msg.errorStatus
+        : extractLeadingHttpStatus(msg.errorMessage?.trim() ?? "")?.code,
     code: msg.errorCode,
     errorType: msg.errorType,
     message: msg.errorMessage?.trim() || undefined,
@@ -1380,6 +1597,18 @@ export function formatAssistantErrorText(
   const diskSpaceCopy = formatDiskSpaceErrorCopy(raw);
   if (diskSpaceCopy) {
     return diskSpaceCopy;
+  }
+
+  // Consumer audience (ENG-16617): return plain-language copy keyed by the same
+  // classification the operator branches below use, so raw provider slugs,
+  // reasons, and attempt counters never reach end users. Sandbox-tool-policy and
+  // disk-space copy above stay under both audiences (already user-appropriate).
+  // Token-exhaustion is excluded here so it falls through to its dedicated
+  // trial/allocation copy + top-up card, which is end-user-grade for both.
+  if (resolveMessageAudience(opts?.cfg) === "consumer" && !isTokenExhausted(raw, msg.errorBody)) {
+    return CONSUMER_ERROR_COPY[
+      resolveConsumerCopyCategory(raw, providerRuntimeFailureKind, opts?.provider)
+    ];
   }
 
   if (providerRuntimeFailureKind === "auth_refresh") {
@@ -1454,8 +1683,9 @@ export function formatAssistantErrorText(
 
   if (isContextOverflowError(raw)) {
     return (
-      "Context overflow: prompt too large for the model. " +
-      "Try /reset (or /new) to start a fresh session, or use a larger-context model."
+      "Context overflow: this conversation reached the model's context limit. " +
+      "Your history is preserved — try again, run /compact, or continue from a saved " +
+      "checkpoint under Sessions → checkpoints. A larger-context model also helps."
     );
   }
 
@@ -1495,9 +1725,15 @@ export function formatAssistantErrorText(
     return `LLM request rejected: ${invalidRequest[1]}`;
   }
 
-  // boon-llm-gateway allocation exhaustion gets dedicated copy before the
-  // generic billing formatter (which talks about API keys) can claim it.
-  if (isAllocationExhaustedErrorMessage(raw)) {
+  // boon-llm-gateway token exhaustion gets dedicated copy before the generic
+  // billing formatter (which talks about API keys) can claim it. Trial and paid
+  // diverge: trials upgrade, paid tops up. The buttoned card is attached at the
+  // reply-payload layer (buildTokenExhaustedPresentation); this is the plain-text
+  // fallback for channels/paths that render text only.
+  if (isTrialBudgetExhausted(raw, msg.errorBody)) {
+    return TRIAL_EXHAUSTED_USER_TEXT;
+  }
+  if (isAllocationExhausted(raw, msg.errorBody)) {
     return ALLOCATION_EXHAUSTED_USER_TEXT;
   }
 

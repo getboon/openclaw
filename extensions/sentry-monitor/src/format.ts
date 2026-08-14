@@ -20,7 +20,11 @@ export function safe(
 }
 
 export function describeModelCallError(event: PluginHookModelCallEndedEvent): string {
+  // errorClass + httpStatus lead so Sentry fingerprints an upstream-provider 5xx
+  // (Bedrock relayed) into a different issue than a gateway-origin 5xx (ENG-16922).
   const parts = [
+    event.errorClass,
+    event.httpStatus ? `http_status=${event.httpStatus}` : undefined,
     event.errorCategory,
     event.failureKind ? `failure_kind=${event.failureKind}` : undefined,
   ].filter(Boolean);

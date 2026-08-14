@@ -566,9 +566,9 @@ describe("handleAssistantFailover", () => {
       expect(err.rawError).toBe(rawError.trim());
     });
 
-    it("never surfaces unclassified raw provider text as the user-facing message (ENG-15627 G2)", () => {
+    it("never surfaces unclassified raw provider text as the user-facing message", () => {
       // A provider-internal string that no classifier branch recognizes must
-      // NOT reach the user as-is. Before ENG-15627 the ladder passed
+      // NOT reach the user as-is. Previously the ladder passed
       // lastAssistant.errorMessage?.trim() through verbatim, leaking raw
       // provider bodies. rawError still keeps it for operator debugging.
       const rawError = "Kaboom: widget subsystem returned gibberish 0xDEADBEEF";

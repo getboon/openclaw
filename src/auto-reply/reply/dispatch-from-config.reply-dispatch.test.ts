@@ -28,6 +28,7 @@ let createReplyOperation: typeof import("./reply-run-registry.js").createReplyOp
 let replyRunRegistry: typeof import("./reply-run-registry.js").replyRunRegistry;
 let runAfterReplyOperationClear: typeof import("./reply-run-registry.js").runAfterReplyOperationClear;
 let resetReplyRunRegistry: typeof import("./reply-run-registry.js").testing.resetReplyRunRegistry;
+let onReplyRunTerminal: typeof import("./reply-run-registry.js").onReplyRunTerminal;
 
 function firstRuntimeLoadCall() {
   return runtimePluginMocks.ensureRuntimePluginsLoaded.mock.calls[0]?.[0] as
@@ -60,6 +61,7 @@ describe("dispatchReplyFromConfig reply_dispatch hook", () => {
     replyRunRegistry = replyRunRegistryModule.replyRunRegistry;
     runAfterReplyOperationClear = replyRunRegistryModule.runAfterReplyOperationClear;
     resetReplyRunRegistry = () => replyRunRegistryModule.testing.resetReplyRunRegistry();
+    onReplyRunTerminal = replyRunRegistryModule.onReplyRunTerminal;
   });
 
   beforeEach(() => {
@@ -301,6 +303,45 @@ describe("dispatchReplyFromConfig reply_dispatch hook", () => {
     expect(sessionStoreMocks.currentEntry?.pendingFinalDelivery).toBe(true);
     expect(sessionStoreMocks.currentEntry?.pendingFinalDeliveryText).toBe("durable reply");
     expect(sessionStoreMocks.currentEntry?.pendingFinalDeliveryCreatedAt).toBe(1);
+  });
+
+  it("records the reply operation as failed:delivery_failed, not completed, when the final reply never reaches the user (ENG-17107)", async () => {
+    // Regression: a final payload that is neither queued for later delivery
+    // nor routed to any recipient previously still recorded the turn as
+    // "completed" — the terminal event carried no failure, so no failure
+    // notice was ever owed to the user even though nothing was delivered.
+    hookMocks.runner.hasHooks.mockReturnValue(false);
+    sessionStoreMocks.currentEntry = {
+      sessionKey: "agent:test:session",
+      pendingFinalDelivery: true,
+      pendingFinalDeliveryText: "durable reply",
+      pendingFinalDeliveryCreatedAt: 1,
+    };
+    sessionStoreMocks.resolveSessionStoreEntry.mockReturnValue({
+      existing: sessionStoreMocks.currentEntry,
+    });
+    const dispatcher = createDispatcher();
+    vi.mocked(dispatcher.sendFinalReply).mockReturnValue(false);
+
+    const terminalEvents: Array<{ result: unknown }> = [];
+    const off = onReplyRunTerminal((event) => terminalEvents.push({ result: event.result }));
+
+    try {
+      await dispatchReplyFromConfig({
+        ctx: createHookCtx(),
+        cfg: emptyConfig,
+        dispatcher,
+        replyResolver: async () => ({ text: "durable reply" }),
+      });
+    } finally {
+      off();
+    }
+
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]?.result).toMatchObject({
+      kind: "failed",
+      code: "delivery_failed",
+    });
   });
 
   it("delivers a generated final reply before queued follow-up admission", async () => {

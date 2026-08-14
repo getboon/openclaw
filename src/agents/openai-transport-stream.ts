@@ -245,6 +245,7 @@ type MutableAssistantOutput = {
   errorCode?: string;
   errorType?: string;
   errorBody?: string;
+  errorStatus?: number;
 };
 
 export { sanitizeTransportPayloadText } from "./transport-stream-shared.js";

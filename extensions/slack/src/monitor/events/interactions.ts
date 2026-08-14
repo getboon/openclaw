@@ -1,6 +1,7 @@
 // Slack plugin module implements interactions behavior.
 import { truncateSlackText } from "../../truncate.js";
 import type { SlackMonitorContext } from "../context.js";
+import type { SlackMessageHandler } from "../message-handler.js";
 import { registerSlackBlockActionHandler, summarizeAction } from "./interactions.block-actions.js";
 import {
   registerModalLifecycleHandler,
@@ -185,12 +186,21 @@ function summarizeViewState(values: unknown): ModalInputSummary[] {
 export function registerSlackInteractionEvents(params: {
   ctx: SlackMonitorContext;
   trackEvent?: () => void;
+  /**
+   * The account's real inbound message handler. Passed through so an
+   * allowlisted command button (e.g. Retry) can be routed through the same
+   * dedup/debounce/auth pipeline a typed message uses, instead of the
+   * generic interaction system-event fallback. Optional so existing
+   * interaction-only tests do not need to construct one.
+   */
+  handleSlackMessage?: SlackMessageHandler;
 }) {
-  const { ctx, trackEvent } = params;
+  const { ctx, trackEvent, handleSlackMessage } = params;
   registerSlackBlockActionHandler({
     ctx,
     trackEvent,
     formatSystemEvent: formatSlackInteractionSystemEvent,
+    handleSlackMessage,
   });
   registerSlackShortcutHandler({
     ctx,

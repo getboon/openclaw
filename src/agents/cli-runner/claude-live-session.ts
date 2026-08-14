@@ -35,6 +35,7 @@ import {
 import { classifyFailoverReason } from "../embedded-agent-helpers.js";
 import { FailoverError, resolveFailoverStatus } from "../failover-error.js";
 import { prepareCliBundleMcpCaptureAttempt } from "./bundle-mcp.js";
+import { selectClaudePluginSkills } from "./claude-skills-plugin.js";
 import { buildClaudeOwnerKey } from "./helpers.js";
 import { cliBackendLog, formatCliBackendOutputDigest } from "./log.js";
 import type { PreparedCliRunContext } from "./types.js";
@@ -285,13 +286,16 @@ function buildClaudeLiveFingerprint(params: {
 }): string {
   const normalizeMcpConfigPath = Boolean(params.context.preparedBackend.mcpConfigHash);
   const skillSnapshot = params.context.params.skillsSnapshot;
+  const explicitSkillName = params.context.params.explicitSkillName;
+  const pluginSkills = selectClaudePluginSkills(skillSnapshot, explicitSkillName);
   const skillsFingerprint = skillSnapshot
     ? sha256(
         JSON.stringify({
           promptHash: sha256(skillSnapshot.prompt),
           skillFilter: skillSnapshot.skillFilter,
           skills: skillSnapshot.skills,
-          resolvedSkills: (skillSnapshot.resolvedSkills ?? []).map((skill) => ({
+          explicitSkillName,
+          pluginSkills: pluginSkills.map((skill) => ({
             name: skill.name,
             description: skill.description,
             filePath: skill.filePath,

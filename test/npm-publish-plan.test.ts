@@ -26,7 +26,7 @@ describe("collectReleaseVersionFloorErrors", () => {
   });
 });
 
-describe("fork -boon.N correction versions (ENG-14431)", () => {
+describe("fork -boon.N correction versions", () => {
   it("parses a fork -boon.N version as a stable correction release", () => {
     const parsed = parseReleaseVersion("2026.6.11-boon.4");
 

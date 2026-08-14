@@ -438,7 +438,8 @@ export type SessionCompactionCheckpointReason =
   | "manual"
   | "auto-threshold"
   | "overflow-retry"
-  | "timeout-retry";
+  | "timeout-retry"
+  | "overflow-block";
 
 export type SessionCompactionTranscriptReference = {
   sessionId: string;

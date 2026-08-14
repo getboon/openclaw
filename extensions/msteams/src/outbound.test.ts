@@ -399,7 +399,7 @@ describe("msteamsOutbound cfg threading", () => {
     expect(chunker("alpha beta", 5)).toEqual(["alpha", "beta"]);
   });
 
-  // ENG-14117: a scheduled cron told to post top-level flows the portable
+  // A scheduled cron told to post top-level flows the portable
   // `threadSuppressed` intent through core outbound; the msteams adapter must
   // translate it into a per-send replyStyleOverride:"top-level" so the send
   // posts a fresh channel-root message instead of threading under the stored ref.
@@ -460,7 +460,7 @@ describe("msteamsOutbound cfg threading", () => {
   });
 
   it("forwards threadSuppressed:false as replyStyleOverride:thread to force threading", async () => {
-    // Bidirectional (ENG-14117): false must force threading even when the channel
+    // Bidirectional: false must force threading even when the channel
     // default is top-level, so it maps to an explicit "thread" override.
     await requireSendText()({
       cfg,
@@ -473,6 +473,49 @@ describe("msteamsOutbound cfg threading", () => {
       cfg,
       to: "conversation:abc",
       text: "forced thread",
+      replyStyleOverride: "thread",
+    });
+  });
+
+  // ENG-17134: presentation cards used to drop threadSuppressed entirely, so a
+  // card-shaped reply always posted at channel root. The absence of these two
+  // assertions is what let that ship.
+  it("forwards threadSuppressed as replyStyleOverride:top-level for presentation cards", async () => {
+    await requireSendPayload()({
+      cfg,
+      to: "conversation:abc",
+      text: "Deploy finished",
+      payload: {
+        text: "Deploy finished",
+        channelData: { msteams: { presentationCard: { type: "AdaptiveCard" } } },
+      },
+      threadSuppressed: true,
+    });
+
+    expect(mocks.sendAdaptiveCardMSTeams).toHaveBeenCalledWith({
+      cfg,
+      to: "conversation:abc",
+      card: { type: "AdaptiveCard" },
+      replyStyleOverride: "top-level",
+    });
+  });
+
+  it("forwards threadSuppressed:false as replyStyleOverride:thread for presentation cards", async () => {
+    await requireSendPayload()({
+      cfg,
+      to: "conversation:abc",
+      text: "Deploy finished",
+      payload: {
+        text: "Deploy finished",
+        channelData: { msteams: { presentationCard: { type: "AdaptiveCard" } } },
+      },
+      threadSuppressed: false,
+    });
+
+    expect(mocks.sendAdaptiveCardMSTeams).toHaveBeenCalledWith({
+      cfg,
+      to: "conversation:abc",
+      card: { type: "AdaptiveCard" },
       replyStyleOverride: "thread",
     });
   });

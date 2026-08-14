@@ -200,6 +200,24 @@ describe("buildApiErrorObservationFields", () => {
     expect(shouldSuppressRawErrorConsoleSuffix("timeout")).toBe(false);
     expect(shouldSuppressRawErrorConsoleSuffix(undefined)).toBe(false);
   });
+
+  it("uses explicit status over parsed status for providerRuntimeFailureKind classification", () => {
+    // When status is supplied explicitly (e.g., from AssistantMessage.errorStatus),
+    // it should take precedence over text-parsed status for classification.
+    const bedrockBody =
+      '{"type":"error","error":{"type":"api_error","message":"Bedrock is unable to process your request."}}';
+
+    const withExplicitStatus = buildApiErrorObservationFields(bedrockBody, {
+      provider: "bedrock",
+      status: 503,
+    });
+    expect(withExplicitStatus.providerRuntimeFailureKind).toBe("timeout");
+
+    const withoutExplicitStatus = buildApiErrorObservationFields(bedrockBody, {
+      provider: "bedrock",
+    });
+    expect(withoutExplicitStatus.providerRuntimeFailureKind).toBe("unclassified");
+  });
 });
 
 describe("sanitizeForConsole", () => {

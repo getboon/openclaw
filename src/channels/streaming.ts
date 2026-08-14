@@ -1,6 +1,7 @@
 // Channel streaming config normalization and progress-draft formatting helpers.
 import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import { normalizeTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
+import { isBenignHousekeepingShellCommand } from "../agents/tool-display-exec-shell.js";
 import { formatToolDetail, resolveToolDisplay } from "../agents/tool-display.js";
 import { formatToolAggregate } from "../auto-reply/tool-meta.js";
 import type {
@@ -532,6 +533,19 @@ export function buildChannelProgressDraftLine(
 ): ChannelProgressDraftLine | undefined {
   switch (input.event) {
     case "tool": {
+      // ENG-16318: drop benign fs-housekeeping exec chains (scratch setup +
+      // inspection like `mkdir … && ls … && find /`) from the user-facing
+      // progress card. These are bookkeeping, not user-meaningful work, and a
+      // trailing `find /` that fails on permission-denied reads as an error.
+      // Only suppress when EVERY stage is benign — a chain that also runs real
+      // work still surfaces.
+      if (
+        isCommandToolName(input.name) &&
+        typeof input.args?.command === "string" &&
+        isBenignHousekeepingShellCommand(input.args.command)
+      ) {
+        return undefined;
+      }
       const itemId = input.itemId ?? (input.toolCallId ? `tool:${input.toolCallId}` : undefined);
       return buildNamedProgressLine(
         input.event,

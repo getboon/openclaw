@@ -55,7 +55,7 @@ export type QueuedDeliveryPayload = {
   /** Replayable projection summary captured when the durable send intent is created. */
   renderedBatchPlan?: QueuedRenderedMessageBatchPlan;
   threadId?: string | number | null;
-  /** Portable top-level intent (ENG-14117); persisted so recovery replay keeps it. */
+  /** Portable top-level intent; persisted so recovery replay keeps it. */
   threadSuppressed?: boolean;
   replyToId?: string | null;
   replyToMode?: ReplyToMode;

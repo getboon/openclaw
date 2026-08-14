@@ -49,6 +49,33 @@ describe("runMessageAction send validation", () => {
     ).rejects.toThrow(/message required/i);
   });
 
+  it("accepts a tool-context-injected target the plugin cannot resolve, instead of rejecting core's own inference", async () => {
+    // "thread-668"-shaped ids are exactly what a channel with no directory
+    // (e.g. Boon Web) hands back as the current conversation id. It matches
+    // neither the plugin's resolveTarget nor its looksLikeId, so without the
+    // tool-context softening this throws "Unknown target" for a value core
+    // injected itself — never something the agent typed.
+    const result = await runDrySend({
+      cfg: workspaceConfig,
+      actionParams: { channel: "workspace", message: "hi" },
+      toolContext: { currentChannelId: "thread-668" },
+    });
+
+    expect(result.kind).toBe("send");
+    if (result.kind === "send") {
+      expect(result.to).toBe("thread-668");
+    }
+  });
+
+  it("still rejects the same unresolvable string when the agent supplies it as an explicit target", async () => {
+    await expect(
+      runDrySend({
+        cfg: workspaceConfig,
+        actionParams: { channel: "workspace", target: "thread-668", message: "hi" },
+      }),
+    ).rejects.toThrow(/Unknown target "thread-668".*Hint: <id>/i);
+  });
+
   it("allows send when only presentation payloads are provided", async () => {
     const result = await runDrySend({
       cfg: {

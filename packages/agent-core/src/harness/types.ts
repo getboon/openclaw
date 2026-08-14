@@ -749,6 +749,12 @@ export interface CompactionSettings {
   enabled: boolean;
   reserveTokens: number;
   keepRecentTokens: number;
+  /**
+   * Optional hard ceiling on verbatim-retained tokens. Unset by default; supplied
+   * during overflow recovery so a recent tail that would itself overflow the
+   * window gets summarized instead of dead-ending the session.
+   */
+  maxRetainedTokens?: number;
 }
 
 /** Prepared compaction inputs exposed to hooks before a summary is generated. */

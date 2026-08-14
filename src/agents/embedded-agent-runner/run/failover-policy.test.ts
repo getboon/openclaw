@@ -1,7 +1,11 @@
 // Failover policy tests cover the embedded run decision table for retry,
 // profile rotation, fallback model escalation, and user-visible errors.
 import { describe, expect, it } from "vitest";
-import { classifyAssistantFailoverReason } from "../../embedded-agent-helpers.js";
+import type { AssistantMessage } from "../../../llm/types.js";
+import {
+  classifyAssistantFailoverReason,
+  isFailoverAssistantError,
+} from "../../embedded-agent-helpers.js";
 import { mergeRetryFailoverReason, resolveRunFailoverDecision } from "./failover-policy.js";
 
 describe("resolveRunFailoverDecision", () => {
@@ -642,5 +646,100 @@ describe("mergeRetryFailoverReason", () => {
         timedOut: true,
       }),
     ).toBe("timeout");
+  });
+});
+
+// End-to-end coverage for ENG-16815: a gateway-relayed upstream 5xx (Bedrock
+// 503 api_error) must walk the configured model-fallback ladder. This composes
+// the REAL failover classifier with the REAL decision policy — no mocks — so it
+// proves the whole handoff the unit tests leave open: assistant error carrying
+// errorStatus -> classifier -> fallback_model decision. The bug was that the
+// transport dropped the HTTP status, so the classifier saw only the bare JSON
+// body and returned null (unclassified), blocking the customer instead of
+// failing over.
+describe("ENG-16815 gateway-relayed Bedrock 503 walks the fallback ladder", () => {
+  const BEDROCK_503_BODY =
+    '{"type":"error","error":{"type":"api_error","message":"Bedrock is unable to process your request."}}';
+
+  function bedrockAssistantError(overrides?: Partial<AssistantMessage>): AssistantMessage {
+    return {
+      role: "assistant",
+      api: "anthropic-messages",
+      provider: "bedrock",
+      model: "claude-opus-4-8-bedrock",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "error",
+      errorMessage: BEDROCK_503_BODY,
+      errorType: "api_error",
+      content: [],
+      timestamp: 0,
+      ...overrides,
+    } as AssistantMessage;
+  }
+
+  it("classifies the 503 error as a timeout failover once errorStatus is present", () => {
+    const assistant = bedrockAssistantError({ errorStatus: 503 });
+    expect(classifyAssistantFailoverReason(assistant)).toBe("timeout");
+    expect(isFailoverAssistantError(assistant)).toBe(true);
+  });
+
+  it("routes the classified 503 to fallback_model when a fallback is configured", () => {
+    const assistant = bedrockAssistantError({ errorStatus: 503 });
+    const failoverReason = classifyAssistantFailoverReason(assistant);
+    const failoverFailure = isFailoverAssistantError(assistant);
+
+    expect(
+      resolveRunFailoverDecision({
+        stage: "assistant",
+        aborted: false,
+        externalAbort: false,
+        fallbackConfigured: true,
+        failoverFailure,
+        failoverReason,
+        timedOut: false,
+        idleTimedOut: false,
+        timedOutDuringCompaction: false,
+        timedOutDuringToolExecution: false,
+        profileRotated: true,
+      }),
+    ).toEqual({
+      action: "fallback_model",
+      reason: "timeout",
+    });
+  });
+
+  it("would block the customer (surface_error) when the HTTP status is dropped — the pre-fix regression", () => {
+    // Reproduces the incident: the same bare Bedrock body WITHOUT errorStatus is
+    // unclassifiable, so no fallback fires and the error surfaces to the user.
+    const assistant = bedrockAssistantError();
+    const failoverReason = classifyAssistantFailoverReason(assistant);
+    const failoverFailure = isFailoverAssistantError(assistant);
+
+    expect(failoverReason).toBeNull();
+    expect(failoverFailure).toBe(false);
+    expect(
+      resolveRunFailoverDecision({
+        stage: "assistant",
+        aborted: false,
+        externalAbort: false,
+        fallbackConfigured: true,
+        failoverFailure,
+        failoverReason,
+        timedOut: false,
+        idleTimedOut: false,
+        timedOutDuringCompaction: false,
+        timedOutDuringToolExecution: false,
+        profileRotated: true,
+      }),
+    ).toEqual({
+      action: "continue_normal",
+    });
   });
 });

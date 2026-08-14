@@ -335,4 +335,22 @@ describe("applySkillsPromptLimits (via buildWorkspaceSkillsPrompt)", () => {
       expect(skill.filePath).not.toMatch(/^~\//);
     }
   });
+
+  it("separates prompt-visible runtime skills from user-invocable command skills", () => {
+    const hidden = makeEntry({ ...makeSkill("hidden"), disableModelInvocation: true });
+    hidden.exposure = {
+      includeInRuntimeRegistry: true,
+      includeInAvailableSkillsPrompt: false,
+      userInvocable: true,
+    };
+
+    const snapshot = buildWorkspaceSkillSnapshot("/fake", {
+      entries: [makeEntry(makeSkill("visible")), hidden],
+    });
+
+    expect(snapshot.prompt).toContain("<name>visible</name>");
+    expect(snapshot.prompt).not.toContain("<name>hidden</name>");
+    expect(snapshot.resolvedSkills?.map((skill) => skill.name)).toEqual(["visible"]);
+    expect(snapshot.commandSkills?.map((skill) => skill.name)).toEqual(["visible", "hidden"]);
+  });
 });

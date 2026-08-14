@@ -4,12 +4,14 @@ import { describe, expect, it } from "vitest";
 import { MALFORMED_STREAMING_FRAGMENT_ERROR_MESSAGE } from "../shared/assistant-error-format.js";
 import {
   BILLING_ERROR_USER_MESSAGE,
+  buildTokenExhaustedPresentation,
   formatBillingErrorMessage,
   formatAssistantErrorText,
   formatUserFacingAssistantErrorText,
   getApiErrorPayloadFingerprint,
   formatRawAssistantErrorForUi,
   isRawApiErrorPayload,
+  isTrialBudgetExhaustedErrorMessage,
   sanitizeUserFacingText,
 } from "./embedded-agent-helpers.js";
 import { makeAssistantMessageFixture } from "./test-helpers/assistant-message-fixtures.js";
@@ -148,24 +150,28 @@ describe("formatAssistantErrorText", () => {
     const result = formatAssistantErrorText(msg);
     expect(result).toBe(BILLING_ERROR_USER_MESSAGE);
   });
-  it("includes provider and assistant model in billing message when provider is given", () => {
+  it("uses Boon billing copy regardless of provider (no provider internals leaked)", () => {
     const msg = makeAssistantError("insufficient credits");
     const result = formatAssistantErrorText(msg, { provider: "Anthropic" });
-    expect(result).toBe(formatBillingErrorMessage("Anthropic", "test-model"));
-    expect(result).toContain("Anthropic");
+    // Boon fork: provider name no longer changes the wording — a Boon user has no
+    // provider account. Always the Boon top-up copy.
+    expect(result).toBe(BILLING_ERROR_USER_MESSAGE);
+    expect(result).toContain("out of Boon Agent tokens");
+    expect(result).not.toContain("Anthropic");
     expect(result).not.toContain("API provider");
   });
-  it("uses the active assistant model for billing message context", () => {
+  it("ignores the active assistant model for billing copy", () => {
     const msg = makeAssistantError("insufficient credits");
     msg.model = "claude-3-5-sonnet";
     const result = formatAssistantErrorText(msg, { provider: "Anthropic" });
-    expect(result).toBe(formatBillingErrorMessage("Anthropic", "claude-3-5-sonnet"));
+    expect(result).toBe(BILLING_ERROR_USER_MESSAGE);
+    expect(result).not.toContain("claude-3-5-sonnet");
   });
-  it("returns generic billing message when provider is not given", () => {
+  it("returns Boon billing copy when provider is not given", () => {
     const msg = makeAssistantError("insufficient credits");
     const result = formatAssistantErrorText(msg);
-    expect(result).toContain("API provider");
     expect(result).toBe(BILLING_ERROR_USER_MESSAGE);
+    expect(result).toContain("out of Boon Agent tokens");
   });
   it("returns a friendly billing message for flat JSON insufficient_balance payloads (#74079)", () => {
     const msg = makeAssistantError(
@@ -673,41 +679,34 @@ describe("raw API error payload helpers", () => {
   });
 });
 
-describe("formatBillingErrorMessage — authMode neutral copy (#80877)", () => {
-  // OAuth/Max users should NOT see "API key" or "top up" language.
-  it("returns neutral copy for oauth authMode — no 'API key' text", () => {
-    const result = formatBillingErrorMessage("Anthropic", "claude-sonnet-4-5", "oauth");
-    expect(result).not.toMatch(/api key/i);
-    expect(result).not.toMatch(/top up/i);
-    expect(result).toContain("check your account");
-  });
-
-  it("returns neutral copy for token authMode — no 'API key' text", () => {
-    const result = formatBillingErrorMessage("Anthropic", "claude-sonnet-4-5", "token");
-    expect(result).not.toMatch(/api key/i);
-    expect(result).not.toMatch(/top up/i);
-  });
-
-  it("REGRESSION: api_key authMode still returns 'API key' copy", () => {
-    const result = formatBillingErrorMessage("Anthropic", "claude-sonnet-4-5", "api_key");
-    expect(result).toMatch(/api key/i);
-    expect(result).toMatch(/top up/i);
-  });
-
-  it("REGRESSION: undefined authMode (legacy call-sites) still returns 'API key' copy", () => {
-    const result = formatBillingErrorMessage("Anthropic", "claude-sonnet-4-5");
-    expect(result).toMatch(/api key/i);
-  });
-
-  it("REGRESSION: no-provider call still returns generic 'API key' copy", () => {
-    const result = formatBillingErrorMessage();
-    expect(result).toMatch(/api key/i);
-  });
+describe("formatBillingErrorMessage — Boon-unified copy", () => {
+  const BILLING_URL = "https://app.getboon.ai/billing?open=agent";
+  // Boon fork: a Boon user always runs against their org's Boon token allocation
+  // via the gateway — there is no provider API key to "switch" and no provider
+  // billing dashboard. So EVERY authMode/provider combination returns the same
+  // plain Boon top-up copy — never "API key" / provider-dashboard wording.
+  const cases: Array<[string, () => string]> = [
+    ["oauth", () => formatBillingErrorMessage("Anthropic", "claude-sonnet-4-5", "oauth")],
+    ["token", () => formatBillingErrorMessage("Anthropic", "claude-sonnet-4-5", "token")],
+    ["api_key", () => formatBillingErrorMessage("Anthropic", "claude-sonnet-4-5", "api_key")],
+    ["undefined authMode", () => formatBillingErrorMessage("Anthropic", "claude-sonnet-4-5")],
+    ["no provider", () => formatBillingErrorMessage()],
+  ];
+  for (const [name, build] of cases) {
+    it(`returns Boon top-up copy for ${name} — never provider-API-key text`, () => {
+      const result = build();
+      expect(result).toContain("out of Boon Agent tokens");
+      expect(result).toContain(`[Top up your tokens](${BILLING_URL})`);
+      expect(result).not.toMatch(/api key/i);
+      expect(result).not.toMatch(/billing dashboard/i);
+      expect(result).not.toContain("Anthropic");
+    });
+  }
 });
 
-describe("boon-llm-gateway allocation_exhausted (ENG-15627 G1)", () => {
+describe("boon-llm-gateway allocation_exhausted", () => {
   // The boon-llm-gateway returns this 429 body when an org's token allocation
-  // is spent. Before ENG-15627 it fell through the classifier to the bare
+  // is spent. Previously it fell through the classifier to the bare
   // "LLM request failed." — the string in the customer (Arguijo) screenshot.
   const GATEWAY_ALLOCATION_EXHAUSTED_BODY =
     '{"error":"allocation_exhausted","message":"Token allocation exhausted. Contact sales to increase your limit."}';
@@ -727,8 +726,8 @@ describe("boon-llm-gateway allocation_exhausted (ENG-15627 G1)", () => {
     expect(out).not.toBe("LLM request failed.");
     // A boon-llm-gateway customer has ONE BOON_API_KEY and an org-level
     // allocation — there is no other API key to "switch" to, so the generic
-    // billing copy is misleading here. Use allocation-specific wording.
-    expect(out).toMatch(/usage allocation/i);
+    // billing copy is misleading here. Copy mirrors the web TokensExhaustedBanner.
+    expect(out).toMatch(/out of Boon Agent tokens/i);
     expect(out).not.toMatch(/switch to a different api key/i);
   });
 
@@ -738,7 +737,158 @@ describe("boon-llm-gateway allocation_exhausted (ENG-15627 G1)", () => {
     expect(out).not.toContain("allocation_exhausted");
     expect(out).not.toContain("{");
     expect(out).not.toBe("LLM request failed.");
-    expect(out).toMatch(/usage allocation/i);
+    expect(out).toMatch(/out of Boon Agent tokens/i);
+  });
+
+  // Trial sibling of allocation_exhausted: the gateway returns this 402 body when
+  // a trial account's one-shot budget is spent. Trials upgrade (no top-up).
+  const GATEWAY_TRIAL_EXHAUSTED_BODY =
+    '{"error":"trial_budget_exhausted","message":"Trial token budget exhausted; upgrade to continue.","granted":500000,"used":500000}';
+
+  it("recognizes trial_budget_exhausted and returns trial-upgrade copy", () => {
+    expect(isTrialBudgetExhaustedErrorMessage(GATEWAY_TRIAL_EXHAUSTED_BODY)).toBe(true);
+    const msg = makeAllocationError(GATEWAY_TRIAL_EXHAUSTED_BODY);
+    const out = formatAssistantErrorText(msg, { provider: "boon-llm-gateway" });
+    expect(out).toBeDefined();
+    expect(out).not.toContain("trial_budget_exhausted");
+    expect(out).toMatch(/used up your free trial/i);
+    expect(out).toMatch(/upgrade/i);
+  });
+});
+
+describe("consumer audience (ENG-16617)", () => {
+  const makeError = (errorMessage: string): AssistantMessage =>
+    makeAssistantMessageFixture({
+      errorMessage,
+      content: [{ type: "text", text: errorMessage }],
+    });
+  const consumerCfg = {
+    agents: { defaults: { messaging: { audience: "consumer" } } },
+  } as unknown as import("../config/types.openclaw.js").OpenClawConfig;
+  const consumer = (msg: AssistantMessage, provider?: string) =>
+    formatAssistantErrorText(msg, { cfg: consumerCfg, provider });
+
+  it.each([
+    {
+      name: "schema/tool rejection",
+      raw: '{"type":"error","error":{"message":"SECRET\\nCANARY","type":"invalid_request_error"}}',
+      expected: "Something went wrong while I was talking to the AI service",
+    },
+    {
+      name: "timeout",
+      raw: "LLM request timed out",
+      expected: "The AI service took too long to respond",
+    },
+    {
+      name: "rate limit",
+      raw: "429 Too Many Requests",
+      expected: "The AI service is busy right now",
+    },
+    {
+      name: "context overflow",
+      raw: "request_too_large",
+      expected: "This conversation has grown too long",
+    },
+    {
+      name: "auth 401",
+      raw: "401 Unauthorized: invalid api key",
+      expected: "I hit a sign-in problem reaching the AI service",
+    },
+    {
+      name: "billing credit balance",
+      raw: "Your credit balance is too low to access the Anthropic API.",
+      expected: "the AI account has hit its usage limit",
+    },
+  ])("returns plain-language copy for $name", ({ raw, expected }) => {
+    const out = consumer(makeError(raw));
+    expect(out).toContain(expected);
+    // Consumer copy must never leak raw provider/schema/slug detail.
+    expect(out).not.toContain("provider rejected");
+    expect(out).not.toContain("{");
+  });
+
+  it("never exposes raw structured provider payload content to consumers", () => {
+    const out = consumer(
+      makeError(
+        '{"type":"error","error":{"message":"SECRET\\nCANARY","type":"invalid_request_error"}}',
+      ),
+    );
+    expect(out).not.toContain("SECRET");
+    expect(out).not.toContain("CANARY");
+  });
+
+  it("falls back to generic copy for unclassified errors", () => {
+    expect(consumer(makeError("some totally unrecognized failure text"))).toBe(
+      "Something went wrong while I was working on that. Please try again in a moment.",
+    );
+  });
+
+  it("keeps token-exhaustion copy identical under both audiences (allocation)", () => {
+    const raw =
+      '{"error":"allocation_exhausted","message":"Token allocation exhausted. Contact sales to increase your limit."}';
+    const operatorOut = formatAssistantErrorText(makeError(raw), { provider: "boon-llm-gateway" });
+    const consumerOut = consumer(makeError(raw), "boon-llm-gateway");
+    expect(consumerOut).toBe(operatorOut);
+    expect(consumerOut).toMatch(/out of Boon Agent tokens/i);
+  });
+
+  it("keeps token-exhaustion copy identical under both audiences (trial)", () => {
+    const raw =
+      '{"error":"trial_budget_exhausted","message":"Trial token budget exhausted; upgrade to continue.","granted":500000,"used":500000}';
+    const operatorOut = formatAssistantErrorText(makeError(raw), { provider: "boon-llm-gateway" });
+    const consumerOut = consumer(makeError(raw), "boon-llm-gateway");
+    expect(consumerOut).toBe(operatorOut);
+    expect(consumerOut).toMatch(/used up your free trial/i);
+  });
+});
+
+describe("buildTokenExhaustedPresentation", () => {
+  const BILLING_URL = "https://app.getboon.ai/billing?open=agent";
+  // Bodies carry only the code (no top_up_url) — the button uses the static URL.
+  const PAID_BODY = '{"error":"allocation_exhausted"}';
+  const TRIAL_BODY = '{"error":"trial_budget_exhausted","granted":500000,"used":500000}';
+
+  it("returns undefined when neither the message nor the body is an exhaustion signal", () => {
+    expect(
+      buildTokenExhaustedPresentation("429 rate limited", '{"error":"rate_limit"}'),
+    ).toBeUndefined();
+  });
+
+  it("builds a paid card with a 'Top up tokens' button using the static billing URL", () => {
+    const p = buildTokenExhaustedPresentation("allocation_exhausted", PAID_BODY);
+    expect(p?.tone).toBe("warning");
+    // Button-only (payload.text carries the copy + inline link); static URL.
+    expect(p?.blocks).toEqual([
+      {
+        type: "buttons",
+        buttons: [{ label: "Top up tokens", url: BILLING_URL, style: "primary" }],
+      },
+    ]);
+  });
+
+  it("builds a trial card with an 'Upgrade plan' button", () => {
+    const p = buildTokenExhaustedPresentation("trial_budget_exhausted", TRIAL_BODY);
+    const buttons = p?.blocks.find((b) => b.type === "buttons");
+    expect(buttons).toEqual({
+      type: "buttons",
+      buttons: [{ label: "Upgrade plan", url: BILLING_URL, style: "primary" }],
+    });
+  });
+
+  it("recognizes TRIAL exhaustion from the errorBody code when the message text does not match", () => {
+    // Production shape: the prettified message ("Trial token budget exhausted…")
+    // does NOT match the trial pattern; the code is only in errorBody. The card
+    // must still render — this is the regression this fix guards.
+    const p = buildTokenExhaustedPresentation(
+      "boon-llm-gateway (402): Trial token budget exhausted; upgrade to continue.",
+      TRIAL_BODY,
+    );
+    expect(p?.blocks).toEqual([
+      {
+        type: "buttons",
+        buttons: [{ label: "Upgrade plan", url: BILLING_URL, style: "primary" }],
+      },
+    ]);
   });
 });
 

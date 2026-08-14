@@ -208,6 +208,7 @@ export const zh_TW: TranslationMap = {
     autoThreshold: "自動閾值",
     overflowRetry: "溢位重試",
     timeoutRetry: "逾時重試",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} 個 token",
     tokensBefore: "之前 {count} 個 token",
     tokenDeltaUnavailable: "token 差異無法使用",

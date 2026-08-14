@@ -104,7 +104,7 @@ describe("resolveCronDeliveryPreview", () => {
     });
   });
 
-  it("appends the top-level suffix for announce jobs with replyStyle:top-level (ENG-14117)", async () => {
+  it("appends the top-level suffix for announce jobs with replyStyle:top-level", async () => {
     const job = makeCronJob({
       agentId: "avery",
       delivery: {
@@ -121,7 +121,7 @@ describe("resolveCronDeliveryPreview", () => {
     expect(preview.detail).toBe("explicit, top-level");
   });
 
-  it("omits the top-level suffix for no-delivery jobs even with replyStyle:top-level (ENG-14117)", async () => {
+  it("omits the top-level suffix for no-delivery jobs even with replyStyle:top-level", async () => {
     // mode:"none" jobs never post the completion; the suffix would claim a
     // delivery behavior that never happens.
     const job = makeCronJob({

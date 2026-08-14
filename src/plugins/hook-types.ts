@@ -326,6 +326,23 @@ export type PluginHookModelCallEndedEvent = PluginHookModelCallBaseEvent & {
   outcome: "completed" | "error";
   errorCategory?: string;
   failureKind?: "aborted" | "connection_closed" | "connection_reset" | "terminated" | "timeout";
+  /**
+   * HTTP status of a failed model call, when one is available on the thrown
+   * error (ENG-16922). Absent for transport-level failures with no response
+   * (those are described by `failureKind` instead).
+   */
+  httpStatus?: number;
+  /**
+   * Source classification of a 5xx failure (ENG-16922), so an observer (e.g.
+   * the sentry-monitor plugin) can tag an upstream-provider outage separately
+   * from a gateway-origin fault without re-deriving it from the status:
+   *   - `upstream_provider_5xx`: a Bedrock/Anthropic 5xx (500/503/529, `api_error`
+   *     / `overloaded`) relayed verbatim by boon-llm-gateway — NOT our infra.
+   *   - `gateway_origin_5xx`: a gateway-synthesized 5xx (chiefly 502 — chain
+   *     exhausted, WAF/HTML block, no-response transport fault) — our infra.
+   * Only set for 5xx outcomes; unset otherwise.
+   */
+  errorClass?: "upstream_provider_5xx" | "gateway_origin_5xx";
   requestPayloadBytes?: number;
   responseStreamBytes?: number;
   timeToFirstByteMs?: number;

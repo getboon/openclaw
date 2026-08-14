@@ -1160,4 +1160,22 @@ describe("createAcpVisibleTextAccumulator", () => {
       delta: "Actual answer",
     });
   });
+
+  it("recovers a genuine reply whose first char is a bare N once real content proves it wasn't NO_REPLY", () => {
+    const acc = createAcpVisibleTextAccumulator();
+
+    expect(acc.consume("N")).toBeNull();
+    expect(acc.consume("ot what happened")).toEqual({
+      text: "Not what happened",
+      delta: "Not what happened",
+    });
+  });
+
+  it("does not leak a bare single-char N as its own visible reply (ENG-16955)", () => {
+    const acc = createAcpVisibleTextAccumulator();
+
+    expect(acc.consume("N")).toBeNull();
+    expect(acc.consume("NO_REPLY")).toBeNull();
+    expect(acc.finalize()).toBe("");
+  });
 });

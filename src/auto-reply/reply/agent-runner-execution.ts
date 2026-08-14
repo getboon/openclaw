@@ -34,6 +34,7 @@ import {
   isCompactionFailureError,
   isContextOverflowError,
   isBillingErrorMessage,
+  isEdgeBlockErrorBody,
   isLikelyContextOverflowError,
   isOverloadedErrorMessage,
   isRateLimitErrorMessage,
@@ -817,7 +818,16 @@ function isPureTransientRateLimitSummary(err: unknown): boolean {
     err.attempts.length > 0 &&
     err.attempts.every((attempt) => {
       const reason = attempt.reason;
-      return reason === "rate_limit" || reason === "overloaded";
+      // An edge/WAF HTML block classifies as `timeout` (errors.ts 429 branch,
+      // plus the 5xx HTML guard). Gate the body check on that reason so a real
+      // edge block stays retryable while HTML auth (401/403 -> auth) and format
+      // (400/422 -> format) failures keep their actionable copy instead of
+      // being ridden out for five blind retries.
+      return (
+        reason === "rate_limit" ||
+        reason === "overloaded" ||
+        (reason === "timeout" && isEdgeBlockErrorBody(attempt.error, attempt.status))
+      );
     })
   );
 }
@@ -1093,7 +1103,7 @@ function markAgentRunFailureReplyPayload<T extends ReplyPayload>(payload: T): T 
 
 /**
  * Deterministic class-specific copy for a run failure that would otherwise emit
- * the single generic "message failed" string (ENG-15739). Maps the thrown error
+ * the single generic "message failed" string. Maps the thrown error
  * to a gateway-failure code and returns its canonical customer copy.
  *
  * This runs only at a TERMINAL failure (retries/fallbacks exhausted), so a code
@@ -1205,8 +1215,8 @@ export function buildKnownAgentRunFailureReplyPayload(params: {
     // This is the outer catch for errors that ESCAPED runAgentTurnWithFallback
     // entirely (pre-run maintenance crashes, restart lifecycle, truly
     // unexpected exceptions) — not the classified LLM-completion failures, which
-    // runAgentTurnWithFallback already converts to a coded kind:"final" payload
-    // (ENG-15739 lives there). Returning undefined here preserves the deliberate
+    // runAgentTurnWithFallback already converts to a coded kind:"final" payload.
+    // Returning undefined here preserves the deliberate
     // "let an unexpected exception propagate to the caller" contract.
     return undefined;
   }
@@ -1494,11 +1504,15 @@ export function buildContextOverflowRecoveryText(params: {
   runtimeModel?: string;
   activeSessionEntry?: SessionEntry;
 }): string {
+  // History is preserved on every path here (session mapping is kept and a
+  // compaction checkpoint is captured at the block). The copy must never tell the
+  // user to start over to keep working: point them at the saved
+  // checkpoint they can continue from instead.
   const prefix = params.preserveSessionMapping
-    ? "⚠️ Auto-compaction could not recover this turn. I kept this conversation mapped to the current session. Please try again, use /compact, or use /new to start a fresh session."
+    ? "⚠️ This conversation reached the model's context limit, so I couldn't finish that turn. Your history is preserved. Continue by trying again or running /compact, or open Sessions → checkpoints to branch from a saved checkpoint (nothing is lost)."
     : params.duringCompaction
-      ? "⚠️ Context limit exceeded during compaction. I've reset our conversation to start fresh - please try again."
-      : "⚠️ Context limit exceeded. I've reset our conversation to start fresh - please try again.";
+      ? "⚠️ Context limit exceeded during compaction. Your history is preserved — try again, run /compact, or continue from a saved checkpoint under Sessions → checkpoints."
+      : "⚠️ Context limit exceeded. Your history is preserved — try again, run /compact, or continue from a saved checkpoint under Sessions → checkpoints.";
   const primaryContextWindow = resolveContextWindowForCompactionHint({
     cfg: params.cfg,
     primaryProvider: params.primaryProvider,
@@ -2528,6 +2542,7 @@ export async function runAgentTurnWithFallback(params: {
                     images: currentTurnImages.images,
                     imageOrder: currentTurnImages.imageOrder,
                     skillsSnapshot: params.followupRun.run.skillsSnapshot,
+                    explicitSkillName: params.followupRun.run.explicitSkillName,
                     messageChannel: params.followupRun.originatingChannel ?? undefined,
                     messageProvider: hookMessageProvider,
                     currentChannelId:
@@ -3405,7 +3420,7 @@ export async function runAgentTurnWithFallback(params: {
       const genericFallbackText = params.isHeartbeat
         ? HEARTBEAT_EXTERNAL_RUN_FAILURE_TEXT
         : GENERIC_EXTERNAL_RUN_FAILURE_TEXT;
-      // ENG-15739: for the previously-generic terminal fall-through, emit
+      // For the previously-generic terminal fall-through, emit
       // deterministic class-specific copy via the shared gate instead of
       // GENERIC_EXTERNAL_RUN_FAILURE_TEXT. The gate preserves group silence, so
       // this is byte-identical for silent cases. Skipped for heartbeat and

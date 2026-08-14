@@ -381,3 +381,109 @@ export function stripShellPreamble(command: string): PreambleResult {
 
   return { command: rest.trim(), chdirPath };
 }
+
+// Display-only classification of "benign housekeeping" shell binaries: read-only
+// inspection (find/ls/cat/…) plus scratch scaffolding (mkdir/touch/printf/echo).
+// This is NOT a security boundary — it drives whether a step is worth surfacing
+// to a user (progress bullets, recovered-error notes). A benign `find /` that
+// exits non-zero on permission-denied is bookkeeping, not the task failing
+// (ENG-16318). Keep this separate from `tool-mutation.ts`'s security-sensitive
+// READ_ONLY_SHELL_COMMANDS, which must not include mutating scaffolding.
+const BENIGN_HOUSEKEEPING_SHELL_BINARIES = new Set([
+  "find",
+  "ls",
+  "cat",
+  "head",
+  "tail",
+  "grep",
+  "pwd",
+  "stat",
+  "wc",
+  "mkdir",
+  "printf",
+  "echo",
+  "touch",
+]);
+
+// `find` is only benign when it is pure traversal. These predicates run commands
+// or delete files (`find . -delete`, `find . -exec rm …`), so a `find` carrying
+// any of them is real work, not bookkeeping — surface it and its failure. Fail
+// closed: an unrecognized side-effecting form must not be classified benign.
+const FIND_SIDE_EFFECT_ACTIONS = new Set([
+  "-delete",
+  "-exec",
+  "-execdir",
+  "-ok",
+  "-okdir",
+  "-fprint",
+  "-fprintf",
+  "-fls",
+]);
+
+function isSideEffectingFind(words: string[]): boolean {
+  return words.some((word) => FIND_SIDE_EFFECT_ACTIONS.has(word.toLowerCase()));
+}
+
+// Shell control this simple word/stage splitter cannot model: a newline or `&`
+// hides a second command the stage scan never sees, and a redirect/backtick/
+// subshell turns a "read-only" binary into a writer (`printf x > ~/.zshrc`,
+// `echo $(rm -rf dist)`). `splitTopLevelStages` only breaks on `;`/`&&`/`||`, so
+// anything here must fail the command CLOSED — treat it as real work, not benign
+// (ENG-16318 gandalfboon). Mirrors the guard in tool-mutation.ts.
+const UNMODELLED_SHELL_CONTROL = /[&<>`\\\n\r]/;
+
+/** True when every pipe segment of a stage is a benign housekeeping command. */
+function isBenignHousekeepingStage(stage: string): boolean {
+  // A benign housekeeping chain never needs a redirect, subshell, backgrounding,
+  // line continuation, or a line break, so refusing them costs nothing and keeps
+  // the classifier fail-closed rather than deciding from a first word that hides
+  // later work. (`;`/`&&`/`||`/`|` stay allowed — those are split and each
+  // segment is classified.)
+  if (UNMODELLED_SHELL_CONTROL.test(stage) || stage.includes("$(")) {
+    return false;
+  }
+  const segments = splitTopLevelPipes(stage);
+  return segments.every((segment) => {
+    // No word cap: a `find` with a long predicate list must still expose a
+    // trailing `-delete`/`-exec`, or the side-effect guard below fails open.
+    const words = trimLeadingEnv(splitShellWords(segment, Number.MAX_SAFE_INTEGER));
+    const bin = binaryName(words[0]);
+    if (bin === undefined || !BENIGN_HOUSEKEEPING_SHELL_BINARIES.has(bin)) {
+      return false;
+    }
+    // Guard the one benign binary with destructive forms (ENG-16318 cubic P1).
+    if (bin === "find" && isSideEffectingFind(words)) {
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * True when EVERY top-level stage of a shell command is benign housekeeping.
+ *
+ * Two consumers key off this (ENG-16318):
+ *  - dropping scratch-setup + inspection chains (e.g.
+ *    `mkdir … && ls … && find / -name "<uuid>*"`) from user-facing progress cards;
+ *  - suppressing the recovered-error note when such a chain exits non-zero on a
+ *    turn that still produced a real answer (a benign `find /` hitting
+ *    permission-denied is bookkeeping, not the task failing).
+ *
+ * Deliberately "every stage", not "the failing stage": the exec result carries a
+ * single exit code, not per-stage info, so which stage failed cannot be known.
+ * If ALL stages are benign then whichever one failed was benign, with no
+ * guessing — and a chain that also runs real work (e.g. `python foo.py`) still
+ * surfaces its failure. Display heuristic only, not a security boundary.
+ */
+export function isBenignHousekeepingShellCommand(command: string | undefined): boolean {
+  if (!command) {
+    return false;
+  }
+  const inner = unwrapShellWrapper(command.trim());
+  const { command: cleaned } = stripShellPreamble(inner);
+  const stages = splitTopLevelStages(cleaned || inner);
+  if (stages.length === 0) {
+    return false;
+  }
+  return stages.every((stage) => isBenignHousekeepingStage(stage));
+}

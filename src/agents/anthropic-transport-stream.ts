@@ -152,6 +152,7 @@ type MutableAssistantOutput = {
   timestamp: number;
   responseId?: string;
   errorMessage?: string;
+  errorStatus?: number;
   diagnostics?: AssistantMessageDiagnostic[];
 };
 
@@ -748,8 +749,9 @@ function createAnthropicMessagesClient(params: {
         });
         if (!response.ok) {
           const detail = await readAnthropicMessagesErrorBodySnippet(response);
-          throw new Error(
-            detail || `Anthropic Messages request failed with HTTP ${response.status}`,
+          throw Object.assign(
+            new Error(detail || `Anthropic Messages request failed with HTTP ${response.status}`),
+            { status: response.status },
           );
         }
         if (!response.body) {

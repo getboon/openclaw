@@ -120,7 +120,7 @@ function buildObservationFingerprint(params: {
 
 export function buildApiErrorObservationFields(
   rawError?: string,
-  opts?: { provider?: string },
+  opts?: { provider?: string; status?: number },
 ): {
   rawErrorPreview?: string;
   rawErrorHash?: string;
@@ -161,7 +161,7 @@ export function buildApiErrorObservationFields(
         : undefined,
       httpCode: parsed?.httpCode,
       providerRuntimeFailureKind: classifyProviderRuntimeFailureKind({
-        status: parsed?.httpCode ? Number(parsed.httpCode) : undefined,
+        status: opts?.status ?? (parsed?.httpCode ? Number(parsed.httpCode) : undefined),
         message: trimmed,
         provider: opts?.provider,
       }),

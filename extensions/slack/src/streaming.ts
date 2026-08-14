@@ -28,8 +28,7 @@ export type SlackStreamSession = {
   /**
    * Thread timestamp. Required to start streaming; cleared to `undefined` by the
    * dispatch fallback when Slack rejects the anchor as invalid and no valid
-   * thread root can be recovered, so the fallback post degrades to the channel
-   * (ENG-16286).
+   * thread root can be recovered, so the fallback post degrades to the channel.
    */
   threadTs: string | undefined;
   /** True once stop() has been called. */
@@ -349,7 +348,7 @@ export function isBenignSlackFinalizeError(err: unknown): boolean {
  * Unlike the benign codes above, this is recoverable: the caller can re-resolve
  * the real thread root via `conversations.history` before falling back, instead
  * of reusing the rejected anchor (which `chat.postMessage` silently drops,
- * orphaning the reply to the channel top level). See ENG-16286.
+ * orphaning the reply to the channel top level).
  */
 const INVALID_THREAD_SLACK_ERROR_CODES = new Set<string>(["invalid_thread_ts", "thread_not_found"]);
 

@@ -212,6 +212,7 @@ export const nl: TranslationMap = {
     autoThreshold: "automatische drempel",
     overflowRetry: "overloop opnieuw proberen",
     timeoutRetry: "opnieuw proberen na time-out",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} tokens",
     tokensBefore: "{count} tokens ervoor",
     tokenDeltaUnavailable: "tokenverschil niet beschikbaar",

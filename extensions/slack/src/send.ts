@@ -239,7 +239,7 @@ function getSlackWebApiErrorData(err: unknown): SlackWebApiErrorData | undefined
 }
 
 // Slack rejected the post's thread_ts: the anchor was deleted/edited or is a
-// non-root reply ts (ENG-16286). Unlike a streaming finalize (chat.startStream),
+// non-root reply ts. Unlike a streaming finalize (chat.startStream),
 // chat.postMessage is USUALLY lenient and drops the thread silently — but not
 // always (e.g. thread_not_found), so the caller retries WITHOUT the thread to
 // guarantee the reply still lands in the channel rather than failing.
@@ -380,7 +380,7 @@ async function postSlackMessageBestEffort(params: {
   // lacks chat:write.customize. Both the primary post AND the invalid-thread
   // retry go through here, so the customize-scope fallback applies to the retry
   // too — otherwise a missing-scope on the no-thread retry would break the
-  // channel-delivery guarantee for a custom-identity host (ENG-16286).
+  // channel-delivery guarantee for a custom-identity host.
   const postWithIdentity = async (payload: SlackBasePostMessagePayload) => {
     const identity = params.identity;
     try {
@@ -424,7 +424,7 @@ async function postSlackMessageBestEffort(params: {
     // reply ts). Retry ONCE without thread_ts so the reply still lands in the
     // channel instead of failing — the last-resort degrade behind the dispatch
     // thread-anchor recovery, and the belt for a recovered anchor that was
-    // itself deleted. ENG-16286.
+    // itself deleted.
     if (params.threadTs && isSlackInvalidThreadError(err)) {
       logVerbose(
         `slack send: thread_ts ${params.threadTs} rejected as invalid; retrying to channel`,
@@ -443,7 +443,7 @@ async function postSlackMessageBestEffort(params: {
 }
 
 // Non-enumerable marker set on a chat.postMessage response when the send degraded
-// to a channel post because the thread anchor was rejected (ENG-16286). The
+// to a channel post because the thread anchor was rejected. The
 // caller reads it via `wasSlackThreadDropped` so a degraded reply is recorded
 // with NO thread rather than the rejected anchor (which would let downstream
 // routing reintroduce the deleted thread).
@@ -862,7 +862,7 @@ async function sendMessageSlackQueuedInner(params: {
     const deliveredChannelId = resolvePostedMessageChannelId(response, channelId);
     // Don't fall back to opts.threadTs when the send degraded to the channel —
     // that anchor was rejected; recording it would let routing reintroduce the
-    // dead thread (ENG-16286).
+    // dead thread.
     const deliveredThreadTs = wasSlackThreadDropped(response)
       ? undefined
       : (resolvePostedMessageThreadTs(response) ?? normalizeSlackThreadTsCandidate(opts.threadTs));
@@ -906,8 +906,7 @@ async function sendMessageSlackQueuedInner(params: {
   let deliveredChannelId = channelId;
   let canonicalDeliveredThreadTs: string | undefined;
   // Set if any chunk degraded to a channel post (thread anchor rejected). When
-  // true, the final thread state must NOT fall back to the rejected opts.threadTs
-  // (ENG-16286).
+  // true, the final thread state must NOT fall back to the rejected opts.threadTs.
   let threadDropped = false;
   let chunksToPost: string[];
   if (opts.mediaUrl) {
@@ -946,7 +945,7 @@ async function sendMessageSlackQueuedInner(params: {
     deliveredChannelId = resolvePostedMessageChannelId(response, deliveredChannelId);
     if (wasSlackThreadDropped(response)) {
       // Degraded to a channel post — do NOT let an echoed thread_ts on this
-      // response become the canonical delivered thread (ENG-16286).
+      // response become the canonical delivered thread.
       threadDropped = true;
     } else {
       canonicalDeliveredThreadTs ??= resolvePostedMessageThreadTs(response);

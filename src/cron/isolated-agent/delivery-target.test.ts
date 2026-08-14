@@ -290,7 +290,7 @@ describe("resolveDeliveryTarget", () => {
     });
   });
 
-  it("pins the captured turn source origin over a contaminated shared session (ENG-14833)", async () => {
+  it("pins the captured turn source origin over a contaminated shared session", async () => {
     // Shared agent-main session was contaminated by a concurrent conversation: lastTo now points at
     // an unrelated DM. A keyless implicit cron would normally be refused (see the test above), but a
     // job that captured its originating channel/target must still deliver there.

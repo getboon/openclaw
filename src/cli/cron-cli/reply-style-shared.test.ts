@@ -1,4 +1,4 @@
-// ENG-14117: cron --reply-style flag parsing for top-level vs threaded completion posts.
+// Cron --reply-style flag parsing for top-level vs threaded completion posts.
 import { describe, expect, it } from "vitest";
 import { parseCronReplyStyleOption } from "./reply-style-shared.js";
 

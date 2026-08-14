@@ -211,6 +211,7 @@ export const uk: TranslationMap = {
     autoThreshold: "автоматичний поріг",
     overflowRetry: "повторна спроба після переповнення",
     timeoutRetry: "повторна спроба після тайм-ауту",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} токенів",
     tokensBefore: "{count} токенів до",
     tokenDeltaUnavailable: "дельта токенів недоступна",

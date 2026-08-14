@@ -342,8 +342,13 @@ function modelFailoverLabels(
     from_model: lowCardinalityLabel(evt.fromModel),
     from_provider: lowCardinalityLabel(evt.fromProvider),
     lane: lowCardinalityQueueLaneLabel(evt.lane),
+    // `outcome` distinguishes chain_exhausted (the `exhausted` alert source)
+    // from ordinary next_fallback/succeeded transitions; `tier` is the 1-based
+    // ladder position so the fleet dashboard can break rate down by depth.
+    outcome: lowCardinalityLabel(evt.outcome, "unknown"),
     reason: lowCardinalityLabel(evt.reason, "other"),
     suspended: evt.suspended === undefined ? "unknown" : String(evt.suspended),
+    tier: evt.cascadeDepth === undefined ? "unknown" : String(evt.cascadeDepth),
     to_model: lowCardinalityLabel(evt.toModel),
     to_provider: lowCardinalityLabel(evt.toProvider),
   };

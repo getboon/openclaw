@@ -113,7 +113,7 @@ describe("process tool supervisor cancellation", () => {
     expectTextContent(result.content[0], "Termination requested for session sess.");
   });
 
-  it("does not classify a successful agent-requested kill as a tool error (ENG-15627 §5b)", async () => {
+  it("does not classify a successful agent-requested kill as a tool error", async () => {
     // An agent intentionally killing a backgrounded session it started is a
     // SUCCESS, not a failure. Marking the result status:"failed" makes the
     // channel render "⚠️ 🧰 Process failed" for a deliberate teardown — the lie
@@ -165,13 +165,13 @@ describe("process tool supervisor cancellation", () => {
     expect(killProcessTreeMock).toHaveBeenCalledWith(4242);
     expect(getSession("sess-fallback")).toBeUndefined();
     // A successful SIGKILL fallback records the session as "killed", not
-    // "failed" (ENG-15627 §5b) — the agent asked for it and it worked.
+    // "failed" — the agent asked for it and it worked.
     expectFinishedSessionState("sess-fallback", { status: "killed", exitSignal: "SIGKILL" });
     expectTextContent(result.content[0], "Killed session sess-fallback.");
     expect(isToolResultError(result)).toBe(false);
   });
 
-  it("polling a killed session does not render the intentional kill as failed (ENG-15627 §5b)", async () => {
+  it("polling a killed session does not render the intentional kill as failed", async () => {
     // cubic P1: after the kill the session sits in the finished registry as
     // "killed". A later `process poll`/`log` on it must NOT re-render that
     // agent-requested termination as a terminal failure.

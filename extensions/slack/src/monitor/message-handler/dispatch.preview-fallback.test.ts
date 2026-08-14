@@ -24,7 +24,7 @@ const startSlackStreamMock = vi.fn(async () => ({
   pendingText: "",
 }));
 const stopSlackStreamMock = vi.fn(async (_params?: unknown) => ({}) as { messageId?: string });
-// ENG-16286: when true, the streaming mock reports the finalize error as an
+// When true, the streaming mock reports the finalize error as an
 // invalid-thread rejection so dispatch runs its thread-anchor recovery.
 let mockedInvalidThreadError = false;
 const resolveThreadTsFromHistoryMock = vi.fn(async () => undefined as string | undefined);
@@ -2255,7 +2255,7 @@ describe("dispatchPreparedSlackMessage preview fallback", () => {
     ).not.toHaveProperty("messageId");
   });
 
-  // ENG-16286: the terminal stopSlackStream (not a mid-turn append) is the first
+  // The terminal stopSlackStream (not a mid-turn append) is the first
   // network call for a short reply and Slack rejects it with invalid_thread_ts.
   // The buffered text must still land via the fallback, threaded into the
   // recovered root — not lost with the rejected stream.
@@ -3726,7 +3726,7 @@ describe("dispatchPreparedSlackMessage preview fallback", () => {
     expect(postMessageMock).not.toHaveBeenCalled();
   });
 
-  // ENG-16286: the anchoring message was deleted/edited mid-turn (or the anchor
+  // The anchoring message was deleted/edited mid-turn (or the anchor
   // was a non-root reply ts), so Slack rejects the stream finalize with
   // invalid_thread_ts. The fallback must re-resolve the real thread root and
   // deliver into it, NOT reuse the rejected anchor (which would orphan the
@@ -3804,7 +3804,7 @@ describe("dispatchPreparedSlackMessage preview fallback", () => {
     expectDeliverReplyCall(0, "first buffered\nsecond payload", { replyThreadTs: undefined });
   });
 
-  // ENG-16286 P1 (cubic): the rejected anchor is itself a thread REPLY ts.
+  // cubic P1: the rejected anchor is itself a thread REPLY ts.
   // conversations.history does not return thread replies, so a lookup by that ts
   // finds nothing — recovery must instead use the durable root Slack already gave
   // us on the inbound event (message.thread_ts / incomingThreadTs), WITHOUT
@@ -3846,7 +3846,7 @@ describe("dispatchPreparedSlackMessage preview fallback", () => {
     expectDeliverReplyCall(0, "first buffered\nsecond payload", { replyThreadTs: "171200.root" });
   });
 
-  // ENG-16286 P1 (cubic): the INITIAL startSlackStream throws invalid_thread_ts —
+  // cubic P1: the INITIAL startSlackStream throws invalid_thread_ts —
   // streamSession is never assigned, so recovery must run from the planned anchor,
   // else the fallback reposts with the rejected ts (orphaned top-level).
   it("recovers on a start-time startSlackStream invalid_thread_ts rejection", async () => {
@@ -3869,7 +3869,7 @@ describe("dispatchPreparedSlackMessage preview fallback", () => {
     expectDeliverReplyCall(0, FINAL_REPLY_TEXT, { replyThreadTs: "171200.root" });
   });
 
-  // ENG-16286 P1 (cubic): after a deleted anchor degrades to channel delivery, a
+  // cubic P1: after a deleted anchor degrades to channel delivery, a
   // LATER payload in the same turn must NOT reintroduce the rejected anchor via
   // replyPlan — the degrade is sticky for the whole turn.
   it("keeps later payloads on the channel after a deleted-anchor degrade (sticky)", async () => {

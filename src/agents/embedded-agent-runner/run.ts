@@ -160,6 +160,7 @@ import { resolveEmbeddedRunFailureSignal } from "./failure-signal.js";
 import { resolveGlobalLane, resolveSessionLane } from "./lanes.js";
 import { log } from "./logger.js";
 import { resolveModelAsync } from "./model.js";
+import { ensureOverflowBlockCheckpoint } from "./overflow-recovery-checkpoint.js";
 import {
   createPostCompactionLoopGuard,
   PostCompactionLoopPersistedError,
@@ -234,6 +235,7 @@ import { mergeAttemptToolMediaPayloads } from "./run/tool-media-payloads.js";
 import type { EmbeddedRunFastModeParam } from "./run/types.js";
 import {
   resolveLiveToolResultMaxChars,
+  resolveRecoveryAggregateToolResultChars,
   sessionLikelyHasOversizedToolResults,
   truncateOversizedToolResultsInSession,
 } from "./tool-result-truncation.js";
@@ -476,16 +478,27 @@ function createScopedAuthProfileStore(
     : createEmptyAuthProfileStore();
 }
 
-function buildTraceToolSummary(params: {
-  toolMetas?: Array<{ toolName: string; meta?: string; asyncStarted?: boolean }>;
+export function buildTraceToolSummary(params: {
+  toolMetas?: Array<{
+    toolName: string;
+    meta?: string;
+    errored?: boolean;
+    status?: "blocked";
+    asyncStarted?: boolean;
+  }>;
+  visibleToolNames?: readonly string[];
   hadFailure: boolean;
 }): ToolSummaryTrace | undefined {
-  if (!params.toolMetas?.length) {
+  const toolMetas = params.toolMetas ?? [];
+  const visibleTools = [...new Set(params.visibleToolNames ?? [])]
+    .filter((name) => normalizeOptionalString(name))
+    .toSorted();
+  if (toolMetas.length === 0 && visibleTools.length === 0) {
     return undefined;
   }
   const tools: string[] = [];
   const seen = new Set<string>();
-  for (const entry of params.toolMetas) {
+  for (const entry of toolMetas) {
     const toolName = normalizeOptionalString(entry.toolName);
     if (!toolName || seen.has(toolName)) {
       continue;
@@ -494,9 +507,21 @@ function buildTraceToolSummary(params: {
     tools.push(toolName);
   }
   return {
-    calls: params.toolMetas?.length ?? 0,
+    calls: toolMetas.length,
     tools,
+    // Preserve boon's any-failure signal for existing trace consumers; per-call
+    // outcomes now flow through `invocations` for the audit projection.
     failures: params.hadFailure ? 1 : 0,
+    visibleTools,
+    invocations: toolMetas.map((entry) => ({
+      name: entry.toolName,
+      status:
+        entry.status === "blocked"
+          ? ("blocked" as const)
+          : entry.errored === true
+            ? ("error" as const)
+            : ("ok" as const),
+    })),
   };
 }
 
@@ -2078,6 +2103,7 @@ async function runEmbeddedAgentInternal(
             workspaceDir: resolvedWorkspace,
             cwd: params.cwd,
             agentDir,
+            explicitSkillName: params.explicitSkillName,
             config: params.config,
             allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
             contextEngine,
@@ -2782,6 +2808,9 @@ async function runEmbeddedAgentInternal(
                       cfg: params.config,
                       agentId: sessionAgentId,
                     }),
+                    aggregateMaxCharsOverride: resolveRecoveryAggregateToolResultChars(
+                      ctxInfo.tokens,
+                    ),
                     sessionId: activeSessionId,
                     sessionKey: params.sessionKey,
                     agentId: sessionAgentId,
@@ -2827,11 +2856,17 @@ async function runEmbeddedAgentInternal(
                 cfg: params.config,
                 agentId: sessionAgentId,
               });
+              // Bound the SUM of tool results to a window fraction so several
+              // recent results each under the per-result cap can still be
+              // truncated when their combined size is what overflows.
+              const aggregateMaxChars =
+                resolveRecoveryAggregateToolResultChars(contextWindowTokens);
               const hasOversized = attempt.messagesSnapshot
                 ? sessionLikelyHasOversizedToolResults({
                     messages: attempt.messagesSnapshot,
                     contextWindowTokens,
                     maxCharsOverride: toolResultMaxChars,
+                    aggregateMaxCharsOverride: aggregateMaxChars,
                   })
                 : false;
 
@@ -2845,6 +2880,7 @@ async function runEmbeddedAgentInternal(
                   sessionFile: activeSessionFile,
                   contextWindowTokens,
                   maxCharsOverride: toolResultMaxChars,
+                  aggregateMaxCharsOverride: aggregateMaxChars,
                   sessionId: activeSessionId,
                   sessionKey: params.sessionKey,
                   agentId: sessionAgentId,
@@ -2876,12 +2912,23 @@ async function runEmbeddedAgentInternal(
               );
             }
             const kind = isCompactionFailure ? "compaction_failure" : "context_overflow";
+            // Ensure a history-preserving restore point exists at the block so the
+            // surface can offer branch/restore instead of a lose-everything reset.
+            const recoveryCheckpointId = await ensureOverflowBlockCheckpoint({
+              config: params.config,
+              sessionKey: params.sessionKey,
+              sessionId: activeSessionId,
+              sessionFile: activeSessionFile,
+              agentId: sessionAgentId,
+              tokensBefore: overflowTokenCountForCompaction ?? ctxInfo.tokens,
+            });
+            // Stable machine reason only; human copy is owned by the surface (Control
+            // UI i18n / channel adapters) keyed off meta.recovery, not this string.
             const overflowRecoveryText =
-              "Context overflow: prompt too large for the model. " +
-              "Try /reset (or /new) to start a fresh session, or use a larger-context model.";
+              "Context overflow: this conversation reached the model's context limit.";
             log.warn(
               `[context-overflow-recovery] exhausted provider overflow recovery for ${provider}/${modelId}; ` +
-                `livenessState=blocked suggestedAction=reset_or_new kind=${kind}`,
+                `livenessState=blocked kind=${kind} recoveryCheckpointId=${recoveryCheckpointId ?? "none"}`,
             );
             setTerminalLifecycleMeta({
               replayInvalid: resolveReplayInvalidForAttempt(),
@@ -2914,6 +2961,11 @@ async function runEmbeddedAgentInternal(
                 replayInvalid: resolveReplayInvalidForAttempt(),
                 livenessState: "blocked",
                 error: { kind, message: errorText },
+                recovery: {
+                  kind: "context_overflow_preserve",
+                  ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
+                  ...(recoveryCheckpointId ? { checkpointId: recoveryCheckpointId } : {}),
+                },
               },
             };
           }
@@ -3607,6 +3659,7 @@ async function runEmbeddedAgentInternal(
             (attempt.toolMetas?.length ?? 0) === 0;
           const attemptToolSummary = buildTraceToolSummary({
             toolMetas: attempt.toolMetas,
+            visibleToolNames: attempt.visibleToolNames,
             hadFailure: Boolean(attempt.lastToolError),
           });
           const failureSignal = resolveEmbeddedRunFailureSignal({

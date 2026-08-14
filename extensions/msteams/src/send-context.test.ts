@@ -202,7 +202,7 @@ describe("resolveMSTeamsProactiveReplyStyle", () => {
     ).toBe("top-level");
   });
 
-  // ENG-14117: a per-send override (e.g. a scheduled cron told to post a fresh
+  // A per-send override (e.g. a scheduled cron told to post a fresh
   // top-level channel message) must win over the resolved/global replyStyle,
   // WITHOUT changing the global "thread" default that keeps conversations threaded.
   it("honors an explicit top-level override on a thread-default channel", () => {

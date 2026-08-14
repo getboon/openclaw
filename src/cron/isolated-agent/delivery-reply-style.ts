@@ -1,4 +1,4 @@
-/** Maps a cron delivery.replyStyle to the portable outbound threadSuppressed intent (ENG-14117). */
+/** Maps a cron delivery.replyStyle to the portable outbound threadSuppressed intent. */
 import type { CronJob, CronReplyStyle } from "../types.js";
 
 /**

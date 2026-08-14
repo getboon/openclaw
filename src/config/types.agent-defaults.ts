@@ -42,6 +42,20 @@ export type PromptOverlaysConfig = {
   claude?: ClaudePromptOverlayConfig;
 };
 
+/** Audience that user-facing operational/error copy is written for. */
+export type MessageAudience = "operator" | "consumer";
+
+export type AgentMessagingConfig = {
+  /**
+   * Who assistant fallback/error messages are written for.
+   * - operator (default): raw diagnostic copy with model slugs and failure
+   *   reasons preserved.
+   * - consumer: plain-language, reassuring copy with internal detail stripped.
+   * Raw detail is always retained in logs and structured events regardless.
+   */
+  audience?: MessageAudience;
+};
+
 export type AgentModelEntryConfig = {
   /** Optional display/lookup alias for this provider/model entry. */
   alias?: string;
@@ -271,6 +285,8 @@ export type AgentDefaultsConfig = {
   repoRoot?: string;
   /** Provider-independent prompt overlays applied by model family. */
   promptOverlays?: PromptOverlaysConfig;
+  /** Presentation controls for user-facing assistant/operational messages. */
+  messaging?: AgentMessagingConfig;
   /** Skip bootstrap (BOOTSTRAP.md creation, etc.) for pre-configured deployments. */
   skipBootstrap?: boolean;
   /**

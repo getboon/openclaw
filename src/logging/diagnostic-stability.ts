@@ -546,6 +546,9 @@ function sanitizeDiagnosticEvent(event: DiagnosticEventPayload): DiagnosticStabi
     case "model.failover":
       record.provider = event.fromProvider;
       record.model = event.fromModel;
+      if (event.outcome) {
+        record.outcome = event.outcome;
+      }
       assignReasonCode(record, event.reason);
       break;
   }

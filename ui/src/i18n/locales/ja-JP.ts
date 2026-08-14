@@ -213,6 +213,7 @@ export const ja_JP: TranslationMap = {
     autoThreshold: "自動しきい値",
     overflowRetry: "オーバーフロー時に再試行",
     timeoutRetry: "タイムアウト時に再試行",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} トークン",
     tokensBefore: "前: {count} トークン",
     tokenDeltaUnavailable: "トークン差分を利用できません",

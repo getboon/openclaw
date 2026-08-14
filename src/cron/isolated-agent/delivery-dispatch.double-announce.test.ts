@@ -386,7 +386,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expect(state.delivered).toBe(true);
   });
 
-  it("forwards delivery.replyStyle:top-level to the durable send as threadSuppressed (ENG-14117)", async () => {
+  it("forwards delivery.replyStyle:top-level to the durable send as threadSuppressed", async () => {
     const params = makeBaseParams({
       synthesizedText: "Daily audit results.",
       replyStyle: "top-level",
@@ -404,7 +404,7 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     expect(state.delivered).toBe(true);
   });
 
-  it("forwards delivery.replyStyle:thread to the durable send as threadSuppressed=false (ENG-14117)", async () => {
+  it("forwards delivery.replyStyle:thread to the durable send as threadSuppressed=false", async () => {
     const params = makeBaseParams({
       synthesizedText: "Daily audit results.",
       replyStyle: "thread",

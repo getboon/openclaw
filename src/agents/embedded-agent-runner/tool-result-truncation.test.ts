@@ -20,6 +20,7 @@ let truncateOversizedToolResultsInMessages: typeof import("./tool-result-truncat
 let truncateOversizedToolResultsInSession: typeof import("./tool-result-truncation.js").truncateOversizedToolResultsInSession;
 let sessionLikelyHasOversizedToolResults: typeof import("./tool-result-truncation.js").sessionLikelyHasOversizedToolResults;
 let estimateToolResultReductionPotential: typeof import("./tool-result-truncation.js").estimateToolResultReductionPotential;
+let resolveRecoveryAggregateToolResultChars: typeof import("./tool-result-truncation.js").resolveRecoveryAggregateToolResultChars;
 let DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS: typeof import("./tool-result-truncation.js").DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS;
 let resolveLiveToolResultMaxChars: typeof import("./tool-result-truncation.js").resolveLiveToolResultMaxChars;
 let createToolResultPromptProjectionState: typeof import("./tool-result-truncation.js").createToolResultPromptProjectionState;
@@ -39,6 +40,7 @@ async function loadFreshToolResultTruncationModuleForTest() {
     truncateOversizedToolResultsInSession,
     sessionLikelyHasOversizedToolResults,
     estimateToolResultReductionPotential,
+    resolveRecoveryAggregateToolResultChars,
     DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS,
     resolveLiveToolResultMaxChars,
     createToolResultPromptProjectionState,
@@ -318,6 +320,57 @@ describe("sessionLikelyHasOversizedToolResults", () => {
     expect(sessionLikelyHasOversizedToolResults({ messages, contextWindowTokens: 128_000 })).toBe(
       true,
     );
+  });
+});
+
+describe("resolveRecoveryAggregateToolResultChars", () => {
+  it("derives the aggregate ceiling from the full window (~half, 4 chars/token)", () => {
+    // 128k tokens * 0.5 * 4 chars/token = 256k chars.
+    expect(resolveRecoveryAggregateToolResultChars(128_000)).toBe(256_000);
+  });
+
+  it("falls back to the default live cap for a non-positive window", () => {
+    expect(resolveRecoveryAggregateToolResultChars(0)).toBe(DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS);
+  });
+
+  it("bounds the summed tool results below the window even when each is under the per-result cap", () => {
+    // XL window: per-result auto cap is 64k chars; aggregate budget is
+    // 200k * 0.5 * 4 = 400k chars. Eight results at ~55k each are individually
+    // under the per-result cap but sum (~440k) over the aggregate budget.
+    const contextWindowTokens = 200_000;
+    const perResult = "x".repeat(55_000);
+    const messages: AgentMessage[] = Array.from({ length: 8 }, (_, i) =>
+      makeToolResult(perResult, `call_${i + 1}`),
+    );
+    const aggregateMaxCharsOverride = resolveRecoveryAggregateToolResultChars(contextWindowTokens);
+
+    // Without the aggregate override, none are individually oversized → no reduction.
+    const withoutOverride = estimateToolResultReductionPotential({
+      messages,
+      contextWindowTokens,
+    });
+    expect(withoutOverride.oversizedCount).toBe(0);
+
+    // With the aggregate override, the summed content is forced under budget.
+    const withOverride = estimateToolResultReductionPotential({
+      messages,
+      contextWindowTokens,
+      aggregateMaxCharsOverride,
+    });
+    expect(withOverride.aggregateReducibleChars).toBeGreaterThan(0);
+
+    const { messages: truncated, truncatedCount } = truncateOversizedToolResultsInMessages(
+      messages,
+      contextWindowTokens,
+      undefined,
+      aggregateMaxCharsOverride,
+    );
+    expect(truncatedCount).toBeGreaterThan(0);
+    const totalChars = truncated.reduce(
+      (sum, message) => sum + getToolResultTextLength(message),
+      0,
+    );
+    expect(totalChars).toBeLessThanOrEqual(aggregateMaxCharsOverride);
   });
 });
 

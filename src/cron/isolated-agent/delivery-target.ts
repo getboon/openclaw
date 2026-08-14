@@ -142,13 +142,13 @@ export async function resolveDeliveryTarget(
     /** Explicit accountId from job.delivery — overrides session-derived and binding-derived values. */
     accountId?: string;
     sessionKey?: string;
-    /** Originating channel for cross-channel contamination prevention (ENG-14833). */
+    /** Originating channel for cross-channel contamination prevention. */
     turnSourceChannel?: ChannelId;
-    /** Originating target for cross-channel contamination prevention (ENG-14833). */
+    /** Originating target for cross-channel contamination prevention. */
     turnSourceTo?: string;
-    /** Originating account for cross-channel contamination prevention (ENG-14833). */
+    /** Originating account for cross-channel contamination prevention. */
     turnSourceAccountId?: string;
-    /** Originating thread for cross-channel contamination prevention (ENG-14833). */
+    /** Originating thread for cross-channel contamination prevention. */
     turnSourceThreadId?: string | number;
   },
   options?: { dryRun?: boolean; inheritSessionThread?: boolean },
@@ -200,7 +200,7 @@ export async function resolveDeliveryTarget(
     explicitTo,
     explicitThreadId: jobPayload.threadId,
     allowMismatchedLastTo,
-    // Pass stored turn source context to prevent cross-channel contamination (ENG-14833)
+    // Pass stored turn source context to prevent cross-channel contamination
     turnSourceChannel: jobPayload.turnSourceChannel,
     turnSourceTo: jobPayload.turnSourceTo,
     turnSourceAccountId: jobPayload.turnSourceAccountId,
@@ -235,7 +235,7 @@ export async function resolveDeliveryTarget(
         fallbackChannel,
         allowMismatchedLastTo,
         mode: preliminary.mode,
-        // Pass stored turn source context to prevent cross-channel contamination (ENG-14833)
+        // Pass stored turn source context to prevent cross-channel contamination
         turnSourceChannel: jobPayload.turnSourceChannel,
         turnSourceTo: jobPayload.turnSourceTo,
         turnSourceAccountId: jobPayload.turnSourceAccountId,
@@ -332,7 +332,7 @@ export async function resolveDeliveryTarget(
   //   - evaluated AFTER the allowFrom reroute above (`toCandidate === resolved.lastTo`) — a cron
   //     whose stale target was rerouted to a configured allow-from peer is delivering to that
   //     allowed peer, not the inherited room, so it is not refused.
-  //   - does not have turnSourceChannel (ENG-14833) — when turnSource context is present, the target
+  //   - does not have turnSourceChannel — when turnSource context is present, the target
   //     is safely captured from the originating channel, not contaminated session state.
   if (
     !rawSessionKey &&

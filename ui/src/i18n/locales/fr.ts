@@ -212,6 +212,7 @@ export const fr: TranslationMap = {
     autoThreshold: "seuil automatique",
     overflowRetry: "nouvelle tentative après dépassement",
     timeoutRetry: "nouvelle tentative après expiration",
+    overflowBlock: "context limit reached",
     tokenRange: "{before} to {after} tokens",
     tokensBefore: "{count} tokens avant",
     tokenDeltaUnavailable: "delta de tokens indisponible",

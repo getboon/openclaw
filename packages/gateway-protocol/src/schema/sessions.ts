@@ -17,6 +17,7 @@ export const SessionCompactionCheckpointReasonSchema = Type.Union([
   Type.Literal("auto-threshold"),
   Type.Literal("overflow-retry"),
   Type.Literal("timeout-retry"),
+  Type.Literal("overflow-block"),
 ]);
 
 /** Start/end event emitted while a session compaction operation runs. */
