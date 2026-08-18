@@ -344,6 +344,93 @@ describe("dispatchReplyFromConfig reply_dispatch hook", () => {
     });
   });
 
+  it("records completed, not failed:delivery_failed, when the only final is the sanctioned NO_REPLY token (ENG-18092)", async () => {
+    // The model is instructed (system-prompt.ts:557) to close a turn with ONLY
+    // NO_REPLY after delivering visible output via the `message` tool. The real
+    // dispatcher refuses this payload by contract (reply-flow.test.ts:23), which
+    // must not be mistaken for a failed delivery of real content.
+    hookMocks.runner.hasHooks.mockReturnValue(false);
+    const dispatcher = createDispatcher();
+    vi.mocked(dispatcher.sendFinalReply).mockReturnValue(false);
+
+    const terminalEvents: Array<{ result: unknown }> = [];
+    const off = onReplyRunTerminal((event) => terminalEvents.push({ result: event.result }));
+
+    let result: Awaited<ReturnType<typeof dispatchReplyFromConfig>>;
+    try {
+      result = await dispatchReplyFromConfig({
+        ctx: createHookCtx(),
+        cfg: emptyConfig,
+        dispatcher,
+        replyResolver: async () => ({ text: "NO_REPLY" }),
+      });
+    } finally {
+      off();
+    }
+
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]?.result).toMatchObject({ kind: "completed" });
+    expect(result.noVisibleReplyFallbackEligible).toBe(true);
+  });
+
+  it("still flags delivery_failed when a silent-token final carries undelivered media (ENG-18092)", async () => {
+    // Locks the media carve-out (normalize-reply.ts:59-64): a NO_REPLY final
+    // with media still ships, so a genuinely undelivered media-bearing payload
+    // must not be swept into the "intentionally silent" exemption.
+    hookMocks.runner.hasHooks.mockReturnValue(false);
+    const dispatcher = createDispatcher();
+    vi.mocked(dispatcher.sendFinalReply).mockReturnValue(false);
+
+    const terminalEvents: Array<{ result: unknown }> = [];
+    const off = onReplyRunTerminal((event) => terminalEvents.push({ result: event.result }));
+
+    try {
+      await dispatchReplyFromConfig({
+        ctx: createHookCtx(),
+        cfg: emptyConfig,
+        dispatcher,
+        replyResolver: async () => ({ text: "NO_REPLY", mediaUrl: "file:///tmp/a.png" }),
+      });
+    } finally {
+      off();
+    }
+
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]?.result).toMatchObject({
+      kind: "failed",
+      code: "delivery_failed",
+    });
+  });
+
+  it("also recognizes a silent token glued to markdown as intentional (ENG-18092)", async () => {
+    // The dispatcher's real normalizeReplyPayload strips a mixed-content form
+    // like "**NO_REPLY" down to empty (normalize-reply.ts:70-80's trailing
+    // strip matches a token preceded by asterisks), not just the exact token.
+    // isIntentionallySilentFinalReply must reuse that same logic rather than a
+    // narrower text-only check, or this form re-triggers the mislabeled
+    // delivery_failed this fix targets.
+    hookMocks.runner.hasHooks.mockReturnValue(false);
+    const dispatcher = createDispatcher();
+    vi.mocked(dispatcher.sendFinalReply).mockReturnValue(false);
+
+    const terminalEvents: Array<{ result: unknown }> = [];
+    const off = onReplyRunTerminal((event) => terminalEvents.push({ result: event.result }));
+
+    try {
+      await dispatchReplyFromConfig({
+        ctx: createHookCtx(),
+        cfg: emptyConfig,
+        dispatcher,
+        replyResolver: async () => ({ text: "**NO_REPLY" }),
+      });
+    } finally {
+      off();
+    }
+
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]?.result).toMatchObject({ kind: "completed" });
+  });
+
   it("delivers a generated final reply before queued follow-up admission", async () => {
     hookMocks.runner.hasHooks.mockReturnValue(false);
     const dispatcher = createDispatcher();

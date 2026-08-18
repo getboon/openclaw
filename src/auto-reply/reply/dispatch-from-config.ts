@@ -143,12 +143,14 @@ import {
 import type {
   DispatchFromConfigParams,
   DispatchFromConfigResult,
+  DispatchTurnSkipReason,
 } from "./dispatch-from-config.types.js";
 import { resolveEffectiveReplyRoute } from "./effective-reply-route.js";
 import { withFullRuntimeReplyConfig } from "./get-reply-fast-path.js";
 import type { ReplySessionBinding } from "./get-reply.types.js";
 import { claimInboundDedupe, commitInboundDedupe, releaseInboundDedupe } from "./inbound-dedupe.js";
 import { hasInboundAudio } from "./inbound-media.js";
+import { normalizeReplyPayload, type NormalizeReplySkipReason } from "./normalize-reply.js";
 import { resolveOriginMessageProvider } from "./origin-routing.js";
 import { waitForReplyDispatcherIdle } from "./reply-dispatcher.js";
 import type {
@@ -771,6 +773,24 @@ async function clearPendingFinalDeliveryAfterSuccess(params: {
   });
 }
 
+/**
+ * A final whose only content is the silent token closes the turn by design:
+ * system-prompt.ts:557 instructs the model to answer with ONLY NO_REPLY after
+ * delivering visible output through the `message` tool. The dispatcher refuses
+ * such a payload by contract (reply-flow.test.ts:23), so it is not a failed
+ * delivery. Reuses the dispatcher's own `normalizeReplyPayload` silent-skip
+ * detection (mixed-content/leading/trailing token forms included) rather than
+ * a narrower re-check, so this can't drift from what the dispatcher actually
+ * refuses. Media alongside the token still ships (normalize-reply.ts:59-64),
+ * so it must not be treated as silent — only the "silent" skip reason counts,
+ * not "empty" (nothing to say at all) or "heartbeat".
+ */
+function isIntentionallySilentFinalReply(reply: ReplyPayload): boolean {
+  let skipReason: NormalizeReplySkipReason | undefined;
+  normalizeReplyPayload(reply, { onSkip: (reason) => (skipReason = reason) });
+  return skipReason === "silent";
+}
+
 async function mirrorDeliveredReplyToTranscript(params: {
   metadata?: TranscriptMirror;
   cfg: OpenClawConfig;
@@ -996,6 +1016,7 @@ type ReplyHotPathTimingSummary = {
 };
 
 const replyHotPathTimingLog = createSubsystemLogger("auto-reply/reply-timing");
+const replyAdmissionLog = createSubsystemLogger("auto-reply/reply-admission");
 const REPLY_HOT_PATH_TIMING_WARN_TOTAL_MS = 1_000;
 const REPLY_HOT_PATH_TIMING_WARN_STAGE_MS = 500;
 
@@ -1091,9 +1112,21 @@ export async function dispatchReplyFromConfig(
 ): Promise<DispatchFromConfigResult> {
   const { ctx, cfg, dispatcher } = params;
   if (params.replyOptions?.abortSignal?.aborted) {
+    // The most silent skip in this file: the caller already gave up before
+    // any dedupe/admission/logging setup below even runs (ENG-18092).
+    replyAdmissionLog.info("reply turn skipped before agent run", {
+      sessionKey:
+        normalizeOptionalString(ctx.SessionKey) ??
+        normalizeOptionalString(ctx.CommandTargetSessionKey),
+      reason: "aborted" satisfies DispatchTurnSkipReason,
+      phase: "pre_dispatch",
+      surface: ctx.Surface,
+      messageId: ctx.MessageSidFull ?? ctx.MessageSid,
+    });
     return {
       queuedFinal: false,
       counts: dispatcher.getQueuedCounts(),
+      turnSkipped: "aborted",
     };
   }
   const diagnosticsEnabled = isDiagnosticsEnabled(cfg);
@@ -1225,9 +1258,24 @@ export async function dispatchReplyFromConfig(
     dispatchOperationSessionKey &&
     replyRunRegistry.get(dispatchOperationSessionKey)
   ) {
+    // Fast path ahead of the full admission machinery below: a heartbeat never
+    // waits or recovers a stale run, it just bails when the lane is busy. Give
+    // it the same skip bookkeeping as the slower admission path (ENG-18092) —
+    // this was previously the most silent skip in the file, with no log line
+    // and no recordProcessed/markIdle call at all.
+    recordProcessed("skipped", { reason: "reply-operation-active" });
+    markIdle("message_completed");
+    replyAdmissionLog.info("reply turn skipped before agent run", {
+      sessionKey: dispatchOperationSessionKey,
+      reason: "active-run" satisfies DispatchTurnSkipReason,
+      phase: "pre_dispatch",
+      surface: ctx.Surface,
+      messageId: ctx.MessageSidFull ?? ctx.MessageSid,
+    });
     return {
       queuedFinal: false,
       counts: dispatcher.getQueuedCounts(),
+      turnSkipped: "active-run",
     };
   }
   const markProgress = () => {
@@ -1325,7 +1373,9 @@ export async function dispatchReplyFromConfig(
   let dispatchReplyOperation: ReplyOperation | undefined;
   let dispatchAbortOperation: ReplyOperation | undefined;
   let preDispatchAbortOperation: ReplyOperation | undefined;
-  type DispatchReplyOperationAcquisition = { status: "ready" } | { status: "busy" };
+  type DispatchReplyOperationAcquisition =
+    | { status: "ready" }
+    | { status: "busy"; reason: DispatchTurnSkipReason; phase: "pre_dispatch" | "dispatch" };
   const ensureDispatchReplyOperation = async (
     phase: "pre_dispatch" | "dispatch",
   ): Promise<DispatchReplyOperationAcquisition> => {
@@ -1333,7 +1383,9 @@ export async function dispatchReplyFromConfig(
       return { status: "ready" };
     }
     if (dispatchAbortOperation && !dispatchAbortOperation.result) {
-      return dispatchReplyOperation ? { status: "ready" } : { status: "busy" };
+      return dispatchReplyOperation
+        ? { status: "ready" }
+        : { status: "busy", reason: "active-run", phase };
     }
     if (
       phase === "dispatch" &&
@@ -1342,7 +1394,11 @@ export async function dispatchReplyFromConfig(
       !dispatchReplyOperation
     ) {
       dispatchAbortOperation = preDispatchAbortOperation;
-      return { status: "busy" };
+      // The pre-dispatch turn's own operation ended in a non-completed terminal
+      // state (aborted/failed/cancelled) before this phase re-checked it, so
+      // this turn never got a live run to admit into — classify as "aborted",
+      // not "active-run" (nothing is actively holding the slot anymore).
+      return { status: "busy", reason: "aborted", phase };
     }
     if (!dispatchOperationSessionKey) {
       return { status: "ready" };
@@ -1455,10 +1511,7 @@ export async function dispatchReplyFromConfig(
         return { status: "ready" };
       }
       dispatchAbortOperation = admission.activeOperation;
-      logVerbose(
-        `dispatch-from-config: skipped reply operation admission for ${dispatchOperationSessionKey}; reason=${admission.reason}`,
-      );
-      return { status: "busy" };
+      return { status: "busy", reason: admission.reason, phase };
     }
     dispatchReplyOperation = admission.operation;
     dispatchReplyOperation.retainFailureUntilComplete();
@@ -1963,6 +2016,7 @@ export async function dispatchReplyFromConfig(
     return attachSourceReplyDeliveryMode({
       queuedFinal: false,
       counts: dispatcher.getQueuedCounts(),
+      turnSkipped: "duplicate",
     });
   }
   const commitInboundDedupeIfClaimed = () => {
@@ -1975,30 +2029,45 @@ export async function dispatchReplyFromConfig(
       releaseInboundDedupe(inboundDedupeClaim.key);
     }
   };
-  const finishReplyOperationBusyDispatch = (opts?: {
+  const finishReplyOperationBusyDispatch = (opts: {
+    reason: DispatchTurnSkipReason;
+    phase: "pre_dispatch" | "dispatch";
     dedupeDisposition?: "commit" | "release";
     recordAgentDispatchCompleted?: boolean;
     sessionMetadataChanges?: DispatchFromConfigResult["sessionMetadataChanges"];
   }): DispatchFromConfigResult => {
-    if (opts?.recordAgentDispatchCompleted) {
+    if (opts.recordAgentDispatchCompleted) {
       recordAgentDispatchCompleted("completed", { reason: "reply-operation-active" });
     }
     recordProcessed("skipped", { reason: "reply-operation-active" });
     markIdle("message_completed");
-    if (opts?.dedupeDisposition === "release") {
+    if (opts.dedupeDisposition === "release") {
       releaseInboundDedupeIfClaimed();
     } else {
       commitInboundDedupeIfClaimed();
     }
+    // Always-on (not diagnostics/verbose-gated): a busy/aborted admission skip
+    // was previously invisible at normal verbosity, indistinguishable from an
+    // agent that legitimately produced nothing (ENG-18092).
+    replyAdmissionLog.info("reply turn skipped before agent run", {
+      sessionKey: dispatchOperationSessionKey ?? sessionKey,
+      reason: opts.reason,
+      phase: opts.phase,
+      surface: ctx.Surface,
+      messageId: ctx.MessageSidFull ?? ctx.MessageSid,
+    });
     return attachSourceReplyDeliveryMode({
       queuedFinal: false,
       counts: dispatcher.getQueuedCounts(),
-      ...(opts?.sessionMetadataChanges
+      turnSkipped: opts.reason,
+      ...(opts.sessionMetadataChanges
         ? { sessionMetadataChanges: opts.sessionMetadataChanges }
         : {}),
     });
   };
-  const finishReplyOperationAbortedDispatch = (): DispatchFromConfigResult => {
+  const finishReplyOperationAbortedDispatch = (opts?: {
+    turnSkipped?: DispatchTurnSkipReason;
+  }): DispatchFromConfigResult => {
     commitInboundDedupeIfClaimed();
     recordProcessed("completed", { reason: "reply_operation_aborted" });
     markIdle("message_completed");
@@ -2006,6 +2075,7 @@ export async function dispatchReplyFromConfig(
     return attachSourceReplyDeliveryMode({
       queuedFinal: false,
       counts: dispatcher.getQueuedCounts(),
+      ...(opts?.turnSkipped ? { turnSkipped: opts.turnSkipped } : {}),
     });
   };
 
@@ -2016,7 +2086,9 @@ export async function dispatchReplyFromConfig(
 
   if (pluginOwnedBinding) {
     if (isPreDispatchOperationAborted()) {
-      return finishReplyOperationAbortedDispatch();
+      // Reached before any reply operation is ever created for this turn
+      // (unlike the mid-turn abort caught below), so the agent never ran.
+      return finishReplyOperationAbortedDispatch({ turnSkipped: "aborted" });
     }
     touchConversationBindingRecord(pluginOwnedBinding.bindingId);
     if (shouldBypassPluginOwnedBindingForCommand(ctx, cfg)) {
@@ -2204,8 +2276,13 @@ export async function dispatchReplyFromConfig(
     }
     // Register the dispatch-owned operation before any plugin hook or model work
     // so /stop can abort pre-run and in-run stalls through the same session lane.
-    if ((await ensureDispatchReplyOperation("pre_dispatch")).status === "busy") {
-      return finishReplyOperationBusyDispatch({ dedupeDisposition: "release" });
+    const preDispatchAcquisition = await ensureDispatchReplyOperation("pre_dispatch");
+    if (preDispatchAcquisition.status === "busy") {
+      return finishReplyOperationBusyDispatch({
+        reason: preDispatchAcquisition.reason,
+        phase: preDispatchAcquisition.phase,
+        dedupeDisposition: "release",
+      });
     }
 
     const shouldSuppressDefaultToolProgressMessages = () => !shouldEmitVerboseProgress();
@@ -2561,8 +2638,13 @@ export async function dispatchReplyFromConfig(
       }
     }
 
-    if ((await ensureDispatchReplyOperation("dispatch")).status === "busy") {
-      return finishReplyOperationBusyDispatch({ dedupeDisposition: "release" });
+    const dispatchAcquisition = await ensureDispatchReplyOperation("dispatch");
+    if (dispatchAcquisition.status === "busy") {
+      return finishReplyOperationBusyDispatch({
+        reason: dispatchAcquisition.reason,
+        phase: dispatchAcquisition.phase,
+        dedupeDisposition: "release",
+      });
     }
 
     // When automatic source delivery is suppressed, still let the agent process
@@ -3274,8 +3356,11 @@ export async function dispatchReplyFromConfig(
     );
     const sessionMetadataChanges = takeCommandSessionMetadataChanges(ctx);
     notifySessionMetadataChanges(sessionMetadataChanges);
-    if ((await ensureDispatchReplyOperation("dispatch")).status === "busy") {
+    const postReplyDispatchAcquisition = await ensureDispatchReplyOperation("dispatch");
+    if (postReplyDispatchAcquisition.status === "busy") {
       return finishReplyOperationBusyDispatch({
+        reason: postReplyDispatchAcquisition.reason,
+        phase: postReplyDispatchAcquisition.phase,
         recordAgentDispatchCompleted: true,
         ...(sessionMetadataChangesForResult
           ? { sessionMetadataChanges: sessionMetadataChangesForResult }
@@ -3383,11 +3468,12 @@ export async function dispatchReplyFromConfig(
         }
         continue;
       }
-      attemptedFinalDelivery = true;
+      const intentionallySilent = isIntentionallySilentFinalReply(reply);
+      attemptedFinalDelivery = attemptedFinalDelivery || !intentionallySilent;
       const finalReply = await sendFinalPayload(reply, { deliveryId: String(replyIndex) });
       queuedFinal = finalReply.queuedFinal || queuedFinal;
       routedFinalCount += finalReply.routedFinalCount;
-      if (!finalReply.queuedFinal && finalReply.routedFinalCount === 0) {
+      if (!intentionallySilent && !finalReply.queuedFinal && finalReply.routedFinalCount === 0) {
         finalDeliveryFailed = true;
       }
     }

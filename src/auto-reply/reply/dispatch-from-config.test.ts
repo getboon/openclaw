@@ -1297,10 +1297,52 @@ describe("dispatchReplyFromConfig", () => {
     expect(result).toMatchObject({
       queuedFinal: false,
       counts: { tool: 0, block: 0, final: 0 },
+      // ENG-18092: a heartbeat turn skipped for a genuinely active run — the
+      // agent never ran this turn, distinct from it having produced nothing.
+      turnSkipped: "active-run",
     });
     expect(replyResolver).not.toHaveBeenCalled();
     expect(replyRunRegistry.get(sessionKey)).toBe(activeOperation);
     activeOperation.complete();
+  });
+
+  it("leaves turnSkipped unset when the turn actually reaches the agent (ENG-18092)", async () => {
+    setNoAbort();
+    const dispatcher = createDispatcher();
+    const result = await dispatchReplyFromConfig({
+      ctx: buildTestCtx({ Provider: "telegram" }),
+      cfg: emptyConfig,
+      dispatcher,
+      replyResolver: async () => ({ text: "hi" }) satisfies ReplyPayload,
+    });
+
+    expect(result.turnSkipped).toBeUndefined();
+  });
+
+  it("tags the admission skip as aborted, not active-run, when the caller already aborted (ENG-18092)", async () => {
+    // Distinguishes an admission skip caused by an already-aborted caller
+    // signal from one caused by a genuinely active run — the two previously
+    // collapsed into the same untagged "busy" result.
+    setNoAbort();
+    const abortController = new AbortController();
+    abortController.abort();
+    const dispatcher = createDispatcher();
+    const replyResolver = vi.fn(async () => ({ text: "should not run" }) satisfies ReplyPayload);
+
+    const result = await dispatchReplyFromConfig({
+      ctx: buildTestCtx({ Provider: "telegram" }),
+      cfg: emptyConfig,
+      dispatcher,
+      replyOptions: { abortSignal: abortController.signal },
+      replyResolver,
+    });
+
+    expect(result).toMatchObject({
+      queuedFinal: false,
+      counts: { tool: 0, block: 0, final: 0 },
+      turnSkipped: "aborted",
+    });
+    expect(replyResolver).not.toHaveBeenCalled();
   });
 
   it("does not route when Provider matches OriginatingChannel (even if Surface is missing)", async () => {
@@ -6457,7 +6499,11 @@ describe("dispatchReplyFromConfig", () => {
       replyResolver,
     });
 
-    expect(result).toEqual({ queuedFinal: false, counts: { tool: 0, block: 0, final: 0 } });
+    expect(result).toEqual({
+      queuedFinal: false,
+      counts: { tool: 0, block: 0, final: 0 },
+      turnSkipped: "aborted",
+    });
     expect(sessionBindingMocks.touch).not.toHaveBeenCalled();
     expect(hookMocks.runner.runInboundClaimForPluginOutcome).not.toHaveBeenCalled();
     expect(replyResolver).not.toHaveBeenCalled();
