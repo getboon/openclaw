@@ -271,6 +271,49 @@ describe("createSlackMessageHandler", () => {
     await Promise.all([handledFailure, flushFailure]);
   });
 
+  it("preserves an unrelated app_mention's winner marker across a raced message dispatch failure (ENG-18283 P1)", async () => {
+    createHandlerWithTracker();
+    const ts = "1709000000.000750";
+    const appMentionEntry = {
+      message: { type: "app_mention", channel: "C111", user: "U111", ts, text: "<@U1> hi" },
+      opts: { source: "app_mention", wasMentioned: true },
+    };
+    const messageEntry = {
+      message: { type: "message", channel: "C111", user: "U111", ts, text: "hi" },
+      opts: { source: "message" },
+    };
+
+    // Message's flush starts first (finding no app_mention marker set yet) and is
+    // held pending mid-dispatch while app_mention's own, separate flush completes.
+    let rejectMessageDispatch: ((err: unknown) => void) | undefined;
+    const messageDispatchPending = new Promise((_resolve, reject) => {
+      rejectMessageDispatch = reject;
+    });
+    dispatchPreparedSlackMessageMock.mockImplementationOnce(() => messageDispatchPending);
+    const messageFlush = onFlushCallbacks[0]?.([messageEntry]);
+    await vi.waitFor(() => expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(1));
+
+    // app_mention now wins the race independently, setting its winner marker
+    // while the message's dispatch is still pending.
+    dispatchPreparedSlackMessageMock.mockResolvedValueOnce(undefined);
+    await onFlushCallbacks[0]?.([appMentionEntry]);
+    expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(2);
+
+    // Now let the message's raced dispatch settle retryable. A native
+    // (non-relay) retry gets scheduled, so the flush resolves rather than
+    // rejecting (ENG-18283 P2). Its cleanup must only undo its own optimistic
+    // state, not app_mention's just-set marker.
+    rejectMessageDispatch?.(
+      new Error("reply session initialization conflicted for agent:main:slack:channel:C111"),
+    );
+    await expect(messageFlush).resolves.toBeUndefined();
+
+    // A later replay for the same ts must still be deduped by app_mention's
+    // preserved marker rather than dispatching a duplicate reply.
+    await onFlushCallbacks[0]?.([messageEntry]);
+    expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(2);
+  });
+
   it("does not auto-retry a relay-owned dispatch after a retryable session-init-conflict failure", async () => {
     dispatchPreparedSlackMessageMock.mockRejectedValueOnce(
       new Error("reply session initialization conflicted for agent:main:slack:channel:C111"),

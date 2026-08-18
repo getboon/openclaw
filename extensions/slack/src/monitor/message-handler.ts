@@ -264,7 +264,12 @@ export function createSlackMessageHandler(params: {
               // Release all of them so the retry can rebuild the same batch.
               for (const entry of entries) {
                 const entrySeenKey = buildSeenMessageKey(entry.message.channel, entry.message.ts);
-                if (entrySeenKey) {
+                if (entrySeenKey && entry.opts.source === "app_mention") {
+                  // Only undo this failed dispatch's own optimistic winner marker.
+                  // A "message" entry must never clear it: that marker may belong
+                  // to a different, already-succeeded app_mention flush for the
+                  // same ts, and clearing it here would let this retry dispatch
+                  // a duplicate reply once the CAS conflict clears (ENG-18283).
                   appMentionDispatchedKeys.delete(entrySeenKey);
                 }
                 ctx.releaseSeenMessage(entry.message.channel, entry.message.ts);
@@ -277,11 +282,18 @@ export function createSlackMessageHandler(params: {
           completion.resolve();
         }
       } catch (error) {
-        retryEntries(error);
+        const retryScheduled = retryEntries(error);
         for (const completion of completions) {
           completion.reject(error);
         }
-        throw error;
+        // A scheduled retry already owns recovery for this race; rethrowing here
+        // would only feed the debounce onError log (the exact false watchdog
+        // alert ENG-18283 exists to remove) for a transient failure that a later
+        // attempt may resolve on its own. Relay-owned completions above already
+        // got their rejection regardless of whether a retry was scheduled.
+        if (!retryScheduled) {
+          throw error;
+        }
       }
     },
     onError: (err) => {

@@ -252,7 +252,7 @@ describe("createSlackMessageHandler app_mention race handling", () => {
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects the flushing caller then automatically retries a native message after a retryable dispatch failure", async () => {
+  it("does not reject the flushing caller when a native message auto-retries after a retryable dispatch failure", async () => {
     vi.useFakeTimers();
     prepareSlackMessageMock.mockResolvedValue({ ctxPayload: {} });
     dispatchPreparedSlackMessageMock
@@ -261,7 +261,10 @@ describe("createSlackMessageHandler app_mention race handling", () => {
 
     const handler = createTestHandler();
 
-    await expect(sendMessageEvent(handler, "1700000000.000250")).rejects.toThrow("retry me");
+    // A scheduled retry already owns recovery, so the flush does not rethrow to
+    // the debounce onError log (which would otherwise still fire the watchdog
+    // alert ENG-18283 exists to remove) for a failure a later attempt resolves.
+    await expect(sendMessageEvent(handler, "1700000000.000250")).resolves.toBeUndefined();
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1_000);
@@ -277,7 +280,7 @@ describe("createSlackMessageHandler app_mention race handling", () => {
 
     const handler = createTestHandler();
 
-    await expect(sendMessageEvent(handler, "1700000000.000260")).rejects.toThrow("retry me");
+    await expect(sendMessageEvent(handler, "1700000000.000260")).resolves.toBeUndefined();
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.advanceTimersByTimeAsync(1_000);
