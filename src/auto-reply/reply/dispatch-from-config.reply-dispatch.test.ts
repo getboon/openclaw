@@ -344,7 +344,7 @@ describe("dispatchReplyFromConfig reply_dispatch hook", () => {
     });
   });
 
-  it("records completed, not failed:delivery_failed, when the only final is the sanctioned NO_REPLY token (ENG-18092)", async () => {
+  it("records completed, not failed:delivery_failed, when the only final is the sanctioned NO_REPLY token", async () => {
     // The model is instructed (system-prompt.ts:557) to close a turn with ONLY
     // NO_REPLY after delivering visible output via the `message` tool. The real
     // dispatcher refuses this payload by contract (reply-flow.test.ts:23), which
@@ -373,7 +373,7 @@ describe("dispatchReplyFromConfig reply_dispatch hook", () => {
     expect(result.noVisibleReplyFallbackEligible).toBe(true);
   });
 
-  it("still flags delivery_failed when a silent-token final carries undelivered media (ENG-18092)", async () => {
+  it("still flags delivery_failed when a silent-token final carries undelivered media", async () => {
     // Locks the media carve-out (normalize-reply.ts:59-64): a NO_REPLY final
     // with media still ships, so a genuinely undelivered media-bearing payload
     // must not be swept into the "intentionally silent" exemption.
@@ -402,7 +402,7 @@ describe("dispatchReplyFromConfig reply_dispatch hook", () => {
     });
   });
 
-  it("also recognizes a silent token glued to markdown as intentional (ENG-18092)", async () => {
+  it("also recognizes a silent token glued to markdown as intentional", async () => {
     // The dispatcher's real normalizeReplyPayload strips a mixed-content form
     // like "**NO_REPLY" down to empty (normalize-reply.ts:70-80's trailing
     // strip matches a token preceded by asterisks), not just the exact token.

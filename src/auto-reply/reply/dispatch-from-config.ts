@@ -1113,7 +1113,7 @@ export async function dispatchReplyFromConfig(
   const { ctx, cfg, dispatcher } = params;
   if (params.replyOptions?.abortSignal?.aborted) {
     // The most silent skip in this file: the caller already gave up before
-    // any dedupe/admission/logging setup below even runs (ENG-18092).
+    // any dedupe/admission/logging setup below even runs.
     replyAdmissionLog.info("reply turn skipped before agent run", {
       sessionKey:
         normalizeOptionalString(ctx.SessionKey) ??
@@ -1260,8 +1260,8 @@ export async function dispatchReplyFromConfig(
   ) {
     // Fast path ahead of the full admission machinery below: a heartbeat never
     // waits or recovers a stale run, it just bails when the lane is busy. Give
-    // it the same skip bookkeeping as the slower admission path (ENG-18092) —
-    // this was previously the most silent skip in the file, with no log line
+    // it the same skip bookkeeping as the slower admission path below — this
+    // was previously the most silent skip in the file, with no log line
     // and no recordProcessed/markIdle call at all.
     recordProcessed("skipped", { reason: "reply-operation-active" });
     markIdle("message_completed");
@@ -2013,6 +2013,13 @@ export async function dispatchReplyFromConfig(
   const inboundDedupeClaim = claimInboundDedupe(ctx);
   if (inboundDedupeClaim.status === "duplicate" || inboundDedupeClaim.status === "inflight") {
     recordProcessed("skipped", { reason: "duplicate" });
+    replyAdmissionLog.info("reply turn skipped before agent run", {
+      sessionKey: dispatchOperationSessionKey ?? sessionKey,
+      reason: "duplicate" satisfies DispatchTurnSkipReason,
+      phase: "pre_dispatch",
+      surface: ctx.Surface,
+      messageId: ctx.MessageSidFull ?? ctx.MessageSid,
+    });
     return attachSourceReplyDeliveryMode({
       queuedFinal: false,
       counts: dispatcher.getQueuedCounts(),
@@ -2048,7 +2055,7 @@ export async function dispatchReplyFromConfig(
     }
     // Always-on (not diagnostics/verbose-gated): a busy/aborted admission skip
     // was previously invisible at normal verbosity, indistinguishable from an
-    // agent that legitimately produced nothing (ENG-18092).
+    // agent that legitimately produced nothing.
     replyAdmissionLog.info("reply turn skipped before agent run", {
       sessionKey: dispatchOperationSessionKey ?? sessionKey,
       reason: opts.reason,
@@ -2072,6 +2079,15 @@ export async function dispatchReplyFromConfig(
     recordProcessed("completed", { reason: "reply_operation_aborted" });
     markIdle("message_completed");
     completeDispatchReplyOperation();
+    if (opts?.turnSkipped) {
+      replyAdmissionLog.info("reply turn skipped before agent run", {
+        sessionKey: dispatchOperationSessionKey ?? sessionKey,
+        reason: opts.turnSkipped,
+        phase: "pre_dispatch",
+        surface: ctx.Surface,
+        messageId: ctx.MessageSidFull ?? ctx.MessageSid,
+      });
+    }
     return attachSourceReplyDeliveryMode({
       queuedFinal: false,
       counts: dispatcher.getQueuedCounts(),
