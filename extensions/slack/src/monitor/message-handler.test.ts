@@ -270,4 +270,41 @@ describe("createSlackMessageHandler", () => {
     const flushFailure = expect(onFlushCallbacks[0]?.([entry])).rejects.toThrow("dispatch failed");
     await Promise.all([handledFailure, flushFailure]);
   });
+
+  it("does not auto-retry a relay-owned dispatch after a retryable session-init-conflict failure", async () => {
+    dispatchPreparedSlackMessageMock.mockRejectedValueOnce(
+      new Error("reply session initialization conflicted for agent:main:slack:channel:C111"),
+    );
+    const { handler } = createHandlerWithTracker();
+    const handled = handler(
+      {
+        type: "message",
+        channel: "C111",
+        user: "U111",
+        ts: "1709000000.000700",
+        text: "relay message",
+      } as never,
+      { source: "message", awaitDispatch: true },
+    );
+
+    await vi.waitFor(() => expect(enqueueMock).toHaveBeenCalledTimes(1));
+    const entry = enqueueMock.mock.calls[0]?.[0] as Record<string, unknown>;
+    const handledFailure = expect(handled).rejects.toThrow(
+      "reply session initialization conflicted",
+    );
+    const flushFailure = expect(onFlushCallbacks[0]?.([entry])).rejects.toThrow(
+      "reply session initialization conflicted",
+    );
+    await Promise.all([handledFailure, flushFailure]);
+
+    vi.useFakeTimers();
+    try {
+      // Relay delivery owns retry for awaitDispatch callers; scheduling an
+      // internal retry too would race the router redelivery and duplicate a reply.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(enqueueMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

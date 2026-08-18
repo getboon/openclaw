@@ -21,6 +21,7 @@ export {
   extractErrorCode,
   formatErrorMessage,
   formatUncaughtError,
+  isReplySessionInitializationConflictError,
   readErrorName,
 } from "../infra/errors.js";
 export { isApprovalNotFoundError } from "../infra/approval-errors.ts";

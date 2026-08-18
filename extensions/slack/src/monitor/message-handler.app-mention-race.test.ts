@@ -154,6 +154,7 @@ describe("createSlackMessageHandler app_mention race handling", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("allows a single app_mention retry when message event was dropped before dispatch", async () => {
@@ -251,7 +252,8 @@ describe("createSlackMessageHandler app_mention race handling", () => {
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(1);
   });
 
-  it("retries message replay after an explicit retryable dispatch failure", async () => {
+  it("rejects the flushing caller then automatically retries a native message after a retryable dispatch failure", async () => {
+    vi.useFakeTimers();
     prepareSlackMessageMock.mockResolvedValue({ ctxPayload: {} });
     dispatchPreparedSlackMessageMock
       .mockRejectedValueOnce(new SlackRetryableInboundError("retry me"))
@@ -260,10 +262,30 @@ describe("createSlackMessageHandler app_mention race handling", () => {
     const handler = createTestHandler();
 
     await expect(sendMessageEvent(handler, "1700000000.000250")).rejects.toThrow("retry me");
-    await expect(sendMessageEvent(handler, "1700000000.000250")).resolves.toBeUndefined();
+    expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1_000);
 
     expect(prepareSlackMessageMock).toHaveBeenCalledTimes(2);
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up scheduling further retries once the max attempt count is reached", async () => {
+    vi.useFakeTimers();
+    prepareSlackMessageMock.mockResolvedValue({ ctxPayload: {} });
+    dispatchPreparedSlackMessageMock.mockRejectedValue(new SlackRetryableInboundError("retry me"));
+
+    const handler = createTestHandler();
+
+    await expect(sendMessageEvent(handler, "1700000000.000260")).rejects.toThrow("retry me");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    // 1 initial attempt + 3 retries (retryAttempt 1..3) exhausts RETRYABLE_FLUSH_MAX_ATTEMPTS.
+    expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(4);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(4);
   });
 
   it("keeps message replay deduped after a non-retryable dispatch failure", async () => {
