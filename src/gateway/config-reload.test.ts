@@ -320,6 +320,14 @@ describe("buildGatewayReloadPlan", () => {
     expect(plan.noopPaths).toStrictEqual([]);
   });
 
+  it("restarts heartbeat when agents.defaults.progressNudge changes (ENG-17107)", () => {
+    const plan = buildGatewayReloadPlan(["agents.defaults.progressNudge.maxNudges"]);
+    expect(plan.restartGateway).toBe(false);
+    expect(plan.restartHeartbeat).toBe(true);
+    expect(plan.hotReasons).toContain("agents.defaults.progressNudge.maxNudges");
+    expect(plan.noopPaths).toStrictEqual([]);
+  });
+
   it("treats plugin install timestamp-only changes as no-op", () => {
     const plan = buildGatewayReloadPlan([
       "plugins.installs.lossless-claw.resolvedAt",

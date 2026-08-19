@@ -298,9 +298,6 @@ export function isSilentReplyPrefixText(
   if (!normalized) {
     return false;
   }
-  if (normalized.length < 2) {
-    return false;
-  }
   if (/[^A-Z_]/.test(normalized)) {
     return false;
   }
@@ -312,7 +309,7 @@ export function isSilentReplyPrefixText(
     return true;
   }
   // Keep underscore guard for generic tokens to avoid suppressing unrelated
-  // uppercase words (e.g. HEART/HE with HEARTBEAT_OK). Only allow bare "NO"
-  // because NO_REPLY streaming can transiently emit that fragment.
-  return tokenUpper === SILENT_REPLY_TOKEN && normalized === "NO";
+  // uppercase words (e.g. HEART/HE with HEARTBEAT_OK). Only allow bare "N"/"NO"
+  // because NO_REPLY streaming can transiently emit those fragments.
+  return tokenUpper === SILENT_REPLY_TOKEN && (normalized === "N" || normalized === "NO");
 }

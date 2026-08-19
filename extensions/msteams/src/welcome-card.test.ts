@@ -25,7 +25,10 @@ describe("buildMSTeamsPresentationCard", () => {
     });
   });
 
-  it("submits command actions as command text", () => {
+  it("wraps command actions as imBack so Teams redelivers them as a typed message", () => {
+    // Teams only turns an Action.Submit press into a message activity the
+    // handler reads (activity.text) when data carries the imBack shape;
+    // a bare command string arrives as an invoke the handler never inspects.
     expect(
       buildMSTeamsPresentationCard({
         presentation: {
@@ -43,7 +46,53 @@ describe("buildMSTeamsPresentationCard", () => {
         },
       }),
     ).toMatchObject({
-      actions: [{ type: "Action.Submit", title: "Plugins", data: "/codex plugins menu" }],
+      actions: [
+        {
+          type: "Action.Submit",
+          title: "Plugins",
+          data: { msteams: { type: "imBack", value: "/codex plugins menu" } },
+        },
+      ],
+    });
+  });
+
+  it("wraps the Retry command button as imBack", () => {
+    expect(
+      buildMSTeamsPresentationCard({
+        presentation: {
+          blocks: [
+            {
+              type: "buttons",
+              buttons: [{ label: "Retry", action: { type: "command", command: "/retry" } }],
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      actions: [
+        {
+          type: "Action.Submit",
+          title: "Retry",
+          data: { msteams: { type: "imBack", value: "/retry" } },
+        },
+      ],
+    });
+  });
+
+  it("leaves non-command (callback) button data shape unchanged", () => {
+    expect(
+      buildMSTeamsPresentationCard({
+        presentation: {
+          blocks: [
+            {
+              type: "buttons",
+              buttons: [{ label: "Open", action: { type: "callback", value: "open" } }],
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      actions: [{ type: "Action.Submit", title: "Open", data: { value: "open", label: "Open" } }],
     });
   });
 

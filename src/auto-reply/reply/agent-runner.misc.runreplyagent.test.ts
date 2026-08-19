@@ -445,6 +445,71 @@ describe("runReplyAgent auto-compaction token update", () => {
     expect(stored[sessionKey].totalTokens).toBe(55_000);
   }, 180_000);
 
+  it("returns the agent decision trace on the terminal reply payload", async () => {
+    const sessionKey = "main";
+    const sessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 50_000,
+    };
+    runEmbeddedAgentMock.mockResolvedValue({
+      payloads: [{ text: "Project found." }],
+      meta: {
+        agentMeta: {},
+        toolSummary: {
+          calls: 1,
+          tools: ["buildingconnected_list_projects"],
+          failures: 0,
+          visibleTools: ["buildingconnected_list_projects", "read"],
+          invocations: [{ name: "buildingconnected_list_projects", status: "ok" }],
+        },
+        completion: { stopReason: "end_turn", refusal: false },
+      },
+    });
+    const { typing, sessionCtx, resolvedQueue, followupRun } = createBaseRun({
+      storePath: "",
+      sessionEntry,
+    });
+
+    const result = await runReplyAgent({
+      commandBody:
+        "Find the active BuildingConnected project with private_input=not-for-audit-trace",
+      followupRun,
+      queueKey: sessionKey,
+      resolvedQueue,
+      shouldSteer: false,
+      shouldFollowup: false,
+      isActive: false,
+      isStreaming: false,
+      typing,
+      sessionCtx,
+      sessionEntry,
+      sessionStore: { [sessionKey]: sessionEntry },
+      sessionKey,
+      defaultModel: "anthropic/claude-opus-4-6",
+      agentCfgContextTokens: 200_000,
+      resolvedVerboseLevel: "off",
+      isNewSession: false,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      shouldInjectGroupIntro: false,
+      typingMode: "instant",
+    });
+
+    expect(result).toMatchObject({
+      text: "Project found.",
+      auditTrace: {
+        schemaVersion: 1,
+        visibleTools: ["buildingconnected_list_projects", "read"],
+        toolInvocations: [{ name: "buildingconnected_list_projects", status: "ok" }],
+        confidence: "high",
+        disposition: "completed",
+        reason: "tool_execution_succeeded",
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("private_input=not-for-audit-trace");
+  });
+
   it("keeps an unarmed preflight drain visible instead of dropping the reply", async () => {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-preflight-drain-"));
     const storePath = path.join(tmp, "sessions.json");
@@ -1439,6 +1504,11 @@ describe("runReplyAgent Active Memory inline debug", () => {
 
     expect(Array.isArray(result)).toBe(true);
     expect((result as { text?: string }[])[0]?.text).toBe("Visible reply");
+    expect((result as { auditTrace?: unknown }[])[0]?.auditTrace).toMatchObject({
+      disposition: "completed",
+      reason: "no_tools_visible",
+    });
+    expect((result as { auditTrace?: unknown }[])[1]).not.toHaveProperty("auditTrace");
     const traceText = (result as { text?: string }[])[1]?.text ?? "";
     expect(traceText).toContain("🔎 Usage (Session Total):");
     expect(traceText).toContain("🔎 Usage (Last Turn Total):");

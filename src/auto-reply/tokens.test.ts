@@ -255,6 +255,7 @@ describe("startsWithSilentToken", () => {
 
 describe("isSilentReplyPrefixText", () => {
   it("matches uppercase token lead fragments", () => {
+    expect(isSilentReplyPrefixText("N")).toBe(true);
     expect(isSilentReplyPrefixText("NO")).toBe(true);
     expect(isSilentReplyPrefixText("NO_")).toBe(true);
     expect(isSilentReplyPrefixText("NO_RE")).toBe(true);
@@ -263,10 +264,14 @@ describe("isSilentReplyPrefixText", () => {
   });
 
   it("rejects ambiguous natural-language prefixes", () => {
-    expect(isSilentReplyPrefixText("N")).toBe(false);
     expect(isSilentReplyPrefixText("No")).toBe(false);
     expect(isSilentReplyPrefixText("no")).toBe(false);
     expect(isSilentReplyPrefixText("Hello")).toBe(false);
+  });
+
+  it("keeps the bare single-char guard scoped to the NO_REPLY token", () => {
+    expect(isSilentReplyPrefixText("N", "HEARTBEAT_OK")).toBe(false);
+    expect(isSilentReplyPrefixText("H", "HEARTBEAT_OK")).toBe(false);
   });
 
   it("keeps underscore guard for non-NO_REPLY tokens", () => {

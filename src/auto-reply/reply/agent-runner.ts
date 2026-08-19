@@ -53,11 +53,7 @@ import {
   formatTokenCount,
   resolveModelCostConfig,
 } from "../../utils/usage-format.js";
-import {
-  buildFallbackClearedNotice,
-  buildFallbackNotice,
-  resolveFallbackTransition,
-} from "../fallback-state.js";
+import { resolveFallbackTransition } from "../fallback-state.js";
 import { DEFAULT_HEARTBEAT_ACK_MAX_CHARS, stripHeartbeatToken } from "../heartbeat.js";
 import {
   isReplyPayloadStatusNotice,
@@ -71,6 +67,7 @@ import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { buildUsageContract } from "../usage-bar/contract.js";
 import { loadUsageBarTemplate } from "../usage-bar/template.js";
 import { renderUsageBar } from "../usage-bar/translator.js";
+import { attachAgentDecisionTrace, buildAgentDecisionTrace } from "./agent-decision-trace.js";
 import {
   buildKnownAgentRunFailureReplyPayload,
   runAgentTurnWithFallback,
@@ -428,6 +425,11 @@ type TraceToolSummaryView = {
   tools: string[];
   failures?: number;
   totalToolTimeMs?: number;
+  visibleTools?: string[];
+  invocations?: Array<{
+    name: string;
+    status: "ok" | "error" | "blocked";
+  }>;
 };
 
 type TraceCompletionView = {
@@ -2048,7 +2050,9 @@ export async function runReplyAgent(params: {
       return returnWithQueuedFollowupDrain(silentFallbackFailurePayload);
     };
 
-    const fallbackNoticePayloads: ReplyPayload[] = [];
+    // A self-recovering mid-turn model swap is an internal reliability detail, never surfaced
+    // to the user (ENG-17078). The transition is recorded only in structured lifecycle events
+    // (and logs) for debugging; the persisted notice-state above still dedupes those events.
     if (
       !fallbackExhausted &&
       !preserveUserFacingSessionState &&
@@ -2069,22 +2073,6 @@ export async function runReplyAgent(params: {
           attempts: fallbackAttempts,
         },
       });
-      const fallbackNotice = buildFallbackNotice({
-        selectedProvider,
-        selectedModel,
-        activeProvider: providerUsed,
-        activeModel: modelUsed,
-        attempts: fallbackAttempts,
-        cfg,
-      });
-      if (fallbackNotice) {
-        fallbackNoticePayloads.push(
-          markReplyPayloadForSourceSuppressionDelivery({
-            text: fallbackNotice,
-            isFallbackNotice: true,
-          }),
-        );
-      }
     }
     if (
       !fallbackExhausted &&
@@ -2104,23 +2092,12 @@ export async function runReplyAgent(params: {
           previousActiveModel: fallbackTransition.previousState.activeModel,
         },
       });
-      fallbackNoticePayloads.push(
-        markReplyPayloadForSourceSuppressionDelivery({
-          text: buildFallbackClearedNotice({
-            selectedProvider,
-            selectedModel,
-            previousActiveModel: fallbackTransition.previousState.activeModel,
-            cfg,
-          }),
-          isFallbackNotice: true,
-        }),
-      );
     }
 
     // Drain any late tool/block deliveries before deciding there's "nothing to send".
     // Otherwise, a late typing trigger (e.g. from a tool callback) can outlive the run and
     // keep the typing indicator stuck.
-    if (payloadArray.length === 0 && fallbackNoticePayloads.length === 0) {
+    if (payloadArray.length === 0) {
       const silentFallbackFailurePayload = await returnSilentFallbackFailureIfNeeded();
       if (silentFallbackFailurePayload) {
         return silentFallbackFailurePayload;
@@ -2131,10 +2108,7 @@ export async function runReplyAgent(params: {
     const currentMessageId = sessionCtx.MessageSidFull ?? sessionCtx.MessageSid;
     const payloadResult = await buildReplyPayloads({
       config: cfg,
-      payloads:
-        fallbackNoticePayloads.length > 0
-          ? [...fallbackNoticePayloads, ...payloadArray]
-          : payloadArray,
+      payloads: payloadArray,
       isHeartbeat,
       didLogHeartbeatStrip,
       silentExpected: followupRun.run.silentExpected,
@@ -2163,17 +2137,17 @@ export async function runReplyAgent(params: {
     const { replyPayloads } = payloadResult;
     didLogHeartbeatStrip = payloadResult.didLogHeartbeatStrip;
 
-    const hasReplyPayloadBeyondFallbackNotice = replyPayloads.some(
+    const hasReplyPayloadBeyondStatusNotice = replyPayloads.some(
       (payload) => !isReplyPayloadStatusNotice(payload),
     );
     const hasDeliveredBlockStream = Boolean(
       blockReplyPipeline?.didStream() && !blockReplyPipeline.isAborted(),
     );
-    const canDeliverStandaloneFallbackNotice =
+    const hasVisibleContentDeliveredElsewhere =
       hasDeliveredBlockStream || successfulSideEffectDelivery;
     if (
       replyPayloads.length === 0 ||
-      (!hasReplyPayloadBeyondFallbackNotice && !canDeliverStandaloneFallbackNotice)
+      (!hasReplyPayloadBeyondStatusNotice && !hasVisibleContentDeliveredElsewhere)
     ) {
       const silentFallbackFailurePayload = await returnSilentFallbackFailureIfNeeded();
       if (silentFallbackFailurePayload) {
@@ -2437,6 +2411,19 @@ export async function runReplyAgent(params: {
               : {}),
           }
         : undefined);
+    if (!isHeartbeat) {
+      // Attach before verbose, raw-trace, and usage decorations so audit facts
+      // stay on the terminal assistant reply instead of diagnostic payloads.
+      finalPayloads = attachAgentDecisionTrace(
+        finalPayloads,
+        buildAgentDecisionTrace({
+          toolSummary,
+          completion,
+          error: runResult.meta?.error,
+          failureSignal: runResult.meta?.failureSignal,
+        }),
+      );
+    }
     const contextManagement = {
       ...(typeof activeSessionEntry?.compactionCount === "number"
         ? { sessionCompactions: activeSessionEntry.compactionCount }

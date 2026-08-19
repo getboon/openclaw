@@ -1,6 +1,7 @@
 /** Main reply dispatch pipeline from finalized config/context to delivery payloads. */
 import crypto from "node:crypto";
 import { isParentOwnedBackgroundAcpSession } from "@openclaw/acp-core/session-interaction-mode";
+import { addTimerTimeoutGraceMs } from "@openclaw/normalization-core/number-coercion";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
@@ -34,6 +35,7 @@ import {
   isSubagentEnvelopeSession,
   resolveSubagentCapabilityStore,
 } from "../../agents/subagent-capabilities.js";
+import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { isToolAllowedByPolicies } from "../../agents/tool-policy-match.js";
 import { mergeAlsoAllowPolicy, resolveToolProfilePolicy } from "../../agents/tool-policy.js";
 import {
@@ -141,12 +143,14 @@ import {
 import type {
   DispatchFromConfigParams,
   DispatchFromConfigResult,
+  DispatchTurnSkipReason,
 } from "./dispatch-from-config.types.js";
 import { resolveEffectiveReplyRoute } from "./effective-reply-route.js";
 import { withFullRuntimeReplyConfig } from "./get-reply-fast-path.js";
 import type { ReplySessionBinding } from "./get-reply.types.js";
 import { claimInboundDedupe, commitInboundDedupe, releaseInboundDedupe } from "./inbound-dedupe.js";
 import { hasInboundAudio } from "./inbound-media.js";
+import { normalizeReplyPayload, type NormalizeReplySkipReason } from "./normalize-reply.js";
 import { resolveOriginMessageProvider } from "./origin-routing.js";
 import { waitForReplyDispatcherIdle } from "./reply-dispatcher.js";
 import type {
@@ -769,6 +773,24 @@ async function clearPendingFinalDeliveryAfterSuccess(params: {
   });
 }
 
+/**
+ * A final whose only content is the silent token closes the turn by design:
+ * system-prompt.ts:557 instructs the model to answer with ONLY NO_REPLY after
+ * delivering visible output through the `message` tool. The dispatcher refuses
+ * such a payload by contract (reply-flow.test.ts:23), so it is not a failed
+ * delivery. Reuses the dispatcher's own `normalizeReplyPayload` silent-skip
+ * detection (mixed-content/leading/trailing token forms included) rather than
+ * a narrower re-check, so this can't drift from what the dispatcher actually
+ * refuses. Media alongside the token still ships (normalize-reply.ts:59-64),
+ * so it must not be treated as silent — only the "silent" skip reason counts,
+ * not "empty" (nothing to say at all) or "heartbeat".
+ */
+function isIntentionallySilentFinalReply(reply: ReplyPayload): boolean {
+  let skipReason: NormalizeReplySkipReason | undefined;
+  normalizeReplyPayload(reply, { onSkip: (reason) => (skipReason = reason) });
+  return skipReason === "silent";
+}
+
 async function mirrorDeliveredReplyToTranscript(params: {
   metadata?: TranscriptMirror;
   cfg: OpenClawConfig;
@@ -994,6 +1016,7 @@ type ReplyHotPathTimingSummary = {
 };
 
 const replyHotPathTimingLog = createSubsystemLogger("auto-reply/reply-timing");
+const replyAdmissionLog = createSubsystemLogger("auto-reply/reply-admission");
 const REPLY_HOT_PATH_TIMING_WARN_TOTAL_MS = 1_000;
 const REPLY_HOT_PATH_TIMING_WARN_STAGE_MS = 500;
 
@@ -1089,9 +1112,21 @@ export async function dispatchReplyFromConfig(
 ): Promise<DispatchFromConfigResult> {
   const { ctx, cfg, dispatcher } = params;
   if (params.replyOptions?.abortSignal?.aborted) {
+    // The most silent skip in this file: the caller already gave up before
+    // any dedupe/admission/logging setup below even runs.
+    replyAdmissionLog.info("reply turn skipped before agent run", {
+      sessionKey:
+        normalizeOptionalString(ctx.SessionKey) ??
+        normalizeOptionalString(ctx.CommandTargetSessionKey),
+      reason: "aborted" satisfies DispatchTurnSkipReason,
+      phase: "pre_dispatch",
+      surface: ctx.Surface,
+      messageId: ctx.MessageSidFull ?? ctx.MessageSid,
+    });
     return {
       queuedFinal: false,
       counts: dispatcher.getQueuedCounts(),
+      turnSkipped: "aborted",
     };
   }
   const diagnosticsEnabled = isDiagnosticsEnabled(cfg);
@@ -1223,9 +1258,24 @@ export async function dispatchReplyFromConfig(
     dispatchOperationSessionKey &&
     replyRunRegistry.get(dispatchOperationSessionKey)
   ) {
+    // Fast path ahead of the full admission machinery below: a heartbeat never
+    // waits or recovers a stale run, it just bails when the lane is busy. Give
+    // it the same skip bookkeeping as the slower admission path below — this
+    // was previously the most silent skip in the file, with no log line
+    // and no recordProcessed/markIdle call at all.
+    recordProcessed("skipped", { reason: "reply-operation-active" });
+    markIdle("message_completed");
+    replyAdmissionLog.info("reply turn skipped before agent run", {
+      sessionKey: dispatchOperationSessionKey,
+      reason: "active-run" satisfies DispatchTurnSkipReason,
+      phase: "pre_dispatch",
+      surface: ctx.Surface,
+      messageId: ctx.MessageSidFull ?? ctx.MessageSid,
+    });
     return {
       queuedFinal: false,
       counts: dispatcher.getQueuedCounts(),
+      turnSkipped: "active-run",
     };
   }
   const markProgress = () => {
@@ -1278,6 +1328,19 @@ export async function dispatchReplyFromConfig(
     fallbackAgentId: ctx.AgentId,
   });
   const sessionAgentCfg = resolveAgentConfig(cfg, sessionAgentId);
+  // Every visible reply-turn gets a lane deadline derived from the same
+  // resolver the agent run itself uses (including the caller's own
+  // timeoutOverrideSeconds, e.g. a heartbeat turn requesting an unbounded
+  // run), plus settle grace — so a hung resolver can never retain the
+  // lane/status indefinitely even when agents.defaults.timeoutSeconds is
+  // unset (the resolver's own 48h default applies, not "no deadline").
+  // `agents.defaults.timeoutSeconds` itself has no "0 means no timeout"
+  // sentinel (the schema is `positive()`, so 0 isn't a valid config value);
+  // that sentinel only exists for a per-run overrideSeconds, mirrored here.
+  const configuredTurnDeadlineMs = addTimerTimeoutGraceMs(
+    resolveAgentTimeoutMs({ cfg, overrideSeconds: params.replyOptions?.timeoutOverrideSeconds }),
+    15_000,
+  );
   const verboseProgress = createShouldEmitVerboseProgress({
     sessionKey: acpDispatchSessionKey,
     storePath: sessionStoreEntry.storePath,
@@ -1310,7 +1373,9 @@ export async function dispatchReplyFromConfig(
   let dispatchReplyOperation: ReplyOperation | undefined;
   let dispatchAbortOperation: ReplyOperation | undefined;
   let preDispatchAbortOperation: ReplyOperation | undefined;
-  type DispatchReplyOperationAcquisition = { status: "ready" } | { status: "busy" };
+  type DispatchReplyOperationAcquisition =
+    | { status: "ready" }
+    | { status: "busy"; reason: DispatchTurnSkipReason; phase: "pre_dispatch" | "dispatch" };
   const ensureDispatchReplyOperation = async (
     phase: "pre_dispatch" | "dispatch",
   ): Promise<DispatchReplyOperationAcquisition> => {
@@ -1318,7 +1383,9 @@ export async function dispatchReplyFromConfig(
       return { status: "ready" };
     }
     if (dispatchAbortOperation && !dispatchAbortOperation.result) {
-      return dispatchReplyOperation ? { status: "ready" } : { status: "busy" };
+      return dispatchReplyOperation
+        ? { status: "ready" }
+        : { status: "busy", reason: "active-run", phase };
     }
     if (
       phase === "dispatch" &&
@@ -1327,7 +1394,11 @@ export async function dispatchReplyFromConfig(
       !dispatchReplyOperation
     ) {
       dispatchAbortOperation = preDispatchAbortOperation;
-      return { status: "busy" };
+      // The pre-dispatch turn's own operation ended in a non-completed terminal
+      // state (aborted/failed/cancelled) before this phase re-checked it, so
+      // this turn never got a live run to admit into — classify as "aborted",
+      // not "active-run" (nothing is actively holding the slot anymore).
+      return { status: "busy", reason: "aborted", phase };
     }
     if (!dispatchOperationSessionKey) {
       return { status: "ready" };
@@ -1369,6 +1440,7 @@ export async function dispatchReplyFromConfig(
       resetTriggered: false,
       routeThreadId,
       upstreamAbortSignal: params.replyOptions?.abortSignal,
+      deadlineMs: configuredTurnDeadlineMs,
       waitForActive: !allowActivePreDispatch && !allowSlackRoutedThreadBypass,
       ...(shouldRecoverStaleVisibleOperation ? { waitTimeoutMs: visibleReplyRecoveryWaitMs } : {}),
     });
@@ -1414,6 +1486,7 @@ export async function dispatchReplyFromConfig(
           resetTriggered: false,
           routeThreadId,
           upstreamAbortSignal: params.replyOptions?.abortSignal,
+          deadlineMs: configuredTurnDeadlineMs,
           waitForActive: replyOperationStillActive,
           waitTimeoutMs: visibleReplyRecoveryWaitMs,
         });
@@ -1438,10 +1511,7 @@ export async function dispatchReplyFromConfig(
         return { status: "ready" };
       }
       dispatchAbortOperation = admission.activeOperation;
-      logVerbose(
-        `dispatch-from-config: skipped reply operation admission for ${dispatchOperationSessionKey}; reason=${admission.reason}`,
-      );
-      return { status: "busy" };
+      return { status: "busy", reason: admission.reason, phase };
     }
     dispatchReplyOperation = admission.operation;
     dispatchReplyOperation.retainFailureUntilComplete();
@@ -1943,9 +2013,17 @@ export async function dispatchReplyFromConfig(
   const inboundDedupeClaim = claimInboundDedupe(ctx);
   if (inboundDedupeClaim.status === "duplicate" || inboundDedupeClaim.status === "inflight") {
     recordProcessed("skipped", { reason: "duplicate" });
+    replyAdmissionLog.info("reply turn skipped before agent run", {
+      sessionKey: dispatchOperationSessionKey ?? sessionKey,
+      reason: "duplicate" satisfies DispatchTurnSkipReason,
+      phase: "pre_dispatch",
+      surface: ctx.Surface,
+      messageId: ctx.MessageSidFull ?? ctx.MessageSid,
+    });
     return attachSourceReplyDeliveryMode({
       queuedFinal: false,
       counts: dispatcher.getQueuedCounts(),
+      turnSkipped: "duplicate",
     });
   }
   const commitInboundDedupeIfClaimed = () => {
@@ -1958,37 +2036,62 @@ export async function dispatchReplyFromConfig(
       releaseInboundDedupe(inboundDedupeClaim.key);
     }
   };
-  const finishReplyOperationBusyDispatch = (opts?: {
+  const finishReplyOperationBusyDispatch = (opts: {
+    reason: DispatchTurnSkipReason;
+    phase: "pre_dispatch" | "dispatch";
     dedupeDisposition?: "commit" | "release";
     recordAgentDispatchCompleted?: boolean;
     sessionMetadataChanges?: DispatchFromConfigResult["sessionMetadataChanges"];
   }): DispatchFromConfigResult => {
-    if (opts?.recordAgentDispatchCompleted) {
+    if (opts.recordAgentDispatchCompleted) {
       recordAgentDispatchCompleted("completed", { reason: "reply-operation-active" });
     }
     recordProcessed("skipped", { reason: "reply-operation-active" });
     markIdle("message_completed");
-    if (opts?.dedupeDisposition === "release") {
+    if (opts.dedupeDisposition === "release") {
       releaseInboundDedupeIfClaimed();
     } else {
       commitInboundDedupeIfClaimed();
     }
+    // Always-on (not diagnostics/verbose-gated): a busy/aborted admission skip
+    // was previously invisible at normal verbosity, indistinguishable from an
+    // agent that legitimately produced nothing.
+    replyAdmissionLog.info("reply turn skipped before agent run", {
+      sessionKey: dispatchOperationSessionKey ?? sessionKey,
+      reason: opts.reason,
+      phase: opts.phase,
+      surface: ctx.Surface,
+      messageId: ctx.MessageSidFull ?? ctx.MessageSid,
+    });
     return attachSourceReplyDeliveryMode({
       queuedFinal: false,
       counts: dispatcher.getQueuedCounts(),
-      ...(opts?.sessionMetadataChanges
+      turnSkipped: opts.reason,
+      ...(opts.sessionMetadataChanges
         ? { sessionMetadataChanges: opts.sessionMetadataChanges }
         : {}),
     });
   };
-  const finishReplyOperationAbortedDispatch = (): DispatchFromConfigResult => {
+  const finishReplyOperationAbortedDispatch = (opts?: {
+    turnSkipped?: DispatchTurnSkipReason;
+  }): DispatchFromConfigResult => {
     commitInboundDedupeIfClaimed();
     recordProcessed("completed", { reason: "reply_operation_aborted" });
     markIdle("message_completed");
     completeDispatchReplyOperation();
+    if (opts?.turnSkipped) {
+      replyAdmissionLog.info("reply turn skipped before agent run", {
+        sessionKey: dispatchOperationSessionKey ?? sessionKey,
+        reason: opts.turnSkipped,
+        phase: "pre_dispatch",
+        surface: ctx.Surface,
+        messageId: ctx.MessageSidFull ?? ctx.MessageSid,
+      });
+    }
     return attachSourceReplyDeliveryMode({
       queuedFinal: false,
       counts: dispatcher.getQueuedCounts(),
+      ...(opts?.turnSkipped ? { turnSkipped: opts.turnSkipped } : {}),
     });
   };
 
@@ -1999,7 +2102,9 @@ export async function dispatchReplyFromConfig(
 
   if (pluginOwnedBinding) {
     if (isPreDispatchOperationAborted()) {
-      return finishReplyOperationAbortedDispatch();
+      // Reached before any reply operation is ever created for this turn
+      // (unlike the mid-turn abort caught below), so the agent never ran.
+      return finishReplyOperationAbortedDispatch({ turnSkipped: "aborted" });
     }
     touchConversationBindingRecord(pluginOwnedBinding.bindingId);
     if (shouldBypassPluginOwnedBindingForCommand(ctx, cfg)) {
@@ -2187,8 +2292,13 @@ export async function dispatchReplyFromConfig(
     }
     // Register the dispatch-owned operation before any plugin hook or model work
     // so /stop can abort pre-run and in-run stalls through the same session lane.
-    if ((await ensureDispatchReplyOperation("pre_dispatch")).status === "busy") {
-      return finishReplyOperationBusyDispatch({ dedupeDisposition: "release" });
+    const preDispatchAcquisition = await ensureDispatchReplyOperation("pre_dispatch");
+    if (preDispatchAcquisition.status === "busy") {
+      return finishReplyOperationBusyDispatch({
+        reason: preDispatchAcquisition.reason,
+        phase: preDispatchAcquisition.phase,
+        dedupeDisposition: "release",
+      });
     }
 
     const shouldSuppressDefaultToolProgressMessages = () => !shouldEmitVerboseProgress();
@@ -2544,8 +2654,13 @@ export async function dispatchReplyFromConfig(
       }
     }
 
-    if ((await ensureDispatchReplyOperation("dispatch")).status === "busy") {
-      return finishReplyOperationBusyDispatch({ dedupeDisposition: "release" });
+    const dispatchAcquisition = await ensureDispatchReplyOperation("dispatch");
+    if (dispatchAcquisition.status === "busy") {
+      return finishReplyOperationBusyDispatch({
+        reason: dispatchAcquisition.reason,
+        phase: dispatchAcquisition.phase,
+        dedupeDisposition: "release",
+      });
     }
 
     // When automatic source delivery is suppressed, still let the agent process
@@ -3257,8 +3372,11 @@ export async function dispatchReplyFromConfig(
     );
     const sessionMetadataChanges = takeCommandSessionMetadataChanges(ctx);
     notifySessionMetadataChanges(sessionMetadataChanges);
-    if ((await ensureDispatchReplyOperation("dispatch")).status === "busy") {
+    const postReplyDispatchAcquisition = await ensureDispatchReplyOperation("dispatch");
+    if (postReplyDispatchAcquisition.status === "busy") {
       return finishReplyOperationBusyDispatch({
+        reason: postReplyDispatchAcquisition.reason,
+        phase: postReplyDispatchAcquisition.phase,
         recordAgentDispatchCompleted: true,
         ...(sessionMetadataChangesForResult
           ? { sessionMetadataChanges: sessionMetadataChangesForResult }
@@ -3366,11 +3484,12 @@ export async function dispatchReplyFromConfig(
         }
         continue;
       }
-      attemptedFinalDelivery = true;
+      const intentionallySilent = isIntentionallySilentFinalReply(reply);
+      attemptedFinalDelivery = attemptedFinalDelivery || !intentionallySilent;
       const finalReply = await sendFinalPayload(reply, { deliveryId: String(replyIndex) });
       queuedFinal = finalReply.queuedFinal || queuedFinal;
       routedFinalCount += finalReply.routedFinalCount;
-      if (!finalReply.queuedFinal && finalReply.routedFinalCount === 0) {
+      if (!intentionallySilent && !finalReply.queuedFinal && finalReply.routedFinalCount === 0) {
         finalDeliveryFailed = true;
       }
     }
@@ -3468,6 +3587,18 @@ export async function dispatchReplyFromConfig(
     const counts = dispatcher.getQueuedCounts();
     counts.final += routedFinalCount;
     commitInboundDedupeIfClaimed();
+    // A final payload that was neither queued for later delivery nor routed
+    // to any recipient never reached the user, even though the turn itself
+    // produced an answer — record the reply-operation outcome as failed so
+    // terminal-event listeners (e.g. the progress-nudge failure notice) don't
+    // treat this as a silent success. Diagnostics timing below
+    // stays "completed": it measures dispatch duration, not delivery success.
+    if (attemptedFinalDelivery && finalDeliveryFailed) {
+      dispatchReplyOperation?.fail(
+        "delivery_failed",
+        new Error("final reply delivery failed: not queued, nothing routed"),
+      );
+    }
     recordAgentDispatchCompleted("completed");
     recordProcessed(
       "completed",

@@ -37,6 +37,7 @@ export {
   parseApiErrorInfo,
   isBillingErrorMessage,
   isCloudflareOrHtmlErrorPage,
+  isEdgeBlockErrorBody,
   isCloudCodeAssistFormatError,
   isCompactionFailureError,
   isContextOverflowError,

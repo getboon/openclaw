@@ -112,6 +112,13 @@ export type ToolSummaryTrace = {
   tools: string[];
   failures?: number;
   totalToolTimeMs?: number;
+  /** Tool names exposed to the model for the terminal attempt. */
+  visibleTools?: string[];
+  /** Bounded per-call outcomes; arguments and result bodies are intentionally excluded. */
+  invocations?: Array<{
+    name: string;
+    status: "ok" | "error" | "blocked";
+  }>;
 };
 
 type CompletionTrace = {

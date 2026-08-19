@@ -34,6 +34,7 @@ import {
   isCompactionFailureError,
   isContextOverflowError,
   isBillingErrorMessage,
+  isEdgeBlockErrorBody,
   isLikelyContextOverflowError,
   isOverloadedErrorMessage,
   isRateLimitErrorMessage,
@@ -817,7 +818,16 @@ function isPureTransientRateLimitSummary(err: unknown): boolean {
     err.attempts.length > 0 &&
     err.attempts.every((attempt) => {
       const reason = attempt.reason;
-      return reason === "rate_limit" || reason === "overloaded";
+      // An edge/WAF HTML block classifies as `timeout` (errors.ts 429 branch,
+      // plus the 5xx HTML guard). Gate the body check on that reason so a real
+      // edge block stays retryable while HTML auth (401/403 -> auth) and format
+      // (400/422 -> format) failures keep their actionable copy instead of
+      // being ridden out for five blind retries.
+      return (
+        reason === "rate_limit" ||
+        reason === "overloaded" ||
+        (reason === "timeout" && isEdgeBlockErrorBody(attempt.error, attempt.status))
+      );
     })
   );
 }
@@ -2532,6 +2542,7 @@ export async function runAgentTurnWithFallback(params: {
                     images: currentTurnImages.images,
                     imageOrder: currentTurnImages.imageOrder,
                     skillsSnapshot: params.followupRun.run.skillsSnapshot,
+                    explicitSkillName: params.followupRun.run.explicitSkillName,
                     messageChannel: params.followupRun.originatingChannel ?? undefined,
                     messageProvider: hookMessageProvider,
                     currentChannelId:

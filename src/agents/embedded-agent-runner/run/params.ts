@@ -87,6 +87,8 @@ export type RunEmbeddedAgentParams = {
   senderName?: string | null;
   senderUsername?: string | null;
   senderE164?: string | null;
+  /** Originating channel/platform (slack, msteams, boon-web, …) for usage attribution. */
+  senderSource?: string | null;
   /** Trusted sender identity bit for command/channel-action auth. */
   senderIsOwner?: boolean;
   /** Device-scoped operator session allowed to review approvals initiated by this run. */
@@ -133,6 +135,8 @@ export type RunEmbeddedAgentParams = {
   agentDir?: string;
   config?: OpenClawConfig;
   skillsSnapshot?: SkillSnapshot;
+  /** Skill selected by an authorized explicit chat command for this run. */
+  explicitSkillName?: string;
   prompt: string;
   /** User-visible prompt body to submit and persist; runtime context travels separately. */
   transcriptPrompt?: string;

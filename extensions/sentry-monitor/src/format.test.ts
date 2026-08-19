@@ -1,6 +1,13 @@
 import type { PluginHookModelCallEndedEvent } from "openclaw/plugin-sdk/types";
 import { describe, expect, it, vi } from "vitest";
-import { describeModelCallError, pruneTags, runContext, safe, stringifyErr } from "./format.js";
+import {
+  describeModelCallError,
+  fingerprintOf,
+  pruneTags,
+  runContext,
+  safe,
+  stringifyErr,
+} from "./format.js";
 
 describe("pruneTags", () => {
   it("drops undefined, null, and empty values and keeps the rest", () => {
@@ -37,6 +44,23 @@ describe("describeModelCallError", () => {
   it("falls back to a generic message when no detail is present", () => {
     expect(describeModelCallError({} as PluginHookModelCallEndedEvent)).toBe(
       "model_call_ended outcome=error",
+    );
+  });
+});
+
+describe("fingerprintOf", () => {
+  it("drops undefined, null, and empty parts and stringifies the rest", () => {
+    expect(fingerprintOf("after_tool_call", "exec", undefined, "", "boom", 42)).toEqual([
+      "after_tool_call",
+      "exec",
+      "boom",
+      "42",
+    ]);
+  });
+
+  it("returns distinct arrays for distinct inputs", () => {
+    expect(fingerprintOf("after_tool_call", "exec", "err a")).not.toEqual(
+      fingerprintOf("after_tool_call", "web_fetch", "err a"),
     );
   });
 });

@@ -1,4 +1,5 @@
 // Command queue serializes and limits process execution for shared command lanes.
+import { diagnosticFailoverDetailSuffix } from "../infra/diagnostic-error-metadata.js";
 import {
   diagnosticLogger as diag,
   logLaneDequeue,
@@ -426,7 +427,7 @@ function drainLane(lane: string) {
             const isProbeLane = lane.startsWith("auth-probe:") || lane.startsWith("session:probe-");
             if (!isProbeLane && !isExpectedNonErrorLaneFailure(err)) {
               diag.error(
-                `lane task error: lane=${lane} durationMs=${Date.now() - startTime} error="${String(err)}"`,
+                `lane task error: lane=${lane} durationMs=${Date.now() - startTime} error="${String(err)}"${diagnosticFailoverDetailSuffix(err)}`,
               );
             } else if (!isProbeLane) {
               diag.debug(

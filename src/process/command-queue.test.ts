@@ -331,6 +331,35 @@ describe("command queue", () => {
     ).toBe(true);
   });
 
+  it("includes FailoverError reason/provider/model/rawError in the lane task error log", async () => {
+    // FailoverError.message is consumer-audience-redacted copy, so the queue's
+    // own error log must not lose the structured raw detail on the error object.
+    const error = new Error(
+      "Something went wrong while I was talking to the AI service and I couldn't finish that. Please try again.",
+    );
+    error.name = "FailoverError";
+    Object.assign(error, {
+      reason: "schema",
+      provider: "anthropic",
+      model: "claude-opus-4-6",
+      rawError: "invalid_request_error: tool_use.input failed schema validation",
+    });
+
+    await expect(
+      enqueueCommandInLane(CommandLane.Main, async () => {
+        throw error;
+      }),
+    ).rejects.toBe(error);
+
+    const errorLogMessage = mockCallArg(diagnosticMocks.diag.error, "lane task error", 0);
+    expect(errorLogMessage).toContain('reason="schema"');
+    expect(errorLogMessage).toContain('provider="anthropic"');
+    expect(errorLogMessage).toContain('model="claude-opus-4-6"');
+    expect(errorLogMessage).toContain(
+      'rawError="invalid_request_error: tool_use.input failed schema validation"',
+    );
+  });
+
   it("getActiveTaskCount returns count of currently executing tasks", async () => {
     const { task, release } = enqueueBlockedMainTask();
 

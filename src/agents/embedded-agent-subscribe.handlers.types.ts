@@ -73,6 +73,7 @@ export type EmbeddedAgentSubscribeState = {
     meta?: string;
     replaySafe?: boolean;
     errored?: boolean;
+    status?: "blocked";
     asyncStarted?: boolean;
     asyncTaskRunId?: string;
     asyncTaskId?: string;

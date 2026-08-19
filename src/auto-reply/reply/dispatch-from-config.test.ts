@@ -1,4 +1,5 @@
 // Tests dispatch-from-config runtime selection, hooks, and provider handoff.
+import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 import { beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { clearAgentHarnesses, registerAgentHarness } from "../../agents/harness/registry.js";
 import type { ChannelMessagingAdapter } from "../../channels/plugins/types.core.js";
@@ -409,6 +410,13 @@ vi.mock("./abort.runtime.js", () => ({
   },
 }));
 
+vi.mock("./reply-turn-admission.js", async () => {
+  const actual = await vi.importActual<typeof import("./reply-turn-admission.js")>(
+    "./reply-turn-admission.js",
+  );
+  return { ...actual, admitReplyTurn: vi.fn(actual.admitReplyTurn) };
+});
+
 vi.mock("../../logging/diagnostic.js", () => ({
   logMessageDispatchCompleted: diagnosticMocks.logMessageDispatchCompleted,
   logMessageDispatchStarted: diagnosticMocks.logMessageDispatchStarted,
@@ -616,6 +624,7 @@ let tryDispatchAcpReplyHook: typeof import("../../plugin-sdk/acp-runtime.js").tr
 let createReplyOperation: typeof import("./reply-run-registry.js").createReplyOperation;
 let replyRunRegistry: typeof import("./reply-run-registry.js").replyRunRegistry;
 let replyRunTesting: typeof import("./reply-run-registry.js").__testing;
+let admitReplyTurn: typeof import("./reply-turn-admission.js").admitReplyTurn;
 type DispatchReplyArgs = Parameters<
   typeof import("./dispatch-from-config.js").dispatchReplyFromConfig
 >[0];
@@ -634,6 +643,7 @@ beforeAll(async () => {
     replyRunRegistry,
     __testing: replyRunTesting,
   } = await import("./reply-run-registry.js"));
+  ({ admitReplyTurn } = await import("./reply-turn-admission.js"));
 });
 
 function createDispatcher(): ReplyDispatcher {
@@ -1127,6 +1137,36 @@ describe("dispatchReplyFromConfig", () => {
     );
   });
 
+  it("honors the caller's timeoutOverrideSeconds in the reply-turn lane deadline", async () => {
+    setNoAbort();
+    vi.mocked(admitReplyTurn).mockClear();
+    const cfg = {
+      agents: { defaults: { timeoutSeconds: 5 } },
+    } as const satisfies OpenClawConfig;
+    const dispatcher = createDispatcher();
+    const ctx = buildTestCtx({
+      Provider: "whatsapp",
+      SessionKey: "agent:main:main",
+    });
+
+    const replyResolver = async () => ({ text: "hi" }) satisfies ReplyPayload;
+    await dispatchReplyFromConfig({
+      ctx,
+      cfg,
+      dispatcher,
+      replyOptions: { timeoutOverrideSeconds: 0 },
+      replyResolver,
+    });
+
+    const admissionParams = firstMockArg(vi.mocked(admitReplyTurn), "reply-turn admission") as {
+      deadlineMs?: number;
+    };
+    // A caller-requested overrideSeconds of 0 means "no timeout" and must win over the much
+    // shorter agents.defaults.timeoutSeconds, or a heartbeat/no-timeout turn could still be
+    // killed by the lane deadline while the agent run itself keeps going.
+    expect(admissionParams.deadlineMs).toBe(MAX_TIMER_TIMEOUT_MS);
+  });
+
   it("returns session metadata changes marked during reply resolution", async () => {
     setNoAbort();
     const sessionKey = "agent:main:main";
@@ -1257,10 +1297,52 @@ describe("dispatchReplyFromConfig", () => {
     expect(result).toMatchObject({
       queuedFinal: false,
       counts: { tool: 0, block: 0, final: 0 },
+      // A heartbeat turn skipped for a genuinely active run — the agent never
+      // ran this turn, distinct from it having produced nothing.
+      turnSkipped: "active-run",
     });
     expect(replyResolver).not.toHaveBeenCalled();
     expect(replyRunRegistry.get(sessionKey)).toBe(activeOperation);
     activeOperation.complete();
+  });
+
+  it("leaves turnSkipped unset when the turn actually reaches the agent", async () => {
+    setNoAbort();
+    const dispatcher = createDispatcher();
+    const result = await dispatchReplyFromConfig({
+      ctx: buildTestCtx({ Provider: "telegram" }),
+      cfg: emptyConfig,
+      dispatcher,
+      replyResolver: async () => ({ text: "hi" }) satisfies ReplyPayload,
+    });
+
+    expect(result.turnSkipped).toBeUndefined();
+  });
+
+  it("tags the admission skip as aborted, not active-run, when the caller already aborted", async () => {
+    // Distinguishes an admission skip caused by an already-aborted caller
+    // signal from one caused by a genuinely active run — the two previously
+    // collapsed into the same untagged "busy" result.
+    setNoAbort();
+    const abortController = new AbortController();
+    abortController.abort();
+    const dispatcher = createDispatcher();
+    const replyResolver = vi.fn(async () => ({ text: "should not run" }) satisfies ReplyPayload);
+
+    const result = await dispatchReplyFromConfig({
+      ctx: buildTestCtx({ Provider: "telegram" }),
+      cfg: emptyConfig,
+      dispatcher,
+      replyOptions: { abortSignal: abortController.signal },
+      replyResolver,
+    });
+
+    expect(result).toMatchObject({
+      queuedFinal: false,
+      counts: { tool: 0, block: 0, final: 0 },
+      turnSkipped: "aborted",
+    });
+    expect(replyResolver).not.toHaveBeenCalled();
   });
 
   it("does not route when Provider matches OriginatingChannel (even if Surface is missing)", async () => {
@@ -3502,8 +3584,8 @@ describe("dispatchReplyFromConfig", () => {
       ChatType: "direct",
     });
     const notice = {
-      text: "Model Fallback: openai/gpt-5.5",
-      isFallbackNotice: true,
+      text: "Compacting conversation…",
+      isStatusNotice: true,
     } satisfies ReplyPayload;
 
     await dispatchReplyFromConfig({
@@ -6417,7 +6499,11 @@ describe("dispatchReplyFromConfig", () => {
       replyResolver,
     });
 
-    expect(result).toEqual({ queuedFinal: false, counts: { tool: 0, block: 0, final: 0 } });
+    expect(result).toEqual({
+      queuedFinal: false,
+      counts: { tool: 0, block: 0, final: 0 },
+      turnSkipped: "aborted",
+    });
     expect(sessionBindingMocks.touch).not.toHaveBeenCalled();
     expect(hookMocks.runner.runInboundClaimForPluginOutcome).not.toHaveBeenCalled();
     expect(replyResolver).not.toHaveBeenCalled();

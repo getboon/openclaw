@@ -21,6 +21,8 @@ export function safe(
 
 export function describeModelCallError(event: PluginHookModelCallEndedEvent): string {
   const parts = [
+    event.errorClass,
+    event.httpStatus ? `http_status=${event.httpStatus}` : undefined,
     event.errorCategory,
     event.failureKind ? `failure_kind=${event.failureKind}` : undefined,
   ].filter(Boolean);
@@ -50,6 +52,20 @@ export function pruneTags(tags: Record<string, string | undefined>): Record<stri
     }
   }
   return out;
+}
+
+// Every capture is dispatched via `new Error(message)` at one fixed call site
+// per hook (dispatch.ts), so the JS stack trace is identical across every
+// distinct failure of that hook and Sentry's stack-based grouping merges them
+// into a single noisy issue regardless of message content, confirmed live
+// across production events spanning Python tracebacks, web-fetch failures,
+// memory_search timeouts, and cron failures all merged into one bucket.
+// Building an explicit fingerprint from the fields that actually distinguish
+// one failure from another is the only way to get Sentry to split them.
+export function fingerprintOf(...parts: Array<string | number | undefined>): string[] {
+  return parts
+    .filter((part): part is string | number => part !== undefined && part !== null && part !== "")
+    .map(String);
 }
 
 export function stringifyErr(err: unknown): string {

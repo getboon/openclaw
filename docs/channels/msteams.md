@@ -826,6 +826,8 @@ When `replyStyle: "thread"` is in effect and the bot was @mentioned from inside 
 
 The thread root is taken from the stored `threadId` on the conversation reference. Older stored references that predate `threadId` fall back to `activityId` (whatever inbound activity last seeded the conversation), so existing deployments keep working without a re-seed.
 
+Thread routing applies to every outbound shape — plain text, inline media, uploaded-file links (SharePoint or OneDrive), Adaptive Cards, presentation cards, and polls. A document link posted after an upload threads exactly like a text reply, so the threading decision never depends on what the reply happens to contain.
+
 When `replyStyle: "top-level"` is in effect, channel-thread inbounds are intentionally answered as new top-level posts — no thread suffix is attached. This is the correct behavior for Threads-style channels; if you see top-level posts where you expected threaded replies, your `replyStyle` is set incorrectly for that channel.
 
 ## Attachments and images
@@ -844,11 +846,12 @@ Authorization headers are only attached for hosts in `channels.msteams.mediaAuth
 
 Bots can send files in DMs using the FileConsentCard flow (built-in). However, **sending files in group chats/channels** requires additional setup:
 
-| Context                  | How files are sent                           | Setup needed                                    |
-| ------------------------ | -------------------------------------------- | ----------------------------------------------- |
-| **DMs**                  | FileConsentCard → user accepts → bot uploads | Works out of the box                            |
-| **Group chats/channels** | Upload to SharePoint → share link            | Requires `sharePointSiteId` + Graph permissions |
-| **Images (any context)** | Base64-encoded inline                        | Works out of the box                            |
+| Context                                          | How files are sent                                                                                                        | Setup needed                                    |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| **DMs**                                          | FileConsentCard → user accepts → bot uploads                                                                              | Works out of the box                            |
+| **Group chats/channels**                         | Upload to SharePoint → share link                                                                                         | Requires `sharePointSiteId` + Graph permissions |
+| **Group chats/channels** (no `sharePointSiteId`) | Explicit in-thread notice that the file can't be attached, with a link back to the source when the media was a remote URL | None — this is the no-setup default             |
+| **Images (any context)**                         | Base64-encoded inline                                                                                                     | Works out of the box                            |
 
 ### Why group chats need SharePoint
 
@@ -900,12 +903,14 @@ Per-user sharing is more secure as only the chat participants can access the fil
 
 ### Fallback behavior
 
-| Scenario                                          | Result                                             |
-| ------------------------------------------------- | -------------------------------------------------- |
-| Group chat + file + `sharePointSiteId` configured | Upload to SharePoint, send sharing link            |
-| Group chat + file + no `sharePointSiteId`         | Attempt OneDrive upload (may fail), send text only |
-| Personal chat + file                              | FileConsentCard flow (works without SharePoint)    |
-| Any context + image                               | Base64-encoded inline (works without SharePoint)   |
+| Scenario                                                  | Result                                                                                                                                                                                                                                                |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Group chat/channel + file + `sharePointSiteId` configured | Upload to SharePoint, send sharing link                                                                                                                                                                                                               |
+| Group chat/channel + file + no `sharePointSiteId`         | Explicit "can't attach this here" notice in-thread, with a link to the source URL when the media was remote. A bot has no personal OneDrive (`/me/drive` needs a signed-in user, not this plugin's app-only token), so there is no upload to attempt. |
+| Personal chat + file                                      | FileConsentCard flow (works without SharePoint)                                                                                                                                                                                                       |
+| Any context + image                                       | Base64-encoded inline (works without SharePoint)                                                                                                                                                                                                      |
+
+`openclaw channels status --channel msteams --probe` reports a warning when `sharePointSiteId` is unset.
 
 ### Files stored location
 

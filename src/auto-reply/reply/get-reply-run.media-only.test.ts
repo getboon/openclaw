@@ -324,6 +324,17 @@ describe("runPreparedReply media-only handling", () => {
     });
   });
 
+  it("carries an explicitly selected skill into the queued run", async () => {
+    await runPreparedReply(
+      baseParams({
+        explicitSkillName: "selected-skill",
+      }),
+    );
+
+    const call = requireRunReplyAgentCall();
+    expect(call.followupRun.run.explicitSkillName).toBe("selected-skill");
+  });
+
   it("propagates non-visible assistant silence for group runs", async () => {
     await runPreparedReply(baseParams());
 

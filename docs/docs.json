@@ -1371,7 +1371,8 @@
                   "tools/subagents",
                   "tools/acp-agents",
                   "tools/acp-agents-setup",
-                  "tools/multi-agent-sandbox-tools"
+                  "tools/multi-agent-sandbox-tools",
+                  "tools/retry"
                 ]
               }
             ]

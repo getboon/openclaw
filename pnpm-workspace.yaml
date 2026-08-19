@@ -7,9 +7,6 @@ packages:
 minimumReleaseAge: 2880
 
 minimumReleaseAgeExclude:
-  # Security fix newer than the maturity window (GHSA-mh99-v99m-4gvg): the only
-  # patched 5.x release. Excluded so the audit pin can apply before it matures.
-  - "brace-expansion@5.0.8"
   - "@openclaw/crabline@0.1.6"
   - "@openclaw/fs-safe@0.3.0"
   - "@openclaw/proxyline@0.3.3"
@@ -105,7 +102,7 @@ overrides:
   hono: 4.12.25
   "@hono/node-server": 1.19.14
   axios: 1.18.1
-  fast-uri: 3.1.4
+  fast-uri: 3.1.5
   follow-redirects: 1.16.0
   defu: 6.1.5
   fast-xml-parser: 5.7.0
@@ -114,7 +111,7 @@ overrides:
   basic-ftp: 6.0.1
   file-type: 22.0.1
   form-data: 2.5.6
-  ip-address: 10.2.0
+  ip-address: 10.3.1
   minimatch: 10.2.5
   path-to-regexp: 8.4.0
   qs: 6.15.2
@@ -131,17 +128,31 @@ overrides:
   "@grpc/grpc-js": 1.14.4
   linkify-it: 5.0.2
   # GHSA-mh99-v99m-4gvg: brace-expansion <=5.0.7 DoS via unbounded expansion.
-  brace-expansion: 5.0.8
+  # GHSA-rgw5-rvv9-x895: brace-expansion <5.0.9 DoS via unbounded intermediate arrays.
+  brace-expansion: 5.0.9
   # GHSA-r28c-9q8g-f849: postcss <=8.5.17 path traversal in source-map auto-load.
   postcss: 8.5.22
   "@opentelemetry/propagator-jaeger": 2.9.0
-  # Scope the undici security pin to the 7.x line only. A flat `undici` override
-  # would force 8.x consumers (jsdom needs `undici@^7.25.0` and imports
-  # lib/handler/wrap-handler.js, removed in 8.x) onto an incompatible major and
-  # crash the jsdom test workers, while a flat 7.x pin EOVERRIDEs the 6.11
-  # extensions that depend on undici 8.5.0 directly. Pinning `undici@7` keeps the
-  # 7.x tree on the secure 7.28.0 patch and leaves the extensions' 8.5.0 alone.
-  "undici@7": 7.28.0
+  # Scope the undici security pin per major line. jsdom needs `undici@^7.25.0`
+  # and imports lib/handler/wrap-handler.js, removed in 8.x, while the 6.11
+  # extensions depend on undici 8.5.0 directly — a single flat override would
+  # force one line onto an incompatible major. Keep both lines patched
+  # independently instead (GHSA-4cwx-7wf7-3272, undici cross-user cache
+  # disclosure/crash, fixed at 7.29.0 and 8.9.0 respectively).
+  "undici@7": 7.29.0
+  "undici@8": 8.9.0
+  # GHSA-2v37-7h3g-55p8 / GHSA-28wg-ghj8-5hjv (nanoid non-secure generator
+  # loop). Range-scoped like undici above (not a "parent>child" path selector
+  # — that syntax is pnpm-only and crashes generate-npm-shrinkwrap.mjs's `npm
+  # install --package-lock-only` step with EINVALIDTAGNAME, since npm's
+  # overrides field has no path-selector syntax). "pkg@range" IS valid in
+  # both pnpm and npm, and keeps the two nanoid majors independent: postcss's
+  # toolchain needs nanoid's CJS-era ^3 API while node-llama-cpp resolves the
+  # ESM-only 5.x line — a single global override would force one chain onto
+  # an incompatible major. 3.3.17 turned out to still be vulnerable
+  # (GHSA-2v37-7h3g-55p8's fixed range is >=3.3.18); 3.3.18 is the real fix.
+  "nanoid@3": 3.3.18
+  "nanoid@5": 5.1.16
   vite: 8.0.16
   ws: 8.21.0
   "@vitest/browser": 4.1.10

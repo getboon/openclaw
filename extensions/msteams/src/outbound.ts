@@ -149,6 +149,7 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
     deps,
     threadSuppressed,
   }) => {
+    const replyStyleOverride = resolveReplyStyleOverride(threadSuppressed);
     const msteamsData = asObjectRecord(payload.channelData?.msteams);
     const presentationCard = msteamsData?.presentationCard;
     if (
@@ -156,17 +157,14 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
       typeof presentationCard === "object" &&
       !Array.isArray(presentationCard)
     ) {
-      // Presentation cards are sent as proactive Adaptive Cards and do not carry
-      // a per-send replyStyle override; threadSuppressed is intentionally ignored
-      // here (documented topLevel limitation for presentation sends).
       const result = await sendAdaptiveCardMSTeams({
         cfg,
         to,
         card: presentationCard as Record<string, unknown>,
+        ...(replyStyleOverride ? { replyStyleOverride } : {}),
       });
       return attachChannelToResult("msteams", result);
     }
-    const replyStyleOverride = resolveReplyStyleOverride(threadSuppressed);
     const mediaUrls = normalizeStringEntries(
       resolvePayloadMediaUrls({
         ...payload,

@@ -376,7 +376,7 @@ export async function buildReplyPayloads(params: {
     return applicableFragments ? applicableFragments.join("").trim() === normalizedText : false;
   };
   const preserveUnsentMediaAfterBlockSend = (payload: ReplyPayload): ReplyPayload | null => {
-    if (payload.isError || payload.isFallbackNotice) {
+    if (payload.isError) {
       return payload;
     }
     const reply = resolveSendableOutboundReplyParts(payload);

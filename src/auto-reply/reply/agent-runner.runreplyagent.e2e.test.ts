@@ -3,10 +3,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  clearRuntimeConfigSnapshot,
-  setRuntimeConfigSnapshot,
-} from "../../config/runtime-snapshot.js";
 import { saveSessionStore, type SessionEntry } from "../../config/sessions.js";
 import { readSessionStoreForTest } from "../../config/sessions/test-helpers.js";
 import type { TypingMode } from "../../config/types.js";
@@ -1195,7 +1191,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
     vi.useRealTimers();
   });
 
-  it("announces model fallback transitions across verbose levels", async () => {
+  it("records model fallback transitions as lifecycle events without a user-visible notice", async () => {
     const cases = [
       { name: "verbose on", verbose: "on" as const },
       { name: "verbose off", verbose: "off" as const },
@@ -1250,11 +1246,17 @@ describe("runReplyAgent typing (heartbeat)", () => {
       });
       const res = await run();
       off();
-      const payload = Array.isArray(res)
-        ? (res[0] as { text?: string })
-        : (res as { text?: string });
-      expect(payload.text, testCase.name).toContain("Model Fallback:");
-      expect(payload.text, testCase.name).toContain("deepinfra/moonshotai/Kimi-K2.5");
+      const payloads = Array.isArray(res) ? res : res ? [res] : [];
+      // The swap is silent to the user: only the normal reply is delivered, no fallback notice.
+      expect(
+        payloads.some((payload) => payload.text?.includes("Model Fallback:")),
+        testCase.name,
+      ).toBe(false);
+      expect(
+        payloads.some((payload) => payload.text === "final"),
+        testCase.name,
+      ).toBe(true);
+      // Transition is still persisted (dedupe) and observable via lifecycle events.
       expect(sessionEntry.fallbackNoticeReason, testCase.name).toBe("rate limit");
       expect(
         phases.filter((phase) => phase === "fallback"),
@@ -1496,7 +1498,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
     expect(sessionEntry.fallbackNoticeReason).toBeUndefined();
   });
 
-  it("keeps fallback transition notices when block streaming has no final text", async () => {
+  it("stays silent about the fallback when block streaming already delivered the answer", async () => {
     const sessionEntry: SessionEntry = {
       sessionId: "session",
       updatedAt: Date.now(),
@@ -1538,129 +1540,9 @@ describe("runReplyAgent typing (heartbeat)", () => {
       const payloads = Array.isArray(res) ? res : res ? [res] : [];
 
       expect(onBlockReply).toHaveBeenCalled();
-      expect(payloads).toHaveLength(1);
-      expect(payloads[0]?.text).toContain("Model Fallback:");
-      expect(payloads[0]?.text).not.toContain("streamed answer");
+      // The streamed answer was delivered directly; the fallback swap adds no extra notice.
+      expect(payloads.some((payload) => payload?.text?.includes("Model Fallback:"))).toBe(false);
     } finally {
-      fallbackSpy.mockRestore();
-    }
-  });
-
-  it("threads fallback notices without consuming the first assistant reply slot", async () => {
-    const sessionEntry: SessionEntry = {
-      sessionId: "session",
-      updatedAt: Date.now(),
-    };
-    const sessionStore = { main: sessionEntry };
-
-    state.runEmbeddedAgentMock.mockResolvedValueOnce({
-      payloads: [{ text: "final" }],
-      meta: {},
-    });
-    const fallbackSpy = vi
-      .spyOn(modelFallbackModule, "runWithModelFallback")
-      .mockImplementationOnce(
-        async ({ run }: { run: (provider: string, model: string) => Promise<unknown> }) => ({
-          outcome: "completed" as const,
-          result: await run("deepinfra", "moonshotai/Kimi-K2.5"),
-          provider: "deepinfra",
-          model: "moonshotai/Kimi-K2.5",
-          attempts: [
-            {
-              provider: "fireworks",
-              model: "fireworks/accounts/fireworks/routers/kimi-k2p5-turbo",
-              error: "Provider fireworks is in cooldown (all profiles unavailable)",
-              reason: "rate_limit",
-            },
-          ],
-        }),
-      );
-    try {
-      const { run } = createMinimalRun({
-        sessionEntry,
-        sessionStore,
-        sessionKey: "main",
-        runOverrides: {
-          config: {
-            channels: {
-              whatsapp: {
-                replyToMode: "first",
-              },
-            },
-          },
-        },
-      });
-      const res = await run();
-      const payloads = Array.isArray(res) ? res : res ? [res] : [];
-
-      expect(payloads).toHaveLength(2);
-      expect(payloads[0]?.text).toContain("Model Fallback:");
-      expect(payloads[0]?.replyToId).toBe("msg");
-      expect(payloads[1]?.text).toBe("final");
-      expect(payloads[1]?.replyToId).toBe("msg");
-    } finally {
-      fallbackSpy.mockRestore();
-    }
-  });
-
-  it("renders a plain-language fallback notice under the consumer audience (ENG-16617)", async () => {
-    const sessionEntry: SessionEntry = {
-      sessionId: "session",
-      updatedAt: Date.now(),
-    };
-    const sessionStore = { main: sessionEntry };
-
-    state.runEmbeddedAgentMock.mockResolvedValueOnce({
-      payloads: [{ text: "final" }],
-      meta: {},
-    });
-    const fallbackSpy = vi
-      .spyOn(modelFallbackModule, "runWithModelFallback")
-      .mockImplementationOnce(
-        async ({ run }: { run: (provider: string, model: string) => Promise<unknown> }) => ({
-          outcome: "completed" as const,
-          result: await run("deepinfra", "moonshotai/Kimi-K2.5"),
-          provider: "deepinfra",
-          model: "moonshotai/Kimi-K2.5",
-          attempts: [
-            {
-              provider: "fireworks",
-              model: "fireworks/accounts/fireworks/routers/kimi-k2p5-turbo",
-              error: "Provider fireworks is in cooldown (all profiles unavailable)",
-              reason: "rate_limit",
-            },
-          ],
-        }),
-      );
-    // The queued-reply config resolver reconciles the run config against the
-    // process runtime-config snapshot; pin the snapshot to the same consumer
-    // config so the audience survives resolution (mirrors a consumer deployment).
-    const consumerConfig = {
-      agents: { defaults: { messaging: { audience: "consumer" } } },
-    } as unknown as Parameters<typeof setRuntimeConfigSnapshot>[0];
-    setRuntimeConfigSnapshot(consumerConfig);
-    try {
-      const { run } = createMinimalRun({
-        sessionEntry,
-        sessionStore,
-        sessionKey: "main",
-        runOverrides: { config: consumerConfig },
-      });
-      const res = await run();
-      const payloads = Array.isArray(res) ? res : res ? [res] : [];
-
-      const notice = payloads.find((payload) => payload?.isFallbackNotice);
-      expect(notice?.text).toBe("↪️ Switched to a backup model to finish your request.");
-      // The flag (not the text prefix) drives delivery/suppression, so it must
-      // survive the consumer reword.
-      expect(notice?.isFallbackNotice).toBe(true);
-      // No operator internals leak to the consumer.
-      expect(notice?.text).not.toContain("Model Fallback:");
-      expect(notice?.text).not.toContain("deepinfra");
-      expect(notice?.text).not.toContain("more attempts");
-      expect(payloads.some((payload) => payload?.text === "final")).toBe(true);
-    } finally {
-      clearRuntimeConfigSnapshot();
       fallbackSpy.mockRestore();
     }
   });
@@ -1844,9 +1726,11 @@ describe("runReplyAgent typing (heartbeat)", () => {
       const res = await run();
       const payload = Array.isArray(res) ? res[0] : res;
 
+      // A delivered side effect means no silent-failure error is surfaced, and the fallback
+      // swap itself stays silent (no user-visible notice).
       expect(payload?.isError).not.toBe(true);
-      expect(payload?.text).toContain("Model Fallback:");
-      expect(payload?.text).not.toContain("no visible reply");
+      expect(payload?.text ?? "").not.toContain("no visible reply");
+      expect(payload?.text ?? "").not.toContain("Model Fallback:");
     } finally {
       fallbackSpy.mockRestore();
     }
@@ -1893,9 +1777,11 @@ describe("runReplyAgent typing (heartbeat)", () => {
       const res = await run();
       const payload = Array.isArray(res) ? res[0] : res;
 
+      // A delivered side effect means no silent-failure error is surfaced, and the fallback
+      // swap itself stays silent (no user-visible notice).
       expect(payload?.isError).not.toBe(true);
-      expect(payload?.text).toContain("Model Fallback:");
-      expect(payload?.text).not.toContain("no visible reply");
+      expect(payload?.text ?? "").not.toContain("no visible reply");
+      expect(payload?.text ?? "").not.toContain("Model Fallback:");
     } finally {
       fallbackSpy.mockRestore();
     }
@@ -2000,9 +1886,11 @@ describe("runReplyAgent typing (heartbeat)", () => {
       const res = await run();
       const payload = Array.isArray(res) ? res[0] : res;
 
+      // A delivered side effect means no silent-failure error is surfaced, and the fallback
+      // swap itself stays silent (no user-visible notice).
       expect(payload?.isError).not.toBe(true);
-      expect(payload?.text).toContain("Model Fallback:");
-      expect(payload?.text).not.toContain("no visible reply");
+      expect(payload?.text ?? "").not.toContain("no visible reply");
+      expect(payload?.text ?? "").not.toContain("Model Fallback:");
     } finally {
       fallbackSpy.mockRestore();
     }
@@ -2052,9 +1940,11 @@ describe("runReplyAgent typing (heartbeat)", () => {
       const res = await run();
       const payload = Array.isArray(res) ? res[0] : res;
 
+      // A delivered side effect means no silent-failure error is surfaced, and the fallback
+      // swap itself stays silent (no user-visible notice).
       expect(payload?.isError).not.toBe(true);
-      expect(payload?.text).toContain("Model Fallback:");
-      expect(payload?.text).not.toContain("no visible reply");
+      expect(payload?.text ?? "").not.toContain("no visible reply");
+      expect(payload?.text ?? "").not.toContain("Model Fallback:");
     } finally {
       fallbackSpy.mockRestore();
     }
@@ -2101,9 +1991,11 @@ describe("runReplyAgent typing (heartbeat)", () => {
       const res = await run();
       const payload = Array.isArray(res) ? res[0] : res;
 
+      // A delivered side effect means no silent-failure error is surfaced, and the fallback
+      // swap itself stays silent (no user-visible notice).
       expect(payload?.isError).not.toBe(true);
-      expect(payload?.text).toContain("Model Fallback:");
-      expect(payload?.text).not.toContain("no visible reply");
+      expect(payload?.text ?? "").not.toContain("no visible reply");
+      expect(payload?.text ?? "").not.toContain("Model Fallback:");
     } finally {
       fallbackSpy.mockRestore();
     }
@@ -2156,7 +2048,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
     }
   });
 
-  it("announces model fallback only once per active fallback state", async () => {
+  it("emits the fallback lifecycle event only once per active fallback state", async () => {
     const sessionEntry: SessionEntry = {
       sessionId: "session",
       updatedAt: Date.now(),
@@ -2204,7 +2096,8 @@ describe("runReplyAgent typing (heartbeat)", () => {
 
       const firstText = Array.isArray(first) ? first[0]?.text : first?.text;
       const secondText = Array.isArray(second) ? second[0]?.text : second?.text;
-      expect(firstText).toContain("Model Fallback:");
+      // Fallback stays silent to the user on every turn; only the lifecycle event fires, once.
+      expect(firstText).not.toContain("Model Fallback:");
       expect(secondText).not.toContain("Model Fallback:");
       expect(fallbackEvents).toHaveLength(1);
     } finally {
@@ -2212,7 +2105,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
     }
   });
 
-  it("re-announces model fallback after returning to selected model", async () => {
+  it("re-emits the fallback lifecycle event after returning to selected model", async () => {
     const sessionEntry: SessionEntry = {
       sessionId: "session",
       updatedAt: Date.now(),
@@ -2269,22 +2162,34 @@ describe("runReplyAgent typing (heartbeat)", () => {
         sessionStore,
         sessionKey: "main",
       });
+      const phases: string[] = [];
+      const off = onAgentEvent((evt) => {
+        const phase = typeof evt.data?.phase === "string" ? evt.data.phase : null;
+        if (evt.stream === "lifecycle" && phase) {
+          phases.push(phase);
+        }
+      });
       const first = await run();
       const second = await run();
       const third = await run();
+      off();
 
       const firstText = Array.isArray(first) ? first[0]?.text : first?.text;
       const secondText = Array.isArray(second) ? second[0]?.text : second?.text;
       const thirdText = Array.isArray(third) ? third[0]?.text : third?.text;
-      expect(firstText).toContain("Model Fallback:");
+      // No user-visible notice on any turn; the transition is tracked via lifecycle events:
+      // fallback -> cleared (return to primary) -> fallback again (new swap).
+      expect(firstText).not.toContain("Model Fallback:");
       expect(secondText).not.toContain("Model Fallback:");
-      expect(thirdText).toContain("Model Fallback:");
+      expect(thirdText).not.toContain("Model Fallback:");
+      expect(countMatching(phases, (phase) => phase === "fallback")).toBe(2);
+      expect(countMatching(phases, (phase) => phase === "fallback_cleared")).toBe(1);
     } finally {
       fallbackSpy.mockRestore();
     }
   });
 
-  it("announces fallback-cleared once when runtime returns to selected model", async () => {
+  it("emits fallback-cleared lifecycle event once when runtime returns to selected model", async () => {
     const sessionEntry: SessionEntry = {
       sessionId: "session",
       updatedAt: Date.now(),
@@ -2356,9 +2261,11 @@ describe("runReplyAgent typing (heartbeat)", () => {
       const firstText = Array.isArray(first) ? first[0]?.text : first?.text;
       const secondText = Array.isArray(second) ? second[0]?.text : second?.text;
       const thirdText = Array.isArray(third) ? third[0]?.text : third?.text;
-      expect(firstText).toContain("Model Fallback:");
-      expect(secondText).toContain("Model Fallback cleared:");
-      expect(thirdText).not.toContain("Model Fallback cleared:");
+      // Neither the fallback nor the return-to-primary surfaces user-visible text; the
+      // transition is observable only through the deduped lifecycle events.
+      expect(firstText).not.toContain("Model Fallback");
+      expect(secondText).not.toContain("Model Fallback");
+      expect(thirdText).not.toContain("Model Fallback");
       expect(countMatching(phases, (phase) => phase === "fallback")).toBe(1);
       expect(countMatching(phases, (phase) => phase === "fallback_cleared")).toBe(1);
     } finally {
@@ -2366,7 +2273,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
     }
   });
 
-  it("announces fallback transitions and emits lifecycle events while verbose is off", async () => {
+  it("emits fallback + cleared lifecycle events while verbose is off", async () => {
     const sessionEntry: SessionEntry = {
       sessionId: "session",
       updatedAt: Date.now(),
@@ -2436,8 +2343,9 @@ describe("runReplyAgent typing (heartbeat)", () => {
 
       const firstText = Array.isArray(first) ? first[0]?.text : first?.text;
       const secondText = Array.isArray(second) ? second[0]?.text : second?.text;
-      expect(firstText).toContain("Model Fallback:");
-      expect(secondText).toContain("Model Fallback cleared:");
+      // Lifecycle events fire regardless of verbose level; the user sees no fallback text.
+      expect(firstText).not.toContain("Model Fallback");
+      expect(secondText).not.toContain("Model Fallback");
       expect(countMatching(phases, (phase) => phase === "fallback")).toBe(1);
       expect(countMatching(phases, (phase) => phase === "fallback_cleared")).toBe(1);
     } finally {

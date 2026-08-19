@@ -40,6 +40,10 @@ export function mergeStoredConversationReference(
     // reactions) would clear previously captured values. Some fields are only
     // populated opportunistically, such as timezone from clientInfo entities and
     // graphChatId from Graph lookups used for DM media downloads.
+    // `activityId`/`threadId` are deliberately NOT preserved: they describe the
+    // newest inbound anchor, not durable identity. A fresh top-level post clears
+    // threadId because the anchor legitimately moved to channel root; preserving
+    // it would pin later replies to a stale thread.
     ...(existing?.timezone && !incoming.timezone ? { timezone: existing.timezone } : {}),
     ...(existing?.graphChatId && !incoming.graphChatId
       ? { graphChatId: existing.graphChatId }

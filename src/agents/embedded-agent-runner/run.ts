@@ -478,16 +478,27 @@ function createScopedAuthProfileStore(
     : createEmptyAuthProfileStore();
 }
 
-function buildTraceToolSummary(params: {
-  toolMetas?: Array<{ toolName: string; meta?: string; asyncStarted?: boolean }>;
+export function buildTraceToolSummary(params: {
+  toolMetas?: Array<{
+    toolName: string;
+    meta?: string;
+    errored?: boolean;
+    status?: "blocked";
+    asyncStarted?: boolean;
+  }>;
+  visibleToolNames?: readonly string[];
   hadFailure: boolean;
 }): ToolSummaryTrace | undefined {
-  if (!params.toolMetas?.length) {
+  const toolMetas = params.toolMetas ?? [];
+  const visibleTools = [...new Set(params.visibleToolNames ?? [])]
+    .filter((name) => normalizeOptionalString(name))
+    .toSorted();
+  if (toolMetas.length === 0 && visibleTools.length === 0) {
     return undefined;
   }
   const tools: string[] = [];
   const seen = new Set<string>();
-  for (const entry of params.toolMetas) {
+  for (const entry of toolMetas) {
     const toolName = normalizeOptionalString(entry.toolName);
     if (!toolName || seen.has(toolName)) {
       continue;
@@ -496,9 +507,21 @@ function buildTraceToolSummary(params: {
     tools.push(toolName);
   }
   return {
-    calls: params.toolMetas?.length ?? 0,
+    calls: toolMetas.length,
     tools,
+    // Preserve boon's any-failure signal for existing trace consumers; per-call
+    // outcomes now flow through `invocations` for the audit projection.
     failures: params.hadFailure ? 1 : 0,
+    visibleTools,
+    invocations: toolMetas.map((entry) => ({
+      name: entry.toolName,
+      status:
+        entry.status === "blocked"
+          ? ("blocked" as const)
+          : entry.errored === true
+            ? ("error" as const)
+            : ("ok" as const),
+    })),
   };
 }
 
@@ -2080,6 +2103,7 @@ async function runEmbeddedAgentInternal(
             workspaceDir: resolvedWorkspace,
             cwd: params.cwd,
             agentDir,
+            explicitSkillName: params.explicitSkillName,
             config: params.config,
             allowGatewaySubagentBinding: params.allowGatewaySubagentBinding,
             contextEngine,
@@ -3635,6 +3659,7 @@ async function runEmbeddedAgentInternal(
             (attempt.toolMetas?.length ?? 0) === 0;
           const attemptToolSummary = buildTraceToolSummary({
             toolMetas: attempt.toolMetas,
+            visibleToolNames: attempt.visibleToolNames,
             hadFailure: Boolean(attempt.lastToolError),
           });
           const failureSignal = resolveEmbeddedRunFailureSignal({

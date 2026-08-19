@@ -717,6 +717,45 @@ describe("msteamsPlugin message actions", () => {
     });
   });
 
+  // ENG-17134: the presentation branch read no topLevel param at all, so a
+  // card-shaped reply ignored the documented tool parameter.
+  it.each([
+    { label: "topLevel true", extraParams: { topLevel: true }, expected: "top-level" },
+    { label: "topLevel false", extraParams: { topLevel: false }, expected: "thread" },
+    { label: "threadId null", extraParams: { threadId: null }, expected: "top-level" },
+  ])(
+    "maps $label to replyStyleOverride for presentation sends",
+    async ({ extraParams, expected }) => {
+      const card = {
+        type: "AdaptiveCard",
+        version: "1.4",
+        body: [{ type: "TextBlock", text: "Deploy finished", wrap: true }],
+        actions: [{ type: "Action.Submit", title: "Open", data: { value: "open", label: "Open" } }],
+      };
+      await expectSuccessfulAction({
+        mockFn: sendAdaptiveCardMSTeamsMock,
+        mockResult: { messageId: "msg-card-1", conversationId: "conv-card-1" },
+        action: "send",
+        actionParams: {
+          to: targetChannelId,
+          message: "Deploy finished",
+          presentation: {
+            blocks: [{ type: "buttons", buttons: [{ label: "Open", value: "open" }] }],
+          },
+          ...extraParams,
+        },
+        runtimeParams: { to: targetChannelId, card, replyStyleOverride: expected },
+        details: { ok: true, channel: "msteams", messageId: "msg-card-1" },
+        contentDetails: {
+          ok: true,
+          channel: "msteams",
+          messageId: "msg-card-1",
+          conversationId: "conv-card-1",
+        },
+      });
+    },
+  );
+
   it("downgrades select blocks when sending presentation cards", async () => {
     await expectSuccessfulAction({
       mockFn: sendAdaptiveCardMSTeamsMock,

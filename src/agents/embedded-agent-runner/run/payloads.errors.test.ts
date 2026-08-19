@@ -94,6 +94,22 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads.map((payload) => payload.text)).not.toContain(errorJson);
   });
 
+  it("marks the assistant-error payload for delivery despite message_tool_only suppression", () => {
+    // A provider/run-level error is exactly the kind of failure signal that
+    // must not vanish just because normal assistant prose is suppressed on
+    // this channel.
+    const payloads = buildPayloads({
+      assistantTexts: [errorJson],
+      lastAssistant: makeAssistant({}),
+      sourceReplyDeliveryMode: "message_tool_only",
+    });
+
+    expectOverloadedFallback(payloads);
+    expect(
+      getReplyPayloadMetadata(payloads[0] as object)?.deliverDespiteSourceReplySuppression,
+    ).toBe(true);
+  });
+
   // Token-exhaustion replies carry plain-language copy with an inline billing
   // link AND a rich-card button (static Boon billing URL). The gateway 402 code
   // (allocation_exhausted / trial_budget_exhausted) lands in errorBody; the
@@ -117,7 +133,10 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads[0]?.text).toContain(`[Top up your tokens](${BILLING_URL})`);
     expect(payloads[0]?.text).not.toMatch(/switch to a different api key/i);
     expect(payloads[0]?.presentation?.blocks).toEqual([
-      { type: "buttons", buttons: [{ label: "Top up tokens", url: BILLING_URL, style: "primary" }] },
+      {
+        type: "buttons",
+        buttons: [{ label: "Top up tokens", url: BILLING_URL, style: "primary" }],
+      },
     ]);
   });
 
@@ -128,7 +147,9 @@ describe("buildEmbeddedRunPayloads", () => {
     const errorBody =
       '{"error":"trial_budget_exhausted","message":"Trial token budget exhausted; upgrade to continue.","granted":500000,"used":500000}';
     const payloads = buildPayloads({
-      assistantTexts: ["boon-llm-gateway (402): Trial token budget exhausted; upgrade to continue."],
+      assistantTexts: [
+        "boon-llm-gateway (402): Trial token budget exhausted; upgrade to continue.",
+      ],
       lastAssistant: makeAssistant({
         stopReason: "error",
         errorMessage: "boon-llm-gateway (402): Trial token budget exhausted; upgrade to continue.",
@@ -154,6 +175,23 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads[0]?.isError).toBe(true);
     expectNoPayloadTextContaining(payloads, "Edit");
     expectNoPayloadTextContaining(payloads, "missing");
+  });
+
+  it("suppresses the sessions_spawn failure badge when an assistant error reply already covers the turn", () => {
+    // ENG-16868: a genuine spawn failure on a turn the assistant already
+    // reported as an error must not stack a second "⚠️ Sub-agent failed" line —
+    // matches the mutating branch this replaced (hasUserFacingErrorReply guard).
+    const payloads = buildPayloads({
+      assistantTexts: [errorJson],
+      lastAssistant: makeAssistant({}),
+      lastToolError: { toolName: "sessions_spawn", error: "sub-agent step errored" },
+      sessionKey: "agent:main:telegram:direct:u123",
+    });
+
+    expectOverloadedFallback(payloads);
+    expect(payloads[0]?.isError).toBe(true);
+    expectNoPayloadTextContaining(payloads, "Sub-agent");
+    expectNoPayloadTextContaining(payloads, "failed");
   });
 
   it("keeps mutating tool warnings when assistant error artifacts are not user-facing", () => {
@@ -624,6 +662,16 @@ describe("buildEmbeddedRunPayloads", () => {
     });
   });
 
+  it("suppresses genuinely-failed sessions_spawn errors when messages.suppressToolErrors is enabled", () => {
+    // sessions_spawn honest-failure badge must still respect the operator's
+    // global suppressToolErrors config (ENG-16868 review finding).
+    expectNoPayloads({
+      assistantTexts: [],
+      lastToolError: { toolName: "sessions_spawn", error: "sub-agent step errored" },
+      config: { messages: { suppressToolErrors: true } },
+    });
+  });
+
   it("suppresses mutating tool errors when suppressToolErrorWarnings is enabled", () => {
     expectNoPayloads({
       lastToolError: { toolName: "exec", error: "command not found" },
@@ -725,8 +773,8 @@ describe("buildEmbeddedRunPayloads", () => {
   it("reframes a recovered exec timeout on a successful turn as an intermediate status", () => {
     // A recovered exec/bash/process error on a turn that still produced a
     // real reply is non-terminal — the deliverable is the answer, not the command
-    // call. Reframe the false "⚠️ Exec failed" badge into the G4 continuation note
-    // (previously this surfaced a terminal warning).
+    // call. Reframe the false "⚠️ Exec failed" badge into a note that names the
+    // step and the classified reason, not a terminal warning.
     const payloads = buildPayloads({
       assistantTexts: ["The script is ready."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -743,7 +791,57 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(getReplyPayloadMetadata(warning as object)?.nonTerminalToolErrorWarning).toBe(true);
     expect(warning?.text).not.toContain("⚠️");
     expect(warning?.text).not.toContain("failed");
-    expect(warning?.text).toMatch(/kept going|continu|proceed/i);
+    // Names the step, the classified reason, and the impact on the reply above.
+    expect(warning?.text).toContain("Step:");
+    expect(warning?.text).toContain("timed out");
+    expect(warning?.text).toMatch(/reply above|redo that step/i);
+  });
+
+  it("attaches a Retry button to the non-terminal step-failure note", () => {
+    const payloads = buildPayloads({
+      assistantTexts: ["The script is ready."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      lastToolError: {
+        toolName: "exec",
+        error: "command timed out",
+        timedOut: true,
+        mutatingAction: true,
+      },
+    });
+
+    const warning = payloads[1];
+    expect(warning?.presentation?.blocks).toEqual([
+      {
+        type: "buttons",
+        buttons: [{ label: "Retry", action: { type: "command", command: "/retry" } }],
+      },
+    ]);
+  });
+
+  it("attaches a Retry button and a suppression-bypass mark to a terminal '⚠️ … failed' badge", () => {
+    // A terminal badge means no usable reply exists at all — that is exactly
+    // the state a failed mutating send (e.g. the message tool failing to
+    // deliver a generated file) leaves the user in, so it needs Retry and
+    // must survive message_tool_only delivery suppression just like the
+    // non-terminal reframe does.
+    const payloads = buildPayloads({
+      lastToolError: {
+        toolName: "process",
+        meta: "salty-shore",
+        error: "Process exited with code 1.",
+      },
+    });
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.presentation?.blocks).toEqual([
+      {
+        type: "buttons",
+        buttons: [{ label: "Retry", action: { type: "command", command: "/retry" } }],
+      },
+    ]);
+    expect(
+      getReplyPayloadMetadata(payloads[0] as object)?.deliverDespiteSourceReplySuppression,
+    ).toBe(true);
   });
 
   it("reframes a recovered exec error as an intermediate status when the turn claims success", () => {
@@ -762,8 +860,10 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(getReplyPayloadMetadata(warning as object)?.nonTerminalToolErrorWarning).toBe(true);
     expect(warning?.text).not.toContain("⚠️");
     expect(warning?.text).not.toContain("failed");
+    // Raw error text stays hidden at default verbosity; only the fixed,
+    // classified reason ("not found") is user-safe to surface.
     expect(warning?.text).not.toContain("python: command not found");
-    expect(warning?.text).toMatch(/kept going|continu|proceed/i);
+    expect(warning?.text).toContain("not found");
   });
 
   it("suppresses the recovered-exec note entirely when the failing step was benign housekeeping (ENG-16318)", () => {
@@ -789,7 +889,7 @@ describe("buildEmbeddedRunPayloads", () => {
 
   it("keeps the recovered-exec note when the failing step was NOT benign housekeeping (ENG-16318)", () => {
     // A recovered exec whose failing tail was real work (not read-only) still
-    // gets the ENG-16330 "↻ kept going" note — only benign housekeeping is silent.
+    // gets the named-step note — only benign housekeeping is silent.
     const payloads = buildPayloads({
       assistantTexts: ["The build script is ready."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -802,7 +902,7 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads).toHaveLength(2);
     const warning = payloads[1];
     expect(getReplyPayloadMetadata(warning as object)?.nonTerminalToolErrorWarning).toBe(true);
-    expect(warning?.text).toMatch(/kept going|continu|proceed/i);
+    expect(warning?.text).toContain("Step:");
   });
 
   it("still flushes a terminal badge for a benign-housekeeping exec error when NO reply exists (ENG-16318 guard)", () => {
@@ -875,9 +975,32 @@ describe("buildEmbeddedRunPayloads", () => {
       assistantTexts: [text],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
       lastToolError: { toolName: "edit", error: "file missing" },
+      sourceReplyDeliveryMode: "automatic",
     });
 
     expectSinglePayloadSummary(payloads, { text });
+  });
+
+  it("still shows a failed message-tool send when the acknowledging prose is message_tool_only-private", () => {
+    // message_tool_only prose is dropped at dispatch (only payloads marked
+    // deliverDespiteSourceReplySuppression survive). A model writing
+    // "I couldn't send the file" there is not an acknowledgement the user saw
+    // — it is text nobody will ever see, so it must not disable the failure
+    // badge for the one signal that actually reaches the user.
+    const text = "I couldn't send the spreadsheet, so it wasn't delivered.";
+    const payloads = buildPayloads({
+      assistantTexts: [text],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      lastToolError: { toolName: "message", error: "Unknown target", mutatingAction: true },
+      sourceReplyDeliveryMode: "message_tool_only",
+    });
+
+    const warning = payloads.find((payload) => payload.isError === true);
+    expect(warning).toBeDefined();
+    expect(warning?.text).toContain("failed");
+    expect(getReplyPayloadMetadata(warning as object)?.deliverDespiteSourceReplySuppression).toBe(
+      true,
+    );
   });
 
   it("suppresses exec warnings when assistant output explicitly acknowledges the command failure", () => {
@@ -929,15 +1052,12 @@ describe("buildEmbeddedRunPayloads", () => {
     expectSinglePayloadSummary(payloads, { text: warningText ?? "" });
   });
 
-  it("reframes a NON-TERMINAL tool failure as an intermediate status, not '⚠️ … failed'", () => {
-    // A middleware (transient) message-tool failure AFTER the assistant already
-    // produced a reply and prior tools completed is non-terminal — core marks
-    // it nonTerminalToolErrorWarning=true. Rendering "⚠️ ✉️ Message failed" is
-    // the over-eager lie: it reads terminal while work actually continued.
-    // Surface the completed-work context instead ("… N steps completed").
-    // Production pushes a toolMeta for EVERY call including the failing one, so
-    // toolMetas here contains the two completed tools PLUS the failing message
-    // tool (3 entries) — exactly as the runtime builds it.
+  it("suppresses a middleware (post-processing) tool failure entirely once a reply was delivered", () => {
+    // A middleware failure means the tool's result couldn't be sanitized — not
+    // that the tool itself failed (buildMiddlewareFailureResult). Its outcome
+    // is genuinely unknown, so "a step didn't complete" overstates the
+    // evidence. Once a real reply was delivered, drop the note entirely —
+    // same precedent as the sessions_spawn suppression above.
     const payloads = buildPayloads({
       assistantTexts: ["Here's the summary you asked for."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -955,41 +1075,46 @@ describe("buildEmbeddedRunPayloads", () => {
       },
     });
 
-    const warning = payloads.find(
-      (p) => getReplyPayloadMetadata(p)?.nonTerminalToolErrorWarning === true,
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.text).toBe("Here's the summary you asked for.");
+    expect(getReplyPayloadMetadata(payloads[0] as object)?.nonTerminalToolErrorWarning).toBe(
+      undefined,
     );
-    expect(warning).toBeDefined();
-    // No terminal "failed" banner for a non-terminal outcome.
-    expect(warning?.text).not.toContain("failed");
-    expect(warning?.text).not.toContain("⚠️");
-    // Must NOT leak the internal tool name — "message" is the delivery-tool
-    // identity (plumbing), meaningless to a user. The real intermediate content
-    // is the assistant reply already emitted above; this is just a continuation
-    // marker naming how much completed.
-    expect(warning?.text?.toLowerCase()).not.toContain("message");
-    expect(warning?.text).not.toContain("✉️");
-    expect(warning?.text).toMatch(/kept going|continu|proceed/i);
-    // cubic P2: the failing message tool must NOT be counted — 3 metas, 1
-    // failed → 2 completed.
-    expect(warning?.text).toContain("2 steps completed");
   });
 
-  it("keeps tool identity + error detail in the non-terminal status when verbose (operator debug)", () => {
-    // Default user copy hides the tool name (plumbing). But an operator running
-    // /verbose full to debug WHICH tool hiccuped and WHY must still get it.
+  it("still surfaces a middleware tool failure honestly when the turn produced NO reply", () => {
+    // No user-facing reply → the outcome is not "unknown but fine", it's a
+    // genuine failure. The suppression above only applies once a reply exists.
+    const payloads = buildPayloads({
+      lastToolError: {
+        toolName: "message",
+        error: "transient send failure",
+        middlewareError: true,
+        mutatingAction: true,
+      },
+    });
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.isError).toBe(true);
+    expect(payloads[0]?.text).toContain("⚠️");
+    expect(payloads[0]?.text).toContain("failed");
+  });
+
+  it("keeps tool identity + raw error detail in the non-terminal status when verbose (operator debug)", () => {
+    // Middleware failures are suppressed outright (see above), so the verbose
+    // operator-detail path is now proven on a recovered exec/process failure —
+    // the class of failure that still reaches the non-terminal builder.
     const payloads = buildPayloads({
       assistantTexts: ["Here's the summary you asked for."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
       currentAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
       toolMetas: [
         { toolName: "bash", meta: "run migration" },
-        { toolName: "message", meta: undefined },
+        { toolName: "process", meta: undefined },
       ],
       lastToolError: {
-        toolName: "message",
+        toolName: "process",
         error: "transient send failure",
-        middlewareError: true,
-        mutatingAction: true,
       },
       verboseLevel: "full",
     });
@@ -1000,12 +1125,13 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning).toBeDefined();
     // Still a continuation, still no terminal "failed".
     expect(warning?.text).not.toContain("⚠️");
-    // But verbose retains the concrete detail for the operator.
+    // But verbose retains the raw detail for the operator, beyond the fixed
+    // classified reason.
     expect(warning?.text).toContain("transient send failure");
   });
 
   it("counts only successfully-completed tools when MULTIPLE calls errored in the turn", () => {
-    // Two transient failures in one turn: bash ok, read errored, message errored.
+    // Two transient failures in one turn: bash ok, read errored, process errored.
     // toolMetas carries an `errored` flag per call, so the count must be the
     // number of non-errored tools (1), not toolMetas.length - 1 (which assumes
     // a single failure and would wrongly say 2).
@@ -1016,13 +1142,11 @@ describe("buildEmbeddedRunPayloads", () => {
       toolMetas: [
         { toolName: "bash", meta: "run migration" },
         { toolName: "read", meta: "config.json", errored: true },
-        { toolName: "message", meta: undefined, errored: true },
+        { toolName: "process", meta: undefined, errored: true },
       ],
       lastToolError: {
-        toolName: "message",
+        toolName: "process",
         error: "transient send failure",
-        middlewareError: true,
-        mutatingAction: true,
       },
     });
 
@@ -1030,8 +1154,16 @@ describe("buildEmbeddedRunPayloads", () => {
       (p) => getReplyPayloadMetadata(p)?.nonTerminalToolErrorWarning === true,
     );
     expect(warning).toBeDefined();
-    expect(warning?.text).toContain("1 step completed");
-    expect(warning?.text).not.toContain("2 steps");
+    expect(warning?.text).toContain("1 of 3 steps completed");
+    // Header pluralizes with the count of steps that didn't finish (2), not a
+    // hardcoded singular "One step" regardless of how many actually failed.
+    expect(warning?.text).toContain("2 steps didn't finish");
+    // The label and closing guidance stay plural-consistent with the header
+    // instead of naming a single "Step:" while multiple steps failed.
+    expect(warning?.text).toContain("Most recent step:");
+    expect(warning?.text).toMatch(/redo them/i);
+    expect(warning?.text).not.toMatch(/\bStep:/);
+    expect(warning?.text).not.toMatch(/redo that step/i);
   });
 
   it("wraps markdown-capable mutating tool warnings so mention-looking names stay inert", () => {
@@ -1051,13 +1183,17 @@ describe("buildEmbeddedRunPayloads", () => {
     });
   });
 
-  it("reframes a recovered bg-process non-zero exit as an intermediate status, not '⚠️ Process failed'", () => {
+  it("reframes a recovered bg-process non-zero exit as a named, classified intermediate status", () => {
     // The gandalf `salty-shore` case: a backgrounded process session exits
     // non-zero, the agent RECOVERS (produces a real final reply), the turn
     // succeeds — yet core rendered "⚠️ 🧰 Process: salty-shore failed", giving the
     // user the wrong intuition ("the agent broke"). A recovered exec/bash/process
-    // error on a successful turn is non-terminal: surface the G4 continuation note,
-    // never a terminal badge, and never the raw generated session name.
+    // error on a successful turn is non-terminal — but this supersedes the
+    // earlier choice to hide the process identity here: the terminal "⚠️ failed"
+    // path already names it (see the no-reply regression guard below), so
+    // hiding it only in the recovered case was an inconsistency, not a
+    // deliberate redaction. Naming which process recovered is exactly what the
+    // reported bug asked for.
     const payloads = buildPayloads({
       assistantTexts: ["Here's the honest status while the draft work runs."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -1079,12 +1215,11 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning).toBeDefined();
     expect(warning?.text).not.toContain("⚠️");
     expect(warning?.text).not.toContain("failed");
-    expect(warning?.text).not.toContain("salty-shore");
-    expect(warning?.text).not.toContain("🧰");
-    expect(warning?.text).toMatch(/kept going|continu|proceed/i);
+    expect(warning?.text).toContain("salty-shore");
+    expect(warning?.text).toContain("exited with an error");
   });
 
-  it("reframes a recovered exec non-zero exit as an intermediate status on a successful turn", () => {
+  it("reframes a recovered exec non-zero exit as a named intermediate status on a successful turn", () => {
     const payloads = buildPayloads({
       assistantTexts: ["The script is ready to use and saved in your workspace."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -1102,7 +1237,8 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning).toBeDefined();
     expect(warning?.text).not.toContain("⚠️");
     expect(warning?.text).not.toContain("failed");
-    expect(warning?.text).toMatch(/kept going|continu|proceed/i);
+    expect(warning?.text).toContain("Step:");
+    expect(warning?.text).toContain("not found");
   });
 
   it("still flushes a terminal '⚠️ … failed' badge for a recovered tool when the turn produced NO reply (regression guard)", () => {

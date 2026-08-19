@@ -1,7 +1,7 @@
 /** Shared command registry builders used by browser-safe and runtime command lists. */
-import { formatFastModeAutoLabel, resolveFastModeModelAutoOnSeconds } from "../shared/fast-mode.js";
 import { normalizeOptionalLowercaseString } from "../../packages/normalization-core/src/string-coerce.js";
 import { normalizeStringEntries } from "../../packages/normalization-core/src/string-normalization.js";
+import { formatFastModeAutoLabel, resolveFastModeModelAutoOnSeconds } from "../shared/fast-mode.js";
 import { COMMAND_ARG_FORMATTERS } from "./commands-args.js";
 import type {
   ChatCommandDefinition,
@@ -546,6 +546,14 @@ export function buildBuiltinChatCommands(
           captureRemaining: true,
         },
       ],
+    }),
+    defineChatCommand({
+      key: "retry",
+      nativeName: "retry",
+      description: "Ask the agent to redo the step that didn't finish in its last reply.",
+      textAlias: "/retry",
+      category: "management",
+      tier: "standard",
     }),
     defineChatCommand({
       key: "config",

@@ -371,11 +371,11 @@ describe("buildEmbeddedRunPayloads tool-error warnings", () => {
     });
   });
 
-  it("marks middleware tool-error warnings after assistant output as non-terminal", () => {
-    // Middleware failures after useful assistant output warn the user without
-    // replacing the successful answer as the terminal payload. Because the turn
-    // continued, the warning is framed as an intermediate status — NOT the
-    // over-eager terminal "⚠️ Exec failed".
+  it("suppresses a middleware tool-error warning once useful assistant output was delivered", () => {
+    // A middleware failure means post-processing of the tool's own result
+    // failed, not that the tool failed — the outcome is genuinely unknown.
+    // Once the turn delivered a real answer, drop the note entirely rather
+    // than claim "a step didn't complete" on evidence that doesn't support it.
     const payloads = buildPayloads({
       assistantTexts: ["Queued 3 topics."],
       lastToolError: {
@@ -386,18 +386,11 @@ describe("buildEmbeddedRunPayloads tool-error warnings", () => {
       verboseLevel: "off",
     });
 
-    expect(payloads).toHaveLength(2);
+    expect(payloads).toHaveLength(1);
     expect(payloads[0]?.text).toBe("Queued 3 topics.");
-    expect(payloads[1]).toMatchObject({
-      isError: true,
-    });
-    expect(payloads[1]?.text).not.toContain("failed");
-    expect(payloads[1]?.text).not.toContain("⚠️");
-    expect(payloads[1]?.text?.toLowerCase()).not.toContain("exec");
-    expect(payloads[1]?.text).toMatch(/didn't complete.*kept going/i);
-    expect(getReplyPayloadMetadata(payloads[1] as object)).toMatchObject({
-      nonTerminalToolErrorWarning: true,
-    });
+    expect(getReplyPayloadMetadata(payloads[0] as object)?.nonTerminalToolErrorWarning).toBe(
+      undefined,
+    );
   });
 
   it("surfaces concise bash tool errors when verbose mode is off", () => {
@@ -603,6 +596,32 @@ describe("buildEmbeddedRunPayloads tool-error warnings", () => {
       lastToolError,
       verboseLevel: "on",
     });
+  });
+
+  it("suppresses sessions_spawn errors when the spawn recovered and delivered a reply", () => {
+    // A sessions_spawn that errored-then-recovered still delivers a complete
+    // answer; the transient failure is backstage plumbing. No warning badge.
+    const payloads = buildPayloads({
+      assistantTexts: ["Here is the full panel schedule: …"],
+      lastToolError: { toolName: "sessions_spawn", error: "sub-agent step errored" },
+      verboseLevel: "off",
+    });
+
+    expectSinglePayloadText(payloads, "Here is the full panel schedule: …");
+  });
+
+  it("surfaces an honest sessions_spawn failure when no reply was delivered", () => {
+    // A genuine failure (spawn errored AND no user-facing answer) must still
+    // surface honestly — do not over-suppress (verification criterion #3).
+    const payloads = buildPayloads({
+      assistantTexts: [],
+      lastToolError: { toolName: "sessions_spawn", error: "sub-agent step errored" },
+      verboseLevel: "off",
+    });
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.isError).toBe(true);
+    expect(payloads[0]?.text).toContain("failed");
   });
 
   it("suppresses assistant text when a deterministic exec approval prompt was already delivered", () => {

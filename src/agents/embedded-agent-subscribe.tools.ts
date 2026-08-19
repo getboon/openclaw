@@ -38,18 +38,40 @@ function truncateToolText(text: string): string {
   return `${truncateUtf16Safe(text, TOOL_RESULT_MAX_CHARS)}\n…(truncated)…`;
 }
 
+const PYTHON_TRACEBACK_HEADER = "Traceback (most recent call last):";
+// The exec tool appends a synthetic status line after real process output on
+// non-zero exit (bash-tools.exec-runtime.ts `exitMsg`/`joinExecFailureOutput`,
+// sessions/tools/bash.ts `appendStatus`): "(Command exited with code N)",
+// "Command timed out after N seconds...", "Command aborted by signal N", etc.
+// All of these start with the word "Command", so skip them when hunting for
+// a traceback's real last line — otherwise we'd report the trailer instead of
+// the actual exception (`\b` keeps this from matching "CommandError: ...").
+const EXEC_STATUS_TRAILER_RE = /^\(?Command\b/i;
+
 function normalizeToolErrorText(text: string): string | undefined {
   const trimmed = text.trim();
   if (!trimmed) {
     return undefined;
   }
-  const firstLine = trimmed.split(/\r?\n/)[0]?.trim() ?? "";
-  if (!firstLine) {
+  const lines = trimmed.split(/\r?\n/);
+  // A Python traceback's first line is always this generic header; the actual
+  // "ExceptionType: message" is the last non-empty line. Keeping the first
+  // line here collapses every distinct Python exec failure into the same
+  // uninformative error string for callers/telemetry that key off this text.
+  const summaryLine =
+    lines[0]?.trim() === PYTHON_TRACEBACK_HEADER
+      ? lines.toReversed().find((line) => {
+          const candidate = line.trim();
+          return candidate.length > 0 && !EXEC_STATUS_TRAILER_RE.test(candidate);
+        })
+      : lines[0];
+  const line = summaryLine?.trim() ?? "";
+  if (!line) {
     return undefined;
   }
-  return firstLine.length > TOOL_ERROR_MAX_CHARS
-    ? `${truncateUtf16Safe(firstLine, TOOL_ERROR_MAX_CHARS)}…`
-    : firstLine;
+  return line.length > TOOL_ERROR_MAX_CHARS
+    ? `${truncateUtf16Safe(line, TOOL_ERROR_MAX_CHARS)}…`
+    : line;
 }
 
 function isErrorLikeStatus(status: string): boolean {

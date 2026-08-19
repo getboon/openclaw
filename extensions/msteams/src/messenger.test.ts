@@ -7,17 +7,27 @@ import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoredConversationReference } from "./conversation-store.js";
 const graphUploadMockState = vi.hoisted(() => ({
-  uploadAndShareOneDrive: vi.fn(),
   uploadAndShareSharePoint: vi.fn(),
   getDriveItemProperties: vi.fn(),
 }));
 
 vi.mock("./graph-upload.js", () => {
   return {
-    uploadAndShareOneDrive: graphUploadMockState.uploadAndShareOneDrive,
     uploadAndShareSharePoint: graphUploadMockState.uploadAndShareSharePoint,
     getDriveItemProperties: graphUploadMockState.getDriveItemProperties,
   };
+});
+
+// Wraps the real loadWebMedia in a spy: local-path tests below exercise the
+// real filesystem read unchanged, while remote-URL tests can override a
+// single call with mockResolvedValueOnce/mockImplementationOnce to avoid a
+// real network fetch.
+const webMediaMockState = vi.hoisted(() => ({ loadWebMedia: undefined as unknown }));
+vi.mock("openclaw/plugin-sdk/web-media", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("openclaw/plugin-sdk/web-media")>();
+  const spy = vi.fn(actual.loadWebMedia);
+  webMediaMockState.loadWebMedia = spy;
+  return { ...actual, loadWebMedia: spy };
 });
 
 import {
@@ -177,18 +187,22 @@ function createMockApp(opts?: MockAppOptions): MSTeamsApp {
   } as unknown as MSTeamsApp;
 }
 
+function loadWebMediaSpy() {
+  return webMediaMockState.loadWebMedia as ReturnType<typeof vi.fn>;
+}
+
 describe("msteams messenger", () => {
   beforeEach(() => {
     setMSTeamsRuntime(runtimeStub);
-    graphUploadMockState.uploadAndShareOneDrive.mockReset();
     graphUploadMockState.uploadAndShareSharePoint.mockReset();
     graphUploadMockState.getDriveItemProperties.mockReset();
-    graphUploadMockState.uploadAndShareOneDrive.mockResolvedValue({
+    graphUploadMockState.uploadAndShareSharePoint.mockResolvedValue({
       itemId: "item123",
-      webUrl: "https://onedrive.example.com/item123",
-      shareUrl: "https://onedrive.example.com/share/item123",
+      webUrl: "https://sp.example.com/item123",
+      shareUrl: "https://sp.example.com/share/item123",
       name: "upload.txt",
     });
+    loadWebMediaSpy().mockClear();
   });
 
   describe("renderReplyPayloadsToMessages", () => {
@@ -345,7 +359,7 @@ describe("msteams messenger", () => {
       expect(capturedConversationId).toBe("19:abc@thread.tacv2");
     });
 
-    it("preserves parsed mentions when appending OneDrive fallback file links", async () => {
+    it("preserves parsed mentions when appending an uploaded SharePoint file link", async () => {
       const tmpDir = await mkdtemp(path.join(resolvePreferredOpenClawTmpDir(), "msteams-mention-"));
       const localFile = path.join(tmpDir, "note.txt");
       await writeFile(localFile, "hello");
@@ -375,16 +389,15 @@ describe("msteams messenger", () => {
           tokenProvider: {
             getAccessToken: async () => "token",
           },
+          sharePointSiteId: "contoso.sharepoint.com,guid1,guid2",
         });
 
         expect(ids).toEqual(["id:one"]);
-        expect(graphUploadMockState.uploadAndShareOneDrive).toHaveBeenCalledOnce();
+        expect(graphUploadMockState.uploadAndShareSharePoint).toHaveBeenCalledOnce();
         expect(sent).toHaveLength(1);
         const firstSent = requireSentMessage(sent);
         expect(firstSent.text).toContain("Hello <at>John</at>");
-        expect(firstSent.text).toContain(
-          "📎 [upload.txt](https://onedrive.example.com/share/item123)",
-        );
+        expect(firstSent.text).toContain("📎 [upload.txt](https://sp.example.com/share/item123)");
         const mentionEntity = requireMentionEntity(sent[0]?.entities);
         expect(mentionEntity.text).toBe("<at>John</at>");
         expect(mentionEntity.mentioned).toEqual({
@@ -397,6 +410,83 @@ describe("msteams messenger", () => {
       } finally {
         await rm(tmpDir, { recursive: true, force: true });
       }
+    });
+
+    it("produces an explicit undeliverable notice for a non-image file with no SharePoint site configured", async () => {
+      // Without sharePointSiteId there is no working upload path for a
+      // non-image in a group chat/channel (a bot has no personal OneDrive).
+      // The user must see this in-thread instead of the agent being told an
+      // opaque failure and paraphrasing it as "I cannot".
+      const tmpDir = await mkdtemp(
+        path.join(resolvePreferredOpenClawTmpDir(), "msteams-undeliverable-"),
+      );
+      const localFile = path.join(tmpDir, "proposal.pdf");
+      await writeFile(localFile, "hello");
+
+      try {
+        const sent: Array<{ text?: string }> = [];
+        const ctx = {
+          sendActivity: async (activity: unknown) => {
+            sent.push(activity as { text?: string });
+            return { id: "id:one" };
+          },
+        };
+
+        await sendMSTeamsMessages({
+          replyStyle: "thread",
+          app: createMockApp(),
+          appId: "app123",
+          conversationRef: {
+            ...baseRef,
+            conversation: { ...baseRef.conversation, conversationType: "channel" },
+          },
+          context: ctx,
+          messages: [{ text: "here's the file", mediaUrl: localFile }],
+          tokenProvider: { getAccessToken: async () => "token" },
+        });
+
+        expect(graphUploadMockState.uploadAndShareSharePoint).not.toHaveBeenCalled();
+        const firstSent = requireSentMessage(sent);
+        expect(firstSent.text).toContain('I can\'t attach "proposal.pdf" directly here');
+        expect(firstSent.text).toContain("sharePointSiteId");
+      } finally {
+        await rm(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("includes the source URL in the undeliverable notice for remote media", async () => {
+      loadWebMediaSpy().mockResolvedValueOnce({
+        buffer: Buffer.from("pdf-bytes"),
+        contentType: "application/pdf",
+        fileName: "report.pdf",
+        kind: "file",
+      });
+
+      const sent: Array<{ text?: string }> = [];
+      const ctx = {
+        sendActivity: async (activity: unknown) => {
+          sent.push(activity as { text?: string });
+          return { id: "id:one" };
+        },
+      };
+
+      await sendMSTeamsMessages({
+        replyStyle: "thread",
+        app: createMockApp(),
+        appId: "app123",
+        conversationRef: {
+          ...baseRef,
+          conversation: { ...baseRef.conversation, conversationType: "channel" },
+        },
+        context: ctx,
+        messages: [{ mediaUrl: "https://app.getboon.ai/projects/123/report.pdf" }],
+        tokenProvider: { getAccessToken: async () => "token" },
+      });
+
+      const firstSent = requireSentMessage(sent);
+      expect(firstSent.text).toContain(
+        "You can open it here instead: https://app.getboon.ai/projects/123/report.pdf",
+      );
     });
 
     it("retries thread sends on throttling (429)", async () => {
@@ -431,15 +521,15 @@ describe("msteams messenger", () => {
         const attempts: string[] = [];
         const retryEvents: Array<{ nextAttempt: number; delayMs: number }> = [];
         let uploadAttempts = 0;
-        graphUploadMockState.uploadAndShareOneDrive.mockImplementation(async () => {
+        graphUploadMockState.uploadAndShareSharePoint.mockImplementation(async () => {
           uploadAttempts += 1;
           if (uploadAttempts === 1) {
             throw Object.assign(new Error("transient upload failure"), { statusCode: 429 });
           }
           return {
             itemId: "item123",
-            webUrl: "https://onedrive.example.com/item123",
-            shareUrl: "https://onedrive.example.com/share/item123",
+            webUrl: "https://sp.example.com/item123",
+            shareUrl: "https://sp.example.com/share/item123",
             name: "retry.txt",
           };
         });
@@ -463,6 +553,7 @@ describe("msteams messenger", () => {
           tokenProvider: {
             getAccessToken: async () => "token",
           },
+          sharePointSiteId: "contoso.sharepoint.com,guid1,guid2",
           retry: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0 },
           onRetry: (e) => retryEvents.push({ nextAttempt: e.nextAttempt, delayMs: e.delayMs }),
         });
@@ -770,6 +861,12 @@ describe("msteams messenger", () => {
     });
 
     it("adds AI-generated entity to media-only messages", async () => {
+      loadWebMediaSpy().mockResolvedValueOnce({
+        buffer: Buffer.from("fake-image-bytes"),
+        contentType: "image/png",
+        fileName: "img.png",
+        kind: "image",
+      });
       const activity = await buildActivity({ mediaUrl: "https://example.com/img.png" }, baseRef);
       expect(requireAiGeneratedEntity(activity.entities).additionalType).toEqual([
         "AIGeneratedContent",
@@ -803,6 +900,73 @@ describe("msteams messenger", () => {
       const activity = await buildActivity({ text: "hello" }, baseRef);
       const channelData = activity.channelData as Record<string, unknown>;
       expect(channelData.feedbackLoopEnabled).toBe(false);
+    });
+  });
+
+  describe("buildActivity media handling", () => {
+    const personalRef: StoredConversationReference = {
+      activityId: "activity123",
+      user: { id: "user123", name: "User" },
+      agent: { id: "bot123", name: "Bot" },
+      conversation: { id: "conv123", conversationType: "personal" },
+      channelId: "msteams",
+      serviceUrl: "https://smba.trafficmanager.net/amer/",
+    };
+
+    const channelRef: StoredConversationReference = {
+      activityId: "activity123",
+      user: { id: "user123", name: "User" },
+      agent: { id: "bot123", name: "Bot" },
+      conversation: { id: "19:channel@thread.tacv2", conversationType: "channel" },
+      channelId: "msteams",
+      serviceUrl: "https://smba.trafficmanager.net/amer/",
+    };
+
+    // A data: URL is already-resolved inline media — e.g. send.ts's own
+    // inline-image plan builds one and routes it back through this same
+    // reply path. loadWebMedia doesn't understand the data: scheme and would
+    // try (and fail) to read it as a local file path, breaking every
+    // proactive image send, including the 1:1 DM path this covers.
+    it("attaches a data: URL directly without reprocessing it through loadWebMedia", async () => {
+      loadWebMediaSpy().mockClear();
+      const dataUrl = "data:image/png;base64,aGVsbG8=";
+
+      const activity = await buildActivity({ mediaUrl: dataUrl }, personalRef);
+
+      expect(loadWebMediaSpy()).not.toHaveBeenCalled();
+      const attachments = activity.attachments as Array<Record<string, unknown>>;
+      expect(attachments).toHaveLength(1);
+      expect(attachments[0]?.contentUrl).toBe(dataUrl);
+      expect(attachments[0]?.contentType).toBe("image/png");
+    });
+
+    // A configured SharePoint site must take priority over inlining for
+    // images too — otherwise a working upload+link path silently regresses
+    // to inline base64 with no permanent share link.
+    it("uploads an image to SharePoint instead of inlining it when a site is configured", async () => {
+      loadWebMediaSpy().mockResolvedValueOnce({
+        buffer: Buffer.from("fake-image-bytes"),
+        contentType: "image/png",
+        fileName: "diagram.png",
+        kind: "image",
+      });
+      graphUploadMockState.uploadAndShareSharePoint.mockResolvedValueOnce({
+        itemId: "item-1",
+        webUrl: "https://sp.example.com/diagram.png",
+        shareUrl: "https://sp.example.com/share/diagram.png",
+        name: "diagram.png",
+      });
+
+      const activity = await buildActivity(
+        { mediaUrl: "https://example.com/diagram.png" },
+        channelRef,
+        { getAccessToken: async () => "token" },
+        "contoso.sharepoint.com,guid1,guid2",
+      );
+
+      expect(graphUploadMockState.uploadAndShareSharePoint).toHaveBeenCalledOnce();
+      expect(activity.attachments).toBeUndefined();
+      expect(activity.text).toBe("📎 [diagram.png](https://sp.example.com/share/diagram.png)");
     });
   });
 

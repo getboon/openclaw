@@ -30,7 +30,6 @@ export function createBlockReplyCoalescer(params: {
   let bufferAudioAsVoice: ReplyPayload["audioAsVoice"];
   let bufferIsReasoning: ReplyPayload["isReasoning"];
   let bufferIsCompactionNotice: ReplyPayload["isCompactionNotice"];
-  let bufferIsFallbackNotice: ReplyPayload["isFallbackNotice"];
   let bufferIsStatusNotice: ReplyPayload["isStatusNotice"];
   let bufferMetadataSource: ReplyPayload | undefined;
   let idleTimer: NodeJS.Timeout | undefined;
@@ -49,7 +48,6 @@ export function createBlockReplyCoalescer(params: {
     bufferAudioAsVoice = undefined;
     bufferIsReasoning = undefined;
     bufferIsCompactionNotice = undefined;
-    bufferIsFallbackNotice = undefined;
     bufferIsStatusNotice = undefined;
     bufferMetadataSource = undefined;
   };
@@ -59,7 +57,6 @@ export function createBlockReplyCoalescer(params: {
     bufferAudioAsVoice = payload.audioAsVoice;
     bufferIsReasoning = payload.isReasoning;
     bufferIsCompactionNotice = payload.isCompactionNotice;
-    bufferIsFallbackNotice = payload.isFallbackNotice;
     bufferIsStatusNotice = payload.isStatusNotice;
     bufferMetadataSource = payload;
   };
@@ -93,7 +90,6 @@ export function createBlockReplyCoalescer(params: {
       audioAsVoice: bufferAudioAsVoice,
       isReasoning: bufferIsReasoning,
       isCompactionNotice: bufferIsCompactionNotice,
-      isFallbackNotice: bufferIsFallbackNotice,
       isStatusNotice: bufferIsStatusNotice,
     };
     const payloadWithMetadata = copyReplyPayloadMetadata(bufferMetadataSource ?? payload, payload);
@@ -111,7 +107,6 @@ export function createBlockReplyCoalescer(params: {
     !bufferIsReasoning &&
     !isReplyPayloadStatusNotice({
       isCompactionNotice: bufferIsCompactionNotice,
-      isFallbackNotice: bufferIsFallbackNotice,
       isStatusNotice: bufferIsStatusNotice,
     }) &&
     (!payload.replyToId || bufferReplyToId === payload.replyToId);
@@ -174,10 +169,8 @@ export function createBlockReplyCoalescer(params: {
       bufferText &&
       (bufferIsReasoning !== payload.isReasoning ||
         bufferIsCompactionNotice !== payload.isCompactionNotice ||
-        bufferIsFallbackNotice !== payload.isFallbackNotice ||
         isReplyPayloadStatusNotice({
           isCompactionNotice: bufferIsCompactionNotice,
-          isFallbackNotice: bufferIsFallbackNotice,
           isStatusNotice: bufferIsStatusNotice,
         }) !== isReplyPayloadStatusNotice(payload));
     // Flush before changing reply target, audio mode, or visibility class.

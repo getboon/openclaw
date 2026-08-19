@@ -7,6 +7,9 @@ import type { CommandSessionMetadataChange } from "./command-session-metadata.js
 import type { InternalGetReplyFromConfig, InternalGetReplyOptions } from "./get-reply.types.js";
 import type { ReplyDispatchKind, ReplyDispatcher } from "./reply-dispatcher.types.js";
 
+/** Why a turn ended before the agent ever ran. Absent means the agent ran. */
+export type DispatchTurnSkipReason = "active-run" | "aborted" | "duplicate";
+
 export type DispatchFromConfigResult = {
   queuedFinal: boolean;
   counts: Record<ReplyDispatchKind, number>;
@@ -17,6 +20,8 @@ export type DispatchFromConfigResult = {
   noVisibleReplyFallbackEligible?: boolean;
   beforeAgentRunBlocked?: boolean;
   sessionMetadataChanges?: CommandSessionMetadataChange[];
+  /** Set only when the turn never reached the agent, so no reply was ever possible. */
+  turnSkipped?: DispatchTurnSkipReason;
 };
 
 export type DispatchFromConfigParams = {

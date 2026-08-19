@@ -110,7 +110,7 @@ openclaw cron add \
   --reply-style top-level
 ```
 
-This maps to `delivery.replyStyle` on the stored job. Today MS Teams honors it (posting a new parent-channel message); other channels ignore it and use their normal routing. It does not apply to presentation-card sends. It is the scheduled-delivery counterpart of the `message` tool's per-send `topLevel` parameter.
+This maps to `delivery.replyStyle` on the stored job. Today MS Teams honors it (posting a new parent-channel message); other channels ignore it and use their normal routing. It is the scheduled-delivery counterpart of the `message` tool's per-send `topLevel` parameter.
 
 `--announce` is runner fallback delivery for the final reply. `--no-deliver` disables that fallback but does not remove the agent's `message` tool when a chat route is available.
 

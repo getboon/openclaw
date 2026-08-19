@@ -202,6 +202,41 @@ describe("deliverReplies identity passthrough", () => {
       ),
     ).rejects.toThrow(/Slack blocks cannot exceed 50 items/i);
   });
+
+  it("posts the audit trace against the delivered thread, not the rejected request thread", async () => {
+    // Primary reply degraded to the channel (thread anchor rejected), so
+    // sendMessageSlack returns threadTs: undefined. The trailing trace must
+    // follow that channel fallback rather than re-posting to the dead thread.
+    sendMock.mockResolvedValueOnce({ messageId: "m1", channelId: "C123", threadTs: undefined });
+    sendMock.mockResolvedValueOnce({ messageId: "m2", channelId: "C123" });
+
+    await deliverReplies(
+      baseParams({
+        replyThreadTs: "dead-thread",
+        replyToMode: "all" as const,
+        replies: [
+          {
+            text: "answer",
+            auditTrace: {
+              schemaVersion: 1,
+              visibleTools: ["read"],
+              toolInvocations: [{ name: "read", status: "ok" }],
+              evidence: [{ kind: "tool_outcome", tool: "read", status: "ok" }],
+              confidence: "high",
+              disposition: "completed",
+              reason: "tool_execution_succeeded",
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(sendMock).toHaveBeenCalledTimes(2);
+    // Primary send used the requested (later-rejected) anchor...
+    expect(requireSendCall(0)[2].threadTs).toBe("dead-thread");
+    // ...but the trace send must NOT reuse it after the channel fallback.
+    expect(requireSendCall(1)[2].threadTs).toBeUndefined();
+  });
 });
 
 describe("resolveDeliveredSlackReplyThreadTs", () => {

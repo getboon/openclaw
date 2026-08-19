@@ -46,6 +46,7 @@ function makeSnapshot(skillCount: number): SessionSkillSnapshot {
     skills: resolved.map((s) => ({ name: s.name })),
     skillFilter: undefined,
     resolvedSkills: resolved,
+    commandSkills: resolved,
     version: 1,
   };
 }
@@ -104,9 +105,11 @@ describe("session store strips resolvedSkills from persistence", () => {
 
     const raw = await fs.readFile(storePath, "utf-8");
     expect(raw).not.toContain("resolvedSkills");
+    expect(raw).not.toContain("commandSkills");
     expect(raw).not.toContain("xxxxx"); // none of the skill source bodies leaked
     const parsed = JSON.parse(raw) as Record<string, SessionEntry>;
     expect(parsed["agent:main:test:1"]?.skillsSnapshot?.resolvedSkills).toBeUndefined();
+    expect(parsed["agent:main:test:1"]?.skillsSnapshot?.commandSkills).toBeUndefined();
   });
 
   it("preserves prompt, skills, skillFilter, and version on roundtrip", async () => {
@@ -125,6 +128,7 @@ describe("session store strips resolvedSkills from persistence", () => {
     expect(persistedSnapshot?.skillFilter).toEqual(["skill-0"]);
     expect(persistedSnapshot?.version).toBe(1);
     expect(persistedSnapshot?.resolvedSkills).toBeUndefined();
+    expect(persistedSnapshot?.commandSkills).toBeUndefined();
   });
 
   it("strips resolvedSkills from a legacy sessions.json on load", async () => {
@@ -135,10 +139,12 @@ describe("session store strips resolvedSkills from persistence", () => {
     await fs.mkdir(path.dirname(storePath), { recursive: true });
     const rawLegacy = JSON.stringify(legacy, null, 2);
     expect(rawLegacy).toContain("resolvedSkills");
+    expect(rawLegacy).toContain("commandSkills");
     await fs.writeFile(storePath, rawLegacy, "utf-8");
 
     const loaded = loadSessionStore(storePath, { skipCache: true });
     expect(loaded["agent:main:test:1"]?.skillsSnapshot?.resolvedSkills).toBeUndefined();
+    expect(loaded["agent:main:test:1"]?.skillsSnapshot?.commandSkills).toBeUndefined();
     expect(loaded["agent:main:test:1"]?.skillsSnapshot?.prompt).toBe(
       legacy["agent:main:test:1"].skillsSnapshot?.prompt,
     );
@@ -147,6 +153,7 @@ describe("session store strips resolvedSkills from persistence", () => {
     await saveSessionStore(storePath, loaded, { skipMaintenance: true });
     const rawAfter = await fs.readFile(storePath, "utf-8");
     expect(rawAfter).not.toContain("resolvedSkills");
+    expect(rawAfter).not.toContain("commandSkills");
   });
 
   it("strips resolvedSkills written via updateSessionStore mutator", async () => {
@@ -162,8 +169,10 @@ describe("session store strips resolvedSkills from persistence", () => {
 
     const raw = await fs.readFile(storePath, "utf-8");
     expect(raw).not.toContain("resolvedSkills");
+    expect(raw).not.toContain("commandSkills");
     const reloaded = loadSessionStore(storePath, { skipCache: true });
     expect(reloaded["agent:main:test:1"]?.skillsSnapshot?.resolvedSkills).toBeUndefined();
+    expect(reloaded["agent:main:test:1"]?.skillsSnapshot?.commandSkills).toBeUndefined();
     expect(reloaded["agent:main:test:1"]?.skillsSnapshot?.skills).toHaveLength(6);
   });
 

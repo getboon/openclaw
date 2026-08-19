@@ -35,6 +35,7 @@ import type {
   ChannelMessageActionName,
   ChannelOutboundAdapter,
   ChannelPlugin,
+  MSTeamsReplyStyle,
   OpenClawConfig,
 } from "../runtime-api.js";
 import {
@@ -243,6 +244,22 @@ function resolveActionContent(params: Record<string, unknown>): string {
         : "";
 }
 
+/**
+ * `topLevel: true` / `threadId: null` force a fresh parent-channel post;
+ * `topLevel: false` forces threading even when config resolves to top-level.
+ * Shared by send, presentation-card send, and upload-file so the three actions
+ * cannot drift on the same documented tool parameter.
+ */
+function resolveMSTeamsActionReplyStyleOverride(
+  params: Record<string, unknown>,
+): MSTeamsReplyStyle | undefined {
+  const topLevel = readBooleanParam(params, "topLevel");
+  if (topLevel === true || params.threadId === null) {
+    return "top-level";
+  }
+  return topLevel === false ? "thread" : undefined;
+}
+
 function readOptionalTrimmedString(
   params: Record<string, unknown>,
   key: string,
@@ -392,7 +409,7 @@ function createMSTeamsTopLevelActionSchema(): Record<string, TSchema> {
     topLevel: Type.Optional(
       Type.Boolean({
         description:
-          "MS Teams-only opt-out from threaded same-channel context. Set true to post a new parent-channel message instead of inheriting the current thread; set false to force threading even when config is top-level. `threadId: null` is accepted as the same top-level request. Note: only supported for non-presentation sends; presentation cards ignore this parameter.",
+          "MS Teams-only opt-out from threaded same-channel context. Set true to post a new parent-channel message instead of inheriting the current thread; set false to force threading even when config is top-level. `threadId: null` is accepted as the same top-level request.",
       }),
     ),
   };
@@ -754,6 +771,7 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
               presentation,
               text: resolveActionContent(ctx.params),
             });
+            const replyStyleOverride = resolveMSTeamsActionReplyStyleOverride(ctx.params);
             return await runWithRequiredActionTarget({
               actionLabel: "Card send",
               toolParams: ctx.params,
@@ -763,6 +781,7 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
                   cfg: ctx.cfg,
                   to,
                   card,
+                  ...(replyStyleOverride ? { replyStyleOverride } : {}),
                 });
                 return jsonActionResultWithDetails(
                   {
@@ -777,18 +796,7 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
             });
           }
           if (ctx.action === "send" && !presentation) {
-            // Handle non-presentation send with topLevel support
-            const topLevelParam = readBooleanParam(ctx.params, "topLevel");
-            const threadIdNull = ctx.params.threadId === null;
-
-            // Convert to replyStyleOverride (support bidirectional override)
-            let replyStyleOverride: "top-level" | "thread" | undefined;
-            if (topLevelParam === true || threadIdNull) {
-              replyStyleOverride = "top-level";
-            } else if (topLevelParam === false) {
-              replyStyleOverride = "thread";
-            }
-
+            const replyStyleOverride = resolveMSTeamsActionReplyStyleOverride(ctx.params);
             const content = resolveActionContent(ctx.params);
             if (!content) {
               return actionError("Send requires content.");
@@ -824,18 +832,7 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
               return actionError("Upload-file requires media, filePath, or path.");
             }
 
-            // Read topLevel parameter (mirror Slack pattern)
-            const topLevelParam = readBooleanParam(ctx.params, "topLevel");
-            const threadIdNull = ctx.params.threadId === null;
-
-            // Convert to replyStyleOverride (support bidirectional override)
-            let replyStyleOverride: "top-level" | "thread" | undefined;
-            if (topLevelParam === true || threadIdNull) {
-              replyStyleOverride = "top-level";
-            } else if (topLevelParam === false) {
-              replyStyleOverride = "thread";
-            }
-
+            const replyStyleOverride = resolveMSTeamsActionReplyStyleOverride(ctx.params);
             return await runWithRequiredActionTarget({
               actionLabel: "Upload-file",
               toolParams: ctx.params,
@@ -1201,7 +1198,7 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
           await (await loadMSTeamsChannelRuntime()).probeMSTeams(cfg.channels?.msteams),
         formatCapabilitiesProbe: ({ probe }) => {
           const teamsProbe = probe;
-          const lines: Array<{ text: string; tone?: "error" }> = [];
+          const lines: Array<{ text: string; tone?: "error" | "warn" }> = [];
           const appId = typeof teamsProbe?.appId === "string" ? teamsProbe.appId.trim() : "";
           if (appId) {
             lines.push({ text: `App: ${appId}` });
@@ -1226,6 +1223,9 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
             } else if (graph.ok) {
               lines.push({ text: "Graph: ok" });
             }
+          }
+          for (const warning of teamsProbe?.warnings ?? []) {
+            lines.push({ text: warning, tone: "warn" });
           }
           return lines;
         },

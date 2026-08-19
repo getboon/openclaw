@@ -259,6 +259,45 @@ describe.each(storeFactories)("msteams conversation store ($name)", ({ createSto
     }
   });
 
+  // Intentional last-seen-wins: unlike timezone/graphChatId, the anchor fields
+  // describe the newest inbound, not durable identity. Preserving threadId here
+  // would pin later replies to a stale thread after a fresh top-level post.
+  it("clears threadId and advances activityId when a later top-level message arrives", async () => {
+    const store = await createStore();
+    const channel = { id: "conv-anchor", conversationType: "channel" };
+
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-03-25T20:00:00.000Z"));
+      await store.upsert("conv-anchor", {
+        conversation: channel,
+        channelId: "msteams",
+        serviceUrl: "https://service.example.com",
+        activityId: "activity-thread-reply",
+        threadId: "thread-root-1",
+      });
+
+      vi.setSystemTime(new Date("2026-03-25T20:01:00.000Z"));
+      // A plain top-level channel post: no threadId, new activityId.
+      await store.upsert("conv-anchor", {
+        conversation: channel,
+        channelId: "msteams",
+        serviceUrl: "https://service.example.com",
+        activityId: "activity-top-level",
+      });
+
+      await expect(store.get("conv-anchor")).resolves.toEqual({
+        conversation: channel,
+        channelId: "msteams",
+        serviceUrl: "https://service.example.com",
+        activityId: "activity-top-level",
+        lastSeenAt: "2026-03-25T20:01:00.000Z",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("prefers the freshest personal conversation for repeated upserts of the same user", async () => {
     const store = await createStore();
 

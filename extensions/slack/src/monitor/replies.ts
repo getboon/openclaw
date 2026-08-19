@@ -19,7 +19,7 @@ import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import { markdownToSlackMrkdwnChunks } from "../format.js";
 import { SLACK_TEXT_LIMIT } from "../limits.js";
 import { emitSlackMessageSentHooks } from "../message-sent-hook.js";
-import { resolveSlackReplyBlocks } from "../reply-blocks.js";
+import { resolveSlackAuditTraceBlock, resolveSlackReplyBlocks } from "../reply-blocks.js";
 import { sendMessageSlack, type SlackSendIdentity, type SlackSendResult } from "./send.runtime.js";
 
 export function readSlackReplyBlocks(payload: ReplyPayload) {
@@ -73,6 +73,29 @@ export async function deliverReplies(params: {
   deferMessageSentHooks?: true;
 }) {
   let latestResult: SlackSendResult | undefined;
+  // Deliver the "How this was verified" audit-trace as a trailing, standalone
+  // context-block message so the primary reply's native text rendering is not
+  // suppressed by Slack's text→fallback demotion when `blocks` are present.
+  // Mirrors openclaw PR #80's separate-segment semantics on boon's flat model.
+  const deliverAuditTrace = async (payload: ReplyPayload, threadTs?: string) => {
+    const traceBlock = resolveSlackAuditTraceBlock(payload);
+    if (!traceBlock) {
+      return;
+    }
+    try {
+      await sendMessageSlack(params.target, "", {
+        cfg: params.cfg,
+        token: params.token,
+        threadTs,
+        accountId: params.accountId,
+        blocks: [traceBlock],
+        ...(params.identity ? { identity: params.identity } : {}),
+      });
+    } catch (error) {
+      // Audit trace is supplemental; never fail the primary reply on its send.
+      params.runtime.log?.(`slack audit-trace delivery failed: ${String(error)}`);
+    }
+  };
   for (const payload of params.replies) {
     if (payload.isReasoning === true) {
       continue;
@@ -149,6 +172,11 @@ export async function deliverReplies(params: {
       emitSent(trimmed, result);
       latestResult = result;
       params.runtime.log?.(`delivered reply to ${params.target}`);
+      // Follow the ACTUAL delivered thread (undefined when the primary send
+      // degraded to the channel on a rejected anchor). Falling back to the
+      // request `threadTs` here would re-post the trace against the dead thread
+      // and trigger another invalid-thread retry.
+      await deliverAuditTrace(payload, result?.threadTs);
       continue;
     }
 
@@ -202,6 +230,11 @@ export async function deliverReplies(params: {
       emitSent(hookContent, reply.hasMedia ? undefined : lastResult);
       latestResult = lastResult;
       params.runtime.log?.(`delivered reply to ${params.target}`);
+      // Follow the ACTUAL delivered thread (undefined when a chunk/media send
+      // degraded to the channel on a rejected anchor). Falling back to the
+      // request `threadTs` here would re-post the trace against the dead thread
+      // and trigger another invalid-thread retry.
+      await deliverAuditTrace(payload, lastResult?.threadTs);
     }
   }
   return latestResult;

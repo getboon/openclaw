@@ -13,30 +13,26 @@ import { sleep } from "openclaw/plugin-sdk/text-utility-runtime";
 import { loadWebMedia } from "openclaw/plugin-sdk/web-media";
 import type { MarkdownTableMode, MSTeamsReplyStyle, OpenClawConfig } from "../runtime-api.js";
 import type { MSTeamsAccessTokenProvider } from "./attachments/types.js";
+import type { MSTeamsSdkCloudOptions } from "./cloud.js";
 import type { StoredConversationReference } from "./conversation-store.js";
 import { classifyMSTeamsSendError } from "./errors.js";
-import { prepareFileConsentActivity, requiresFileConsent } from "./file-consent-helpers.js";
-import { uploadAndShareOneDrive, uploadAndShareSharePoint } from "./graph-upload.js";
+import { prepareFileConsentActivity } from "./file-consent-helpers.js";
+import {
+  buildMSTeamsSharePointFileLinkText,
+  buildMSTeamsUndeliverableFileNotice,
+  MSTEAMS_MAX_MEDIA_BYTES,
+  resolveMSTeamsOutboundFilePlan,
+} from "./file-plan.js";
+import { uploadAndShareSharePoint } from "./graph-upload.js";
 import { extractFilename, extractMessageId, getMimeType, isLocalPath } from "./media-helpers.js";
 import { parseMentions } from "./mentions.js";
 import { setPendingUploadActivityId } from "./pending-uploads.js";
 import { withRevokedProxyFallback } from "./revoked-context.js";
 import { getMSTeamsRuntime } from "./runtime.js";
-
-/**
- * MSTeams-specific media size limit (100MB).
- * Higher than the default because OneDrive upload handles large files well.
- */
-const MSTEAMS_MAX_MEDIA_BYTES = 100 * 1024 * 1024;
-
-/**
- * Threshold for large files that require FileConsentCard flow in personal chats.
- * Files >= 4MB use consent flow; smaller images can use inline base64.
- */
-const FILE_CONSENT_THRESHOLD_BYTES = 4 * 1024 * 1024;
-
-import type { MSTeamsSdkCloudOptions } from "./cloud.js";
-import { sendMSTeamsActivityWithReference } from "./sdk-proactive.js";
+import {
+  resolveMSTeamsThreadActivityId,
+  sendMSTeamsActivityWithReference,
+} from "./sdk-proactive.js";
 import type { MSTeamsActivityLike } from "./sdk-types.js";
 import type { MSTeamsApp } from "./sdk.js";
 
@@ -296,103 +292,107 @@ export async function buildActivity(
   }
 
   if (msg.mediaUrl) {
-    let contentUrl = msg.mediaUrl;
-    let contentType = await getMimeType(msg.mediaUrl);
-    let fileName = await extractFilename(msg.mediaUrl);
-
-    if (isLocalPath(msg.mediaUrl)) {
-      const maxBytes = mediaMaxBytes ?? MSTEAMS_MAX_MEDIA_BYTES;
-      const media = await loadWebMedia(msg.mediaUrl, maxBytes);
-      contentType = media.contentType ?? contentType;
-      fileName = media.fileName ?? fileName;
-
-      // Determine conversation type and file type
-      // Teams only accepts base64 data URLs for images
-      const conversationType = normalizeOptionalLowercaseString(
-        conversationRef.conversation?.conversationType,
-      );
-      const isPersonal = conversationType === "personal";
-      const isImage = media.kind === "image";
-
-      if (
-        requiresFileConsent({
-          conversationType,
-          contentType,
-          bufferSize: media.buffer.length,
-          thresholdBytes: FILE_CONSENT_THRESHOLD_BYTES,
-        })
-      ) {
-        // Large file or non-image in personal chat: use FileConsentCard flow
-        const conversationId = conversationRef.conversation?.id ?? "unknown";
-        const { activity: consentActivity, uploadId } = prepareFileConsentActivity({
-          media: { buffer: media.buffer, filename: fileName, contentType },
-          conversationId,
-          description: msg.text || undefined,
-        });
-
-        // Tag the activity so the caller can store the activity ID after sending
-        consentActivity["_pendingUploadId"] = uploadId;
-
-        // Return the consent activity (caller sends it)
-        return consentActivity;
-      }
-
-      if (!isPersonal && !isImage && tokenProvider && sharePointSiteId) {
-        // Non-image in group chat/channel with SharePoint site configured:
-        // Upload to SharePoint and use native file card attachment.
-        // Use the cached Graph-native chat ID when available — Bot Framework conversation IDs
-        // for personal DMs use a format (e.g. `a:1xxx`) that Graph API rejects.
-        const chatId = conversationRef.graphChatId ?? conversationRef.conversation?.id;
-
-        // Upload to SharePoint
-        const uploaded = await uploadAndShareSharePoint({
-          buffer: media.buffer,
-          filename: fileName,
-          contentType,
-          tokenProvider,
-          siteId: sharePointSiteId,
-          chatId: chatId ?? undefined,
-          usePerUserSharing: conversationType === "groupchat",
-        });
-
-        // Bot Framework file-info cards render as a broken
-        // "chiclet" (400 on file.info) in this tenant — post a markdown link to
-        // the shared SharePoint item instead of a native file card attachment.
-        const fileLink = `📎 [${uploaded.name}](${uploaded.shareUrl})`;
-        const existingText = typeof activity.text === "string" ? activity.text : undefined;
-        activity.text = existingText ? `${existingText}\n\n${fileLink}` : fileLink;
-
-        return activity;
-      }
-
-      if (!isPersonal && media.kind !== "image" && tokenProvider) {
-        // Fallback: no SharePoint site configured, try OneDrive upload
-        const uploaded = await uploadAndShareOneDrive({
-          buffer: media.buffer,
-          filename: fileName,
-          contentType,
-          tokenProvider,
-        });
-
-        // Bot Framework doesn't support "reference" attachment type for sending
-        const fileLink = `📎 [${uploaded.name}](${uploaded.shareUrl})`;
-        const existingText = typeof activity.text === "string" ? activity.text : undefined;
-        activity.text = existingText ? `${existingText}\n\n${fileLink}` : fileLink;
-        return activity;
-      }
-
-      // Image (any chat): use base64 (works for images in all conversation types)
-      const base64 = media.buffer.toString("base64");
-      contentUrl = `data:${media.contentType};base64,${base64}`;
+    // A data: URL is already-resolved inline media — e.g. send.ts's own
+    // inline-image plan branch builds one and routes it back through this
+    // same reply path via sendTextWithMedia/sendMSTeamsMessages. loadWebMedia
+    // only understands http(s) and local file paths; anything else falls
+    // into its local-path branch and tries (and fails) to read the data: URL
+    // as a filesystem path. Attach it directly instead of reprocessing it.
+    if (msg.mediaUrl.startsWith("data:")) {
+      activity.attachments = [
+        {
+          name: await extractFilename(msg.mediaUrl),
+          contentType: await getMimeType(msg.mediaUrl),
+          contentUrl: msg.mediaUrl,
+        },
+      ];
+      return activity;
     }
 
-    activity.attachments = [
-      {
-        name: fileName,
+    // Route local paths and remote URLs through the same download-and-decide
+    // pipeline (loadWebMedia handles both). A local/remote split here used to
+    // let remote media (e.g. a link to a generated report) skip consent/
+    // upload handling entirely and get attached raw, which Teams does not
+    // render for non-image attachments.
+    const maxBytes = mediaMaxBytes ?? MSTEAMS_MAX_MEDIA_BYTES;
+    const media = await loadWebMedia(msg.mediaUrl, maxBytes);
+    const contentType = media.contentType ?? (await getMimeType(msg.mediaUrl));
+    const fileName = media.fileName ?? (await extractFilename(msg.mediaUrl));
+
+    const conversationType = normalizeOptionalLowercaseString(
+      conversationRef.conversation?.conversationType,
+    );
+
+    const plan = resolveMSTeamsOutboundFilePlan({
+      conversationType,
+      contentType,
+      bufferSize: media.buffer.length,
+      sharePointSiteId,
+      hasTokenProvider: Boolean(tokenProvider),
+    });
+
+    if (plan.kind === "consent") {
+      // Large file or non-image in personal chat: use FileConsentCard flow
+      const conversationId = conversationRef.conversation?.id ?? "unknown";
+      const { activity: consentActivity, uploadId } = prepareFileConsentActivity({
+        media: { buffer: media.buffer, filename: fileName, contentType },
+        conversationId,
+        description: msg.text || undefined,
+      });
+
+      // Tag the activity so the caller can store the activity ID after sending
+      consentActivity["_pendingUploadId"] = uploadId;
+
+      // Return the consent activity (caller sends it)
+      return consentActivity;
+    }
+
+    if (plan.kind === "sharepoint-upload") {
+      // Non-image in group chat/channel with SharePoint site configured:
+      // Upload to SharePoint and use native file card attachment.
+      // Use the cached Graph-native chat ID when available — Bot Framework conversation IDs
+      // for personal DMs use a format (e.g. `a:1xxx`) that Graph API rejects.
+      const chatId = conversationRef.graphChatId ?? conversationRef.conversation?.id;
+
+      // resolveMSTeamsOutboundFilePlan only returns "sharepoint-upload" when
+      // hasTokenProvider (computed from this same tokenProvider) was true.
+      const activeTokenProvider = tokenProvider as MSTeamsAccessTokenProvider;
+      const uploaded = await uploadAndShareSharePoint({
+        buffer: media.buffer,
+        filename: fileName,
         contentType,
-        contentUrl,
-      },
-    ];
+        tokenProvider: activeTokenProvider,
+        siteId: plan.siteId,
+        chatId: chatId ?? undefined,
+        usePerUserSharing: conversationType === "groupchat",
+      });
+
+      activity.text = buildMSTeamsSharePointFileLinkText({
+        name: uploaded.name,
+        shareUrl: uploaded.shareUrl,
+        precedingText: typeof activity.text === "string" ? activity.text : undefined,
+      });
+
+      return activity;
+    }
+
+    if (plan.kind === "inline-image") {
+      // Image (any chat): use base64 (works for images in all conversation types)
+      const base64 = media.buffer.toString("base64");
+      activity.attachments = [
+        { name: fileName, contentType, contentUrl: `data:${contentType};base64,${base64}` },
+      ];
+      return activity;
+    }
+
+    // plan.kind === "undeliverable"
+    activity.text = buildMSTeamsUndeliverableFileNotice({
+      fileName,
+      reason: plan.reason,
+      sourceUrl: isLocalPath(msg.mediaUrl) ? undefined : msg.mediaUrl,
+      precedingText: typeof activity.text === "string" ? activity.text : undefined,
+    });
+    return activity;
   }
 
   return activity;
@@ -519,30 +519,30 @@ export async function sendMSTeamsMessages(params: {
     return messageIds;
   };
 
+  // Resolved once so the thread branch, the revoked-context fallback, and the
+  // top-level branch cannot drift on the same decision.
+  const threadActivityId = resolveMSTeamsThreadActivityId({
+    ref: params.conversationRef,
+    replyStyle: params.replyStyle,
+  });
+
   const sendProactively = async (
     batch: MSTeamsRenderedMessage[],
     startIndex: number,
-    threadActivityId?: string,
   ): Promise<string[]> => {
     const baseRef = buildConversationReference(params.conversationRef);
-    const isChannel = params.conversationRef.conversation?.conversationType === "channel";
     const sendFn = (activity: MSTeamsActivityLike) =>
       sendMSTeamsActivityWithReference(params.app, baseRef, activity, {
-        threadActivityId: isChannel ? threadActivityId : undefined,
+        threadActivityId,
         serviceUrlBoundary: params.serviceUrlBoundary,
       });
     return await sendMessageBatchInContext(sendFn, batch, startIndex);
   };
 
-  // Resolve the thread root message ID for channel thread routing.
-  // `threadId` is the canonical thread root (set on inbound for channel threads);
-  // fall back to `activityId` for backward compatibility with older stored refs.
-  const resolvedThreadId = params.conversationRef.threadId ?? params.conversationRef.activityId;
-
   if (params.replyStyle === "thread") {
     const ctx = params.context;
     if (!ctx) {
-      return await sendProactively(messages, 0, resolvedThreadId);
+      return await sendProactively(messages, 0);
     }
     const sendFn = ctx.sendActivity;
     const messageIds: string[] = [];
@@ -558,8 +558,7 @@ export async function sendMSTeamsMessages(params: {
           // fallback delivers the reply into the correct channel thread.
           const remaining = messages.slice(idx);
           return {
-            ids:
-              remaining.length > 0 ? await sendProactively(remaining, idx, resolvedThreadId) : [],
+            ids: remaining.length > 0 ? await sendProactively(remaining, idx) : [],
             fellBack: true,
           };
         },
@@ -572,11 +571,7 @@ export async function sendMSTeamsMessages(params: {
     return messageIds;
   }
 
-  // replyStyle === "top-level" — explicit "post at the top of the channel"
-  // intent. Do NOT add the thread suffix even when the stored ref has a
-  // threadId; threading on a top-level send would defeat the operator's
-  // explicit choice. Threaded sends route through the `replyStyle === "thread"`
-  // branch above (which already passes resolvedThreadId on the proactive
-  // fallback when the live turn context is revoked, preserving #55198).
+  // replyStyle === "top-level" — resolveMSTeamsThreadActivityId already returned
+  // undefined, so no thread suffix is attached even when the ref has a threadId.
   return await sendProactively(messages, 0);
 }

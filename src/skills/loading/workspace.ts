@@ -19,7 +19,10 @@ import {
   resolveEffectiveAgentSkillsLimits,
 } from "../discovery/agent-filter.js";
 import { normalizeSkillFilter } from "../discovery/filter.js";
-import { filterPromptVisibleSkillEntries } from "../discovery/skill-index.js";
+import {
+  filterPromptVisibleSkillEntries,
+  filterUserInvocableSkillEntries,
+} from "../discovery/skill-index.js";
 import type {
   OpenClawSkillMetadata,
   ParsedSkillFrontmatter,
@@ -1406,7 +1409,10 @@ export function buildWorkspaceSkillSnapshot(
   workspaceDir: string,
   opts?: WorkspaceSkillBuildOptions & { snapshotVersion?: number },
 ): SkillSnapshot {
-  const { eligible, prompt, resolvedSkills } = resolveWorkspaceSkillPromptState(workspaceDir, opts);
+  const { commandSkills, eligible, prompt, resolvedSkills } = resolveWorkspaceSkillPromptState(
+    workspaceDir,
+    opts,
+  );
   const skillFilter = resolveEffectiveWorkspaceSkillFilter(opts);
   return {
     prompt,
@@ -1417,6 +1423,7 @@ export function buildWorkspaceSkillSnapshot(
     })),
     ...(skillFilter === undefined ? {} : { skillFilter }),
     resolvedSkills,
+    commandSkills,
     version: opts?.snapshotVersion,
     promptFormatVersion: WORKSPACE_SKILLS_PROMPT_FORMAT_VERSION,
   };
@@ -1460,13 +1467,14 @@ function resolveWorkspaceSkillPromptState(
   workspaceDir: string,
   opts?: WorkspaceSkillBuildOptions,
 ): {
+  commandSkills: Skill[];
   eligible: SkillEntry[];
   prompt: string;
   resolvedSkills: Skill[];
 } {
   const effectiveSkillFilter = resolveEffectiveWorkspaceSkillFilter(opts);
   if (effectiveSkillFilter !== undefined && effectiveSkillFilter.length === 0) {
-    return { eligible: [], prompt: "", resolvedSkills: [] };
+    return { commandSkills: [], eligible: [], prompt: "", resolvedSkills: [] };
   }
   const skillEntries = opts?.entries ?? loadSkillEntries(workspaceDir, opts);
   const eligible = filterSkillEntries(
@@ -1476,12 +1484,14 @@ function resolveWorkspaceSkillPromptState(
     opts?.eligibility,
   );
   const promptEntries = filterPromptVisibleSkillEntries(eligible);
+  const commandEntries = filterUserInvocableSkillEntries(eligible);
   const remoteNote = opts?.eligibility?.remote?.note?.trim();
   const resolvedSkills = promptEntries.map((entry) => entry.skill);
+  const commandSkills = commandEntries.map((entry) => entry.skill);
   // Derive prompt-facing skills with compacted paths (e.g. ~/...) once.
   // Budget checks and final render both use this same representation so the
   // tier decision is based on the exact strings that end up in the prompt.
-  // resolvedSkills keeps canonical paths for snapshot / runtime consumers.
+  // Runtime snapshot lists keep canonical paths for downstream consumers.
   const promptSkills = compactSkillPaths(resolvedSkills).toSorted((a, b) =>
     a.name.localeCompare(b.name, "en"),
   );
@@ -1497,7 +1507,24 @@ function resolveWorkspaceSkillPromptState(
     total: resolvedSkills.length,
     compact,
   });
-  return { eligible, prompt, resolvedSkills };
+  return { commandSkills, eligible, prompt, resolvedSkills };
+}
+
+export function resolveExplicitSkillForRun(params: {
+  skillsSnapshot?: SkillSnapshot;
+  entries?: SkillEntry[];
+  explicitSkillName?: string;
+}): Skill | undefined {
+  if (!params.explicitSkillName) {
+    return undefined;
+  }
+  const candidates =
+    (params.entries
+      ? filterUserInvocableSkillEntries(params.entries).map((entry) => entry.skill)
+      : undefined) ??
+    params.skillsSnapshot?.commandSkills ??
+    [];
+  return candidates.find((skill) => skill.name === params.explicitSkillName);
 }
 
 export function resolveSkillsPromptForRun(params: {
@@ -1507,7 +1534,12 @@ export function resolveSkillsPromptForRun(params: {
   workspaceDir: string;
   agentId?: string;
   eligibility?: SkillEligibilityContext;
+  explicitSkillName?: string;
 }): string {
+  if (params.explicitSkillName) {
+    const selected = resolveExplicitSkillForRun(params);
+    return selected ? formatSkillsForPrompt(compactSkillPaths([selected])) : "";
+  }
   const snapshotPrompt = params.skillsSnapshot?.prompt?.trim();
   if (snapshotPrompt) {
     return snapshotPrompt;

@@ -162,6 +162,7 @@ export function resolveFollowupDeliveryContextKey(run: FollowupRun): string {
     execution.allowEmptyAssistantReplyAsSilent === true,
     execution.suppressNextUserMessagePersistence === true,
     execution.suppressTranscriptOnlyAssistantPersistence === true,
+    execution.explicitSkillName ?? "",
     execution.blockReplyBreak,
   ]);
 }

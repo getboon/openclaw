@@ -73,7 +73,10 @@ import { getPluginToolMeta } from "../../../plugins/tools.js";
 import { isSubagentSessionKey } from "../../../routing/session-key.js";
 import { annotateInterSessionPromptText } from "../../../sessions/input-provenance.js";
 import { isTranscriptOnlyOpenClawAssistantMessage } from "../../../shared/transcript-only-openclaw-assistant.js";
-import { resolveSkillsPromptForRun } from "../../../skills/loading/workspace.js";
+import {
+  resolveExplicitSkillForRun,
+  resolveSkillsPromptForRun,
+} from "../../../skills/loading/workspace.js";
 import { resolveEmbeddedRunSkillEntries } from "../../../skills/runtime/embedded-run-entries.js";
 import {
   applySkillEnvOverrides,
@@ -505,6 +508,7 @@ import {
   formatPrePromptPrecheckLog,
   shouldPreemptivelyCompactBeforePrompt,
 } from "./preemptive-compaction.js";
+import { resolveRunPromptPolicy } from "./prompt-policy.js";
 import {
   buildCurrentInboundPrompt,
   buildRuntimeContextCustomMessage,
@@ -1105,6 +1109,7 @@ export async function runEmbeddedAttempt(
       agentId: sessionAgentId,
       eligibility: skillsEligibility,
       skillsSnapshot: skillsSnapshotForRun,
+      explicitSkillName: params.explicitSkillName,
       workspaceOnly: loadSkillsWorkspaceOnly,
     });
     restoreSkillEnv = skillsSnapshotForRun
@@ -1121,6 +1126,18 @@ export async function runEmbeddedAttempt(
       skillsWorkspaceDir: effectiveSkillsWorkspace,
       skillsPromptWorkspaceDir: effectiveSkillsPromptWorkspace,
     });
+    const explicitSkill = resolveExplicitSkillForRun({
+      skillsSnapshot: skillsSnapshotForRun,
+      entries: promptSkillEntries,
+      explicitSkillName: params.explicitSkillName,
+    });
+    const skillsSnapshotForTools = params.explicitSkillName
+      ? {
+          prompt: "",
+          skills: [],
+          resolvedSkills: explicitSkill ? [explicitSkill] : [],
+        }
+      : skillsSnapshotForRun;
 
     const skillsPrompt = resolveSkillsPromptForRun({
       skillsSnapshot: skillsSnapshotForRun,
@@ -1129,6 +1146,7 @@ export async function runEmbeddedAttempt(
       workspaceDir: effectiveSkillsPromptWorkspace,
       agentId: sessionAgentId,
       eligibility: skillsEligibility,
+      explicitSkillName: params.explicitSkillName,
     });
     prepStages.mark("skills");
 
@@ -1346,7 +1364,7 @@ export async function runEmbeddedAttempt(
             recordToolPrepStage: (name) => corePluginToolStages.mark(name),
             onToolOutcome: params.onToolOutcome,
             allocateToolOutcomeOrdinal: params.allocateToolOutcomeOrdinal,
-            skillsSnapshot: skillsSnapshotForRun,
+            skillsSnapshot: skillsSnapshotForTools,
             onYield: (message) => {
               yieldDetected = true;
               yieldMessage = message;
@@ -1947,9 +1965,13 @@ export async function runEmbeddedAttempt(
       (isRawModelRun ? "none" : resolvePromptModeForSession(params.sessionKey));
     const promptSurface = resolveAgentPromptSurfaceForSessionKey(params.sessionKey);
 
-    // When toolsAllow is set, use minimal prompt and strip skills catalog
-    const effectivePromptMode = params.toolsAllow?.length ? ("minimal" as const) : promptMode;
-    const effectiveSkillsPrompt = params.toolsAllow?.length ? undefined : skillsPrompt;
+    const { promptMode: effectivePromptMode, skillsPrompt: effectiveSkillsPrompt } =
+      resolveRunPromptPolicy({
+        promptMode,
+        skillsPrompt,
+        toolsAllow: params.toolsAllow,
+        explicitSkillName: params.explicitSkillName,
+      });
     const openClawReferences = await resolveOpenClawReferencePaths({
       workspaceDir: effectiveWorkspace,
       argv1: process.argv[1],
@@ -3162,6 +3184,13 @@ export async function runEmbeddedAttempt(
           runId: params.runId,
           ...(params.sessionKey && { sessionKey: params.sessionKey }),
           ...(params.sessionId && { sessionId: params.sessionId }),
+          ...(params.senderId && { senderId: params.senderId }),
+          ...(params.senderName && { senderName: params.senderName }),
+          ...(params.senderSource && { senderSource: params.senderSource }),
+          ...(params.messageThreadId != null &&
+            String(params.messageThreadId) !== "" && {
+              threadId: String(params.messageThreadId),
+            }),
           provider: params.provider,
           model: params.modelId,
           api: params.model.api,
@@ -5619,6 +5648,7 @@ export async function runEmbeddedAttempt(
         ...(beforeAgentFinalizeRevisionReason ? { beforeAgentFinalizeRevisionReason } : {}),
         assistantTexts,
         lastAssistantTextMessageIndex: getLastAssistantTextMessageIndex(),
+        visibleToolNames: effectiveTools.map((tool) => tool.name),
         toolMetas: toolMetasNormalized,
         acceptedSessionSpawns,
         lastAssistant,

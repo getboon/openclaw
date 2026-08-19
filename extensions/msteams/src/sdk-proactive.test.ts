@@ -1,6 +1,11 @@
 // Msteams tests cover sdk proactive plugin behavior.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sendMSTeamsActivityWithReference } from "./sdk-proactive.js";
+import type { MSTeamsReplyStyle } from "../runtime-api.js";
+import type { StoredConversationReference } from "./conversation-store.js";
+import {
+  resolveMSTeamsThreadActivityId,
+  sendMSTeamsActivityWithReference,
+} from "./sdk-proactive.js";
 import type { MSTeamsApp } from "./sdk.js";
 
 const clientState = vi.hoisted(() => ({
@@ -94,4 +99,129 @@ describe("sendMSTeamsActivityWithReference", () => {
       }),
     });
   });
+
+  // Locks the mechanism that makes every "forgot to pass threadActivityId" bug
+  // silent: the `;messageid=` suffix is what threads, and its absence STRIPS an
+  // existing one rather than erroring.
+  it("appends the thread suffix when a thread root is supplied", async () => {
+    const app = {
+      client: {},
+      api: { conversations: { activities: () => ({}) } },
+    } as unknown as MSTeamsApp;
+
+    await sendMSTeamsActivityWithReference(
+      app,
+      {
+        serviceUrl: "https://smba.trafficmanager.net/amer/",
+        agent: { id: "28:bot", role: "bot" },
+        conversation: { id: "19:channel@thread.tacv2", conversationType: "channel" },
+        channelId: "msteams",
+      },
+      { type: "message", text: "hello" },
+      { threadActivityId: "thread-root-1" },
+    );
+
+    expect(clientState.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: "19:channel@thread.tacv2;messageid=thread-root-1",
+      }),
+    );
+  });
+
+  it("strips an existing thread suffix when no thread root is supplied", async () => {
+    const app = {
+      client: {},
+      api: { conversations: { activities: () => ({}) } },
+    } as unknown as MSTeamsApp;
+
+    await sendMSTeamsActivityWithReference(
+      app,
+      {
+        serviceUrl: "https://smba.trafficmanager.net/amer/",
+        agent: { id: "28:bot", role: "bot" },
+        conversation: {
+          id: "19:channel@thread.tacv2;messageid=stale-root",
+          conversationType: "channel",
+        },
+        channelId: "msteams",
+      },
+      { type: "message", text: "hello" },
+    );
+
+    expect(clientState.create).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: "19:channel@thread.tacv2" }),
+    );
+  });
+});
+
+describe("resolveMSTeamsThreadActivityId", () => {
+  const channel = { id: "19:channel@thread.tacv2", conversationType: "channel" };
+  const cases: Array<{
+    name: string;
+    ref: StoredConversationReference;
+    replyStyle: MSTeamsReplyStyle;
+    expected: string | undefined;
+  }> = [
+    {
+      name: "channel thread reply uses the stored thread root",
+      ref: { threadId: "thread-root-1", activityId: "activity-9", conversation: channel },
+      replyStyle: "thread",
+      expected: "thread-root-1",
+    },
+    {
+      name: "falls back to activityId for refs predating threadId",
+      ref: { activityId: "activity-9", conversation: channel },
+      replyStyle: "thread",
+      expected: "activity-9",
+    },
+    {
+      name: "top-level ignores a stored thread root",
+      ref: { threadId: "thread-root-1", conversation: channel },
+      replyStyle: "top-level",
+      expected: undefined,
+    },
+    {
+      name: "groupChat has no thread suffix concept",
+      ref: {
+        threadId: "thread-root-1",
+        conversation: { id: "19:group@thread.v2", conversationType: "groupChat" },
+      },
+      replyStyle: "thread",
+      expected: undefined,
+    },
+    {
+      name: "personal DM has no thread suffix concept",
+      ref: {
+        threadId: "thread-root-1",
+        conversation: { id: "a:1abc", conversationType: "personal" },
+      },
+      replyStyle: "thread",
+      expected: undefined,
+    },
+    {
+      // Guards real drift: the old messenger check compared === "channel"
+      // case-sensitively while send-context normalized to lowercase.
+      name: "conversationType casing is normalized",
+      ref: {
+        threadId: "thread-root-1",
+        conversation: { id: "19:channel@thread.tacv2", conversationType: "Channel" },
+      },
+      replyStyle: "thread",
+      expected: "thread-root-1",
+    },
+    {
+      name: "missing conversationType is not treated as a channel",
+      ref: { threadId: "thread-root-1", conversation: { id: "19:channel@thread.tacv2" } },
+      replyStyle: "thread",
+      expected: undefined,
+    },
+  ];
+
+  for (const testCase of cases) {
+    it(testCase.name, () => {
+      expect(
+        resolveMSTeamsThreadActivityId({ ref: testCase.ref, replyStyle: testCase.replyStyle }),
+      ).toBe(testCase.expected);
+    });
+  }
 });

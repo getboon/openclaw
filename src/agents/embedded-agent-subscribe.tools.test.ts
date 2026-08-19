@@ -335,6 +335,84 @@ describe("sanitizeToolResult", () => {
     expect(text).not.toContain("custom-secret-abc123");
     expect(text).toContain("custom…c123");
   });
+
+  it("preserves a bestEffort MessageSendResult's error message, but reduces a raw Error to {}", () => {
+    // src/infra/outbound/message.ts formats a failed bestEffort send's error
+    // to a plain string specifically because redactStringsDeep walks objects
+    // via Object.entries, which never sees an Error's non-enumerable
+    // message/stack. This locks in that survival property end to end.
+    const details = {
+      channel: "anychat-boon-web",
+      to: "thread-668",
+      deliveryStatus: "failed" as const,
+      error: 'Unknown target "thread-668" for Boon Web.',
+    };
+    const sanitized = sanitizeToolResult({ details });
+    expect(extractToolErrorMessage(sanitized)).toContain("Unknown target");
+
+    const detailsWithRawError = { ...details, error: new Error(details.error) };
+    const sanitizedWithRawError = sanitizeToolResult({ details: detailsWithRawError });
+    expect(extractToolErrorMessage(sanitizedWithRawError)).toBeUndefined();
+  });
+
+  it("uses the last line of a Python traceback instead of the generic header", () => {
+    const traceback = [
+      "Traceback (most recent call last):",
+      '  File "script.py", line 3, in <module>',
+      "    raise ValueError('bad input')",
+      "ValueError: bad input",
+    ].join("\n");
+    const result = {
+      content: [{ type: "text", text: traceback }],
+      details: { status: "completed", exitCode: 1 },
+    };
+    expect(extractToolErrorMessage(result)).toBe("ValueError: bad input");
+  });
+
+  it("skips the exec tool's appended exit-status trailer when picking the traceback line", () => {
+    // bash-tools.exec-runtime.ts appends "\n\n(Command exited with code N)"
+    // after real output on a non-zero exit; that trailer must not be mistaken
+    // for the traceback's real last line.
+    const traceback = [
+      "Traceback (most recent call last):",
+      '  File "script.py", line 3, in <module>',
+      "    raise ValueError('bad input')",
+      "ValueError: bad input",
+      "",
+      "(Command exited with code 1)",
+    ].join("\n");
+    const result = {
+      content: [{ type: "text", text: traceback }],
+      details: { status: "completed", exitCode: 1 },
+    };
+    expect(extractToolErrorMessage(result)).toBe("ValueError: bad input");
+  });
+
+  it("skips a timeout/abort status trailer without parens or an exit code", () => {
+    // sessions/tools/bash.ts's appendStatus() has no parens and can carry
+    // free-form reason text ("Command timed out after N seconds...").
+    const traceback = [
+      "Traceback (most recent call last):",
+      '  File "script.py", line 3, in <module>',
+      "    raise ValueError('bad input')",
+      "ValueError: bad input",
+      "",
+      "Command timed out after 30 seconds",
+    ].join("\n");
+    const result = {
+      content: [{ type: "text", text: traceback }],
+      details: { status: "completed", exitCode: 1 },
+    };
+    expect(extractToolErrorMessage(result)).toBe("ValueError: bad input");
+  });
+
+  it("still uses the first line for non-traceback multi-line tool output", () => {
+    const result = {
+      content: [{ type: "text", text: "connection refused\nretrying in 1s\nretrying in 2s" }],
+      details: { status: "completed", exitCode: 1 },
+    };
+    expect(extractToolErrorMessage(result)).toBe("connection refused");
+  });
 });
 
 describe("sanitizeToolArgs", () => {

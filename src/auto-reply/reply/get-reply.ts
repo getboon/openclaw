@@ -1032,6 +1032,7 @@ export async function getReplyFromConfig(
       commandAuthorized,
       command,
       commandSource,
+      explicitSkillName: inlineActionResult.explicitSkillName,
       allowTextCommands,
       directives,
       defaultActivation,

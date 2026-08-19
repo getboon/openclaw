@@ -128,6 +128,7 @@ describe("agent-runner-utils", () => {
     const run = makeRun({
       enforceFinalTag: true,
       cwd: "/tmp/task-repo",
+      explicitSkillName: "selected-skill",
     });
     const authProfile = resolveProviderScopedAuthProfile({
       provider: "openai",
@@ -151,6 +152,7 @@ describe("agent-runner-utils", () => {
     expect(resolved.agentDir).toBe(run.agentDir);
     expect(resolved.config).toBe(run.config);
     expect(resolved.skillsSnapshot).toBe(run.skillsSnapshot);
+    expect(resolved.explicitSkillName).toBe("selected-skill");
     expect(resolved.ownerNumbers).toBe(run.ownerNumbers);
     expect(resolved.enforceFinalTag).toBe(true);
     expect(resolved.provider).toBe("openai");

@@ -81,7 +81,16 @@ export function buildMSTeamsPresentationCard(params: {
           actions.push({
             type: "Action.Submit",
             title: button.label,
-            data: button.action?.type === "command" ? value : { value, label: button.label },
+            // Teams delivers a bare Action.Submit as an invoke activity that the
+            // message handler never inspects (it only reads activity.text). The
+            // imBack wrapper is the same shape welcome-card.ts's prompt-starter
+            // buttons use, which makes Teams redeliver the press as a normal
+            // message activity with text=value — see readMSTeamsImBackValue in
+            // monitor-handler.ts, the live consumer of this shape.
+            data:
+              button.action?.type === "command"
+                ? { msteams: { type: "imBack", value } }
+                : { value, label: button.label },
           });
         }
       }

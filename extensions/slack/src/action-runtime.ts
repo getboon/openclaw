@@ -2,6 +2,7 @@
 import type { AgentToolResult } from "openclaw/plugin-sdk/agent-core";
 import { readBooleanParam } from "openclaw/plugin-sdk/boolean-param";
 import { isSingleUseReplyToMode } from "openclaw/plugin-sdk/reply-reference";
+import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { resolveOpenProviderRuntimeGroupPolicy } from "openclaw/plugin-sdk/runtime-group-policy";
 import type { ResolvedSlackAccount } from "./accounts.js";
 import { parseSlackBlocksInput } from "./blocks-input.js";
@@ -142,6 +143,42 @@ function resolveThreadTsFromContext(
     return context.currentThreadTs;
   }
   return undefined;
+}
+
+/**
+ * Emit a DEBUG trace of the thread-resolution decision for a Slack tool send.
+ *
+ * The auto-inject decision in {@link resolveThreadTsFromContext} is otherwise
+ * completely silent, so when one tool-posted message lands top-level while its
+ * siblings thread correctly (ENG-16509) there is no INFO/DEBUG record to say
+ * WHY. This logs the full decision context — the two suppression triggers
+ * (`topLevel`/`threadId:null` vs a target-format mismatch), the inherited
+ * thread anchor, and the resolved value — so a verbose repro pins the cause.
+ * Message content is never logged.
+ */
+function logSlackThreadResolution(params: {
+  action: "sendMessage" | "uploadFile";
+  to: string;
+  explicitThreadTs: string | undefined;
+  topLevel: boolean;
+  threadIdNull: boolean;
+  context: SlackActionContext | undefined;
+  resolvedThreadTs: string | undefined;
+}): void {
+  const { action, to, context } = params;
+  logVerbose(
+    `slack ${action}: thread-resolve to=${to} ` +
+      `topLevel=${params.topLevel} threadIdNull=${params.threadIdNull} ` +
+      `explicitThreadTs=${params.explicitThreadTs ?? "-"} ` +
+      `currentThreadTs=${context?.currentThreadTs ?? "-"} ` +
+      `currentChannelId=${context?.currentChannelId ?? "-"} ` +
+      `currentMessagingTarget=${context?.currentMessagingTarget ?? "-"} ` +
+      `replyToMode=${context?.replyToMode ?? "-"} ` +
+      `hasReplied=${context?.hasRepliedRef?.value ?? "-"} ` +
+      `sameChannelThreadRequired=${context?.sameChannelThreadRequired ?? "-"} ` +
+      `targetsMatch=${context ? slackContextTargetsMatch(to, context) : "-"} ` +
+      `resolved=${params.resolvedThreadTs ?? "TOP-LEVEL"}`,
+  );
 }
 
 function readSlackBlocksParam(params: Record<string, unknown>) {
@@ -292,14 +329,21 @@ export async function handleSlackAction(
             "Slack replyBroadcast is only supported for text or block thread replies.",
           );
         }
-        const threadTs = resolveThreadTsFromContext(
-          readStringParam(params, "threadTs"),
+        const explicitThreadTs = readStringParam(params, "threadTs");
+        const topLevel = params.topLevel === true;
+        const threadIdNull = params.threadTs === null;
+        const threadTs = resolveThreadTsFromContext(explicitThreadTs, to, context, {
+          suppressImplicitThread: topLevel || threadIdNull,
+        });
+        logSlackThreadResolution({
+          action: "sendMessage",
           to,
+          explicitThreadTs,
+          topLevel,
+          threadIdNull,
           context,
-          {
-            suppressImplicitThread: params.topLevel === true || params.threadTs === null,
-          },
-        );
+          resolvedThreadTs: threadTs,
+        });
         const sendOpts = {
           ...writeOpts,
           mediaLocalRoots: context?.mediaLocalRoots,
@@ -351,14 +395,21 @@ export async function handleSlackAction(
             "Slack replyBroadcast is only supported for text or block thread replies.",
           );
         }
-        const threadTs = resolveThreadTsFromContext(
-          readStringParam(params, "threadTs"),
+        const explicitThreadTs = readStringParam(params, "threadTs");
+        const topLevel = params.topLevel === true;
+        const threadIdNull = params.threadTs === null;
+        const threadTs = resolveThreadTsFromContext(explicitThreadTs, to, context, {
+          suppressImplicitThread: topLevel || threadIdNull,
+        });
+        logSlackThreadResolution({
+          action: "uploadFile",
           to,
+          explicitThreadTs,
+          topLevel,
+          threadIdNull,
           context,
-          {
-            suppressImplicitThread: params.topLevel === true || params.threadTs === null,
-          },
-        );
+          resolvedThreadTs: threadTs,
+        });
         const result = await slackActionRuntime.sendSlackMessage(to, initialComment ?? "", {
           ...writeOpts,
           mediaUrl: filePath,

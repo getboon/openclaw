@@ -57,7 +57,10 @@ import {
 } from "./channel-selection.js";
 import type { OutboundSendDeps } from "./deliver.js";
 import { shouldUseInternalSourceReplySink } from "./internal-source-reply.js";
-import { normalizeMessageActionInput } from "./message-action-normalization.js";
+import {
+  normalizeMessageActionInput,
+  type MessageActionTargetSource,
+} from "./message-action-normalization.js";
 import {
   collectActionMediaSourceHints,
   hydrateAttachmentParamsForAction,
@@ -381,8 +384,15 @@ async function resolveActionTarget(params: {
   action: ChannelMessageActionName;
   args: Record<string, unknown>;
   accountId?: string | null;
+  targetSource?: MessageActionTargetSource;
 }): Promise<ResolvedMessagingTarget | undefined> {
   let resolvedTarget: ResolvedMessagingTarget | undefined;
+  // A target core injected from the live inbound tool context is the
+  // channel's own current-conversation id, not something the agent typed —
+  // declaring it "Unknown target" is a core bug, not a channel rejection.
+  // Fall back to the normalized value instead of throwing; an agent-supplied
+  // target still fails loudly with the plugin's hint.
+  const unknownTargetMode = params.targetSource === "tool-context" ? "normalized" : "error";
   const toRaw = normalizeOptionalString(params.args.to) ?? "";
   if (toRaw) {
     const resolved = await resolveResolvedTargetOrThrow({
@@ -390,6 +400,7 @@ async function resolveActionTarget(params: {
       channel: params.channel,
       input: toRaw,
       accountId: params.accountId ?? undefined,
+      unknownTargetMode,
     });
     params.args.to = resolved.to;
     resolvedTarget = resolved;
@@ -406,6 +417,7 @@ async function resolveActionTarget(params: {
         target.kind === "user"
           ? `Channel id "${channelIdRaw}" resolved to a user target.`
           : undefined,
+      unknownTargetMode,
     });
     params.args.channelId = sanitizeGroupTargetId(resolved.to);
   }
@@ -423,6 +435,7 @@ async function resolveResolvedTargetOrThrow(params: {
   accountId?: string;
   preferredKind?: "group" | "user" | "channel";
   validateResolvedTarget?: (target: ResolvedMessagingTarget) => string | undefined;
+  unknownTargetMode?: "error" | "normalized";
 }): Promise<ResolvedMessagingTarget> {
   const resolved = await resolveChannelTarget({
     cfg: params.cfg,
@@ -430,6 +443,7 @@ async function resolveResolvedTargetOrThrow(params: {
     input: params.input,
     accountId: params.accountId,
     preferredKind: params.preferredKind,
+    unknownTargetMode: params.unknownTargetMode,
   });
   if (!resolved.ok) {
     throw resolved.error;
@@ -1418,11 +1432,13 @@ export async function runMessageAction(
     return handleInternalSourceReplySendAction({ ...input, agentId: resolvedAgentId }, params);
   }
   applyImplicitSourceReplySendPolicy(input, params);
-  params = normalizeMessageActionInput({
+  const normalizedInput = normalizeMessageActionInput({
     action,
     args: params,
     toolContext: input.toolContext,
   });
+  params = normalizedInput.args;
+  const targetSource = normalizedInput.targetSource;
 
   const channel = await resolveChannel(cfg, params, input.toolContext);
   let accountId = readStringParam(params, "accountId") ?? input.defaultAccountId;
@@ -1514,6 +1530,7 @@ export async function runMessageAction(
     action,
     args: params,
     accountId,
+    targetSource,
   });
 
   enforceCrossContextPolicy({

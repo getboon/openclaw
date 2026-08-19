@@ -28,6 +28,7 @@ let createReplyOperation: typeof import("./reply-run-registry.js").createReplyOp
 let replyRunRegistry: typeof import("./reply-run-registry.js").replyRunRegistry;
 let runAfterReplyOperationClear: typeof import("./reply-run-registry.js").runAfterReplyOperationClear;
 let resetReplyRunRegistry: typeof import("./reply-run-registry.js").testing.resetReplyRunRegistry;
+let onReplyRunTerminal: typeof import("./reply-run-registry.js").onReplyRunTerminal;
 
 function firstRuntimeLoadCall() {
   return runtimePluginMocks.ensureRuntimePluginsLoaded.mock.calls[0]?.[0] as
@@ -60,6 +61,7 @@ describe("dispatchReplyFromConfig reply_dispatch hook", () => {
     replyRunRegistry = replyRunRegistryModule.replyRunRegistry;
     runAfterReplyOperationClear = replyRunRegistryModule.runAfterReplyOperationClear;
     resetReplyRunRegistry = () => replyRunRegistryModule.testing.resetReplyRunRegistry();
+    onReplyRunTerminal = replyRunRegistryModule.onReplyRunTerminal;
   });
 
   beforeEach(() => {
@@ -301,6 +303,132 @@ describe("dispatchReplyFromConfig reply_dispatch hook", () => {
     expect(sessionStoreMocks.currentEntry?.pendingFinalDelivery).toBe(true);
     expect(sessionStoreMocks.currentEntry?.pendingFinalDeliveryText).toBe("durable reply");
     expect(sessionStoreMocks.currentEntry?.pendingFinalDeliveryCreatedAt).toBe(1);
+  });
+
+  it("records the reply operation as failed:delivery_failed, not completed, when the final reply never reaches the user (ENG-17107)", async () => {
+    // Regression: a final payload that is neither queued for later delivery
+    // nor routed to any recipient previously still recorded the turn as
+    // "completed" — the terminal event carried no failure, so no failure
+    // notice was ever owed to the user even though nothing was delivered.
+    hookMocks.runner.hasHooks.mockReturnValue(false);
+    sessionStoreMocks.currentEntry = {
+      sessionKey: "agent:test:session",
+      pendingFinalDelivery: true,
+      pendingFinalDeliveryText: "durable reply",
+      pendingFinalDeliveryCreatedAt: 1,
+    };
+    sessionStoreMocks.resolveSessionStoreEntry.mockReturnValue({
+      existing: sessionStoreMocks.currentEntry,
+    });
+    const dispatcher = createDispatcher();
+    vi.mocked(dispatcher.sendFinalReply).mockReturnValue(false);
+
+    const terminalEvents: Array<{ result: unknown }> = [];
+    const off = onReplyRunTerminal((event) => terminalEvents.push({ result: event.result }));
+
+    try {
+      await dispatchReplyFromConfig({
+        ctx: createHookCtx(),
+        cfg: emptyConfig,
+        dispatcher,
+        replyResolver: async () => ({ text: "durable reply" }),
+      });
+    } finally {
+      off();
+    }
+
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]?.result).toMatchObject({
+      kind: "failed",
+      code: "delivery_failed",
+    });
+  });
+
+  it("records completed, not failed:delivery_failed, when the only final is the sanctioned NO_REPLY token", async () => {
+    // The model is instructed (system-prompt.ts:557) to close a turn with ONLY
+    // NO_REPLY after delivering visible output via the `message` tool. The real
+    // dispatcher refuses this payload by contract (reply-flow.test.ts:23), which
+    // must not be mistaken for a failed delivery of real content.
+    hookMocks.runner.hasHooks.mockReturnValue(false);
+    const dispatcher = createDispatcher();
+    vi.mocked(dispatcher.sendFinalReply).mockReturnValue(false);
+
+    const terminalEvents: Array<{ result: unknown }> = [];
+    const off = onReplyRunTerminal((event) => terminalEvents.push({ result: event.result }));
+
+    let result: Awaited<ReturnType<typeof dispatchReplyFromConfig>>;
+    try {
+      result = await dispatchReplyFromConfig({
+        ctx: createHookCtx(),
+        cfg: emptyConfig,
+        dispatcher,
+        replyResolver: async () => ({ text: "NO_REPLY" }),
+      });
+    } finally {
+      off();
+    }
+
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]?.result).toMatchObject({ kind: "completed" });
+    expect(result.noVisibleReplyFallbackEligible).toBe(true);
+  });
+
+  it("still flags delivery_failed when a silent-token final carries undelivered media", async () => {
+    // Locks the media carve-out (normalize-reply.ts:59-64): a NO_REPLY final
+    // with media still ships, so a genuinely undelivered media-bearing payload
+    // must not be swept into the "intentionally silent" exemption.
+    hookMocks.runner.hasHooks.mockReturnValue(false);
+    const dispatcher = createDispatcher();
+    vi.mocked(dispatcher.sendFinalReply).mockReturnValue(false);
+
+    const terminalEvents: Array<{ result: unknown }> = [];
+    const off = onReplyRunTerminal((event) => terminalEvents.push({ result: event.result }));
+
+    try {
+      await dispatchReplyFromConfig({
+        ctx: createHookCtx(),
+        cfg: emptyConfig,
+        dispatcher,
+        replyResolver: async () => ({ text: "NO_REPLY", mediaUrl: "file:///tmp/a.png" }),
+      });
+    } finally {
+      off();
+    }
+
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]?.result).toMatchObject({
+      kind: "failed",
+      code: "delivery_failed",
+    });
+  });
+
+  it("also recognizes a silent token glued to markdown as intentional", async () => {
+    // The dispatcher's real normalizeReplyPayload strips a mixed-content form
+    // like "**NO_REPLY" down to empty (normalize-reply.ts:70-80's trailing
+    // strip matches a token preceded by asterisks), not just the exact token.
+    // isIntentionallySilentFinalReply must reuse that same logic rather than a
+    // narrower text-only check, or this form re-triggers the mislabeled
+    // delivery_failed this fix targets.
+    hookMocks.runner.hasHooks.mockReturnValue(false);
+    const dispatcher = createDispatcher();
+    vi.mocked(dispatcher.sendFinalReply).mockReturnValue(false);
+
+    const terminalEvents: Array<{ result: unknown }> = [];
+    const off = onReplyRunTerminal((event) => terminalEvents.push({ result: event.result }));
+
+    try {
+      await dispatchReplyFromConfig({
+        ctx: createHookCtx(),
+        cfg: emptyConfig,
+        dispatcher,
+        replyResolver: async () => ({ text: "**NO_REPLY" }),
+      });
+    } finally {
+      off();
+    }
+
+    expect(terminalEvents).toHaveLength(1);
+    expect(terminalEvents[0]?.result).toMatchObject({ kind: "completed" });
   });
 
   it("delivers a generated final reply before queued follow-up admission", async () => {

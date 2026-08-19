@@ -42,6 +42,8 @@ export type ReplyOperationFailureCode =
   | "command_lane_cleared"
   | "aborted_by_user"
   | "session_corruption_reset"
+  | "turn_deadline"
+  | "delivery_failed"
   | "run_failed";
 
 export type ReplyOperationAbortCode = "aborted_by_user" | "aborted_for_restart";
@@ -420,6 +422,7 @@ export function createReplyOperation(params: {
   resetTriggered: boolean;
   routeThreadId?: string | number;
   upstreamAbortSignal?: AbortSignal;
+  deadlineMs?: number;
   respectFollowupAdmissionBarrier?: boolean;
 }): ReplyOperation {
   const sessionKey = normalizeOptionalString(params.sessionKey);
@@ -447,6 +450,7 @@ export function createReplyOperation(params: {
   let result: ReplyOperationResult | null = null;
   let stateCleared = false;
   let retainFailureUntilComplete = false;
+  let deadlineTimer: NodeJS.Timeout | undefined;
 
   const clearState = (
     afterClearBarrier?: PromiseLike<unknown>,
@@ -456,6 +460,10 @@ export function createReplyOperation(params: {
       return;
     }
     stateCleared = true;
+    if (deadlineTimer) {
+      clearTimeout(deadlineTimer);
+      deadlineTimer = undefined;
+    }
     const registeredBarrier = afterClearBarrier
       ? registerFollowupAdmissionBarrier(
           sessionKey,
@@ -647,6 +655,26 @@ export function createReplyOperation(params: {
   replyRunState.activeKeysBySessionId.set(currentSessionId, sessionKey);
   registerWaitSessionId(sessionKey, currentSessionId);
   markReplyRunDiagnosticWorkStarted({ sessionKey, sessionId: currentSessionId });
+
+  if (typeof params.deadlineMs === "number" && Number.isFinite(params.deadlineMs)) {
+    const deadlineMs = resolveTimerTimeoutMs(params.deadlineMs, 1, 1);
+    if (deadlineMs > 0) {
+      deadlineTimer = setTimeout(() => {
+        if (stateCleared) {
+          return;
+        }
+        const cause = new Error(`Reply turn exceeded its ${deadlineMs}ms deadline`);
+        if (!result) {
+          result = { kind: "failed", code: "turn_deadline", cause };
+          phase = "failed";
+        }
+        abortInternally(cause);
+        getAttachedBackend(operation)?.cancel("superseded");
+        clearState();
+      }, deadlineMs);
+      deadlineTimer.unref?.();
+    }
+  }
 
   return operation;
 }

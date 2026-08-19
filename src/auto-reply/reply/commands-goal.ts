@@ -11,7 +11,7 @@ import {
   getSessionGoal,
   updateSessionGoalStatus,
 } from "../../config/sessions.js";
-import { rejectUnauthorizedCommand } from "./command-gates.js";
+import { continueAsNormalPrompt, rejectUnauthorizedCommand } from "./command-gates.js";
 import { markCommandSessionMetadataChanged } from "./command-session-metadata.js";
 import type {
   CommandHandler,
@@ -116,36 +116,6 @@ export function isFormattedGoalContinuationPrompt(message: string): boolean {
   );
 }
 
-function applyGoalPromptToContext(ctx: HandleCommandsParams["ctx"], message: string): void {
-  const mutableCtx = ctx as HandleCommandsParams["ctx"] & {
-    Body?: string;
-    RawBody?: string;
-    CommandBody?: string;
-    BodyForCommands?: string;
-    BodyForAgent?: string;
-    BodyStripped?: string;
-  };
-  mutableCtx.Body = message;
-  mutableCtx.RawBody = message;
-  mutableCtx.CommandBody = message;
-  mutableCtx.BodyForCommands = message;
-  mutableCtx.BodyForAgent = message;
-  mutableCtx.BodyStripped = message;
-}
-
-function applyGoalContinuationPrompt(params: HandleCommandsParams, message: string): void {
-  applyGoalPromptToContext(params.ctx, message);
-  if (params.rootCtx && params.rootCtx !== params.ctx) {
-    applyGoalPromptToContext(params.rootCtx, message);
-  }
-  params.command.rawBodyNormalized = message;
-  params.command.commandBodyNormalized = message;
-}
-
-function goalContinuation(): CommandHandlerResult {
-  return { shouldContinue: true };
-}
-
 function goalErrorReply(error: unknown): CommandHandlerResult {
   const message = error instanceof Error ? error.message : String(error);
   return goalReply(`Goal error: ${message}`);
@@ -192,8 +162,7 @@ export const handleGoalCommand: CommandHandler = async (params, allowTextCommand
         });
         syncGoalSessionEntry(params);
         markCommandSessionMetadataChanged(params);
-        applyGoalContinuationPrompt(params, formatGoalContinuationPrompt(goal.objective));
-        return goalContinuation();
+        return continueAsNormalPrompt(params, formatGoalContinuationPrompt(goal.objective));
       }
       case "pause": {
         const goal = await updateSessionGoalStatus({
@@ -216,8 +185,7 @@ export const handleGoalCommand: CommandHandler = async (params, allowTextCommand
         syncGoalSessionEntry(params);
         markCommandSessionMetadataChanged(params);
         const message = formatGoalResumeContinuationPrompt(parsed.text);
-        applyGoalContinuationPrompt(params, message);
-        return goalContinuation();
+        return continueAsNormalPrompt(params, message);
       }
       case "complete":
       case "done": {

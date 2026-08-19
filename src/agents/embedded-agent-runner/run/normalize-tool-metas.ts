@@ -17,6 +17,7 @@ export type RawToolMetaEntry = {
   meta?: string;
   replaySafe?: boolean;
   errored?: boolean;
+  status?: "blocked";
   asyncStarted?: boolean;
   asyncTaskRunId?: string;
   asyncTaskId?: string;
@@ -28,6 +29,7 @@ export type NormalizedToolMetaEntry = {
   meta?: string;
   replaySafe: boolean;
   errored?: boolean;
+  status?: "blocked";
   asyncStarted?: true;
   asyncTaskRunId?: string;
   asyncTaskId?: string;
@@ -56,6 +58,12 @@ export function normalizeToolMetas(
       // counts only successfully-completed tools when more than one call errors.
       if (typeof entry.errored === "boolean") {
         normalized.errored = entry.errored;
+      }
+      // Carry the blocked/permission-denied marker forward so the audit trace
+      // classifies it as `blocked` (not `ok`); the collector sets it for
+      // approval-unavailable/never-started calls (ENG-16854).
+      if (entry.status === "blocked") {
+        normalized.status = "blocked";
       }
       if (entry.asyncStarted === true) {
         normalized.asyncStarted = true;

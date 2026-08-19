@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { resolveToolSearchCodeDisplayTarget } from "./tool-display-common.js";
 import { resolveExecDetail } from "./tool-display-exec.js";
 import { formatToolDetail, formatToolSummary, resolveToolDisplay } from "./tool-display.js";
+import { TOOL_DISPLAY_CONFIG } from "./tool-display-config.js";
 
 describe("tool display details", () => {
   it("summarizes tool-search code targets from described tool ids", () => {
@@ -52,16 +53,16 @@ describe("tool display details", () => {
   it("skips zero/false values for optional detail fields", () => {
     const detail = formatToolDetail(
       resolveToolDisplay({
-        name: "sessions_spawn",
+        name: "sessions_history",
         args: {
-          task: "double-message-bug-gpt",
-          label: 0,
-          runTimeoutSeconds: 0,
+          sessionKey: "agent:main:main",
+          limit: 0,
+          includeTools: false,
         },
       }),
     );
 
-    expect(detail).toBe("double-message-bug-gpt");
+    expect(detail).toBe("agent:main:main");
   });
 
   it("includes only truthy boolean details", () => {
@@ -572,23 +573,20 @@ describe("coerceDisplayValue middle truncation", () => {
       "/important-file.txt";
     const detail = formatToolDetail(
       resolveToolDisplay({
-        name: "sessions_spawn",
-        args: { task: longPath },
+        name: "memory_search",
+        args: { query: longPath },
       }),
     );
-    // Should contain the start of the path
     expect(detail).toContain("/usr/local/share/");
-    // Should contain the end (filename)
     expect(detail).toContain("important-file.txt");
-    // Should contain the ellipsis for middle truncation
     expect(detail).toContain("…");
   });
 
   it("does not truncate short string values", () => {
     const detail = formatToolDetail(
       resolveToolDisplay({
-        name: "sessions_spawn",
-        args: { task: "short-task-name" },
+        name: "memory_search",
+        args: { query: "short-task-name" },
       }),
     );
     expect(detail).toBe("short-task-name");
@@ -605,11 +603,10 @@ describe("coerceDisplayValue middle truncation", () => {
       " final-step";
     const detail = formatToolDetail(
       resolveToolDisplay({
-        name: "sessions_spawn",
-        args: { task: longValue },
+        name: "memory_search",
+        args: { query: longValue },
       }),
     );
-    // The ghp_ token must be redacted before truncation
     expect(detail).not.toContain("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop");
   });
 
@@ -620,12 +617,55 @@ describe("coerceDisplayValue middle truncation", () => {
       " final-step";
     const detail = formatToolDetail(
       resolveToolDisplay({
-        name: "sessions_spawn",
-        args: { task: longValue },
+        name: "memory_search",
+        args: { query: longValue },
       }),
     );
 
     expect(detail).not.toContain("AKIDABCDEFGHIJKLMNOP1234567890");
     expect(detail).toContain("AKIDAB…7890");
+  });
+});
+
+describe("sessions_spawn scaffolding is not rendered (ENG-16868)", () => {
+  it("renders only taskName so the prompt/label never leak", () => {
+    // Drift guard: taskName is the short, contract-slugged handle that tells the
+    // customer WHICH sub-agent ran. The free-form task prompt and label are
+    // internal orchestration; if they re-enter detailKeys the ENG-16868 leak
+    // recurs. Keep the list to taskName only.
+    expect(TOOL_DISPLAY_CONFIG.tools.sessions_spawn?.detailKeys).toEqual(["taskName"]);
+  });
+
+  it("renders the taskName but never the label/task prompt for a sessions_spawn call", () => {
+    const detail = formatToolDetail(
+      resolveToolDisplay({
+        name: "sessions_spawn",
+        args: {
+          taskName: "panel-schedule-extraction",
+          label: "Merlin Labs panel schedule extraction",
+          task: "You are executing the PANEL SCHEDULE EXTRACTION step…",
+        },
+      }),
+    );
+
+    expect(detail).toBe("panel-schedule-extraction");
+    expect(detail).not.toContain("You are executing");
+    expect(detail).not.toContain("Merlin Labs");
+  });
+
+  it("renders no detail for a sessions_spawn call without a taskName", () => {
+    // taskName is optional; when absent the line degrades to a bare Sub-agent
+    // rather than falling back to the prompt.
+    const detail = formatToolDetail(
+      resolveToolDisplay({
+        name: "sessions_spawn",
+        args: {
+          label: "Merlin Labs panel schedule extraction",
+          task: "You are executing the PANEL SCHEDULE EXTRACTION step…",
+        },
+      }),
+    );
+
+    expect(detail).toBeUndefined();
   });
 });

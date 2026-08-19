@@ -106,7 +106,10 @@ export type SkillSnapshot = {
   skills: Array<{ name: string; primaryEnv?: string; requiredEnv?: string[] }>;
   /** Normalized agent-level filter used to build this snapshot; undefined means unrestricted. */
   skillFilter?: string[];
+  /** Runtime-only skills exposed to the model's normal skills prompt. */
   resolvedSkills?: Skill[];
+  /** Runtime-only user-invocable skills, including skills hidden from normal model prompts. */
+  commandSkills?: Skill[];
   version?: number;
   promptFormatVersion?: number;
 };

@@ -20,6 +20,10 @@ describe("normalizeMessageActionInput", () => {
     input: Parameters<typeof normalizeMessageActionInput>[0];
     expectedFields?: Record<string, unknown>;
     absentFields?: string[];
+    // "tool-context" only when the target came from the live inbound tool
+    // context (core's own inference); every explicit/legacy-caller target
+    // stays "agent" — resolution softens only the former.
+    expectedTargetSource: "agent" | "tool-context";
   };
 
   it.each([
@@ -34,6 +38,7 @@ describe("normalizeMessageActionInput", () => {
       },
       expectedFields: { target: "channel:C1", to: "channel:C1" },
       absentFields: ["channelId"],
+      expectedTargetSource: "agent",
     },
     {
       input: {
@@ -46,6 +51,7 @@ describe("normalizeMessageActionInput", () => {
       },
       expectedFields: { target: "1214056829", to: "1214056829" },
       absentFields: ["channelId"],
+      expectedTargetSource: "agent",
     },
     {
       input: {
@@ -55,6 +61,7 @@ describe("normalizeMessageActionInput", () => {
         },
       },
       expectedFields: { target: "channel:C1", to: "channel:C1" },
+      expectedTargetSource: "agent",
     },
     {
       input: {
@@ -65,6 +72,7 @@ describe("normalizeMessageActionInput", () => {
         },
       },
       expectedFields: { target: "channel:C1", to: "channel:C1" },
+      expectedTargetSource: "tool-context",
     },
     {
       input: {
@@ -76,6 +84,7 @@ describe("normalizeMessageActionInput", () => {
         },
       },
       expectedFields: { target: "user:U1", to: "user:U1" },
+      expectedTargetSource: "tool-context",
     },
     {
       input: {
@@ -87,6 +96,7 @@ describe("normalizeMessageActionInput", () => {
         },
       },
       expectedFields: { target: "user:U1", to: "user:U1" },
+      expectedTargetSource: "tool-context",
     },
     {
       input: {
@@ -100,6 +110,7 @@ describe("normalizeMessageActionInput", () => {
         },
       },
       expectedFields: { channel: "workspace" },
+      expectedTargetSource: "agent",
     },
     {
       input: {
@@ -110,6 +121,7 @@ describe("normalizeMessageActionInput", () => {
         },
       },
       absentFields: ["target", "to"],
+      expectedTargetSource: "agent",
     },
     {
       input: {
@@ -122,6 +134,7 @@ describe("normalizeMessageActionInput", () => {
         },
       },
       absentFields: ["channel"],
+      expectedTargetSource: "agent",
     },
     {
       input: {
@@ -135,6 +148,7 @@ describe("normalizeMessageActionInput", () => {
       },
       expectedFields: { messageId: "msg_123" },
       absentFields: ["target", "to"],
+      expectedTargetSource: "agent",
     },
     {
       input: {
@@ -146,6 +160,7 @@ describe("normalizeMessageActionInput", () => {
       },
       expectedFields: { messageId: "om_123" },
       absentFields: ["target", "to"],
+      expectedTargetSource: "agent",
     },
     {
       input: {
@@ -157,6 +172,7 @@ describe("normalizeMessageActionInput", () => {
       },
       expectedFields: { chatId: "oc_123" },
       absentFields: ["target", "to"],
+      expectedTargetSource: "agent",
     },
     {
       input: {
@@ -171,6 +187,7 @@ describe("normalizeMessageActionInput", () => {
         },
       },
       expectedFields: { target: "C12345678", messageId: "123.456" },
+      expectedTargetSource: "tool-context",
     },
     {
       input: {
@@ -181,19 +198,21 @@ describe("normalizeMessageActionInput", () => {
       },
       expectedFields: { target: "C123", channelId: "C123" },
       absentFields: ["to"],
+      expectedTargetSource: "agent",
     },
   ] satisfies NormalizeMessageActionInputCase[])(
     "normalizes message action input for %j",
-    ({ input, expectedFields, absentFields }) => {
-      const normalized = normalizeMessageActionInput(input);
+    ({ input, expectedFields, absentFields, expectedTargetSource }) => {
+      const { args, targetSource } = normalizeMessageActionInput(input);
       if (expectedFields) {
         for (const [field, value] of Object.entries(expectedFields)) {
-          expect(normalized[field]).toBe(value);
+          expect(args[field]).toBe(value);
         }
       }
       for (const field of absentFields ?? []) {
-        expect(field in normalized).toBe(false);
+        expect(field in args).toBe(false);
       }
+      expect(targetSource).toBe(expectedTargetSource);
     },
   );
 

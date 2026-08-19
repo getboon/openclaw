@@ -24,6 +24,7 @@ import type {
 } from "playwright-core";
 import { formatErrorMessage } from "../infra/errors.js";
 import { SsrFBlockedError, type SsrFPolicy } from "../infra/net/ssrf.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
 import { withNoProxyForCdpUrl } from "./cdp-proxy-bypass.js";
 import { isSelectableCdpBrowserTarget } from "./cdp-target-filter.js";
 import {
@@ -53,6 +54,8 @@ import { BROWSER_REF_MARKER_ATTRIBUTE, withPageScopedCdpClient } from "./pw-sess
 import { sanitizeUntrustedFileName } from "./safe-filename.js";
 
 const { chromium } = playwrightCore;
+
+const log = createSubsystemLogger("browser").child("pw-session");
 
 /** Console message captured from a Playwright page. */
 export type BrowserConsoleMessage = {
@@ -1394,6 +1397,12 @@ export async function gotoPageWithNavigationGuard(
     if (blockedError) {
       throw toLintErrorObject(blockedError, "Non-Error thrown");
     }
+    // Navigate-completion signal for observability: status is absent for
+    // same-document navigations (e.g. hash-only changes) and non-HTTP
+    // schemes (about:blank), where Playwright's goto() returns null.
+    log.debug(
+      `navigate complete url=${opts.url} status=${response ? String(response.status()) : "none"}`,
+    );
     return response;
   } catch (err) {
     if (blockedError) {

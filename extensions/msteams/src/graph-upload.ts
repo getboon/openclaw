@@ -7,6 +7,14 @@
  * - Uploading files to SharePoint (group/channel scope)
  * - Creating sharing links (organization-wide or per-user)
  * - Getting chat members for per-user sharing
+ *
+ * uploadToOneDrive/uploadAndShareOneDrive are intentionally NOT called by the
+ * automatic send/messenger fallback (see resolveMSTeamsOutboundFilePlan in
+ * file-plan.ts, which reports "undeliverable" instead when sharePointSiteId
+ * is unset). `/me/drive` requires a signed-in user's delegated token, and this
+ * plugin's tokenProvider is app-only (see createMSTeamsTokenProvider), so the
+ * call always fails for a bot identity. Kept unwired rather than deleted in
+ * case a future delegated-auth token gets threaded through here.
  */
 
 import type { MSTeamsAccessTokenProvider } from "./attachments/types.js";

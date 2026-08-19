@@ -52,6 +52,133 @@ describe("resolveSkillsPromptForRun", () => {
     expect(prompt).not.toContain("/app/skills/hidden-skill/SKILL.md");
   });
 
+  it("includes only an explicitly selected hidden skill from entries", () => {
+    const hidden: SkillEntry = {
+      skill: createCanonicalFixtureSkill({
+        name: "hidden-skill",
+        description: "Hidden",
+        filePath: "/app/skills/hidden-skill/SKILL.md",
+        baseDir: "/app/skills/hidden-skill",
+        source: "openclaw-workspace",
+        disableModelInvocation: true,
+      }),
+      frontmatter: {},
+    };
+    const visible: SkillEntry = {
+      skill: createCanonicalFixtureSkill({
+        name: "visible-skill",
+        description: "Visible",
+        filePath: "/app/skills/visible-skill/SKILL.md",
+        baseDir: "/app/skills/visible-skill",
+        source: "openclaw-workspace",
+      }),
+      frontmatter: {},
+    };
+
+    const prompt = resolveSkillsPromptForRun({
+      entries: [visible, hidden],
+      explicitSkillName: "hidden-skill",
+      workspaceDir: "/tmp/openclaw",
+    });
+
+    expect(prompt).toContain("/app/skills/hidden-skill/SKILL.md");
+    expect(prompt).not.toContain("/app/skills/visible-skill/SKILL.md");
+  });
+
+  it("does not select a skill marked as non-user-invocable", () => {
+    const hidden: SkillEntry = {
+      skill: createCanonicalFixtureSkill({
+        name: "internal-skill",
+        description: "Internal",
+        filePath: "/app/skills/internal-skill/SKILL.md",
+        baseDir: "/app/skills/internal-skill",
+        source: "openclaw-workspace",
+      }),
+      frontmatter: {},
+      exposure: {
+        includeInRuntimeRegistry: true,
+        includeInAvailableSkillsPrompt: true,
+        userInvocable: false,
+      },
+    };
+
+    const prompt = resolveSkillsPromptForRun({
+      entries: [hidden],
+      explicitSkillName: "internal-skill",
+      workspaceDir: "/tmp/openclaw",
+    });
+
+    expect(prompt).toBe("");
+  });
+
+  it("selects an explicit skill from command snapshot skills", () => {
+    const selected = createCanonicalFixtureSkill({
+      name: "selected-skill",
+      description: "Selected",
+      filePath: "/app/skills/selected-skill/SKILL.md",
+      baseDir: "/app/skills/selected-skill",
+      source: "openclaw-workspace",
+      disableModelInvocation: true,
+    });
+    const unrelated = createCanonicalFixtureSkill({
+      name: "unrelated-skill",
+      description: "Unrelated",
+      filePath: "/app/skills/unrelated-skill/SKILL.md",
+      baseDir: "/app/skills/unrelated-skill",
+      source: "openclaw-workspace",
+    });
+
+    const prompt = resolveSkillsPromptForRun({
+      skillsSnapshot: {
+        prompt: "NORMAL SNAPSHOT",
+        skills: [],
+        resolvedSkills: [unrelated],
+        commandSkills: [unrelated, selected],
+      },
+      explicitSkillName: "selected-skill",
+      workspaceDir: "/tmp/openclaw",
+    });
+
+    expect(prompt).toContain("/app/skills/selected-skill/SKILL.md");
+    expect(prompt).not.toContain("NORMAL SNAPSHOT");
+    expect(prompt).not.toContain("/app/skills/unrelated-skill/SKILL.md");
+  });
+
+  it("returns an empty prompt when the explicit skill is unavailable", () => {
+    const prompt = resolveSkillsPromptForRun({
+      skillsSnapshot: {
+        prompt: "NORMAL SNAPSHOT",
+        skills: [],
+        resolvedSkills: [],
+      },
+      explicitSkillName: "missing-skill",
+      workspaceDir: "/tmp/openclaw",
+    });
+
+    expect(prompt).toBe("");
+  });
+
+  it("does not authorize an explicit skill from prompt-visible snapshot skills", () => {
+    const promptVisible = createCanonicalFixtureSkill({
+      name: "internal-skill",
+      description: "Internal",
+      filePath: "/app/skills/internal-skill/SKILL.md",
+      baseDir: "/app/skills/internal-skill",
+      source: "openclaw-workspace",
+    });
+    const prompt = resolveSkillsPromptForRun({
+      skillsSnapshot: {
+        prompt: "NORMAL SNAPSHOT",
+        skills: [{ name: "internal-skill" }],
+        resolvedSkills: [promptVisible],
+      },
+      explicitSkillName: "internal-skill",
+      workspaceDir: "/tmp/openclaw",
+    });
+
+    expect(prompt).toBe("");
+  });
+
   it("inherits agents.defaults.skills when rebuilding prompt for an agent", () => {
     const visible: SkillEntry = {
       skill: createCanonicalFixtureSkill({

@@ -50,17 +50,29 @@ function resolveSlackButtonStyle(
   return undefined;
 }
 
+// Bare commands with no arguments to validate — allowlisted by exact string
+// match, unlike /approve which needs parseExecApprovalCommandText to check
+// its <id> <decision> shape.
+const SLACK_ALLOWLISTED_BARE_COMMANDS = new Set(["/retry"]);
+
+export function isSlackAllowlistedCommand(command: string): boolean {
+  return (
+    Boolean(parseExecApprovalCommandText(command)) ||
+    SLACK_ALLOWLISTED_BARE_COMMANDS.has(command.trim().toLowerCase())
+  );
+}
+
 function resolveSlackControlValue(control: {
   action?: { type: "command"; command: string } | { type: "callback"; value: string };
   value?: string;
 }): string | undefined {
   if (control.action?.type === "command") {
     const command = normalizeOptionalString(control.action.command);
-    if (command && parseExecApprovalCommandText(command)) {
+    if (command && isSlackAllowlistedCommand(command)) {
       return command;
     }
     const legacyValue = normalizeOptionalString(control.value);
-    return legacyValue && parseExecApprovalCommandText(legacyValue) ? legacyValue : undefined;
+    return legacyValue && isSlackAllowlistedCommand(legacyValue) ? legacyValue : undefined;
   }
   return resolveMessagePresentationControlValue(control);
 }

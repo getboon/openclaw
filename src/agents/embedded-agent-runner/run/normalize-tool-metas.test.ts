@@ -23,6 +23,19 @@ describe("normalizeToolMetas", () => {
     expect("errored" in normalized[0]).toBe(false);
   });
 
+  it("carries forward the `blocked` status so the audit trace can classify denied calls", () => {
+    // Regression (ENG-16854): the collector marks approval-unavailable /
+    // never-started calls `status:"blocked"` with `errored:false`. If this
+    // boundary drops `status`, buildTraceToolSummary sees `{errored:false}` and
+    // mis-classifies a permission-blocked call as `ok` — reporting a blocked run
+    // as a verified success.
+    const normalized = normalizeToolMetas([
+      { toolName: "exec", status: "blocked", errored: false },
+      { toolName: "read", errored: false },
+    ]);
+    expect(normalized.map((entry) => entry.status)).toEqual(["blocked", undefined]);
+  });
+
   it("drops entries without a usable tool name", () => {
     const normalized = normalizeToolMetas([
       { toolName: "", errored: true },

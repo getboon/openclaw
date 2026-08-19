@@ -10,6 +10,35 @@ import type { SkillSnapshot } from "../types.js";
 import { resolveEmbeddedRunSkillEntries } from "./embedded-run-entries.js";
 
 describe("resolveEmbeddedRunSkillEntries", () => {
+  it("reloads entries for an explicit skill when command skills are absent from a persisted snapshot", () => {
+    const result = resolveEmbeddedRunSkillEntries({
+      workspaceDir: "/tmp/workspace",
+      explicitSkillName: "hidden-skill",
+      skillsSnapshot: {
+        prompt: "visible skills",
+        skills: [{ name: "visible-skill" }],
+        resolvedSkills: [],
+      },
+    });
+
+    expect(result.shouldLoadSkillEntries).toBe(true);
+  });
+
+  it("reloads entries when a stale command snapshot lacks the explicit skill", () => {
+    const result = resolveEmbeddedRunSkillEntries({
+      workspaceDir: "/tmp/workspace",
+      explicitSkillName: "new-skill",
+      skillsSnapshot: {
+        prompt: "visible skills",
+        skills: [{ name: "old-skill" }],
+        resolvedSkills: [],
+        commandSkills: [],
+      },
+    });
+
+    expect(result.shouldLoadSkillEntries).toBe(true);
+  });
+
   const loadWorkspaceSkillEntriesSpy = vi.spyOn(skillsWorkspaceModule, "loadWorkspaceSkillEntries");
 
   beforeEach(() => {
