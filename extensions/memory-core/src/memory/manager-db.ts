@@ -45,16 +45,32 @@ const MEMORY_REINDEX_UUID_PATTERN =
 // falls back to the default rather than disabling the floor.
 const MEMORY_REINDEX_ORPHAN_MIN_AGE_DEFAULT_MS = 60_000;
 
-function resolveMemoryReindexOrphanMinAgeMs(): number {
-  const raw = process.env.OPENCLAW_MEMORY_REINDEX_ORPHAN_MIN_AGE_MS;
+/**
+ * Read a non-negative numeric override from the environment, falling back to
+ * `fallback` for unset, blank, non-numeric, negative and non-finite values.
+ *
+ * Shared by every reindex-containment knob (the GC age floor here, the space
+ * multiplier and reserve in manager-sync-ops) so the validation rules cannot drift
+ * apart between them -- these are safety limits, and a knob that silently accepts
+ * a bad value disables the guard it controls.
+ */
+export function resolveNonNegativeNumberEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
   if (raw === undefined || raw.trim() === "") {
-    return MEMORY_REINDEX_ORPHAN_MIN_AGE_DEFAULT_MS;
+    return fallback;
   }
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) {
-    return MEMORY_REINDEX_ORPHAN_MIN_AGE_DEFAULT_MS;
+    return fallback;
   }
   return parsed;
+}
+
+function resolveMemoryReindexOrphanMinAgeMs(): number {
+  return resolveNonNegativeNumberEnv(
+    "OPENCLAW_MEMORY_REINDEX_ORPHAN_MIN_AGE_MS",
+    MEMORY_REINDEX_ORPHAN_MIN_AGE_DEFAULT_MS,
+  );
 }
 
 function resolveMemoryReindexBaseName(
@@ -331,8 +347,20 @@ export function listMemoryReindexShadowBaseNames(dbPath: string): string[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return [];
+  } catch (err) {
+    // FAIL CLOSED. Returning [] here would report "no shadows" from a scan that
+    // never happened, and the one-shadow circuit breaker would read that as
+    // permission to start another multi-GB rebuild -- defeating the guard exactly
+    // when the filesystem is already unhealthy, which is when it matters most.
+    // ENOENT is the one safe case: no directory means no shadow can exist.
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+      return [];
+    }
+    throw new Error(
+      `cannot enumerate ${dir} to check for unreclaimed memory-reindex shadows: ` +
+        ((err as Error)?.message ?? String(err)),
+      { cause: err },
+    );
   }
   for (const entry of entries) {
     if (!entry.isFile()) {

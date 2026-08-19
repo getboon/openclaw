@@ -238,7 +238,11 @@ describe("memory manager reindex recovery", () => {
     ).resolves.toBeUndefined();
 
     expect(syncCalled).toBe(false);
+    // `dirty` alone would let the next sync do an INCREMENTAL memory pass, so the
+    // full rebuild this guard deferred would never happen. Assert the full-retry
+    // flag, which is the state that actually forces the rebuild to be re-attempted.
     expect(harness.dirty).toBe(true);
+    expect(harness.memoryFullRetryDirty).toBe(true);
     // the pre-existing shadow is left alone for the GC, not deleted mid-decision
     await expect(fs.access(shadow)).resolves.toBeUndefined();
   });
@@ -261,6 +265,30 @@ describe("memory manager reindex recovery", () => {
 
     expect(syncCalled).toBe(false);
     expect(harness.dirty).toBe(true);
+    expect(harness.memoryFullRetryDirty).toBe(true);
+  });
+
+  it("a declining guard requests a FULL session retry, not just a dirty flag", async () => {
+    // Both guards decline via markFailedFullReindexRetry, matching the failure path.
+    // Without the sessions half, a declined reindex on a sessions-sourced agent
+    // would skip session indexing entirely on the next pass rather than rebuilding.
+    const memoryManager = await openManager(
+      createCfg({ provider: "none", sources: ["memory", "sessions"] }),
+    );
+    const harness = memoryManager as unknown as ReindexHarness & {
+      markFailedFullReindexRetry: (p: { memory: boolean; sessions: boolean }) => void;
+    };
+    harness.dirty = false;
+    harness.memoryFullRetryDirty = false;
+    harness.sessionsDirty = false;
+    harness.sessionsFullRetryDirty = false;
+
+    harness.markFailedFullReindexRetry({ memory: true, sessions: true });
+
+    expect(harness.dirty).toBe(true);
+    expect(harness.memoryFullRetryDirty).toBe(true);
+    expect(harness.sessionsDirty).toBe(true);
+    expect(harness.sessionsFullRetryDirty).toBe(true);
   });
 
   it("forces source-wide session sync when retrying a failed full reindex", async () => {
