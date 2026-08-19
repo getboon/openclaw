@@ -63,6 +63,13 @@ describe("buildModelCallEndedCapture", () => {
       error_category: "rate_limit",
     });
     expect(capture?.contexts?.run).toEqual({ run_id: "r1", session_id: undefined, call_id: "c1" });
+    expect(capture?.fingerprint).toEqual([
+      "model_call_ended",
+      "anthropic",
+      "claude",
+      "timeout",
+      "rate_limit",
+    ]);
   });
 
   it("tags a relayed upstream provider 5xx (Bedrock 503) with error_class + http_status (ENG-16922)", () => {
@@ -72,10 +79,17 @@ describe("buildModelCallEndedCapture", () => {
     );
     expect(capture?.tags).toMatchObject({ error_class: "upstream_provider_5xx" });
     expect(capture?.extra).toMatchObject({ http_status: 503 });
-    // errorClass + status lead the title so Sentry fingerprints it separately.
     expect(capture?.message).toBe(
       "model_call_ended: upstream_provider_5xx, http_status=503, Error",
     );
+    expect(capture?.fingerprint).toEqual([
+      "model_call_ended",
+      "anthropic",
+      "claude",
+      "upstream_provider_5xx",
+      "503",
+      "Error",
+    ]);
   });
 
   it("tags a gateway-synthesized 502 as gateway_origin_5xx (ENG-16922)", () => {
@@ -86,6 +100,26 @@ describe("buildModelCallEndedCapture", () => {
     expect(capture?.tags).toMatchObject({ error_class: "gateway_origin_5xx" });
     expect(capture?.extra).toMatchObject({ http_status: 502 });
     expect(capture?.message).toBe("model_call_ended: gateway_origin_5xx, http_status=502, Error");
+    expect(capture?.fingerprint).toEqual([
+      "model_call_ended",
+      "anthropic",
+      "claude",
+      "gateway_origin_5xx",
+      "502",
+      "Error",
+    ]);
+  });
+
+  it("fingerprints the same error_class with different http statuses into different issues", () => {
+    const bedrock503 = buildModelCallEndedCapture(
+      modelCall({ httpStatus: 503, errorClass: "upstream_provider_5xx", errorCategory: "Error" }),
+      HOST,
+    );
+    const bedrock502 = buildModelCallEndedCapture(
+      modelCall({ httpStatus: 502, errorClass: "upstream_provider_5xx", errorCategory: "Error" }),
+      HOST,
+    );
+    expect(bedrock503?.fingerprint).not.toEqual(bedrock502?.fingerprint);
   });
 
   it("omits error_class when the failure carries no 5xx classification", () => {
@@ -117,6 +151,7 @@ describe("buildAgentEndCapture", () => {
     expect(capture?.kind).toBe("exception");
     expect(capture?.message).toBe("context overflow");
     expect(capture?.extra?.message_count).toBe(2);
+    expect(capture?.fingerprint).toEqual(["agent_end", "context overflow"]);
     expect(capture?.contexts?.run).toEqual({
       run_id: "r9",
       session_id: undefined,
@@ -146,6 +181,34 @@ describe("buildAfterToolCallCapture", () => {
     expect(capture?.message).toBe("exit 1");
     expect(capture?.tags.tool).toBe("bash");
     expect(capture?.extra?.tool_call_id).toBe("tc1");
+    expect(capture?.fingerprint).toEqual(["after_tool_call", "bash", "exit 1"]);
+  });
+
+  it("fingerprints different tools' failures into different issues", () => {
+    // Every after_tool_call capture is thrown from the same call site in
+    // dispatch.ts, so without an explicit fingerprint Sentry's stack-based
+    // grouping merges unrelated tool failures into one issue.
+    const execFailure = buildAfterToolCallCapture(
+      { toolName: "exec", params: {}, error: "Traceback (most recent call last):" },
+      HOST,
+    );
+    const webFetchFailure = buildAfterToolCallCapture(
+      { toolName: "web_fetch", params: {}, error: "Web fetch failed (403)" },
+      HOST,
+    );
+    expect(execFailure?.fingerprint).not.toEqual(webFetchFailure?.fingerprint);
+  });
+
+  it("fingerprints different errors from the same tool into different issues", () => {
+    const timeout = buildAfterToolCallCapture(
+      { toolName: "exec", params: {}, error: "ValueError: bad input" },
+      HOST,
+    );
+    const denied = buildAfterToolCallCapture(
+      { toolName: "exec", params: {}, error: "KeyError: 'missing'" },
+      HOST,
+    );
+    expect(timeout?.fingerprint).not.toEqual(denied?.fingerprint);
   });
 });
 
@@ -162,6 +225,7 @@ describe("buildMessageSentCapture", () => {
     );
     expect(capture?.message).toBe("socket closed");
     expect(capture?.extra?.message_id).toBe("m1");
+    expect(capture?.fingerprint).toEqual(["message_sent", "socket closed"]);
   });
 });
 
@@ -186,6 +250,12 @@ describe("buildSubagentEndedCapture", () => {
       expect(capture?.kind).toBe("exception");
       expect(capture?.tags.outcome).toBe(outcome);
       expect(capture?.message).toBe(`subagent_ended outcome=${outcome}`);
+      expect(capture?.fingerprint).toEqual([
+        "subagent_ended",
+        outcome,
+        "subagent",
+        `outcome=${outcome}`,
+      ]);
     },
   );
 });
@@ -213,6 +283,7 @@ describe("buildCronChangedCapture", () => {
     expect(capture?.message).toBe("post failed");
     expect(capture?.tags.delivery_status).toBeUndefined();
     expect(capture?.extra?.delivery_error).toBe("post failed");
+    expect(capture?.fingerprint).toEqual(["cron_changed", "finished", "post failed"]);
   });
 
   it("captures a not-delivered status even with no error string (dropped output)", () => {
@@ -268,6 +339,7 @@ describe("buildSessionEndCapture", () => {
       expect(capture?.kind === "message" && capture.level).toBe("warning");
       expect(capture?.message).toBe("session_end reason=unknown");
       expect(capture?.extra?.message_count).toBe(3);
+      expect(capture?.fingerprint).toEqual(["session_end", "unknown"]);
     }
   });
 });
