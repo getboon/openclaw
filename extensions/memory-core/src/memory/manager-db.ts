@@ -24,7 +24,38 @@ const MEMORY_DATABASE_FILE_SUFFIXES = ["", "-wal", "-shm", "-journal"] as const;
 const MEMORY_REINDEX_ENTRY_SUFFIXES = ["-wal", "-shm", "-journal", ""] as const;
 const MEMORY_REINDEX_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const MEMORY_REINDEX_ORPHAN_MIN_AGE_MS = 24 * 60 * 60_000;
+// Orphan age floor for cleanupAgedMemoryReindexTempFiles.
+//
+// This used to be 24 h, which made the GC structurally unable to break the
+// failure it exists to prevent: the orphan that is actively filling the disk is,
+// by definition, younger than 24 h. A host with a multi-GB agent DB strands ~10 GB
+// per killed reindex, so two orphans inside one day exhaust the volume while the
+// GC declines to collect either.
+//
+// A long floor is not what makes the GC safe -- the EXCLUSIVE reindex lock is.
+// cleanupAgedMemoryReindexTempFiles only runs while holding it, and
+// runInPlaceReindex holds that same lock from before the shadow is created until
+// after it is removed. So with the lock held, no reindex for this database can be
+// running and every shadow present is provably abandoned; age is irrelevant.
+//
+// The floor is therefore kept only as narrow defence-in-depth against a
+// shadow-creating path that does not take the lock (there is none in-tree), and is
+// short enough that the GC can actually collect the orphan that matters. Override
+// with OPENCLAW_MEMORY_REINDEX_ORPHAN_MIN_AGE_MS; a malformed or negative value
+// falls back to the default rather than disabling the floor.
+const MEMORY_REINDEX_ORPHAN_MIN_AGE_DEFAULT_MS = 60_000;
+
+function resolveMemoryReindexOrphanMinAgeMs(): number {
+  const raw = process.env.OPENCLAW_MEMORY_REINDEX_ORPHAN_MIN_AGE_MS;
+  if (raw === undefined || raw.trim() === "") {
+    return MEMORY_REINDEX_ORPHAN_MIN_AGE_DEFAULT_MS;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return MEMORY_REINDEX_ORPHAN_MIN_AGE_DEFAULT_MS;
+  }
+  return parsed;
+}
 
 function resolveMemoryReindexBaseName(
   databaseBaseName: string,
@@ -268,7 +299,7 @@ export function cleanupAgedMemoryReindexTempFiles(dbPath: string, nowMs = Date.n
       }
       if (
         nowMs - Math.max(...stats.map((stat) => stat.mtimeMs)) <
-        MEMORY_REINDEX_ORPHAN_MIN_AGE_MS
+        resolveMemoryReindexOrphanMinAgeMs()
       ) {
         continue;
       }
@@ -283,6 +314,50 @@ export function cleanupAgedMemoryReindexTempFiles(dbPath: string, nowMs = Date.n
       reindexLock.release();
     } catch {}
   }
+}
+
+/**
+ * List the distinct shadow base names for `dbPath` that currently exist on disk.
+ *
+ * Used by the one-shadow circuit breaker in runInPlaceReindex. It deliberately
+ * reads the FILESYSTEM rather than in-process state: an orphan exists precisely
+ * because the process that held that state was hard-killed, so in-memory
+ * bookkeeping cannot see it.
+ */
+export function listMemoryReindexShadowBaseNames(dbPath: string): string[] {
+  const dir = path.dirname(dbPath);
+  const databaseBaseName = path.basename(dbPath);
+  const shadowBaseNames = new Set<string>();
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  for (const entry of entries) {
+    if (!entry.isFile()) {
+      continue;
+    }
+    const shadowBaseName = resolveMemoryReindexBaseName(databaseBaseName, entry.name);
+    if (shadowBaseName) {
+      shadowBaseNames.add(shadowBaseName);
+    }
+  }
+  return [...shadowBaseNames];
+}
+
+/** Total bytes currently occupied by shadow databases for `dbPath`. */
+export function measureMemoryReindexShadowBytes(dbPath: string): number {
+  const dir = path.dirname(dbPath);
+  let total = 0;
+  for (const shadowBaseName of listMemoryReindexShadowBaseNames(dbPath)) {
+    for (const suffix of MEMORY_DATABASE_FILE_SUFFIXES) {
+      try {
+        total += fs.statSync(path.join(dir, `${shadowBaseName}${suffix}`)).size;
+      } catch {}
+    }
+  }
+  return total;
 }
 
 export function openMemoryDatabaseAtPath(

@@ -10,6 +10,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupAgedMemoryReindexTempFiles,
+  listMemoryReindexShadowBaseNames,
+  measureMemoryReindexShadowBytes,
   publishMemoryDatabaseTables,
   readMemoryDatabaseRevision,
 } from "./manager-db.js";
@@ -233,5 +235,92 @@ describe("memory manager database publication", () => {
     await expectPathMissing(`${oldShadow}-journal`);
     await expectPathMissing(lockedShadow);
     await expect(fs.access(youngShadow)).resolves.toBeUndefined();
+  });
+
+  it("collects an orphan that is minutes old, not just one older than a day", async () => {
+    // Regression: the floor was 24 h, which made the GC structurally unable to
+    // break the failure it exists to prevent -- the orphan filling the disk is by
+    // definition younger than a day. Two ~10 GB shadows inside one day exhausted a
+    // production volume while the GC declined to collect either.
+    const databasePath = path.join(fixtureRoot, "agent.sqlite");
+    new DatabaseSync(databasePath).close();
+    const shadow = `${databasePath}.memory-reindex-12341234-5678-9abc-def0-111122223333`;
+    const minutesOld = new Date(Date.now() - 5 * 60_000);
+    for (const suffix of ["", "-wal", "-shm"]) {
+      await fs.writeFile(`${shadow}${suffix}`, "abandoned");
+      await fs.utimes(`${shadow}${suffix}`, minutesOld, minutesOld);
+    }
+
+    cleanupAgedMemoryReindexTempFiles(databasePath);
+
+    await expectPathMissing(shadow);
+    await expectPathMissing(`${shadow}-wal`);
+    await expectPathMissing(`${shadow}-shm`);
+  });
+
+  it("falls back to the default floor when the env override is malformed", async () => {
+    const databasePath = path.join(fixtureRoot, "agent.sqlite");
+    new DatabaseSync(databasePath).close();
+    const shadow = `${databasePath}.memory-reindex-55555555-6666-7777-8888-999999999999`;
+    const minutesOld = new Date(Date.now() - 5 * 60_000);
+    await fs.writeFile(shadow, "abandoned");
+    await fs.utimes(shadow, minutesOld, minutesOld);
+
+    const previous = process.env.OPENCLAW_MEMORY_REINDEX_ORPHAN_MIN_AGE_MS;
+    process.env.OPENCLAW_MEMORY_REINDEX_ORPHAN_MIN_AGE_MS = "not-a-number";
+    try {
+      // A malformed value must not disable the floor, and must not extend it back
+      // to a day either -- it uses the default, so a 5-minute orphan is collected.
+      cleanupAgedMemoryReindexTempFiles(databasePath);
+    } finally {
+      if (previous === undefined) delete process.env.OPENCLAW_MEMORY_REINDEX_ORPHAN_MIN_AGE_MS;
+      else process.env.OPENCLAW_MEMORY_REINDEX_ORPHAN_MIN_AGE_MS = previous;
+    }
+    await expectPathMissing(shadow);
+  });
+
+  it("honours an explicit longer floor from the env override", async () => {
+    const databasePath = path.join(fixtureRoot, "agent.sqlite");
+    new DatabaseSync(databasePath).close();
+    const shadow = `${databasePath}.memory-reindex-aaaa1111-bbbb-2222-cccc-333344445555`;
+    const minutesOld = new Date(Date.now() - 5 * 60_000);
+    await fs.writeFile(shadow, "abandoned");
+    await fs.utimes(shadow, minutesOld, minutesOld);
+
+    const previous = process.env.OPENCLAW_MEMORY_REINDEX_ORPHAN_MIN_AGE_MS;
+    process.env.OPENCLAW_MEMORY_REINDEX_ORPHAN_MIN_AGE_MS = String(60 * 60_000);
+    try {
+      cleanupAgedMemoryReindexTempFiles(databasePath);
+    } finally {
+      if (previous === undefined) delete process.env.OPENCLAW_MEMORY_REINDEX_ORPHAN_MIN_AGE_MS;
+      else process.env.OPENCLAW_MEMORY_REINDEX_ORPHAN_MIN_AGE_MS = previous;
+    }
+    await expect(fs.access(shadow)).resolves.toBeUndefined();
+  });
+
+  it("lists and measures shadow databases from the filesystem", async () => {
+    const databasePath = path.join(fixtureRoot, "agent.sqlite");
+    new DatabaseSync(databasePath).close();
+    const a = `${databasePath}.memory-reindex-11111111-1111-1111-1111-111111111111`;
+    const b = `${databasePath}.memory-reindex-22222222-2222-2222-2222-222222222222`;
+    await fs.writeFile(a, "x".repeat(100));
+    await fs.writeFile(`${a}-wal`, "y".repeat(50));
+    await fs.writeFile(b, "z".repeat(10));
+    // must be ignored: the lock db, and the never-reclaim families
+    await fs.writeFile(`${databasePath}.reindex-lock.sqlite`, "");
+    await fs.writeFile(`${databasePath}.backup-33333333-3333-3333-3333-333333333333`, "keep");
+    await fs.writeFile(`${databasePath}.tmp-44444444-4444-4444-4444-444444444444`, "keep");
+
+    expect(listMemoryReindexShadowBaseNames(databasePath).sort()).toEqual(
+      [path.basename(a), path.basename(b)].sort(),
+    );
+    expect(measureMemoryReindexShadowBytes(databasePath)).toBe(160);
+  });
+
+  it("reports no shadows for a database that has none", async () => {
+    const databasePath = path.join(fixtureRoot, "agent.sqlite");
+    new DatabaseSync(databasePath).close();
+    expect(listMemoryReindexShadowBaseNames(databasePath)).toEqual([]);
+    expect(measureMemoryReindexShadowBytes(databasePath)).toBe(0);
   });
 });
