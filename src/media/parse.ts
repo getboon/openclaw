@@ -50,7 +50,7 @@ function cleanCandidate(raw: string) {
 const MAX_GLUED_MEDIA_EXT_LEN = 5;
 
 /**
- * ENG-18014 — the system prompt requires `MEDIA:<path>` on its own line, but
+ * The system prompt requires `MEDIA:<path>` on its own line, but
  * when the model forgets the newline the prose fuses onto the path
  * ("…Bid_Form.xlsxHere's the earthwork"). MEDIA_TOKEN_RE captures greedily to
  * end-of-line, so the fused run is taken as the path, resolves to nothing, and
@@ -91,6 +91,13 @@ function splitGluedMediaExtension(payload: string): { payload: string; split: bo
         continue;
       }
       const end = dot + 1 + len;
+      // A path separator in the remainder means this "extension" is really the
+      // start of a directory name and the token continues — not a boundary.
+      // Every shorter candidate leaves an even longer remainder, so give up on
+      // this dot entirely rather than trying them.
+      if (/[/\\]/.test(firstToken.slice(end))) {
+        break;
+      }
       const rest = `${firstToken.slice(end)}${payload.slice(firstToken.length)}`;
       return { payload: `${firstToken.slice(0, end)} ${rest}`, split: true };
     }
@@ -635,7 +642,7 @@ export function splitMediaFromOutput(
 
       const payload = match[1];
       const unwrapped = unwrapQuoted(payload);
-      // A quoted path is explicit — never re-split it (ENG-18014).
+      // A quoted path is explicit — never re-split it.
       const glued = unwrapped ? { payload, split: false } : splitGluedMediaExtension(payload);
       const payloadValue = unwrapped ?? glued.payload;
       const parts = unwrapped ? [unwrapped] : glued.payload.split(/\s+/).filter(Boolean);
@@ -643,9 +650,18 @@ export function splitMediaFromOutput(
       let validCount = 0;
       const invalidParts: string[] = [];
       let hasValidMedia = false;
-      for (const part of parts) {
+      for (const [partIndex, part] of parts.entries()) {
         const candidate = normalizeMediaSource(cleanCandidate(part));
-        if (isValidMedia(candidate, unwrapped ? { allowSpaces: true } : undefined)) {
+        // The media half of a split is a filename we just carved out of the
+        // token, so a bare filename is legitimate there even though it is
+        // rejected elsewhere; the prose half stays invalid and is re-emitted
+        // as text.
+        const validateOpts = unwrapped
+          ? { allowSpaces: true }
+          : glued.split && partIndex === 0
+            ? { allowBareFilename: true }
+            : undefined;
+        if (isValidMedia(candidate, validateOpts)) {
           media.push(candidate);
           hasValidMedia = true;
           foundMediaToken = true;
@@ -658,7 +674,7 @@ export function splitMediaFromOutput(
       const trimmedPayload = payloadValue.trim();
       const looksLikeLocalPath =
         looksLikeLocalFilePath(trimmedPayload) || trimmedPayload.startsWith("file://");
-      // Skipped after a fused-prose split (ENG-18014): the whitespace we just
+      // Skipped after a fused-prose split: the whitespace we just
       // introduced is a prose boundary, not part of a filename, so re-joining
       // it here would rebuild the very path that failed to resolve.
       if (
@@ -691,7 +707,7 @@ export function splitMediaFromOutput(
         }
       }
 
-      // Same reasoning as the two guards above (ENG-18014): after a split, the
+      // Same reasoning as the two guards above: after a split, the
       // injected whitespace is a prose boundary. Without this guard a split that
       // failed to validate (a bare filename with no directory) would be
       // re-assembled here into a "path" containing the prose AND the injected

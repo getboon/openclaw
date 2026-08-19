@@ -66,7 +66,7 @@ describe("splitMediaFromOutput", () => {
       String.raw`MEDIA:/path/to/image.png\"}],\"details\":{\"provider\":\"openai\"}`,
     ],
     ["/tmp/render,final.png", "MEDIA:/tmp/render,final.png"],
-    // ENG-18014 regression guard. These four extensions have a 1-shorter
+    // Regression guard. These four extensions have a 1-shorter
     // extension that is ALSO known (.xlsx/.xls, .docx/.doc, .pptx/.ppt,
     // .html/.htm), so a boundary search that tries prefixes truncates them
     // whenever punctuation follows — dropping the attachment and leaking the
@@ -81,12 +81,12 @@ describe("splitMediaFromOutput", () => {
     expectAcceptedMediaPathCase(expectedPath, input);
   });
 
-  // ENG-18014 — the system prompt tells the model to put `MEDIA:<path>` on its
+  // The system prompt tells the model to put `MEDIA:<path>` on its
   // own line, but when it forgets the newline the prose fuses onto the path
   // ("…Bid_Form.xlsxHere's the earthwork"). MEDIA_TOKEN_RE captures greedily to
   // end-of-line, so the whole run becomes the "path", resolves to nothing, and
   // NO attachment is produced — the raw server path then leaks to the customer
-  // (Jaynes thread 800). Split at the known-extension boundary so the file
+  // reported in production. Split at the known-extension boundary so the file
   // attaches and the prose survives as visible text.
   it("splits prose fused onto a media path", () => {
     expectParsedMediaOutputCase(
@@ -112,6 +112,25 @@ describe("splitMediaFromOutput", () => {
     ["https://example.com/img.png", "MEDIA:https://example.com/img.pngHere it is", "Here it is"],
   ] as const)("splits at the rightmost real extension: %s", (expectedPath, input, expectedText) => {
     expectParsedMediaOutputCase(input, { mediaUrls: [expectedPath], text: expectedText });
+  });
+
+  // A directory whose name merely STARTS with a known extension is not a
+  // boundary — anything after a split must not contain a path separator, or the
+  // "prose" is really the rest of the path and the attachment points nowhere.
+  it("does not split inside a directory name that starts with an extension", () => {
+    expectParsedMediaOutputCase("MEDIA:/tmp/report.xlsxbackup/final.pdf", {
+      mediaUrls: ["/tmp/report.xlsxbackup/final.pdf"],
+    });
+  });
+
+  // The split produces a genuine filename, so the media half may be a bare
+  // filename even though a bare filename is otherwise rejected — the prose half
+  // stays invalid and is re-emitted as text.
+  it("attaches a fused bare filename", () => {
+    expectParsedMediaOutputCase("MEDIA:image.pngHere it is", {
+      mediaUrls: ["image.png"],
+      text: "Here it is",
+    });
   });
 
   // A dotted directory segment (".openclaw") must not be mistaken for the
