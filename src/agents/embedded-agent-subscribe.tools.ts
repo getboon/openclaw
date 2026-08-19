@@ -38,18 +38,29 @@ function truncateToolText(text: string): string {
   return `${truncateUtf16Safe(text, TOOL_RESULT_MAX_CHARS)}\n…(truncated)…`;
 }
 
+const PYTHON_TRACEBACK_HEADER = "Traceback (most recent call last):";
+
 function normalizeToolErrorText(text: string): string | undefined {
   const trimmed = text.trim();
   if (!trimmed) {
     return undefined;
   }
-  const firstLine = trimmed.split(/\r?\n/)[0]?.trim() ?? "";
-  if (!firstLine) {
+  const lines = trimmed.split(/\r?\n/);
+  // A Python traceback's first line is always this generic header; the actual
+  // "ExceptionType: message" is the last non-empty line. Keeping the first
+  // line here collapses every distinct Python exec failure into the same
+  // uninformative error string for callers/telemetry that key off this text.
+  const summaryLine =
+    lines[0]?.trim() === PYTHON_TRACEBACK_HEADER
+      ? [...lines].reverse().find((line) => line.trim().length > 0)
+      : lines[0];
+  const line = summaryLine?.trim() ?? "";
+  if (!line) {
     return undefined;
   }
-  return firstLine.length > TOOL_ERROR_MAX_CHARS
-    ? `${truncateUtf16Safe(firstLine, TOOL_ERROR_MAX_CHARS)}…`
-    : firstLine;
+  return line.length > TOOL_ERROR_MAX_CHARS
+    ? `${truncateUtf16Safe(line, TOOL_ERROR_MAX_CHARS)}…`
+    : line;
 }
 
 function isErrorLikeStatus(status: string): boolean {

@@ -354,6 +354,28 @@ describe("sanitizeToolResult", () => {
     const sanitizedWithRawError = sanitizeToolResult({ details: detailsWithRawError });
     expect(extractToolErrorMessage(sanitizedWithRawError)).toBeUndefined();
   });
+
+  it("uses the last line of a Python traceback instead of the generic header", () => {
+    const traceback = [
+      "Traceback (most recent call last):",
+      '  File "script.py", line 3, in <module>',
+      "    raise ValueError('bad input')",
+      "ValueError: bad input",
+    ].join("\n");
+    const result = {
+      content: [{ type: "text", text: traceback }],
+      details: { status: "completed", exitCode: 1 },
+    };
+    expect(extractToolErrorMessage(result)).toBe("ValueError: bad input");
+  });
+
+  it("still uses the first line for non-traceback multi-line tool output", () => {
+    const result = {
+      content: [{ type: "text", text: "connection refused\nretrying in 1s\nretrying in 2s" }],
+      details: { status: "completed", exitCode: 1 },
+    };
+    expect(extractToolErrorMessage(result)).toBe("connection refused");
+  });
 });
 
 describe("sanitizeToolArgs", () => {

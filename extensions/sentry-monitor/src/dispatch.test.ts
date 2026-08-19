@@ -24,6 +24,7 @@ describe("dispatchCapture", () => {
       kind: "exception",
       message: "boom",
       tags: { hook: "model_call_ended" },
+      fingerprint: ["model_call_ended", "boom"],
       contexts: { run: { run_id: "r1" } },
       extra: { duration_ms: 5 },
     };
@@ -35,6 +36,7 @@ describe("dispatchCapture", () => {
     expect((call?.[0] as Error | undefined)?.message).toBe("boom");
     expect(call?.[1]).toEqual({
       tags: { hook: "model_call_ended" },
+      fingerprint: ["model_call_ended", "boom"],
       contexts: { run: { run_id: "r1" } },
       extra: { duration_ms: 5 },
     });
@@ -47,6 +49,7 @@ describe("dispatchCapture", () => {
       message: "session_end reason=unknown",
       level: "warning",
       tags: { hook: "session_end" },
+      fingerprint: ["session_end", "unknown"],
       contexts: { run: { run_id: "r2" } },
       extra: { message_count: 3 },
     };
@@ -58,6 +61,7 @@ describe("dispatchCapture", () => {
     expect(call?.[1]).toEqual({
       level: "warning",
       tags: { hook: "session_end" },
+      fingerprint: ["session_end", "unknown"],
       contexts: { run: { run_id: "r2" } },
       extra: { message_count: 3 },
     });

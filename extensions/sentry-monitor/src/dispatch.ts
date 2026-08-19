@@ -9,6 +9,7 @@ type SentryScopeContext = {
   tags?: Record<string, string>;
   contexts?: Record<string, Record<string, string | undefined> | undefined>;
   extra?: Record<string, unknown>;
+  fingerprint?: string[];
 };
 
 export type SentryCaptureClient = {
@@ -25,6 +26,7 @@ export function dispatchCapture(client: SentryCaptureClient, capture: SentryCapt
     tags: capture.tags,
     contexts: capture.contexts,
     extra: capture.extra,
+    fingerprint: capture.fingerprint,
   };
   if (capture.kind === "exception") {
     client.captureException(new Error(capture.message), scope);
