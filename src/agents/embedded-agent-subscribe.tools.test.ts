@@ -369,6 +369,43 @@ describe("sanitizeToolResult", () => {
     expect(extractToolErrorMessage(result)).toBe("ValueError: bad input");
   });
 
+  it("skips the exec tool's appended exit-status trailer when picking the traceback line", () => {
+    // bash-tools.exec-runtime.ts appends "\n\n(Command exited with code N)"
+    // after real output on a non-zero exit; that trailer must not be mistaken
+    // for the traceback's real last line.
+    const traceback = [
+      "Traceback (most recent call last):",
+      '  File "script.py", line 3, in <module>',
+      "    raise ValueError('bad input')",
+      "ValueError: bad input",
+      "",
+      "(Command exited with code 1)",
+    ].join("\n");
+    const result = {
+      content: [{ type: "text", text: traceback }],
+      details: { status: "completed", exitCode: 1 },
+    };
+    expect(extractToolErrorMessage(result)).toBe("ValueError: bad input");
+  });
+
+  it("skips a timeout/abort status trailer without parens or an exit code", () => {
+    // sessions/tools/bash.ts's appendStatus() has no parens and can carry
+    // free-form reason text ("Command timed out after N seconds...").
+    const traceback = [
+      "Traceback (most recent call last):",
+      '  File "script.py", line 3, in <module>',
+      "    raise ValueError('bad input')",
+      "ValueError: bad input",
+      "",
+      "Command timed out after 30 seconds",
+    ].join("\n");
+    const result = {
+      content: [{ type: "text", text: traceback }],
+      details: { status: "completed", exitCode: 1 },
+    };
+    expect(extractToolErrorMessage(result)).toBe("ValueError: bad input");
+  });
+
   it("still uses the first line for non-traceback multi-line tool output", () => {
     const result = {
       content: [{ type: "text", text: "connection refused\nretrying in 1s\nretrying in 2s" }],

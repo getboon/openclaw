@@ -39,6 +39,14 @@ function truncateToolText(text: string): string {
 }
 
 const PYTHON_TRACEBACK_HEADER = "Traceback (most recent call last):";
+// The exec tool appends a synthetic status line after real process output on
+// non-zero exit (bash-tools.exec-runtime.ts `exitMsg`/`joinExecFailureOutput`,
+// sessions/tools/bash.ts `appendStatus`): "(Command exited with code N)",
+// "Command timed out after N seconds...", "Command aborted by signal N", etc.
+// All of these start with the word "Command", so skip them when hunting for
+// a traceback's real last line — otherwise we'd report the trailer instead of
+// the actual exception (`\b` keeps this from matching "CommandError: ...").
+const EXEC_STATUS_TRAILER_RE = /^\(?Command\b/i;
 
 function normalizeToolErrorText(text: string): string | undefined {
   const trimmed = text.trim();
@@ -52,7 +60,10 @@ function normalizeToolErrorText(text: string): string | undefined {
   // uninformative error string for callers/telemetry that key off this text.
   const summaryLine =
     lines[0]?.trim() === PYTHON_TRACEBACK_HEADER
-      ? [...lines].reverse().find((line) => line.trim().length > 0)
+      ? lines.toReversed().find((line) => {
+          const candidate = line.trim();
+          return candidate.length > 0 && !EXEC_STATUS_TRAILER_RE.test(candidate);
+        })
       : lines[0];
   const line = summaryLine?.trim() ?? "";
   if (!line) {

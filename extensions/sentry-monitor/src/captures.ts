@@ -66,6 +66,9 @@ export function buildModelCallEndedCapture(
       event.provider,
       event.model,
       event.errorClass,
+      // httpStatus alongside errorClass: same classification, different HTTP
+      // cause (e.g. Bedrock 503 vs a gateway 502) must not share an issue.
+      event.httpStatus,
       event.failureKind,
       event.errorCategory,
     ),

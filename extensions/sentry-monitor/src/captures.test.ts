@@ -79,10 +79,17 @@ describe("buildModelCallEndedCapture", () => {
     );
     expect(capture?.tags).toMatchObject({ error_class: "upstream_provider_5xx" });
     expect(capture?.extra).toMatchObject({ http_status: 503 });
-    // errorClass + status lead the title so Sentry fingerprints it separately.
     expect(capture?.message).toBe(
       "model_call_ended: upstream_provider_5xx, http_status=503, Error",
     );
+    expect(capture?.fingerprint).toEqual([
+      "model_call_ended",
+      "anthropic",
+      "claude",
+      "upstream_provider_5xx",
+      "503",
+      "Error",
+    ]);
   });
 
   it("tags a gateway-synthesized 502 as gateway_origin_5xx (ENG-16922)", () => {
@@ -93,6 +100,26 @@ describe("buildModelCallEndedCapture", () => {
     expect(capture?.tags).toMatchObject({ error_class: "gateway_origin_5xx" });
     expect(capture?.extra).toMatchObject({ http_status: 502 });
     expect(capture?.message).toBe("model_call_ended: gateway_origin_5xx, http_status=502, Error");
+    expect(capture?.fingerprint).toEqual([
+      "model_call_ended",
+      "anthropic",
+      "claude",
+      "gateway_origin_5xx",
+      "502",
+      "Error",
+    ]);
+  });
+
+  it("fingerprints the same error_class with different http statuses into different issues", () => {
+    const bedrock503 = buildModelCallEndedCapture(
+      modelCall({ httpStatus: 503, errorClass: "upstream_provider_5xx", errorCategory: "Error" }),
+      HOST,
+    );
+    const bedrock502 = buildModelCallEndedCapture(
+      modelCall({ httpStatus: 502, errorClass: "upstream_provider_5xx", errorCategory: "Error" }),
+      HOST,
+    );
+    expect(bedrock503?.fingerprint).not.toEqual(bedrock502?.fingerprint);
   });
 
   it("omits error_class when the failure carries no 5xx classification", () => {
@@ -157,7 +184,7 @@ describe("buildAfterToolCallCapture", () => {
     expect(capture?.fingerprint).toEqual(["after_tool_call", "bash", "exit 1"]);
   });
 
-  it("fingerprints different tools' failures into different issues (OPENCLAW-FLEET-H4)", () => {
+  it("fingerprints different tools' failures into different issues", () => {
     // Every after_tool_call capture is thrown from the same call site in
     // dispatch.ts, so without an explicit fingerprint Sentry's stack-based
     // grouping merges unrelated tool failures into one issue.
