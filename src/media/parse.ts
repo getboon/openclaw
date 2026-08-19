@@ -75,13 +75,21 @@ function splitGluedMediaExtension(payload: string): { payload: string; split: bo
   // fromIndex, which lastIndexOf would clamp to 0 and loop on forever.
   for (let dot = firstToken.lastIndexOf("."); dot > 0; dot = firstToken.lastIndexOf(".", dot - 1)) {
     const run = /^[A-Za-z0-9]*/.exec(firstToken.slice(dot + 1))?.[0] ?? "";
+    if (run.length === 0) {
+      continue;
+    }
     // The full alphanumeric run IS the candidate extension. If it is already a
     // known one, nothing is fused on — what follows is punctuation or
     // serialized-JSON that cleanCandidate trims. Testing prefixes here instead
     // would truncate `.xlsx` to `.xls` (and `.docx`/`.pptx`/`.html` likewise),
     // dropping the attachment and leaking the tail as visible text.
-    if (run.length === 0 || mimeTypeFromFilePath(`x.${run}`)) {
-      continue;
+    //
+    // Give up on the whole token rather than walking further left: a real
+    // extension on the right means the filename genuinely ends there, so any
+    // earlier dot would carve a prefix out of a legitimate name
+    // ("report.pdf2024.xlsx" must not become "report.pdf").
+    if (mimeTypeFromFilePath(`x.${run}`)) {
+      return { payload, split: false };
     }
     // `run.length - 1` guarantees at least one character survives the split, so
     // the boundary always has prose on the far side.

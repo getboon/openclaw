@@ -123,6 +123,14 @@ describe("splitMediaFromOutput", () => {
     });
   });
 
+  // A bare filename whose earlier segment happens to be a known extension must
+  // not be carved up — the rightmost known extension ends the name.
+  it("does not carve a prefix out of a multi-suffix bare filename", () => {
+    expectParsedMediaOutputCase("MEDIA:report.pdf2024.xlsx", {
+      mediaUrls: ["report.pdf2024.xlsx"],
+    });
+  });
+
   // The split produces a genuine filename, so the media half may be a bare
   // filename even though a bare filename is otherwise rejected — the prose half
   // stays invalid and is re-emitted as text.
