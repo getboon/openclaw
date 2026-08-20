@@ -118,8 +118,15 @@ export async function createBrowserProfileConfig(params: {
         throw new BrowserConflictError(`profile "${params.name}" already exists`);
       }
 
+      // Preserve the prior color on replace: getUsedColors below still counts
+      // the existing entry (it isn't removed until this callback returns), so
+      // without this the same profile name would repaint on every reattach.
+      const existingProfileColor =
+        latestProfiles[params.name]?.color ?? latestProfileSource.profiles[params.name]?.color;
       const profileColor =
-        params.color ?? allocateColor(getUsedColors(latestProfileSource.profiles));
+        params.color ??
+        existingProfileColor ??
+        allocateColor(getUsedColors(latestProfileSource.profiles));
 
       let nextProfileConfig: BrowserProfileConfig;
       if (params.parsedCdpUrl) {

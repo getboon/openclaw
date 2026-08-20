@@ -73,7 +73,7 @@ describe("createBrowserProfileConfig replaceExisting", () => {
     ).rejects.toThrow(/already exists/);
   });
 
-  it("with replaceExisting, overwrites the profile in one mutation and preserves defaultProfile", async () => {
+  it("with replaceExisting, overwrites the profile in one mutation, preserves defaultProfile and color", async () => {
     const result = await createBrowserProfileConfig({
       name: "handoff-example.com",
       resolved: resolveBrowserConfig(undefined, undefined),
@@ -83,8 +83,23 @@ describe("createBrowserProfileConfig replaceExisting", () => {
     });
 
     expect(result?.userDataDir).toBe("/new");
+    expect(result?.color).toBe("#111111");
     const cfg = configMocks.getRuntimeConfig();
     expect(cfg.browser?.profiles?.["handoff-example.com"]?.userDataDir).toBe("/new");
+    expect(cfg.browser?.profiles?.["handoff-example.com"]?.color).toBe("#111111");
     expect(cfg.browser?.defaultProfile).toBe("handoff-example.com");
+  });
+
+  it("with replaceExisting, an explicit color still overrides the preserved one", async () => {
+    const result = await createBrowserProfileConfig({
+      name: "handoff-example.com",
+      resolved: resolveBrowserConfig(undefined, undefined),
+      driver: "existing-session",
+      userDataDir: "/new",
+      color: "#222222",
+      replaceExisting: true,
+    });
+
+    expect(result?.color).toBe("#222222");
   });
 });
