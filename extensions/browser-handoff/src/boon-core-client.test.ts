@@ -59,12 +59,59 @@ describe("requestBrowserLoginHandoff", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://app.getboon.ai/api/v1/agent/browser_handoff/request");
     expect(init.method).toBe("POST");
-    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer test-key");
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer test-key");
+    expect(headers["Idempotency-Key"]).toBeTruthy();
     expect(JSON.parse(init.body as string)).toStrictEqual({
       site: "app.procore.com",
       login_url: "https://app.procore.com/login",
       reason: "login",
     });
+  });
+
+  it("retries a 5xx with the same idempotency key so it cannot mint two handoffs", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(503, {})).mockResolvedValueOnce(
+      jsonResponse(200, {
+        data: { handoff_token: "tok_123", live_view_url: "https://live.example/view" },
+      }),
+    );
+
+    await requestBrowserLoginHandoff({
+      baseUrl: "https://app.getboon.ai",
+      apiKey: "test-key",
+      site: "app.procore.com",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstHeaders = (fetchMock.mock.calls[0]![1] as RequestInit).headers as Record<
+      string,
+      string
+    >;
+    const secondHeaders = (fetchMock.mock.calls[1]![1] as RequestInit).headers as Record<
+      string,
+      string
+    >;
+    expect(secondHeaders["Idempotency-Key"]).toBe(firstHeaders["Idempotency-Key"]);
+  });
+
+  it("retries a thrown network error instead of leaving it unretried", async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError("fetch failed")).mockResolvedValueOnce(
+      jsonResponse(200, {
+        data: { handoff_token: "tok_123", live_view_url: "https://live.example/view" },
+      }),
+    );
+
+    const result = await requestBrowserLoginHandoff({
+      baseUrl: "https://app.getboon.ai",
+      apiKey: "test-key",
+      site: "app.procore.com",
+    });
+
+    expect(result).toStrictEqual({
+      handoffToken: "tok_123",
+      liveViewUrl: "https://live.example/view",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("throws a non-retryable error on 4xx without retrying", async () => {
@@ -151,5 +198,17 @@ describe("pollBrowserHandoffStatus", () => {
         handoffToken: "tok_123",
       }),
     ).rejects.toBeInstanceOf(BrowserHandoffApiError);
+  });
+
+  it("throws when a ready status omits profile_name instead of reporting success", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { data: { status: "ready" } }));
+
+    await expect(
+      pollBrowserHandoffStatus({
+        baseUrl: "https://app.getboon.ai",
+        apiKey: "test-key",
+        handoffToken: "tok_123",
+      }),
+    ).rejects.toThrow(/profile_name/);
   });
 });

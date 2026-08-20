@@ -180,3 +180,50 @@ export async function executeBrowserHandoffTool(
     return textResult(`browser-handoff error: ${formatErrorMessage(err)}`);
   }
 }
+
+function readAction(raw: Record<string, unknown>): "request_login" | "status" | "attach" {
+  const action = raw.action;
+  if (action === "request_login" || action === "status" || action === "attach") {
+    return action;
+  }
+  throw new Error('browser_handoff: action must be one of "request_login", "status", "attach"');
+}
+
+function readSite(raw: Record<string, unknown>): string {
+  const site = typeof raw.site === "string" ? raw.site.trim() : "";
+  if (!site) {
+    throw new Error("browser_handoff: site is required");
+  }
+  return site;
+}
+
+function readOptionalString(raw: Record<string, unknown>, key: string): string | undefined {
+  const value = raw[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * Handle a raw tool-call args object, parsing it into `BrowserHandoffToolParams`.
+ *
+ * Parsing happens inside the same try/catch as the rest of the tool so a bad
+ * `action`/`site` produces the tool's normal `browser-handoff error:` text
+ * result instead of a raw thrown tool-call error.
+ */
+export async function executeBrowserHandoffToolFromArgs(
+  api: OpenClawPluginApi,
+  args: unknown,
+): Promise<BrowserHandoffToolTextResult> {
+  try {
+    const raw = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+    const loginUrl = readOptionalString(raw, "loginUrl");
+    const reason = readOptionalString(raw, "reason");
+    return await executeBrowserHandoffTool(api, {
+      action: readAction(raw),
+      site: readSite(raw),
+      ...(loginUrl ? { loginUrl } : {}),
+      ...(reason ? { reason } : {}),
+    });
+  } catch (err) {
+    return textResult(`browser-handoff error: ${formatErrorMessage(err)}`);
+  }
+}

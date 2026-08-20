@@ -63,23 +63,55 @@ async function extractError(res: Response): Promise<{ code?: string; message?: s
   return {};
 }
 
+/**
+ * Run a fetch and convert both HTTP error statuses and thrown network errors
+ * (DNS/connection failures, resets) into `BrowserHandoffApiError` so the retry
+ * predicate below can see them; a bare fetch rejection would otherwise never
+ * match `err instanceof BrowserHandoffApiError` and retry would be dead for
+ * the most common transient failure mode.
+ */
+async function fetchOrWrapNetworkError(
+  url: string,
+  init: RequestInit,
+  failureLabel: string,
+): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    if (err instanceof BrowserHandoffApiError) {
+      throw err;
+    }
+    throw new BrowserHandoffApiError(
+      `${failureLabel}: ${err instanceof Error ? err.message : String(err)}`,
+      0,
+      true,
+    );
+  }
+}
+
 async function postJson(params: {
   url: string;
   apiKey: string;
   body: Record<string, unknown>;
+  idempotencyKey: string;
   signal?: AbortSignal;
 }): Promise<unknown> {
   return await retryAsync(
     async () => {
-      const res = await fetch(params.url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${params.apiKey}`,
-          "Content-Type": "application/json",
+      const res = await fetchOrWrapNetworkError(
+        params.url,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${params.apiKey}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": params.idempotencyKey,
+          },
+          body: JSON.stringify(params.body),
+          ...(params.signal ? { signal: params.signal } : {}),
         },
-        body: JSON.stringify(params.body),
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
+        "browser-handoff request network error",
+      );
       if (res.status >= 400 && res.status < 500) {
         const { code, message } = await extractError(res);
         throw new BrowserHandoffApiError(
@@ -114,11 +146,15 @@ async function getJson(params: {
 }): Promise<unknown> {
   return await retryAsync(
     async () => {
-      const res = await fetch(params.url, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${params.apiKey}` },
-        ...(params.signal ? { signal: params.signal } : {}),
-      });
+      const res = await fetchOrWrapNetworkError(
+        params.url,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${params.apiKey}` },
+          ...(params.signal ? { signal: params.signal } : {}),
+        },
+        "browser-handoff status network error",
+      );
       if (res.status >= 400 && res.status < 500) {
         const { code, message } = await extractError(res);
         throw new BrowserHandoffApiError(
@@ -155,9 +191,13 @@ export async function requestBrowserLoginHandoff(params: {
   reason?: string;
   signal?: AbortSignal;
 }): Promise<BrowserHandoffRequestResult> {
+  // Stable across retries within this call so a 5xx retry cannot mint a
+  // second handoff on boon-core's side.
+  const idempotencyKey = crypto.randomUUID();
   const body = (await postJson({
     url: buildUrl(params.baseUrl, "/api/v1/agent/browser_handoff/request"),
     apiKey: params.apiKey,
+    idempotencyKey,
     body: {
       site: params.site,
       ...(params.loginUrl ? { login_url: params.loginUrl } : {}),
@@ -191,6 +231,16 @@ export async function pollBrowserHandoffStatus(params: {
   if (status !== "pending" && status !== "ready" && status !== "failed") {
     throw new BrowserHandoffApiError(
       "browser-handoff status response missing/invalid status",
+      200,
+      false,
+    );
+  }
+  // A ready status with no profile name would silently produce a handoff
+  // record that handleAttach can never actually attach; treat that as an
+  // invalid response rather than reporting success.
+  if (status === "ready" && !body?.data?.profile_name) {
+    throw new BrowserHandoffApiError(
+      "browser-handoff status response missing profile_name for ready status",
       200,
       false,
     );

@@ -1,3 +1,4 @@
+import { parseBrowserHttpUrl } from "openclaw/plugin-sdk/browser-config";
 import {
   createBrowserProfileConfig,
   deleteBrowserProfileConfig,
@@ -16,12 +17,25 @@ export type RegisterRemoteCdpBrowserProfileResult =
   | { ok: true; name: string }
   | { ok: false; error: string };
 
-/** Register a remote-CDP browser profile (attach-only, no local launch) under `name`. */
+/**
+ * Register a remote-CDP browser profile (attach-only, no local launch) under
+ * `name`, replacing any existing profile with that name.
+ *
+ * Registration is create-only, but a re-attach after the prior session
+ * expired reuses the same profile name — delete-then-create gives that call
+ * replace semantics instead of failing on the conflict.
+ */
 export async function registerRemoteCdpBrowserProfile(params: {
   name: string;
   cdpUrl: string;
 }): Promise<RegisterRemoteCdpBrowserProfileResult> {
   try {
+    parseBrowserHttpUrl(params.cdpUrl, "browser_handoff cdpUrl");
+  } catch (err) {
+    return { ok: false, error: formatErrorMessage(err) };
+  }
+  try {
+    await deleteBrowserProfileConfig(params.name);
     const profile = await createBrowserProfileConfig({
       name: params.name,
       resolved: resolveBrowserConfig(undefined, undefined),

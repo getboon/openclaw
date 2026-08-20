@@ -24,7 +24,7 @@ vi.mock("openclaw/plugin-sdk/browser-profile-config", () => ({
   registerRemoteCdpBrowserProfile: registerRemoteCdpBrowserProfileMock,
 }));
 
-import { executeBrowserHandoffTool } from "./tool.js";
+import { executeBrowserHandoffTool, executeBrowserHandoffToolFromArgs } from "./tool.js";
 
 describe("browser-handoff tool", () => {
   let stateDir: string;
@@ -158,5 +158,29 @@ describe("browser-handoff tool", () => {
     });
     expect(result.content[0].text).toContain("browser-handoff error");
     expect(result.content[0].text).toContain("boon-core unreachable");
+  });
+});
+
+describe("executeBrowserHandoffToolFromArgs", () => {
+  beforeEach(() => {
+    resetPluginStateStoreForTests();
+    vi.clearAllMocks();
+  });
+
+  it("returns the same error-text format as a handler failure instead of throwing", async () => {
+    const result = await executeBrowserHandoffToolFromArgs(createTestPluginApi({}), {
+      action: "not-a-real-action",
+      site: "example.com",
+    });
+    expect(result.content[0].text).toContain("browser-handoff error");
+    expect(result.content[0].text).toContain("action must be one of");
+  });
+
+  it("rejects a missing site the same way", async () => {
+    const result = await executeBrowserHandoffToolFromArgs(createTestPluginApi({}), {
+      action: "status",
+    });
+    expect(result.content[0].text).toContain("browser-handoff error");
+    expect(result.content[0].text).toContain("site is required");
   });
 });

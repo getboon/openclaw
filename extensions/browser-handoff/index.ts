@@ -7,27 +7,6 @@ import type {
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { BrowserHandoffToolSchema } from "./src/schema.js";
 
-function readAction(raw: Record<string, unknown>): "request_login" | "status" | "attach" {
-  const action = raw.action;
-  if (action === "request_login" || action === "status" || action === "attach") {
-    return action;
-  }
-  throw new Error('browser_handoff: action must be one of "request_login", "status", "attach"');
-}
-
-function readSite(raw: Record<string, unknown>): string {
-  const site = typeof raw.site === "string" ? raw.site.trim() : "";
-  if (!site) {
-    throw new Error("browser_handoff: site is required");
-  }
-  return site;
-}
-
-function readOptionalString(raw: Record<string, unknown>, key: string): string | undefined {
-  const value = raw[key];
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
 function createBrowserHandoffTool(api: OpenClawPluginApi): AnyAgentTool {
   return {
     label: "Browser Login Handoff",
@@ -42,16 +21,8 @@ function createBrowserHandoffTool(api: OpenClawPluginApi): AnyAgentTool {
     ].join(" "),
     parameters: BrowserHandoffToolSchema,
     execute: async (_toolCallId, args) => {
-      const raw = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
-      const { executeBrowserHandoffTool } = await import("./src/tool.js");
-      return await executeBrowserHandoffTool(api, {
-        action: readAction(raw),
-        site: readSite(raw),
-        ...(readOptionalString(raw, "loginUrl")
-          ? { loginUrl: readOptionalString(raw, "loginUrl") }
-          : {}),
-        ...(readOptionalString(raw, "reason") ? { reason: readOptionalString(raw, "reason") } : {}),
-      });
+      const { executeBrowserHandoffToolFromArgs } = await import("./src/tool.js");
+      return await executeBrowserHandoffToolFromArgs(api, args);
     },
   };
 }

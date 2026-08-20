@@ -460,6 +460,12 @@ importers:
         specifier: 8.9.0
         version: 8.9.0
 
+  extensions/browser-handoff:
+    devDependencies:
+      '@openclaw/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
   extensions/byteplus:
     devDependencies:
       '@openclaw/plugin-sdk':
