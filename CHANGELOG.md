@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.21
+
+Preserves source reply transcript mirrors when sent-text deduplication sees matching outbound text.
+
+- **#135:** source reply mirrors are internal transcript and UI payloads, not second channel sends. Sent-text deduplication now preserves payloads explicitly marked as source-reply mirrors, preventing terminal bookkeeping from replacing the visible answer. Ordinary text and media deduplication remain unchanged.
+- Base = `2026.6.11-boon.20`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.21` in lockstep. No other code changes; #135 was merged onto `boon` before this release.
+
 ## 2026.6.11-boon.20
 
 Delivers an attachment the model fused prose onto instead of dropping it, stops a successfully-delivered silent turn from being recorded as a delivery failure (and firing a contradictory error nudge at the user), and splits the fleet's catch-all Sentry hook issue into real per-cause buckets.
