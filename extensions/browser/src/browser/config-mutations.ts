@@ -77,6 +77,14 @@ export async function createBrowserProfileConfig(params: {
   parsedCdpUrl?: string;
   userDataDir?: string;
   driver?: "openclaw" | "existing-session";
+  /**
+   * Overwrite an existing profile with this name in the same mutation instead
+   * of rejecting the conflict. Keeps replace-on-reattach atomic: the old entry
+   * (and `browser.defaultProfile`, which this path never touches) survives
+   * untouched if validation or port/color allocation fails below, since
+   * nothing is written until the whole mutate callback resolves.
+   */
+  replaceExisting?: boolean;
 }): Promise<BrowserProfileConfig | undefined> {
   const mutation = await mutateConfigFile<BrowserProfileConfig>({
     afterWrite: { mode: "auto" },
@@ -103,12 +111,22 @@ export async function createBrowserProfileConfig(params: {
       const latestRootResolved = resolveBrowserConfig(draft.browser, draft);
       const latestProfileSource = useRebasedPortRange ? latestRootResolved : latestResolved;
       const latestProfiles = draft.browser?.profiles ?? {};
-      if (params.name in latestProfiles || params.name in latestProfileSource.profiles) {
+      if (
+        !params.replaceExisting &&
+        (params.name in latestProfiles || params.name in latestProfileSource.profiles)
+      ) {
         throw new BrowserConflictError(`profile "${params.name}" already exists`);
       }
 
+      // Preserve the prior color on replace: getUsedColors below still counts
+      // the existing entry (it isn't removed until this callback returns), so
+      // without this the same profile name would repaint on every reattach.
+      const existingProfileColor =
+        latestProfiles[params.name]?.color ?? latestProfileSource.profiles[params.name]?.color;
       const profileColor =
-        params.color ?? allocateColor(getUsedColors(latestProfileSource.profiles));
+        params.color ??
+        existingProfileColor ??
+        allocateColor(getUsedColors(latestProfileSource.profiles));
 
       let nextProfileConfig: BrowserProfileConfig;
       if (params.parsedCdpUrl) {
