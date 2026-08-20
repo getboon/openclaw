@@ -1609,23 +1609,23 @@ When a single Slack message contains multiple file attachments:
 - Each attachment is processed independently through the media pipeline.
 - Downloaded media references are aggregated into the message context.
 - Processing order follows Slack's file order in the event payload.
-- A failure in one attachment's download does not block others.
+- A failure in one attachment's download does not block others, and each failed attachment is reported individually rather than only the fully-failed case.
 
 ### Size, download, and model limits
 
 - **Size cap**: Default 20 MB per file. Configurable via `channels.slack.mediaMaxMb`.
-- **Download failures**: Files that Slack cannot serve, expired URLs, inaccessible files, oversize files, and Slack auth/login HTML responses are skipped instead of being reported as unsupported formats.
+- **Download failures**: Files that Slack cannot serve, expired URLs, inaccessible files, oversize files, and Slack auth/login HTML responses are retried on a transient error and, on a persistent failure, reported to the agent, and to the user for direct requests, with the file name and a plain-language reason instead of being silently dropped.
 - **Vision model**: Image analysis uses the active reply model when it supports vision, or the image model configured at `agents.defaults.imageModel`.
 
 ### Known limits
 
-| Scenario                               | Current behavior                                                             | Workaround                                                                 |
-| -------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Expired Slack file URL                 | File skipped; no error shown                                                 | Re-upload the file in Slack                                                |
-| Vision model not configured            | Image attachments are stored as media references, but not analyzed as images | Configure `agents.defaults.imageModel` or use a vision-capable reply model |
-| Very large images (> 20 MB by default) | Skipped per size cap                                                         | Increase `channels.slack.mediaMaxMb` if Slack allows                       |
-| Forwarded/shared attachments           | Text and Slack-hosted image/file media are best-effort                       | Re-share directly in the OpenClaw thread                                   |
-| PDF attachments                        | Stored as file/media context, not automatically routed through image vision  | Use `download-file` for file metadata or the `pdf` tool for PDF analysis   |
+| Scenario                               | Current behavior                                                                            | Workaround                                                                 |
+| -------------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Expired Slack file URL                 | Retried against a fresh URL; a persistent failure posts an in-thread notice naming the file | Re-upload the file in Slack                                                |
+| Vision model not configured            | Image attachments are stored as media references, but not analyzed as images                | Configure `agents.defaults.imageModel` or use a vision-capable reply model |
+| Very large images (> 20 MB by default) | Skipped per size cap and reported to the agent, and to the user for direct requests         | Increase `channels.slack.mediaMaxMb` if Slack allows                       |
+| Forwarded/shared attachments           | Text and Slack-hosted image/file media are best-effort                                      | Re-share directly in the OpenClaw thread                                   |
+| PDF attachments                        | Stored as file/media context, not automatically routed through image vision                 | Use `download-file` for file metadata or the `pdf` tool for PDF analysis   |
 
 ### Related documentation
 

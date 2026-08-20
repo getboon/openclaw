@@ -32,7 +32,11 @@ import {
   the prompt/session context. Use `channelContext` to pass channel-owned
   sender/chat metadata through to plugin hook `ctx.channelContext`; augment
   `PluginHookChannelSenderContext` or `PluginHookChannelChatContext` from this
-  subpath for channel-specific fields.
+  subpath for channel-specific fields. Pass successfully-resolved attachments
+  via `media` (`InboundMediaFacts[]`); pass any attachment the channel could
+  not deliver via the separate, unaligned `mediaFailures`
+  (`InboundMediaFailure[]`, reason one of the closed `InboundMediaFailureReason`
+  values) so a dropped attachment is never silent to the user or the model.
 - `runChannelInboundEvent(...)`: run ingest, classify, preflight, resolve,
   record, dispatch, and finalize for one inbound platform event.
 - `dispatchChannelInboundReply(...)`: record and dispatch an already assembled

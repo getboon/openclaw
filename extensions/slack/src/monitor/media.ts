@@ -7,12 +7,28 @@ import { resolveRequestUrl } from "openclaw/plugin-sdk/request-url";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
+  normalizeOptionalString,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { formatSlackFileReference } from "../file-reference.js";
 import type { SlackAttachment, SlackFile } from "../types.js";
-export { MAX_SLACK_MEDIA_FILES, type SlackMediaResult } from "./media-types.js";
-import { MAX_SLACK_MEDIA_FILES, type SlackMediaResult } from "./media-types.js";
-import { type FetchLike, fetchWithRuntimeDispatcher, saveRemoteMedia } from "./media.runtime.js";
+export {
+  MAX_SLACK_MEDIA_FILES,
+  type SlackMediaFailure,
+  type SlackMediaOutcome,
+  type SlackMediaResult,
+} from "./media-types.js";
+import {
+  MAX_SLACK_MEDIA_FILES,
+  type SlackMediaFailure,
+  type SlackMediaOutcome,
+  type SlackMediaResult,
+} from "./media-types.js";
+import {
+  type FetchLike,
+  fetchWithRuntimeDispatcher,
+  MediaFetchError,
+  saveRemoteMedia,
+} from "./media.runtime.js";
 import { logVerbose } from "./thread.runtime.js";
 export {
   resetSlackThreadStarterCacheForTest,
@@ -159,7 +175,46 @@ const SLACK_MEDIA_SSRF_POLICY = {
 };
 export const SLACK_MEDIA_READ_IDLE_TIMEOUT_MS = 60_000;
 export const SLACK_MEDIA_TOTAL_TIMEOUT_MS = 120_000;
+// Bounded retry for a transient download failure. The 60s idle /
+// 120s total timeouts above already bound the whole retried operation, and
+// shouldRetryMediaFetch (src/media/fetch.ts) already declines to retry
+// max_bytes or an abort, so this cannot turn a permanent failure into a long
+// hang.
+const SLACK_MEDIA_FETCH_RETRY = { attempts: 3, minDelayMs: 300, maxDelayMs: 2_000 };
 type SlackSaveRemoteMediaOptions = Parameters<typeof saveRemoteMedia>[0];
+
+/**
+ * Raised when saveSlackMedia's own SLACK_MEDIA_TOTAL_TIMEOUT_MS race fires.
+ * A distinct class (rather than matching a plain Error's message) so
+ * classifySlackMediaFetchError can report `timed_out` instead of the
+ * generic `fetch_failed`, which otherwise gives the user unhelpful
+ * "download failed" copy for what was actually a timeout.
+ */
+class SlackMediaTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`slack media download timed out after ${timeoutMs}ms`);
+    this.name = "SlackMediaTimeoutError";
+  }
+}
+
+/** Classifies a failed Slack media fetch onto the shared inbound-failure reason vocabulary. */
+function classifySlackMediaFetchError(err: unknown): SlackMediaFailure["reason"] {
+  if (err instanceof SlackMediaTimeoutError) {
+    return "timed_out";
+  }
+  if (err instanceof MediaFetchError) {
+    if (err.code === "max_bytes") {
+      return "too_large";
+    }
+    if (err.code === "http_error") {
+      return err.status === 401 || err.status === 403 || err.status === 404
+        ? "expired_link"
+        : "fetch_failed";
+    }
+    return "fetch_failed";
+  }
+  return "fetch_failed";
+}
 
 function mergeAbortSignals(signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
   const activeSignals = signals.filter((signal): signal is AbortSignal => Boolean(signal));
@@ -232,7 +287,7 @@ async function saveSlackMedia(params: {
       timeoutHandle = setTimeout(() => {
         timedOut = true;
         timeoutAbortController?.abort();
-        reject(new Error(`slack media download timed out after ${params.totalTimeoutMs}ms`));
+        reject(new SlackMediaTimeoutError(params.totalTimeoutMs!));
       }, params.totalTimeoutMs);
       timeoutHandle.unref?.();
     });
@@ -282,6 +337,21 @@ async function looksLikeHtmlFile(filePath: string): Promise<boolean> {
   }
 }
 
+/**
+ * Detects a saved download that resolved to an auth/login HTML page instead
+ * of binary media — the shape an expired/invalid Slack file URL actually
+ * takes (Slack returns 200 with an HTML login page, not an HTTP error).
+ * Shared by the direct-file and forwarded-image download paths so both
+ * report `expired_link` instead of treating the HTML page as a success.
+ */
+async function isHtmlAuthPageDownload(saved: {
+  path: string;
+  contentType?: string;
+}): Promise<boolean> {
+  const detectedMime = normalizeOptionalLowercaseString(saved.contentType?.split(";")[0]);
+  return detectedMime === "text/html" || (await looksLikeHtmlFile(saved.path));
+}
+
 const MAX_SLACK_MEDIA_CONCURRENCY = 3;
 const MAX_SLACK_FORWARDED_ATTACHMENTS = 8;
 
@@ -310,6 +380,24 @@ async function fetchFreshSlackFileUrl(params: {
   }
 }
 
+type SlackMediaDownloadResult =
+  | { status: "ok"; media: SlackMediaResult }
+  | { status: "failed"; failure: SlackMediaFailure };
+
+function slackMediaDownloadFailure(
+  file: SlackFile,
+  reason: SlackMediaFailure["reason"],
+): SlackMediaDownloadResult {
+  return {
+    status: "failed",
+    // normalizeOptionalString trims and treats an empty/whitespace-only name
+    // as absent, so downstream copy (media-note.ts, the failure-notice, and
+    // this file's own [Slack file not delivered: ...] placeholder) can
+    // fall back to a generic label instead of rendering a blank name.
+    failure: { name: normalizeOptionalString(file.name), contentType: file.mimetype, reason },
+  };
+}
+
 async function downloadSlackMediaFile(params: {
   file: SlackFile;
   url: string;
@@ -318,23 +406,34 @@ async function downloadSlackMediaFile(params: {
   readIdleTimeoutMs?: number;
   totalTimeoutMs?: number;
   abortSignal?: AbortSignal;
-}): Promise<SlackMediaResult | null> {
-  const { url: slackUrl, requestInit } = createSlackMediaRequest(params.url, params.token);
-  const fetchImpl = createSlackMediaFetch();
-  const saved = await saveSlackMedia({
-    options: {
-      url: slackUrl,
-      fetchImpl,
-      requestInit,
-      filePathHint: params.file.name,
-      fallbackContentType: resolveSlackMediaMimetype(params.file, params.file.mimetype),
-      maxBytes: params.maxBytes,
-      ssrfPolicy: SLACK_MEDIA_SSRF_POLICY,
-    },
-    readIdleTimeoutMs: params.readIdleTimeoutMs,
-    totalTimeoutMs: params.totalTimeoutMs ?? SLACK_MEDIA_TOTAL_TIMEOUT_MS,
-    abortSignal: params.abortSignal,
-  });
+}): Promise<SlackMediaDownloadResult> {
+  let saved: Awaited<ReturnType<typeof saveSlackMedia>>;
+  try {
+    // createSlackMediaRequest throws on a malformed URL, a non-HTTPS
+    // protocol, or a non-Slack hostname (assertSlackFileUrl) — it must stay
+    // inside this try, or one bad attachment throws out of mapLimit's
+    // Promise.all and rejects the entire batch instead of becoming a
+    // per-attachment failure.
+    const { url: slackUrl, requestInit } = createSlackMediaRequest(params.url, params.token);
+    const fetchImpl = createSlackMediaFetch();
+    saved = await saveSlackMedia({
+      options: {
+        url: slackUrl,
+        fetchImpl,
+        requestInit,
+        filePathHint: params.file.name,
+        fallbackContentType: resolveSlackMediaMimetype(params.file, params.file.mimetype),
+        maxBytes: params.maxBytes,
+        ssrfPolicy: SLACK_MEDIA_SSRF_POLICY,
+        retry: SLACK_MEDIA_FETCH_RETRY,
+      },
+      readIdleTimeoutMs: params.readIdleTimeoutMs,
+      totalTimeoutMs: params.totalTimeoutMs ?? SLACK_MEDIA_TOTAL_TIMEOUT_MS,
+      abortSignal: params.abortSignal,
+    });
+  } catch (err) {
+    return slackMediaDownloadFailure(params.file, classifySlackMediaFetchError(err));
+  }
 
   // Guard against auth/login HTML pages returned instead of binary media.
   // Allow user-provided HTML files through.
@@ -343,10 +442,12 @@ async function downloadSlackMediaFile(params: {
   const isExpectedHtml =
     fileMime === "text/html" || fileName.endsWith(".html") || fileName.endsWith(".htm");
   if (!isExpectedHtml) {
-    const detectedMime = normalizeOptionalLowercaseString(saved.contentType?.split(";")[0]);
-    if (detectedMime === "text/html" || (await looksLikeHtmlFile(saved.path))) {
+    if (await isHtmlAuthPageDownload(saved)) {
       await fs.rm(saved.path, { force: true }).catch(() => undefined);
-      return null;
+      logVerbose(
+        `slack: file id=${params.file.id} download resolved to an HTML page (expired/invalid link)`,
+      );
+      return slackMediaDownloadFailure(params.file, "expired_link");
     }
   }
 
@@ -354,9 +455,12 @@ async function downloadSlackMediaFile(params: {
   const label = saved.fileName ?? params.file.name;
   const contentType = effectiveMime ?? saved.contentType;
   return {
-    path: saved.path,
-    ...(contentType ? { contentType } : {}),
-    placeholder: `[Slack file: ${formatSlackFileReference({ ...params.file, name: label })}]`,
+    status: "ok",
+    media: {
+      path: saved.path,
+      ...(contentType ? { contentType } : {}),
+      placeholder: `[Slack file: ${formatSlackFileReference({ ...params.file, name: label })}]`,
+    },
   };
 }
 
@@ -378,6 +482,20 @@ function resolveForwardedAttachmentImageUrl(attachment: SlackAttachment): string
     return parsed.toString();
   } catch {
     return null;
+  }
+}
+
+/**
+ * Best-effort display name for a forwarded image that failed before a local
+ * filename was ever known (saveSlackMedia threw) — falls back to the URL's
+ * basename so the failure names something more specific than "file 1".
+ */
+function resolveForwardedImageUrlBasename(imageUrl: string): string {
+  try {
+    const basename = new URL(imageUrl).pathname.split("/").at(-1);
+    return basename ? decodeURIComponent(basename) : "forwarded image";
+  } catch {
+    return "forwarded image";
   }
 }
 
@@ -408,8 +526,9 @@ async function mapLimit<T, R>(
 }
 
 /**
- * Downloads all files attached to a Slack message and returns them as an array.
- * Returns `null` when no files could be downloaded.
+ * Downloads all files attached to a Slack message. Never silently drops a
+ * failed file — every attachment that didn't download successfully is
+ * reported in `failures` instead of vanishing.
  */
 export async function resolveSlackMedia(params: {
   files?: SlackFile[];
@@ -419,19 +538,21 @@ export async function resolveSlackMedia(params: {
   readIdleTimeoutMs?: number;
   totalTimeoutMs?: number;
   abortSignal?: AbortSignal;
-}): Promise<SlackMediaResult[] | null> {
+}): Promise<SlackMediaOutcome> {
   const files = params.files ?? [];
   const limitedFiles =
     files.length > MAX_SLACK_MEDIA_FILES ? files.slice(0, MAX_SLACK_MEDIA_FILES) : files;
+  const overflowFiles =
+    files.length > MAX_SLACK_MEDIA_FILES ? files.slice(MAX_SLACK_MEDIA_FILES) : [];
 
-  const resolved = await mapLimit<SlackFile, SlackMediaResult | null>(
+  const resolved = await mapLimit<SlackFile, SlackMediaDownloadResult>(
     limitedFiles,
     MAX_SLACK_MEDIA_CONCURRENCY,
     async (file) => {
       const eventUrl = file.url_private_download ?? file.url_private;
       const url = eventUrl ?? (await fetchFreshSlackFileUrl({ file, client: params.client }));
       if (!url) {
-        return null;
+        return slackMediaDownloadFailure(file, "fetch_failed");
       }
       const result = await downloadSlackMediaFile({
         file,
@@ -441,14 +562,20 @@ export async function resolveSlackMedia(params: {
         readIdleTimeoutMs: params.readIdleTimeoutMs,
         totalTimeoutMs: params.totalTimeoutMs,
         abortSignal: params.abortSignal,
-      }).catch(() => null);
-      if (result || !eventUrl) {
+      });
+      // A fresh URL only helps a stale/expired signature — the file is
+      // still oversize (or over the file-count cap) no matter which URL
+      // fetches it, so retrying would just re-download the same too-large
+      // body for nothing.
+      if (result.status === "ok" || !eventUrl || result.failure.reason === "too_large") {
         return result;
       }
 
+      // The event-carried URL failed (commonly an expired signature) — retry
+      // once against a freshly minted URL from files.info before giving up.
       const freshUrl = await fetchFreshSlackFileUrl({ file, client: params.client });
       if (!freshUrl) {
-        return null;
+        return result;
       }
       return await downloadSlackMediaFile({
         file,
@@ -458,12 +585,27 @@ export async function resolveSlackMedia(params: {
         readIdleTimeoutMs: params.readIdleTimeoutMs,
         totalTimeoutMs: params.totalTimeoutMs,
         abortSignal: params.abortSignal,
-      }).catch(() => null);
+      });
     },
   );
 
-  const results = resolved.filter((entry): entry is SlackMediaResult => Boolean(entry));
-  return results.length > 0 ? results : null;
+  const media: SlackMediaResult[] = [];
+  const failures: SlackMediaFailure[] = [];
+  for (const entry of resolved) {
+    if (entry.status === "ok") {
+      media.push(entry.media);
+    } else {
+      failures.push(entry.failure);
+    }
+  }
+  for (const file of overflowFiles) {
+    failures.push({
+      name: normalizeOptionalString(file.name),
+      contentType: file.mimetype,
+      reason: "over_file_limit",
+    });
+  }
+  return { media, failures };
 }
 
 /** Extracts text and media from forwarded-message attachments. Returns null when empty. */
@@ -475,7 +617,7 @@ export async function resolveSlackAttachmentContent(params: {
   readIdleTimeoutMs?: number;
   totalTimeoutMs?: number;
   abortSignal?: AbortSignal;
-}): Promise<{ text: string; media: SlackMediaResult[] } | null> {
+}): Promise<{ text: string; media: SlackMediaResult[]; failures: SlackMediaFailure[] } | null> {
   const attachments = params.attachments;
   if (!attachments || attachments.length === 0) {
     return null;
@@ -490,6 +632,7 @@ export async function resolveSlackAttachmentContent(params: {
 
   const textBlocks: string[] = [];
   const allMedia: SlackMediaResult[] = [];
+  const allFailures: SlackMediaFailure[] = [];
 
   for (const att of forwardedAttachments) {
     const text = att.text?.trim() || att.fallback?.trim();
@@ -511,24 +654,42 @@ export async function resolveSlackAttachmentContent(params: {
             requestInit,
             maxBytes: params.maxBytes,
             ssrfPolicy: SLACK_MEDIA_SSRF_POLICY,
+            retry: SLACK_MEDIA_FETCH_RETRY,
           },
           readIdleTimeoutMs: params.readIdleTimeoutMs,
           totalTimeoutMs: params.totalTimeoutMs ?? SLACK_MEDIA_TOTAL_TIMEOUT_MS,
           abortSignal: params.abortSignal,
         });
-        const label = saved.fileName ?? "forwarded image";
-        allMedia.push({
-          path: saved.path,
-          contentType: saved.contentType,
-          placeholder: `[Forwarded image: ${label}]`,
+        // A forwarded attachment is only ever treated as an image (see
+        // resolveForwardedAttachmentImageUrl), so unlike downloadSlackMediaFile
+        // there is no "expected HTML" exception to check first. Note: this
+        // does NOT skip the att.files check below — a forwarded attachment
+        // can carry both an image_url and separate files.
+        if (await isHtmlAuthPageDownload(saved)) {
+          await fs.rm(saved.path, { force: true }).catch(() => undefined);
+          allFailures.push({
+            name: saved.fileName ?? "forwarded image",
+            contentType: saved.contentType,
+            reason: "expired_link",
+          });
+        } else {
+          const label = saved.fileName ?? "forwarded image";
+          allMedia.push({
+            path: saved.path,
+            contentType: saved.contentType,
+            placeholder: `[Forwarded image: ${label}]`,
+          });
+        }
+      } catch (err) {
+        allFailures.push({
+          name: resolveForwardedImageUrlBasename(imageUrl),
+          reason: classifySlackMediaFetchError(err),
         });
-      } catch {
-        // Skip images that fail to download
       }
     }
 
     if (att.files && att.files.length > 0) {
-      const fileMedia = await resolveSlackMedia({
+      const fileOutcome = await resolveSlackMedia({
         files: att.files,
         client: params.client,
         token: params.token,
@@ -537,15 +698,14 @@ export async function resolveSlackAttachmentContent(params: {
         totalTimeoutMs: params.totalTimeoutMs,
         abortSignal: params.abortSignal,
       });
-      if (fileMedia) {
-        allMedia.push(...fileMedia);
-      }
+      allMedia.push(...fileOutcome.media);
+      allFailures.push(...fileOutcome.failures);
     }
   }
 
   const combinedText = textBlocks.join("\n\n");
-  if (!combinedText && allMedia.length === 0) {
+  if (!combinedText && allMedia.length === 0 && allFailures.length === 0) {
     return null;
   }
-  return { text: combinedText, media: allMedia };
+  return { text: combinedText, media: allMedia, failures: allFailures };
 }

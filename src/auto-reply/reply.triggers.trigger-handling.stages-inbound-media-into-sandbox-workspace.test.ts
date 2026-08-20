@@ -272,7 +272,7 @@ describe("stageSandboxMedia", () => {
     });
   });
 
-  it("skips oversized media staging and keeps original media paths", async () => {
+  it("skips oversized media staging, keeps original media paths, and records the failure", async () => {
     await withSandboxMediaTempHome("openclaw-triggers-", async (home) => {
       const { cfg, workspaceDir, sandboxDir } = await setupSandboxWorkspace(home);
 
@@ -300,6 +300,46 @@ describe("stageSandboxMedia", () => {
       expect(stagedStatError?.code).toBe("ENOENT");
       expect(ctx.MediaPath).toBe(mediaPath);
       expect(sessionCtx.MediaPath).toBe(mediaPath);
+      // A file that downloaded fine under the channel's own (larger) cap but
+      // silently failed to stage past the 5MB cliff used to leave the
+      // sandboxed agent with an unstaged, unopenable path and zero signal —
+      // the failure must now be recorded.
+      expect(ctx.MediaFailures).toEqual([{ name: basename(mediaPath), reason: "too_large" }]);
+    });
+  });
+
+  it("records a staging failure for each of two different oversized files that share a basename", async () => {
+    await withSandboxMediaTempHome("openclaw-triggers-", async (home) => {
+      const { cfg, workspaceDir } = await setupSandboxWorkspace(home);
+
+      const oversizedPayload = Buffer.alloc(MEDIA_MAX_BYTES + 1, 0x41);
+      const firstDir = join(home, ".openclaw", "media", "inbound", "a");
+      const secondDir = join(home, ".openclaw", "media", "inbound", "b");
+      await fs.mkdir(firstDir, { recursive: true });
+      await fs.mkdir(secondDir, { recursive: true });
+      const firstPath = join(firstDir, "oversized.bin");
+      const secondPath = join(secondDir, "oversized.bin");
+      await fs.writeFile(firstPath, oversizedPayload);
+      await fs.writeFile(secondPath, oversizedPayload);
+
+      const { ctx, sessionCtx } = createSandboxMediaContexts(firstPath);
+      ctx.MediaPaths = [firstPath, secondPath];
+      sessionCtx.MediaPaths = ctx.MediaPaths;
+
+      await stageSandboxMedia({
+        ctx,
+        sessionCtx,
+        cfg,
+        sessionKey: "agent:main:main",
+        workspaceDir,
+      });
+
+      // Both distinct sources must be reported even though they share a
+      // basename — a name+reason dedup would wrongly collapse this to one.
+      expect(ctx.MediaFailures).toEqual([
+        { name: "oversized.bin", reason: "too_large" },
+        { name: "oversized.bin", reason: "too_large" },
+      ]);
     });
   });
 });

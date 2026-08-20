@@ -86,6 +86,36 @@ describe("channel inbound media facts", () => {
     ]);
   });
 
+  it("adds MediaFailures without touching the aligned arrays", () => {
+    const payload = buildChannelInboundMediaPayload(
+      [{ path: "/tmp/image.png", contentType: "image/png", kind: "image" }],
+      [{ name: "spec.pdf", reason: "expired_link" }],
+    );
+
+    expect(payload.MediaPaths).toEqual(["/tmp/image.png"]);
+    expect(payload.MediaUrls).toEqual(["/tmp/image.png"]);
+    expect(payload.MediaTypes).toEqual(["image/png"]);
+    expect(payload.MediaFailures).toEqual([{ name: "spec.pdf", reason: "expired_link" }]);
+  });
+
+  it("populates MediaFailures alone when every attachment failed (no media at all)", () => {
+    const payload = buildChannelInboundMediaPayload(null, [
+      { name: "spec.pdf", reason: "too_large" },
+    ]);
+
+    expect(payload.MediaPaths).toBeUndefined();
+    expect(payload.MediaFailures).toEqual([{ name: "spec.pdf", reason: "too_large" }]);
+  });
+
+  it("omits MediaFailures when there are no failures", () => {
+    const payload = buildChannelInboundMediaPayload(
+      [{ path: "/tmp/image.png", contentType: "image/png", kind: "image" }],
+      [],
+    );
+
+    expect(payload.MediaFailures).toBeUndefined();
+  });
+
   it("maps inbound media facts into history media entries", () => {
     expect(
       toHistoryMediaEntries([{ path: "/tmp/image.png", contentType: "image/png" }], {

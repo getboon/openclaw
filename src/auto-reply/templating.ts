@@ -24,6 +24,34 @@ export type MentionSource =
 
 export type InboundSourceModality = "text" | "voice" | "audio" | "image" | "video" | "document";
 
+/**
+ * Closed reasons an inbound attachment failed to reach the model. Channels and
+ * core staging map their own failure signals onto this set so the model note
+ * (media-note.ts) and the user-facing notice (inbound-media-failure-notice.ts)
+ * can render copy from one typed table instead of freeform strings — adding a
+ * reason here is a compile error at both renderers until each handles it.
+ */
+export type InboundMediaFailureReason =
+  | "too_large"
+  | "expired_link"
+  | "fetch_failed"
+  | "over_file_limit"
+  | "unavailable"
+  | "timed_out";
+
+/**
+ * One inbound attachment that failed before reaching the model. Deliberately
+ * NOT index-aligned with MediaPaths/MediaUrls/MediaTypes — a failure has no
+ * path/url/index of its own, and folding it into those arrays would corrupt
+ * every consumer that assumes parallel-array alignment (MediaTranscribedIndexes,
+ * MediaUnderstanding[].attachmentIndex).
+ */
+export type InboundMediaFailure = {
+  name?: string;
+  contentType?: string;
+  reason: InboundMediaFailureReason;
+};
+
 type StickerContextMetadata = {
   cachedDescription?: string;
   emoji?: string;
@@ -200,6 +228,13 @@ export type MsgContext = {
   MediaWorkspaceDir?: string;
   /** Attachment indexes whose audio was already transcribed before media understanding runs. */
   MediaTranscribedIndexes?: number[];
+  /**
+   * Attachments a channel or core staging step failed to deliver, unaligned
+   * with MediaPaths/MediaUrls/MediaTypes (see InboundMediaFailure). Read by
+   * buildInboundMediaNote (model-facing) and inbound-media-failure-notice.ts
+   * (user-facing) so a dropped attachment is never silent.
+   */
+  MediaFailures?: InboundMediaFailure[];
   /**
    * Marker: skip downstream stageSandboxMedia. chat.send RPC sets this so
    * staging runs synchronously before respond() and surfaces 5xx to the

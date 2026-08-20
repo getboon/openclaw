@@ -104,6 +104,9 @@ const mediaUnderstandingApplyRuntimeLoader = createLazyImportLoader(
 const linkUnderstandingApplyRuntimeLoader = createLazyImportLoader(
   () => import("../../link-understanding/apply.runtime.js"),
 );
+const inboundMediaFailureNoticeRuntimeLoader = createLazyImportLoader(
+  () => import("../inbound-media-failure-notice.runtime.js"),
+);
 
 const replyResolverTimingLog = createSubsystemLogger("auto-reply/reply-resolver-timing");
 const commandsCoreRuntimeLoader = createLazyImportLoader(
@@ -124,6 +127,10 @@ function loadMediaUnderstandingApplyRuntime() {
 
 function loadLinkUnderstandingApplyRuntime() {
   return linkUnderstandingApplyRuntimeLoader.load();
+}
+
+function loadInboundMediaFailureNoticeRuntime() {
+  return inboundMediaFailureNoticeRuntimeLoader.load();
 }
 
 function loadCommandsCoreRuntime() {
@@ -326,6 +333,37 @@ export async function getReplyFromConfig(
         attributes: traceAttributes,
       }),
     );
+
+  // Reports ctx.MediaFailures added since the last call, so the notice fires
+  // exactly once per failure regardless of where in this function it's
+  // known: channel-reported failures are already on ctx by the time this
+  // function is entered, but several branches below (native slash command,
+  // directive, inline action, before_agent_reply hook) can return a synthetic
+  // reply before sandbox staging (further down) ever runs and adds its own
+  // failures. Calling this here, before every one of those early-return
+  // paths, means a plugin/command-handled message still gets notified about
+  // channel-level failures; calling it again after staging picks up anything
+  // staging added, without repeating what was already reported. `finalized`
+  // and `ctx` are the same object (finalizeInboundContext casts in place),
+  // so ctx.MediaFailures already reflects it here.
+  let reportedMediaFailureCount = 0;
+  const reportNewMediaFailures = async () => {
+    if (useFastTestBootstrap) {
+      return;
+    }
+    const failures = ctx.MediaFailures ?? [];
+    const newFailures = failures.slice(reportedMediaFailureCount);
+    if (newFailures.length === 0) {
+      return;
+    }
+    reportedMediaFailureCount = failures.length;
+    const { sendInboundMediaFailureNotice } = await loadInboundMediaFailureNoticeRuntime();
+    void traceGetReplyPhase("reply.media_failure_notice", () =>
+      sendInboundMediaFailureNotice({ ctx, cfg, failures: newFailures }),
+    );
+  };
+  await reportNewMediaFailures();
+
   const mergedSkillFilter = resolverTiming.measureSync("reply.resolve_skill_filter", () =>
     mergeSkillFilters(opts?.skillFilter, resolveAgentSkillsFilter(cfg, agentId)),
   );
@@ -1018,6 +1056,11 @@ export async function getReplyFromConfig(
       }),
     );
   }
+
+  // Report any failures sandbox staging just added (channel-level failures
+  // were already reported by the earlier call, before every early-return
+  // path above).
+  await reportNewMediaFailures();
 
   logResolverTiming("milestone", "before_run_prepared_reply");
   const replyResult = await traceGetReplyPhase("reply.run_prepared_reply", () =>

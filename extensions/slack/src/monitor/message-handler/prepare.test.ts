@@ -967,10 +967,12 @@ Second paragraph should still reach the agent after Slack's preview cutoff.`;
     expect(prepared).toBeNull();
   });
 
-  it("delivers file-only message with placeholder when media download fails", async () => {
+  it("delivers file-only message with a per-file failure placeholder and MediaFailures when media download fails", async () => {
     // Files without url_private will fail to download, simulating a download
-    // failure.  The message should still be delivered with a fallback
-    // placeholder instead of being silently dropped (#25064).
+    // failure. The message should still be delivered with a fallback
+    // placeholder instead of being silently dropped (#25064), and every
+    // failed file must also reach ctx.MediaFailures so the user and the
+    // model are told, not just the raw body text.
     const prepared = await prepareWithDefaultCtx(
       createSlackMessage({
         text: "",
@@ -982,12 +984,50 @@ Second paragraph should still reach the agent after Slack's preview cutoff.`;
     );
 
     assertPrepared(prepared);
-    expect(prepared.ctxPayload.RawBody).toContain("[Slack file:");
-    expect(prepared.ctxPayload.RawBody).toContain("voice.ogg (fileId: FVOICE)");
-    expect(prepared.ctxPayload.RawBody).toContain("photo.jpg (fileId: FPHOTO)");
+    expect(prepared.ctxPayload.RawBody).toContain("[Slack file not delivered: voice.ogg]");
+    expect(prepared.ctxPayload.RawBody).toContain("[Slack file not delivered: photo.jpg]");
+    expect(prepared.ctxPayload.MediaFailures).toEqual([
+      { name: "voice.ogg", contentType: undefined, reason: "fetch_failed" },
+      { name: "photo.jpg", contentType: undefined, reason: "fetch_failed" },
+    ]);
   });
 
-  it("falls back to generic file label when a Slack file name is empty", async () => {
+  it("reports only the failed file when 1 of 2 attachments succeeds (partial failure)", async () => {
+    // The old `!mediaPlaceholder` guard in prepare-content.ts meant a
+    // successful sibling attachment hid every other file's failure. This is
+    // the regression guard for that hole.
+    const originalFetch = globalThis.fetch;
+    const mockFetch = vi.fn(async () => {
+      return new Response(Buffer.from("image data"), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      });
+    });
+    globalThis.fetch = mockFetch as typeof fetch;
+
+    try {
+      const prepared = await prepareWithDefaultCtx(
+        createSlackMessage({
+          text: "",
+          files: [
+            { id: "FOK", name: "ok.jpg", url_private: "https://files.slack.com/ok.jpg" },
+            { id: "FBAD", name: "bad.pdf" },
+          ],
+        }),
+      );
+
+      assertPrepared(prepared);
+      expect(prepared.ctxPayload.MediaFailures).toEqual([
+        { name: "bad.pdf", contentType: undefined, reason: "fetch_failed" },
+      ]);
+      expect(prepared.ctxPayload.RawBody).toContain("[Slack file not delivered: bad.pdf]");
+      expect(prepared.ctxPayload.MediaPaths).toHaveLength(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("falls back to a generic name when a failed Slack file name is empty", async () => {
     const prepared = await prepareWithDefaultCtx(
       createSlackMessage({
         text: "",
@@ -996,7 +1036,7 @@ Second paragraph should still reach the agent after Slack's preview cutoff.`;
     );
 
     assertPrepared(prepared);
-    expect(prepared.ctxPayload.RawBody).toContain("[Slack file: file]");
+    expect(prepared.ctxPayload.RawBody).toContain("[Slack file not delivered: file]");
   });
 
   it("extracts attachment text for bot messages with empty text when allowBots is true (#27616)", async () => {

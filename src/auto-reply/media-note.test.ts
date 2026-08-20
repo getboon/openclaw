@@ -359,4 +359,78 @@ describe("buildInboundMediaNote", () => {
     });
     expect(note).toBe("[media attached: /tmp/a.png (image/png)]");
   });
+
+  describe("MediaFailures (silent-drop reporting)", () => {
+    it("renders a failure line even when no paths ever arrived (total failure)", () => {
+      // This is exactly the bug: buildInboundMediaNote used to return
+      // undefined whenever MediaPaths was empty, leaving the model with zero
+      // signal that an attachment was expected.
+      const note = buildInboundMediaNote({
+        MediaFailures: [{ name: "spec.pdf", reason: "expired_link" }],
+      });
+      expect(note).toBe('[attachment not delivered: "spec.pdf" (download link expired)]');
+    });
+
+    it("renders one failure line per failed attachment when nothing succeeded", () => {
+      const note = buildInboundMediaNote({
+        MediaFailures: [
+          { name: "a.pdf", reason: "too_large" },
+          { name: "b.png", reason: "fetch_failed" },
+        ],
+      });
+      expect(note).toBe(
+        [
+          '[attachment not delivered: "a.pdf" (file too large)]',
+          '[attachment not delivered: "b.png" (download failed)]',
+        ].join("\n"),
+      );
+    });
+
+    it("appends failure lines after a rendered single-attachment note (partial failure)", () => {
+      const note = buildInboundMediaNote({
+        MediaPath: "/tmp/a.png",
+        MediaType: "image/png",
+        MediaFailures: [{ name: "b.png", reason: "expired_link" }],
+      });
+      expect(note).toBe(
+        [
+          "[media attached: /tmp/a.png (image/png)]",
+          '[attachment not delivered: "b.png" (download link expired)]',
+        ].join("\n"),
+      );
+    });
+
+    it("appends failure lines after a rendered multi-attachment note (partial failure)", () => {
+      const note = buildInboundMediaNote({
+        MediaPaths: ["/tmp/a.png", "/tmp/b.png"],
+        MediaFailures: [{ name: "c.png", reason: "over_file_limit" }],
+      });
+      expect(note).toBe(
+        [
+          "[media attached: 2 files]",
+          "[media attached 1/2: /tmp/a.png]",
+          "[media attached 2/2: /tmp/b.png]",
+          '[attachment not delivered: "c.png" (too many files attached)]',
+        ].join("\n"),
+      );
+    });
+
+    it("falls back to a generic name when the failure has none", () => {
+      const note = buildInboundMediaNote({
+        MediaFailures: [{ reason: "unavailable" }],
+      });
+      expect(note).toBe('[attachment not delivered: "file" (temporarily unavailable)]');
+    });
+
+    it("returns undefined when there are neither paths nor failures", () => {
+      expect(buildInboundMediaNote({})).toBeUndefined();
+    });
+
+    it("sanitizes the failure name before rendering it into the prompt", () => {
+      const note = buildInboundMediaNote({
+        MediaFailures: [{ name: "bad]name\ntext", reason: "fetch_failed" }],
+      });
+      expect(note).toBe('[attachment not delivered: "bad name text" (download failed)]');
+    });
+  });
 });
