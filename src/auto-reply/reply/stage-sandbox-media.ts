@@ -27,8 +27,12 @@ export const SCP_STDERR_TAIL_CHARS = 16_384;
 // prestage use this to detect partial failures: unstaged sources keep their
 // original absolute path in ctx.MediaPaths, so a length check against the
 // input cannot distinguish "everything staged" from "silently skipped some"
-// (e.g. the 5MB cap in STAGED_MEDIA_MAX_BYTES rejecting files that the
-// chat.send RPC already admitted under its 20MB cap).
+// (e.g. the 5MB cap in STAGED_MEDIA_MAX_BYTES rejecting files that a channel
+// already admitted under its own, larger download cap). A channel-turn
+// (non-chat.send) caller has no `staged` map to inspect, so every skip/catch
+// below also pushes an InboundMediaFailure onto ctx.MediaFailures — that is
+// the general-purpose signal a channel path, the model note, and the
+// attachment-failure notice all read (ENG-18116).
 export type StageSandboxMediaResult = {
   staged: ReadonlyMap<string, string>;
 };
@@ -72,6 +76,16 @@ export async function stageSandboxMedia(params: {
   const usedNames = new Set<string>();
   const staged = new Map<string, string>(); // absolute source -> relative sandbox path
 
+  // Pushes an InboundMediaFailure for a source that downloaded fine (it made
+  // it this far as a MediaPaths entry) but silently failed to stage — most
+  // commonly the 5MB STAGED_MEDIA_MAX_BYTES cliff below the channel's own,
+  // larger download cap (see the module comment on StageSandboxMediaResult).
+  // Without this, the sandboxed agent gets an unstaged absolute host path it
+  // cannot open and may confidently describe a file it never read (ENG-18116).
+  const recordStagingFailure = (source: string, reason: "too_large" | "unavailable") => {
+    (ctx.MediaFailures ??= []).push({ name: path.basename(source), reason });
+  };
+
   for (const raw of rawPaths) {
     const source = resolveAbsolutePath(raw);
     if (!source || staged.has(source)) {
@@ -83,10 +97,12 @@ export async function stageSandboxMedia(params: {
       remoteAttachmentRoots,
     });
     if (!allowed) {
+      recordStagingFailure(source, "unavailable");
       continue;
     }
     const fileName = allocateStagedFileName(source, usedNames);
     if (!fileName) {
+      recordStagingFailure(source, "unavailable");
       continue;
     }
     const relativeDest = sandbox ? path.join("media", "inbound", fileName) : fileName;
@@ -115,8 +131,10 @@ export async function stageSandboxMedia(params: {
         logVerbose(
           `Blocking inbound media staging above ${STAGED_MEDIA_MAX_BYTES} bytes: ${source}`,
         );
+        recordStagingFailure(source, "too_large");
       } else {
         logVerbose(`Failed to stage inbound media path ${source}: ${String(err)}`);
+        recordStagingFailure(source, "unavailable");
       }
       continue;
     }

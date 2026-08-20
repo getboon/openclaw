@@ -104,6 +104,9 @@ const mediaUnderstandingApplyRuntimeLoader = createLazyImportLoader(
 const linkUnderstandingApplyRuntimeLoader = createLazyImportLoader(
   () => import("../../link-understanding/apply.runtime.js"),
 );
+const inboundMediaFailureNoticeRuntimeLoader = createLazyImportLoader(
+  () => import("../inbound-media-failure-notice.runtime.js"),
+);
 
 const replyResolverTimingLog = createSubsystemLogger("auto-reply/reply-resolver-timing");
 const commandsCoreRuntimeLoader = createLazyImportLoader(
@@ -124,6 +127,10 @@ function loadMediaUnderstandingApplyRuntime() {
 
 function loadLinkUnderstandingApplyRuntime() {
   return linkUnderstandingApplyRuntimeLoader.load();
+}
+
+function loadInboundMediaFailureNoticeRuntime() {
+  return inboundMediaFailureNoticeRuntimeLoader.load();
 }
 
 function loadCommandsCoreRuntime() {
@@ -1016,6 +1023,18 @@ export async function getReplyFromConfig(
         sessionKey,
         workspaceDir,
       }),
+    );
+  }
+
+  // Fire the attachment-failure notice here — the only point downstream of
+  // every failure source (channel-reported download failures land in ctx at
+  // ingest; sandbox-staging failures are only known after the block above).
+  // Not awaited on the reply path (best-effort, logs on failure), so a slow
+  // or failed notice send never blocks or breaks the agent turn (ENG-18116).
+  if (!useFastTestBootstrap && ctx.MediaFailures && ctx.MediaFailures.length > 0) {
+    const { sendInboundMediaFailureNotice } = await loadInboundMediaFailureNoticeRuntime();
+    void traceGetReplyPhase("reply.media_failure_notice", () =>
+      sendInboundMediaFailureNotice({ ctx, cfg }),
     );
   }
 

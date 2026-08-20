@@ -180,15 +180,26 @@ export async function resolveSlackThreadContextData(params: {
     threadLabel = `Slack thread ${params.roomLabel}${snippet ? `: ${snippet}` : ""}`;
     if (!params.effectiveDirectMedia && starter.files && starter.files.length > 0) {
       const { resolveSlackMedia } = await loadSlackMediaModule();
-      threadStarterMedia = await resolveSlackMedia({
+      // Thread-starter hydration is a supplemental/observer path — the user
+      // didn't attach a file in *this* message, only in the (possibly old,
+      // possibly unmentioned-group) root message. Deliberately drop failures
+      // here rather than surfacing them: a notice/prompt note about a root
+      // message's dead file would be a false alarm on this turn (ENG-18116).
+      const { media, failures } = await resolveSlackMedia({
         files: starter.files,
         client: params.ctx.app.client,
         token: params.ctx.botToken,
         maxBytes: params.ctx.mediaMaxBytes,
       });
+      threadStarterMedia = media.length > 0 ? media : null;
       if (threadStarterMedia) {
         const starterPlaceholders = threadStarterMedia.map((item) => item.placeholder).join(", ");
         logVerbose(`slack: hydrated thread starter file ${starterPlaceholders} from root message`);
+      }
+      if (failures.length > 0) {
+        logVerbose(
+          `slack: ${failures.length} thread starter file(s) failed to hydrate (dropped, not reported to user)`,
+        );
       }
     }
   } else {

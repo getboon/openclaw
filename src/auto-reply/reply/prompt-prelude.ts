@@ -7,6 +7,7 @@ import type { SourceReplyDeliveryMode } from "../get-reply-options.types.js";
 import { HEARTBEAT_TRANSCRIPT_PROMPT } from "../heartbeat.js";
 import { buildInboundMediaNote } from "../media-note.js";
 import type { MsgContext, TemplateContext } from "../templating.js";
+import { hasInboundMedia } from "./inbound-media.js";
 import { appendUntrustedContext } from "./untrusted-context.js";
 
 const REPLY_MEDIA_HINT =
@@ -49,7 +50,11 @@ export function buildReplyPromptBodies(params: {
     .join("\n\n");
   const queueBodyBase = [params.threadContextNote, bodyWithEvents].filter(Boolean).join("\n\n");
   const mediaNote = buildInboundMediaNote(params.ctx);
-  const mediaReplyHint = mediaNote ? REPLY_MEDIA_HINT : undefined;
+  // Gate on real inbound media, not just a rendered note — a failures-only
+  // turn (ENG-18116) still produces a mediaNote (the "not delivered" lines),
+  // but there is no image to reply with, so the media-reply hint would be
+  // nonsense there.
+  const mediaReplyHint = mediaNote && hasInboundMedia(params.ctx) ? REPLY_MEDIA_HINT : undefined;
   const queuedBodyRaw = mediaNote
     ? [mediaNote, mediaReplyHint, queueBodyBase].filter(Boolean).join("\n").trim()
     : queueBodyBase;

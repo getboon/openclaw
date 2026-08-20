@@ -30,6 +30,10 @@ import type { ChannelBotLoopProtectionFacts } from "./bot-loop-protection.js";
 
 export type { InboundEventKind } from "../inbound-event/kind.js";
 export type { SupplementalContextFacts } from "../../auto-reply/templating.js";
+export type {
+  InboundMediaFailure,
+  InboundMediaFailureReason,
+} from "../../auto-reply/templating.js";
 
 /** Admission decision for an inbound channel event before agent dispatch. */
 export type ChannelTurnAdmission =

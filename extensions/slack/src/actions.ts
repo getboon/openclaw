@@ -538,7 +538,7 @@ export async function downloadSlackFile(
     return null;
   }
 
-  const results = await resolveSlackMedia({
+  const outcome = await resolveSlackMedia({
     files: [
       {
         id: file.id,
@@ -552,5 +552,5 @@ export async function downloadSlackFile(
     maxBytes: opts.maxBytes,
   });
 
-  return results?.[0] ?? null;
+  return outcome.media[0] ?? null;
 }

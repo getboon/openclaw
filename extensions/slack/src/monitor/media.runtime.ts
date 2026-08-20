@@ -2,6 +2,7 @@
 export { fetchWithRuntimeDispatcher } from "openclaw/plugin-sdk/runtime-fetch";
 export type { FetchLike, SavedMedia } from "openclaw/plugin-sdk/media-runtime";
 export {
+  MediaFetchError,
   readRemoteMediaBuffer,
   saveMediaBuffer,
   saveRemoteMedia,

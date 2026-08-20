@@ -1,6 +1,7 @@
 // Slack tests cover media plugin behavior.
 import type { WebClient } from "@slack/web-api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SlackMediaOutcome } from "./media-types.js";
 import {
   fetchWithSlackAuth,
   resolveSlackAttachmentContent,
@@ -15,15 +16,20 @@ import * as mediaRuntime from "./media.runtime.js";
 import { logVerbose } from "./thread.runtime.js";
 
 type FetchMock = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-type SlackMediaResult = NonNullable<Awaited<ReturnType<typeof resolveSlackMedia>>>;
+type SlackMediaResultList = SlackMediaOutcome["media"];
 
-function expectSlackMediaResult(
-  result: Awaited<ReturnType<typeof resolveSlackMedia>>,
-): SlackMediaResult {
-  if (result === null) {
+/**
+ * Unwraps a SlackMediaOutcome down to its successful media list, throwing if
+ * nothing succeeded — preserves the array-shaped assertions (`.length`,
+ * `[0]`, `.map(...)`) every existing test already uses, without touching each
+ * call site individually when the return type moved from `T[] | null` to
+ * `{ media: T[]; failures: ... }` (ENG-18116).
+ */
+function expectSlackMediaResult(outcome: SlackMediaOutcome): SlackMediaResultList {
+  if (outcome.media.length === 0) {
     throw new Error("Expected Slack media result");
   }
-  return result;
+  return outcome.media;
 }
 
 const readRemoteMediaBufferMock = vi.hoisted(() =>
@@ -55,7 +61,13 @@ const readRemoteMediaBufferMock = vi.hoisted(() =>
         }
       }
       if (response.status < 200 || response.status >= 300) {
-        throw new Error(`fetch failed: ${response.status}`);
+        // A real HTTP error must be a MediaFetchError with `status` so prod
+        // code's classifySlackMediaFetchError exercises its status-based
+        // branches (401/403/404 -> expired_link) instead of always falling
+        // through to the generic fetch_failed catch-all (ENG-18116).
+        throw new MediaFetchErrorMock("http_error", `fetch failed: ${response.status}`, {
+          status: response.status,
+        });
       }
       return {
         buffer: Buffer.from(await response.arrayBuffer()),
@@ -99,6 +111,27 @@ const saveRemoteMediaMock = vi.hoisted(() =>
 );
 const fetchWithRuntimeDispatcherMock = vi.hoisted(() => vi.fn());
 const logVerboseMock = vi.hoisted(() => vi.fn());
+// Prod code does `err instanceof MediaFetchError` to classify a failed
+// download (ENG-18116) — the mock MUST export the same class identity the
+// test throws, or every classification silently falls through to the
+// catch-all "fetch_failed" reason regardless of the simulated status/code.
+const MediaFetchErrorMock = vi.hoisted(
+  () =>
+    class MediaFetchError extends Error {
+      code: "max_bytes" | "http_error" | "fetch_failed";
+      status?: number;
+      constructor(
+        code: "max_bytes" | "http_error" | "fetch_failed",
+        message: string,
+        options?: { status?: number },
+      ) {
+        super(message);
+        this.name = "MediaFetchError";
+        this.code = code;
+        this.status = options?.status;
+      }
+    },
+);
 
 vi.mock("./media.runtime.js", () => ({
   readRemoteMediaBuffer: readRemoteMediaBufferMock,
@@ -106,6 +139,7 @@ vi.mock("./media.runtime.js", () => ({
   logVerbose: logVerboseMock,
   saveMediaBuffer: saveMediaBufferMock,
   saveRemoteMedia: saveRemoteMediaMock,
+  MediaFetchError: MediaFetchErrorMock,
 }));
 
 vi.mock("./thread.runtime.js", () => ({
@@ -465,7 +499,7 @@ describe("resolveSlackMedia", () => {
     });
   });
 
-  it("returns null when download fails", async () => {
+  it("reports a fetch_failed failure instead of silently dropping the file when download fails (ENG-18116)", async () => {
     // Simulate a network error
     mockFetch.mockRejectedValueOnce(new Error("Network error"));
 
@@ -475,7 +509,10 @@ describe("resolveSlackMedia", () => {
       maxBytes: 1024 * 1024,
     });
 
-    expect(result).toBeNull();
+    expect(result.media).toEqual([]);
+    expect(result.failures).toEqual([
+      { name: "test.jpg", contentType: undefined, reason: "fetch_failed" },
+    ]);
   });
 
   it("passes bounded media download timeouts while preserving Slack auth", async () => {
@@ -499,15 +536,23 @@ describe("resolveSlackMedia", () => {
     const fetchOptions = requireRecord(
       requireMockCall(readRemoteMediaBufferMock, 0, "readRemoteMediaBuffer")[0],
       "readRemoteMediaBuffer options",
-    ) as { readIdleTimeoutMs?: number; requestInit?: RequestInit };
+    ) as {
+      readIdleTimeoutMs?: number;
+      requestInit?: RequestInit;
+      retry?: { attempts: number; minDelayMs: number; maxDelayMs: number };
+    };
     expect(fetchOptions.readIdleTimeoutMs).toBe(SLACK_MEDIA_READ_IDLE_TIMEOUT_MS);
     expect(fetchOptions.requestInit?.signal).toBeInstanceOf(AbortSignal);
     expect(new Headers(fetchOptions.requestInit?.headers).get("Authorization")).toBe(
       "Bearer xoxb-test-token",
     );
+    // Bounded retry for a transient failure (ENG-18116) — the retry config
+    // itself is exercised by src/media/fetch.test.ts; this only proves the
+    // wiring reaches saveRemoteMedia.
+    expect(fetchOptions.retry).toEqual({ attempts: 3, minDelayMs: 300, maxDelayMs: 2_000 });
   });
 
-  it("returns null when a media download exceeds the total timeout", async () => {
+  it("reports a fetch_failed failure when a media download exceeds the total timeout", async () => {
     vi.useFakeTimers();
     try {
       let abortSignal: AbortSignal | undefined;
@@ -533,31 +578,38 @@ describe("resolveSlackMedia", () => {
       });
 
       await vi.advanceTimersByTimeAsync(25);
-      await expect(resultPromise).resolves.toBeNull();
+      const result = await resultPromise;
+      expect(result.media).toEqual([]);
+      expect(result.failures).toEqual([
+        { name: "slow.jpg", contentType: undefined, reason: "fetch_failed" },
+      ]);
       expect(abortSignal?.aborted).toBe(true);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("returns null when no files are provided", async () => {
+  it("returns no media and no invented failures when no files are provided", async () => {
     const result = await resolveSlackMedia({
       files: [],
       token: "xoxb-test-token",
       maxBytes: 1024 * 1024,
     });
 
-    expect(result).toBeNull();
+    expect(result).toEqual({ media: [], failures: [] });
   });
 
-  it("skips files without url_private", async () => {
+  it("reports a fetch_failed failure for files without url_private and no client to refresh from", async () => {
     const result = await resolveSlackMedia({
       files: [{ name: "test.jpg" }], // No url_private
       token: "xoxb-test-token",
       maxBytes: 1024 * 1024,
     });
 
-    expect(result).toBeNull();
+    expect(result.media).toEqual([]);
+    expect(result.failures).toEqual([
+      { name: "test.jpg", contentType: undefined, reason: "fetch_failed" },
+    ]);
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -594,7 +646,7 @@ describe("resolveSlackMedia", () => {
     expectFetchCalledWithUrl(mockFetch, "https://files.slack.com/fresh.jpg");
   });
 
-  it("skips id-only files when files.info returns no private URL", async () => {
+  it("reports a fetch_failed failure for id-only files when files.info returns no private URL", async () => {
     const mockClient = {
       files: {
         info: vi.fn().mockResolvedValue({ file: { id: "F123" } }),
@@ -608,12 +660,15 @@ describe("resolveSlackMedia", () => {
       maxBytes: 1024 * 1024,
     });
 
-    expect(result).toBeNull();
+    expect(result.media).toEqual([]);
+    expect(result.failures).toEqual([
+      { name: "test.jpg", contentType: undefined, reason: "fetch_failed" },
+    ]);
     expect(mockClient.files.info).toHaveBeenCalledWith({ file: "F123" });
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("skips id-only files when files.info fails", async () => {
+  it("reports a fetch_failed failure for id-only files when files.info fails", async () => {
     const mockClient = {
       files: {
         info: vi.fn().mockRejectedValue(new Error("files.info failed")),
@@ -627,7 +682,10 @@ describe("resolveSlackMedia", () => {
       maxBytes: 1024 * 1024,
     });
 
-    expect(result).toBeNull();
+    expect(result.media).toEqual([]);
+    expect(result.failures).toEqual([
+      { name: "test.jpg", contentType: undefined, reason: "fetch_failed" },
+    ]);
     expect(mockClient.files.info).toHaveBeenCalledWith({ file: "F123" });
     expect(mockFetch).not.toHaveBeenCalled();
   });
@@ -674,7 +732,9 @@ describe("resolveSlackMedia", () => {
     ]);
   });
 
-  it("rejects HTML auth pages for non-HTML files", async () => {
+  it("reports an expired_link failure (not a silent drop) for an HTML auth page for non-HTML files (ENG-18116)", async () => {
+    // This is the customer's actual failure shape: Slack returns 200 with an
+    // HTML login page instead of an HTTP error when a file URL has expired.
     mockFetch.mockResolvedValueOnce(
       new Response("<!DOCTYPE html><html><body>login</body></html>", {
         status: 200,
@@ -688,7 +748,10 @@ describe("resolveSlackMedia", () => {
       maxBytes: 1024 * 1024,
     });
 
-    expect(result).toBeNull();
+    expect(result.media).toEqual([]);
+    expect(result.failures).toEqual([
+      { name: "test.jpg", contentType: undefined, reason: "expired_link" },
+    ]);
     expect(saveRemoteMediaMock).toHaveBeenCalledTimes(1);
   });
 
@@ -791,7 +854,7 @@ describe("resolveSlackMedia", () => {
     expect(media[0]?.contentType).toBe("video/mp4");
   });
 
-  it("falls through to next file when first file returns error", async () => {
+  it("reports the first file as a failure and still returns the second as media (partial failure, ENG-18116)", async () => {
     vi.spyOn(mediaRuntime, "saveMediaBuffer").mockResolvedValue(
       createSavedMedia("/tmp/test.jpg", "image/jpeg"),
     );
@@ -815,8 +878,14 @@ describe("resolveSlackMedia", () => {
       maxBytes: 1024 * 1024,
     });
 
+    // This is the exact partial-failure hole the old `!mediaPlaceholder`
+    // guard in prepare-content.ts left open: 1 success must never hide the
+    // other file's failure.
     const media = expectSlackMediaResult(result);
     expect(media).toHaveLength(1);
+    expect(result.failures).toEqual([
+      { name: "first.jpg", contentType: undefined, reason: "expired_link" },
+    ]);
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
@@ -895,6 +964,11 @@ describe("resolveSlackMedia", () => {
     expect(media).toHaveLength(8);
     expect(saveMediaBufferMockValue).toHaveBeenCalledTimes(8);
     expect(mockFetch).toHaveBeenCalledTimes(8);
+    // The 9th file isn't just dropped — it's reported so the user/model know
+    // one attachment didn't make it (ENG-18116).
+    expect(result.failures).toEqual([
+      { name: "file-8.jpg", contentType: "image/jpeg", reason: "over_file_limit" },
+    ]);
   });
 
   it("routes dispatcher-backed Slack media requests through runtime fetch", async () => {
@@ -1047,6 +1121,7 @@ describe("resolveSlackAttachmentContent", () => {
     expect(result).toEqual({
       text: "[Forwarded message from Bob]\nPlease review this",
       media: [],
+      failures: [],
     });
     expect(mockFetch).not.toHaveBeenCalled();
   });
@@ -1092,12 +1167,49 @@ describe("resolveSlackAttachmentContent", () => {
           placeholder: "[Forwarded image: forwarded.jpg]",
         },
       ],
+      failures: [],
     });
     const firstCall = requireMockCall(mockFetch, 0, "fetch");
     expect(firstCall[0]).toBe("https://files.slack.com/forwarded.jpg");
     const firstInit = requireRecord(firstCall[1], "fetch init") as RequestInit;
     expect(firstInit.redirect).toBe("manual");
     expect(new Headers(firstInit.headers).get("Authorization")).toBe("Bearer xoxb-test-token");
+  });
+
+  it("reports a classified failure instead of silently swallowing a failed forwarded image download (ENG-18116)", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("network down"));
+
+    const result = await resolveSlackAttachmentContent({
+      attachments: [{ is_share: true, image_url: "https://files.slack.com/forwarded.jpg" }],
+      token: "xoxb-test-token",
+      maxBytes: 1024 * 1024,
+    });
+
+    expect(result).toEqual({ text: "", media: [], failures: [{ reason: "fetch_failed" }] });
+  });
+
+  it("merges nested file-attachment failures alongside forwarded-image failures", async () => {
+    mockFetch.mockResolvedValueOnce(
+      // The forwarded attachment's own `files` entry fails to download.
+      new Response("Not Found", { status: 404 }),
+    );
+
+    const result = await resolveSlackAttachmentContent({
+      attachments: [
+        {
+          is_share: true,
+          files: [{ url_private: "https://files.slack.com/attached.pdf", name: "attached.pdf" }],
+        },
+      ],
+      token: "xoxb-test-token",
+      maxBytes: 1024 * 1024,
+    });
+
+    expect(result).toEqual({
+      text: "",
+      media: [],
+      failures: [{ name: "attached.pdf", contentType: undefined, reason: "expired_link" }],
+    });
   });
 });
 

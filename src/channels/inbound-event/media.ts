@@ -5,6 +5,7 @@
  */
 import { normalizeOptionalString as normalizeString } from "@openclaw/normalization-core/string-coerce";
 import type { HistoryMediaEntry } from "../../auto-reply/reply/history.types.js";
+import type { InboundMediaFailure } from "../../auto-reply/templating.js";
 import type { InboundMediaFacts } from "../turn/types.js";
 
 /**
@@ -30,6 +31,7 @@ export type ChannelInboundMediaPayload = {
   MediaUrls?: string[];
   MediaTypes?: string[];
   MediaTranscribedIndexes?: number[];
+  MediaFailures?: InboundMediaFailure[];
 };
 
 function alignedStrings(values: Array<string | undefined>): string[] | undefined {
@@ -94,9 +96,15 @@ export function toHistoryMediaEntries(
 
 /**
  * Builds prompt environment media fields while keeping single-item legacy fields populated.
+ *
+ * `failures` is intentionally a separate, unaligned parameter rather than part
+ * of `media` — a failed attachment has no path/url/index of its own, and
+ * folding it into the aligned arrays would corrupt every index-aligned
+ * consumer (MediaTranscribedIndexes, MediaUnderstanding[].attachmentIndex).
  */
 export function buildChannelInboundMediaPayload(
   media: readonly InboundMediaFacts[] | null | undefined,
+  failures?: readonly InboundMediaFailure[] | null,
 ): ChannelInboundMediaPayload {
   const entries = Array.isArray(media) ? media : [];
   const transcribedIndexes = entries
@@ -110,5 +118,6 @@ export function buildChannelInboundMediaPayload(
     MediaUrls: alignedStrings(entries.map((item) => item.url ?? item.path)),
     MediaTypes: alignedStrings(entries.map(mediaType)),
     MediaTranscribedIndexes: transcribedIndexes.length > 0 ? transcribedIndexes : undefined,
+    MediaFailures: failures && failures.length > 0 ? [...failures] : undefined,
   };
 }

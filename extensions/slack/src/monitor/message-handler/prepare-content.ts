@@ -6,14 +6,14 @@ import {
   normalizeOptionalString,
   readStringValue as readString,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { formatSlackFileReference } from "../../file-reference.js";
 import type { SlackFile, SlackMessageEvent } from "../../types.js";
-import { MAX_SLACK_MEDIA_FILES, type SlackMediaResult } from "../media-types.js";
+import type { SlackMediaFailure, SlackMediaResult } from "../media-types.js";
 import type { SlackThreadStarter } from "../thread.js";
 
 type SlackResolvedMessageContent = {
   rawBody: string;
   effectiveDirectMedia: SlackMediaResult[] | null;
+  mediaFailures: SlackMediaFailure[];
 };
 
 const SLACK_MENTION_RESOLUTION_CONCURRENCY = 4;
@@ -335,21 +335,25 @@ export async function resolveSlackMessageContent(params: {
 
   const [media, attachmentContent] = await Promise.all([mediaPromise, attachmentContentPromise]);
 
-  const mergedMedia = [...(media ?? []), ...(attachmentContent?.media ?? [])];
+  const mergedMedia = [...(media?.media ?? []), ...(attachmentContent?.media ?? [])];
   const effectiveDirectMedia = mergedMedia.length > 0 ? mergedMedia : null;
   const mediaPlaceholder = effectiveDirectMedia
     ? effectiveDirectMedia.map((item) => item.placeholder).join(" ")
     : undefined;
 
-  const fallbackFiles = ownFiles ?? [];
-  const fileOnlyFallback =
-    !mediaPlaceholder && fallbackFiles.length > 0
-      ? fallbackFiles
-          .slice(0, MAX_SLACK_MEDIA_FILES)
-          .map((file) => formatSlackFileReference(file))
-          .join(", ")
+  // One placeholder per failed file, not a single fallback gated on "nothing
+  // at all succeeded" — the old guard meant 2 real failures got zero residue
+  // whenever 1 of 3 files succeeded. This also guarantees rawBody stays
+  // non-empty whenever any file was attached, even if every one failed, so
+  // the turn isn't dropped below and the failure notice/prompt note (which
+  // read ctx.MediaFailures downstream) still get a turn to ride on.
+  const mediaFailures = [...(media?.failures ?? []), ...(attachmentContent?.failures ?? [])];
+  const failurePlaceholder =
+    mediaFailures.length > 0
+      ? mediaFailures
+          .map((failure) => `[Slack file not delivered: ${failure.name ?? "file"}]`)
+          .join(" ")
       : undefined;
-  const fileOnlyPlaceholder = fileOnlyFallback ? `[Slack file: ${fileOnlyFallback}]` : undefined;
 
   let botAttachmentText: string | undefined;
   if (params.isBotMessage && !attachmentContent?.text) {
@@ -408,7 +412,7 @@ export async function resolveSlackMessageContent(params: {
       renderedAttachmentText,
       renderedBotAttachmentText,
       mediaPlaceholder,
-      fileOnlyPlaceholder,
+      failurePlaceholder,
     ]
       .filter(Boolean)
       .join("\n") || "";
@@ -419,5 +423,6 @@ export async function resolveSlackMessageContent(params: {
   return {
     rawBody,
     effectiveDirectMedia,
+    mediaFailures,
   };
 }

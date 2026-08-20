@@ -2,7 +2,7 @@
 import path from "node:path";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { getMediaDir } from "../media/store.js";
-import type { MsgContext } from "./templating.js";
+import type { InboundMediaFailure, InboundMediaFailureReason, MsgContext } from "./templating.js";
 
 function stripDarwinPrivatePrefix(value: string): string {
   return value.startsWith("/private/var/") ? value.slice("/private".length) : value;
@@ -89,6 +89,24 @@ function isAudioPath(pathLocal: string | undefined): boolean {
   return false;
 }
 
+// Model-facing phrase per closed failure reason (ENG-18116). Keyed as a
+// Record so adding a reason to InboundMediaFailureReason is a compile error
+// here until this map handles it too — the same discipline applies to the
+// user-facing copy table in inbound-media-failure-notice.ts.
+const MEDIA_FAILURE_REASON_TEXT: Record<InboundMediaFailureReason, string> = {
+  too_large: "file too large",
+  expired_link: "download link expired",
+  fetch_failed: "download failed",
+  over_file_limit: "too many files attached",
+  unavailable: "temporarily unavailable",
+};
+
+function formatMediaFailureLine(failure: InboundMediaFailure): string {
+  const name = sanitizeInlineMediaNoteValue(failure.name) || "file";
+  const reasonText = MEDIA_FAILURE_REASON_TEXT[failure.reason];
+  return `[attachment not delivered: "${name}" (${reasonText})]`;
+}
+
 function isValidAttachmentIndex(index: number, attachmentCount: number): boolean {
   return Number.isSafeInteger(index) && index >= 0 && index < attachmentCount;
 }
@@ -139,8 +157,12 @@ export function buildInboundMediaNote(ctx: MsgContext): string | undefined {
       : ctx.MediaPath?.trim()
         ? [ctx.MediaPath.trim()]
         : [];
+  // Failures are unaligned with paths (see InboundMediaFailure) — render them
+  // even when paths is empty (a total failure), so the model is never left
+  // with zero signal that an attachment was expected (ENG-18116).
+  const failureLines = (ctx.MediaFailures ?? []).map(formatMediaFailureLine);
   if (paths.length === 0) {
-    return undefined;
+    return failureLines.length > 0 ? failureLines.join("\n") : undefined;
   }
 
   const transcribedAudioIndices = collectTranscribedAudioAttachmentIndices(ctx, paths.length);
@@ -186,14 +208,15 @@ export function buildInboundMediaNote(ctx: MsgContext): string | undefined {
       return true;
     });
   if (entries.length === 0) {
-    return undefined;
+    return failureLines.length > 0 ? failureLines.join("\n") : undefined;
   }
   if (entries.length === 1) {
-    return formatMediaAttachedLine({
+    const line = formatMediaAttachedLine({
       path: entries[0]?.path ?? "",
       type: entries[0]?.type,
       url: entries[0]?.url,
     });
+    return [line, ...failureLines].join("\n");
   }
 
   const count = entries.length;
@@ -209,5 +232,6 @@ export function buildInboundMediaNote(ctx: MsgContext): string | undefined {
       }),
     );
   }
+  lines.push(...failureLines);
   return lines.join("\n");
 }

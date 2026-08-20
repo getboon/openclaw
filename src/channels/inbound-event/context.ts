@@ -16,7 +16,7 @@ import {
   normalizeInboundTextNewlines,
   sanitizeInboundSystemTags,
 } from "../../auto-reply/reply/inbound-text.js";
-import type { FinalizedMsgContext } from "../../auto-reply/templating.js";
+import type { FinalizedMsgContext, InboundMediaFailure } from "../../auto-reply/templating.js";
 import type { ContextVisibilityMode } from "../../config/types.base.js";
 import type { PluginHookChannelContext } from "../../plugins/hook-channel-context.types.js";
 import { shouldIncludeSupplementalContext } from "../../security/context-visibility.js";
@@ -76,6 +76,8 @@ export type BuildChannelInboundEventContextParams = {
   command?: CommandFacts;
   commandTurn?: CommandTurnContext;
   media?: InboundMediaFacts[];
+  /** Attachments that failed to reach the model — unaligned with `media`, see InboundMediaFailure. */
+  mediaFailures?: InboundMediaFailure[];
   supplemental?: ChannelInboundSupplementalFacts;
   channelContext?: PluginHookChannelContext;
   contextVisibility?: ContextVisibilityMode;
@@ -121,6 +123,7 @@ export type FinalizeChannelInboundContextParams<T extends Record<string, unknown
   supplemental?: SupplementalContextFacts | ChannelInboundSupplementalFacts;
   contextVisibility?: ContextVisibilityMode;
   media?: readonly InboundMediaFacts[];
+  mediaFailures?: readonly InboundMediaFailure[];
   finalize?: FinalizeInboundContextFn;
   finalizeOptions?: FinalizeInboundContextOptions;
 };
@@ -319,12 +322,22 @@ function finalizePreparedChannelInboundContext<T extends Record<string, unknown>
   rawSupplemental?: SupplementalContextFacts | ChannelInboundSupplementalFacts;
   supplemental?: SupplementalContextFacts;
   media?: readonly InboundMediaFacts[];
+  mediaFailures?: readonly InboundMediaFailure[];
   finalize?: FinalizeInboundContextFn;
   finalizeOptions?: FinalizeInboundContextOptions;
 }): FinalizeChannelInboundContextResult<T> {
-  const mediaPayload = params.media
-    ? definedFields(buildChannelInboundMediaPayload([...params.media]))
-    : {};
+  // A total failure (every attachment failed) means `media` is empty/absent
+  // but `mediaFailures` is not — still build the payload so MediaFailures
+  // reaches the prompt/notice even when no attachment succeeded.
+  const mediaPayload =
+    params.media || params.mediaFailures
+      ? definedFields(
+          buildChannelInboundMediaPayload(
+            params.media ? [...params.media] : [],
+            params.mediaFailures,
+          ),
+        )
+      : {};
   const baseContext = {
     ...params.originalContext,
     SupplementalContext: params.supplemental,
@@ -380,6 +393,10 @@ export function finalizeChannelInboundContext<T extends Record<string, unknown>>
       originalContext: params.context,
       finalize: params.finalize,
       finalizeOptions: params.finalizeOptions,
+      // mediaFailures never needs supplemental resolution (it's already fully
+      // computed by the channel), so it's passed straight through rather than
+      // via resolveChannelInboundSupplementalForFinalizer's `result`.
+      mediaFailures: params.mediaFailures,
       ...result,
     });
   if (params.resolveSupplementalMedia) {
@@ -529,6 +546,7 @@ export function buildChannelInboundEventContext(
     supplemental: params.supplemental,
     contextVisibility: params.contextVisibility,
     media: params.media,
+    mediaFailures: params.mediaFailures,
     context,
   };
   const result = params.resolveSupplementalMedia

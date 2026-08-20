@@ -425,9 +425,25 @@ async function extractFileBlocks(params: {
     const rawMime = bufferResult?.mime ?? attachment.mime;
     const normalizedRawMime = normalizeMimeType(rawMime);
     if (!forcedTextMimeResolved && isBinaryMediaMime(normalizedRawMime)) {
+      // Not a lost file — it stays staged and readable by the agent's
+      // file/exec tools; this only means it isn't force-decoded into a text
+      // block (correct for a spreadsheet/archive the agent should open with
+      // a tool). Every sibling skip in this loop logs; this one didn't
+      // (ENG-18116 audit finding), which made a real drop indistinguishable
+      // from this expected skip in the logs.
+      if (shouldLogVerbose()) {
+        logVerbose(
+          `media: file attachment not inlined (binary mime ${normalizedRawMime ?? "unknown"}) index=${attachment.index}`,
+        );
+      }
       continue;
     }
     if (hasSuspiciousBinarySignal(bufferResult?.buffer)) {
+      if (shouldLogVerbose()) {
+        logVerbose(
+          `media: file attachment not inlined (binary signature detected) index=${attachment.index}`,
+        );
+      }
       continue;
     }
     const utf16Charset = resolveUtf16Charset(bufferResult?.buffer);
