@@ -28,7 +28,7 @@ vi.mock("./api.js", () => ({
 vi.mock("./monitor-access.js", () => ({
   applyGoogleChatInboundAccessPolicy: accessMocks.applyGoogleChatInboundAccessPolicy,
 }));
-// NOTE: we deliberately do NOT mock openclaw/plugin-sdk/inbound-reply-dispatch
+// NOTE: we deliberately do NOT mock openclaw/plugin-sdk/channel-inbound
 // — the real bot-loop SDK helper runs end-to-end.
 
 type CapturedTurn = {
@@ -105,7 +105,7 @@ function buildE2EHarness() {
         chunkMarkdownTextWithMode: vi.fn((s: string) => [s]),
         resolveChunkMode: vi.fn(() => "default"),
       },
-      turn: {
+      inbound: {
         buildContext: vi.fn((payload: unknown) => payload),
         run,
       },

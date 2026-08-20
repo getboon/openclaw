@@ -237,9 +237,12 @@ async function processMessageWithPipeline(params: {
   // Same source for inbound session scoping AND outbound reply targeting.
   const inboundThreadName = resolveGoogleChatThreadName(event);
   // Only suffix the session key when the space supports threading; outbound
-  // path still gets `inboundThreadName` so replies land in the right thread
+  // path still gets `replyThreadName` so replies land in the right thread
   // even in non-threaded spaces (Google Chat's REST API accepts it harmlessly).
   const sessionThreadName = spaceSupportsThreading(space) ? inboundThreadName : undefined;
+  // DMs have no thread concept — never leak thread targeting into a DM reply
+  // even if the raw event happens to carry a `thread.name`.
+  const replyThreadName = isGroup ? inboundThreadName : undefined;
   // Bot-loop conversationId is the native space id — matches Slack's
   // `prepared.message.channel` shape (no thread suffix). Bot loops are rare
   // enough that space-level scope is sufficient; per-thread suppression
@@ -399,8 +402,8 @@ async function processMessageWithPipeline(params: {
     reply: {
       to: `googlechat:${spaceId}`,
       originatingTo: `googlechat:${spaceId}`,
-      replyToId: inboundThreadName,
-      replyToIdFull: inboundThreadName,
+      replyToId: replyThreadName,
+      replyToIdFull: replyThreadName,
     },
     message: {
       body,
@@ -454,7 +457,7 @@ async function processMessageWithPipeline(params: {
         account,
         space: spaceId,
         text: `_${botName} is typing..._`,
-        thread: inboundThreadName,
+        thread: replyThreadName,
       });
       typingMessageName = result?.messageName;
     } catch (err) {

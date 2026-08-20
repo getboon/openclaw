@@ -22,9 +22,9 @@ vi.mock("./api.js", () => ({
 vi.mock("./monitor-access.js", () => ({
   applyGoogleChatInboundAccessPolicy: accessMocks.applyGoogleChatInboundAccessPolicy,
 }));
-vi.mock("openclaw/plugin-sdk/inbound-reply-dispatch", async () => {
-  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/inbound-reply-dispatch")>(
-    "openclaw/plugin-sdk/inbound-reply-dispatch",
+vi.mock("openclaw/plugin-sdk/channel-inbound", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/channel-inbound")>(
+    "openclaw/plugin-sdk/channel-inbound",
   );
   return {
     ...actual,
@@ -37,7 +37,6 @@ type CapturedTurn = {
   routeSessionKey: string;
   ctxConversationId: string;
   ctxConversationKind: string;
-  ctxRoutePeerKind: string;
   ctxThreadId: string | undefined;
   ctxParentSessionKey: string | undefined;
   resolvedPeerKind: string | undefined;
@@ -53,14 +52,13 @@ function buildHarness() {
     }) => {
       const turn = params.adapter.resolveTurn();
       const ctx = turn.ctxPayload as {
-        conversation: { id: string; kind: string; threadId?: string; routePeer: { kind: string } };
+        conversation: { id: string; kind: string; threadId?: string };
         route: { routeSessionKey: string; parentSessionKey?: string };
       };
       captured.push({
         routeSessionKey: turn.routeSessionKey,
         ctxConversationId: ctx.conversation.id,
         ctxConversationKind: ctx.conversation.kind,
-        ctxRoutePeerKind: ctx.conversation.routePeer.kind,
         ctxThreadId: ctx.conversation.threadId,
         ctxParentSessionKey: ctx.route.parentSessionKey,
         resolvedPeerKind: observedPeerKinds.at(-1),
@@ -99,7 +97,7 @@ function buildHarness() {
         chunkMarkdownTextWithMode: vi.fn((s: string) => [s]),
         resolveChunkMode: vi.fn(() => "default"),
       },
-      turn: { buildContext, run },
+      inbound: { buildContext, run },
     },
   } as unknown as GoogleChatCoreRuntime;
   const runtime = { error: vi.fn(), log: vi.fn() } satisfies GoogleChatRuntimeEnv;
@@ -305,7 +303,6 @@ describe("googlechat monitor thread-scoped session keys", () => {
     });
     expect(captured[0].resolvedPeerKind).toBe("direct");
     expect(captured[0].ctxConversationKind).toBe("direct");
-    expect(captured[0].ctxRoutePeerKind).toBe("direct");
     expect(captured[0].routeSessionKey).toMatch(/:direct:spaces\/AAA$/);
   });
 
@@ -327,7 +324,6 @@ describe("googlechat monitor thread-scoped session keys", () => {
       mediaMaxMb: 0,
     });
     expect(captured[0].resolvedPeerKind).toBe("group");
-    expect(captured[0].ctxRoutePeerKind).toBe("group");
   });
 
   it("does NOT suffix when only legacy `space.type === 'DM'` is set", async () => {
