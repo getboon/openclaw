@@ -552,7 +552,7 @@ describe("resolveSlackMedia", () => {
     expect(fetchOptions.retry).toEqual({ attempts: 3, minDelayMs: 300, maxDelayMs: 2_000 });
   });
 
-  it("reports a fetch_failed failure when a media download exceeds the total timeout", async () => {
+  it("reports a timed_out failure when a media download exceeds the total timeout", async () => {
     vi.useFakeTimers();
     try {
       let abortSignal: AbortSignal | undefined;
@@ -581,7 +581,7 @@ describe("resolveSlackMedia", () => {
       const result = await resultPromise;
       expect(result.media).toEqual([]);
       expect(result.failures).toEqual([
-        { name: "slow.jpg", contentType: undefined, reason: "fetch_failed" },
+        { name: "slow.jpg", contentType: undefined, reason: "timed_out" },
       ]);
       expect(abortSignal?.aborted).toBe(true);
     } finally {
@@ -887,6 +887,39 @@ describe("resolveSlackMedia", () => {
       { name: "first.jpg", contentType: undefined, reason: "expired_link" },
     ]);
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a malformed/disallowed attachment URL as a per-file failure instead of rejecting the whole batch", async () => {
+    // Regression guard: createSlackMediaRequest (assertSlackFileUrl) throws
+    // synchronously on a bad URL. That throw must stay inside
+    // downloadSlackMediaFile's try/catch — if it escapes, it rejects the
+    // worker inside mapLimit's Promise.all and takes down every other
+    // attachment in the same resolveSlackMedia call with it.
+    vi.spyOn(mediaRuntime, "saveMediaBuffer").mockResolvedValue(
+      createSavedMedia("/tmp/good.jpg", "image/jpeg"),
+    );
+    mockFetch.mockResolvedValueOnce(
+      new Response(Buffer.from("image data"), {
+        status: 200,
+        headers: { "content-type": "image/jpeg" },
+      }),
+    );
+
+    const result = await resolveSlackMedia({
+      files: [
+        { url_private: "https://evil.example.com/malicious.jpg", name: "bad.jpg" },
+        { url_private: "https://files.slack.com/good.jpg", name: "good.jpg" },
+      ],
+      token: "xoxb-test-token",
+      maxBytes: 1024 * 1024,
+    });
+
+    const media = expectSlackMediaResult(result);
+    expect(media).toHaveLength(1);
+    expect(media[0]?.path).toBe("/tmp/good.jpg");
+    expect(result.failures).toEqual([
+      { name: "bad.jpg", contentType: undefined, reason: "fetch_failed" },
+    ]);
   });
 
   it("returns all successfully downloaded files as an array", async () => {

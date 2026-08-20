@@ -183,8 +183,25 @@ export const SLACK_MEDIA_TOTAL_TIMEOUT_MS = 120_000;
 const SLACK_MEDIA_FETCH_RETRY = { attempts: 3, minDelayMs: 300, maxDelayMs: 2_000 };
 type SlackSaveRemoteMediaOptions = Parameters<typeof saveRemoteMedia>[0];
 
+/**
+ * Raised when saveSlackMedia's own SLACK_MEDIA_TOTAL_TIMEOUT_MS race fires.
+ * A distinct class (rather than matching a plain Error's message) so
+ * classifySlackMediaFetchError can report `timed_out` instead of the
+ * generic `fetch_failed`, which otherwise gives the user unhelpful
+ * "download failed" copy for what was actually a timeout.
+ */
+class SlackMediaTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`slack media download timed out after ${timeoutMs}ms`);
+    this.name = "SlackMediaTimeoutError";
+  }
+}
+
 /** Classifies a failed Slack media fetch onto the shared inbound-failure reason vocabulary. */
 function classifySlackMediaFetchError(err: unknown): SlackMediaFailure["reason"] {
+  if (err instanceof SlackMediaTimeoutError) {
+    return "timed_out";
+  }
   if (err instanceof MediaFetchError) {
     if (err.code === "max_bytes") {
       return "too_large";
@@ -270,7 +287,7 @@ async function saveSlackMedia(params: {
       timeoutHandle = setTimeout(() => {
         timedOut = true;
         timeoutAbortController?.abort();
-        reject(new Error(`slack media download timed out after ${params.totalTimeoutMs}ms`));
+        reject(new SlackMediaTimeoutError(params.totalTimeoutMs!));
       }, params.totalTimeoutMs);
       timeoutHandle.unref?.();
     });
