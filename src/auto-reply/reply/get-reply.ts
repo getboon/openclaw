@@ -963,6 +963,33 @@ export async function getReplyFromConfig(
     }
   }
 
+  // Reports ctx.MediaFailures added since the last call, so the notice fires
+  // exactly once per failure regardless of where in this function it's
+  // known: channel-reported failures are already on ctx by the time this
+  // function is entered, but a before_agent_reply hook below can claim the
+  // turn and return before sandbox staging (further below) ever runs and
+  // adds its own failures. Calling this before the hook check means a
+  // plugin-handled message still gets notified about channel-level
+  // failures; calling it again after staging picks up anything staging
+  // added, without repeating what was already reported.
+  let reportedMediaFailureCount = 0;
+  const reportNewMediaFailures = async () => {
+    if (useFastTestBootstrap) {
+      return;
+    }
+    const failures = ctx.MediaFailures ?? [];
+    const newFailures = failures.slice(reportedMediaFailureCount);
+    if (newFailures.length === 0) {
+      return;
+    }
+    reportedMediaFailureCount = failures.length;
+    const { sendInboundMediaFailureNotice } = await loadInboundMediaFailureNoticeRuntime();
+    void traceGetReplyPhase("reply.media_failure_notice", () =>
+      sendInboundMediaFailureNotice({ ctx, cfg, failures: newFailures }),
+    );
+  };
+  await reportNewMediaFailures();
+
   // Allow plugins to intercept and return a synthetic reply before the LLM runs.
   if (!useFastTestBootstrap) {
     const { getGlobalHookRunner } = await loadHookRunnerGlobal();
@@ -1026,17 +1053,9 @@ export async function getReplyFromConfig(
     );
   }
 
-  // Fire the attachment-failure notice here — the only point downstream of
-  // every failure source (channel-reported download failures land in ctx at
-  // ingest; sandbox-staging failures are only known after the block above).
-  // Not awaited on the reply path (best-effort, logs on failure), so a slow
-  // or failed notice send never blocks or breaks the agent turn (ENG-18116).
-  if (!useFastTestBootstrap && ctx.MediaFailures && ctx.MediaFailures.length > 0) {
-    const { sendInboundMediaFailureNotice } = await loadInboundMediaFailureNoticeRuntime();
-    void traceGetReplyPhase("reply.media_failure_notice", () =>
-      sendInboundMediaFailureNotice({ ctx, cfg }),
-    );
-  }
+  // Report any failures sandbox staging just added (channel-level failures
+  // were already reported before the hook check above).
+  await reportNewMediaFailures();
 
   logResolverTiming("milestone", "before_run_prepared_reply");
   const replyResult = await traceGetReplyPhase("reply.run_prepared_reply", () =>

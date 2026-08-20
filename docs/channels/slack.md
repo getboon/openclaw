@@ -1614,7 +1614,7 @@ When a single Slack message contains multiple file attachments:
 ### Size, download, and model limits
 
 - **Size cap**: Default 20 MB per file. Configurable via `channels.slack.mediaMaxMb`.
-- **Download failures**: Files that Slack cannot serve, expired URLs, inaccessible files, oversize files, and Slack auth/login HTML responses are retried on a transient error and, on a persistent failure, reported to the agent and the user with the file name and a plain-language reason instead of being silently dropped.
+- **Download failures**: Files that Slack cannot serve, expired URLs, inaccessible files, oversize files, and Slack auth/login HTML responses are retried on a transient error and, on a persistent failure, reported to the agent, and to the user for direct requests, with the file name and a plain-language reason instead of being silently dropped.
 - **Vision model**: Image analysis uses the active reply model when it supports vision, or the image model configured at `agents.defaults.imageModel`.
 
 ### Known limits
@@ -1623,7 +1623,7 @@ When a single Slack message contains multiple file attachments:
 | -------------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | Expired Slack file URL                 | Retried against a fresh URL; a persistent failure posts an in-thread notice naming the file | Re-upload the file in Slack                                                |
 | Vision model not configured            | Image attachments are stored as media references, but not analyzed as images                | Configure `agents.defaults.imageModel` or use a vision-capable reply model |
-| Very large images (> 20 MB by default) | Skipped per size cap and reported to the agent and the user                                 | Increase `channels.slack.mediaMaxMb` if Slack allows                       |
+| Very large images (> 20 MB by default) | Skipped per size cap and reported to the agent, and to the user for direct requests         | Increase `channels.slack.mediaMaxMb` if Slack allows                       |
 | Forwarded/shared attachments           | Text and Slack-hosted image/file media are best-effort                                      | Re-share directly in the OpenClaw thread                                   |
 | PDF attachments                        | Stored as file/media context, not automatically routed through image vision                 | Use `download-file` for file metadata or the `pdf` tool for PDF analysis   |
 

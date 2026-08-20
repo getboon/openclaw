@@ -32,7 +32,7 @@ export const SCP_STDERR_TAIL_CHARS = 16_384;
 // (non-chat.send) caller has no `staged` map to inspect, so every skip/catch
 // below also pushes an InboundMediaFailure onto ctx.MediaFailures — that is
 // the general-purpose signal a channel path, the model note, and the
-// attachment-failure notice all read (ENG-18116).
+// attachment-failure notice all read.
 export type StageSandboxMediaResult = {
   staged: ReadonlyMap<string, string>;
 };
@@ -81,9 +81,21 @@ export async function stageSandboxMedia(params: {
   // commonly the 5MB STAGED_MEDIA_MAX_BYTES cliff below the channel's own,
   // larger download cap (see the module comment on StageSandboxMediaResult).
   // Without this, the sandboxed agent gets an unstaged absolute host path it
-  // cannot open and may confidently describe a file it never read (ENG-18116).
+  // cannot open and may confidently describe a file it never read.
+  //
+  // Idempotent by name+reason: stageRemoteInboundMediaBeforeUnderstandingIfNeeded
+  // (get-reply.ts) can invoke stageSandboxMedia a second time on the SAME ctx
+  // for remote-host media when the first attempt staged nothing — without
+  // this guard the same file's failure would be appended twice.
   const recordStagingFailure = (source: string, reason: "too_large" | "unavailable") => {
-    (ctx.MediaFailures ??= []).push({ name: path.basename(source), reason });
+    const name = path.basename(source);
+    const alreadyRecorded = ctx.MediaFailures?.some(
+      (failure) => failure.name === name && failure.reason === reason,
+    );
+    if (alreadyRecorded) {
+      return;
+    }
+    (ctx.MediaFailures ??= []).push({ name, reason });
   };
 
   for (const raw of rawPaths) {

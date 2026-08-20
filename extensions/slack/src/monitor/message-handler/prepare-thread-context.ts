@@ -184,7 +184,7 @@ export async function resolveSlackThreadContextData(params: {
       // didn't attach a file in *this* message, only in the (possibly old,
       // possibly unmentioned-group) root message. Deliberately drop failures
       // here rather than surfacing them: a notice/prompt note about a root
-      // message's dead file would be a false alarm on this turn (ENG-18116).
+      // message's dead file would be a false alarm on this turn.
       const { media, failures } = await resolveSlackMedia({
         files: starter.files,
         client: params.ctx.app.client,

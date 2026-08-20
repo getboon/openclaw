@@ -23,7 +23,7 @@ type SlackMediaResultList = SlackMediaOutcome["media"];
  * nothing succeeded — preserves the array-shaped assertions (`.length`,
  * `[0]`, `.map(...)`) every existing test already uses, without touching each
  * call site individually when the return type moved from `T[] | null` to
- * `{ media: T[]; failures: ... }` (ENG-18116).
+ * `{ media: T[]; failures: ... }`.
  */
 function expectSlackMediaResult(outcome: SlackMediaOutcome): SlackMediaResultList {
   if (outcome.media.length === 0) {
@@ -64,7 +64,7 @@ const readRemoteMediaBufferMock = vi.hoisted(() =>
         // A real HTTP error must be a MediaFetchError with `status` so prod
         // code's classifySlackMediaFetchError exercises its status-based
         // branches (401/403/404 -> expired_link) instead of always falling
-        // through to the generic fetch_failed catch-all (ENG-18116).
+        // through to the generic fetch_failed catch-all.
         throw new MediaFetchErrorMock("http_error", `fetch failed: ${response.status}`, {
           status: response.status,
         });
@@ -112,9 +112,9 @@ const saveRemoteMediaMock = vi.hoisted(() =>
 const fetchWithRuntimeDispatcherMock = vi.hoisted(() => vi.fn());
 const logVerboseMock = vi.hoisted(() => vi.fn());
 // Prod code does `err instanceof MediaFetchError` to classify a failed
-// download (ENG-18116) — the mock MUST export the same class identity the
-// test throws, or every classification silently falls through to the
-// catch-all "fetch_failed" reason regardless of the simulated status/code.
+// download — the mock MUST export the same class identity the test throws,
+// or every classification silently falls through to the catch-all
+// "fetch_failed" reason regardless of the simulated status/code.
 const MediaFetchErrorMock = vi.hoisted(
   () =>
     class MediaFetchError extends Error {
@@ -499,7 +499,7 @@ describe("resolveSlackMedia", () => {
     });
   });
 
-  it("reports a fetch_failed failure instead of silently dropping the file when download fails (ENG-18116)", async () => {
+  it("reports a fetch_failed failure instead of silently dropping the file when download fails", async () => {
     // Simulate a network error
     mockFetch.mockRejectedValueOnce(new Error("Network error"));
 
@@ -546,8 +546,8 @@ describe("resolveSlackMedia", () => {
     expect(new Headers(fetchOptions.requestInit?.headers).get("Authorization")).toBe(
       "Bearer xoxb-test-token",
     );
-    // Bounded retry for a transient failure (ENG-18116) — the retry config
-    // itself is exercised by src/media/fetch.test.ts; this only proves the
+    // Bounded retry for a transient failure — the retry config itself is
+    // exercised by src/media/fetch.test.ts; this only proves the
     // wiring reaches saveRemoteMedia.
     expect(fetchOptions.retry).toEqual({ attempts: 3, minDelayMs: 300, maxDelayMs: 2_000 });
   });
@@ -732,7 +732,7 @@ describe("resolveSlackMedia", () => {
     ]);
   });
 
-  it("reports an expired_link failure (not a silent drop) for an HTML auth page for non-HTML files (ENG-18116)", async () => {
+  it("reports an expired_link failure (not a silent drop) for an HTML auth page for non-HTML files", async () => {
     // This is the customer's actual failure shape: Slack returns 200 with an
     // HTML login page instead of an HTTP error when a file URL has expired.
     mockFetch.mockResolvedValueOnce(
@@ -854,7 +854,7 @@ describe("resolveSlackMedia", () => {
     expect(media[0]?.contentType).toBe("video/mp4");
   });
 
-  it("reports the first file as a failure and still returns the second as media (partial failure, ENG-18116)", async () => {
+  it("reports the first file as a failure and still returns the second as media (partial failure)", async () => {
     vi.spyOn(mediaRuntime, "saveMediaBuffer").mockResolvedValue(
       createSavedMedia("/tmp/test.jpg", "image/jpeg"),
     );
@@ -965,7 +965,7 @@ describe("resolveSlackMedia", () => {
     expect(saveMediaBufferMockValue).toHaveBeenCalledTimes(8);
     expect(mockFetch).toHaveBeenCalledTimes(8);
     // The 9th file isn't just dropped — it's reported so the user/model know
-    // one attachment didn't make it (ENG-18116).
+    // one attachment didn't make it.
     expect(result.failures).toEqual([
       { name: "file-8.jpg", contentType: "image/jpeg", reason: "over_file_limit" },
     ]);
@@ -1176,7 +1176,7 @@ describe("resolveSlackAttachmentContent", () => {
     expect(new Headers(firstInit.headers).get("Authorization")).toBe("Bearer xoxb-test-token");
   });
 
-  it("reports a classified failure instead of silently swallowing a failed forwarded image download (ENG-18116)", async () => {
+  it("reports a classified failure instead of silently swallowing a failed forwarded image download", async () => {
     mockFetch.mockRejectedValueOnce(new Error("network down"));
 
     const result = await resolveSlackAttachmentContent({

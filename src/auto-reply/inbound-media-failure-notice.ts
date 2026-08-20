@@ -1,12 +1,13 @@
-// Inbound attachment failure notice delivery (ENG-18116). Every channel and
-// core staging step that can drop an inbound attachment records the failure
-// on ctx.MediaFailures instead of silently dropping the file; this module is
+// Inbound attachment failure notice delivery. Every channel and core staging
+// step that can drop an inbound attachment records the failure on
+// ctx.MediaFailures instead of silently dropping the file; this module is
 // the single place that turns that fact into a best-effort user-visible
 // message, modeled on media-understanding/echo-transcript.ts's delivery shape.
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../config/types.js";
 import { logVerbose, shouldLogVerbose } from "../globals.js";
 import { isDeliverableMessageChannel } from "../utils/message-channel.js";
+import { sanitizeInlineMediaNoteValue } from "./media-note.js";
 import type { InboundMediaFailure, InboundMediaFailureReason, MsgContext } from "./templating.js";
 
 let messageRuntimePromise: Promise<typeof import("../channels/message/runtime.js")> | null = null;
@@ -28,12 +29,17 @@ const NOTICE_REASON_TEXT: Record<InboundMediaFailureReason, string> = {
   fetch_failed: "it couldn't be downloaded",
   over_file_limit: "too many files were attached at once",
   unavailable: "file storage was temporarily unavailable",
+  timed_out: "the download timed out",
 };
 
 const MAX_NAMED_FAILURES = 3;
 
+// Sanitize with the same helper as the model-facing twin (media-note.ts) —
+// this is untrusted, user-controlled filename text going into a delivered
+// chat message, and a name containing control characters or newlines would
+// otherwise render uncleanly (or break the message layout).
 function formatFailureName(failure: InboundMediaFailure, index: number): string {
-  const name = failure.name?.trim();
+  const name = sanitizeInlineMediaNoteValue(failure.name);
   return name ? `"${name}"` : `file ${index + 1}`;
 }
 
@@ -54,13 +60,19 @@ export function buildInboundMediaFailureNotice(failures: readonly InboundMediaFa
   return `I couldn't read ${failures.length} of the files you attached: ${list}. Re-attach them and I'll try again.`;
 }
 
-/** Sends a best-effort notice back to the originating deliverable chat naming dropped attachments. */
+/**
+ * Sends a best-effort notice back to the originating deliverable chat naming
+ * dropped attachments. Reads `ctx.MediaFailures` by default; pass `failures`
+ * explicitly to report only a subset (e.g. a caller that already reported an
+ * earlier batch and only wants to notify about ones added since).
+ */
 export async function sendInboundMediaFailureNotice(params: {
   ctx: MsgContext;
   cfg: OpenClawConfig;
+  failures?: readonly InboundMediaFailure[];
 }): Promise<void> {
   const { ctx, cfg } = params;
-  const failures = ctx.MediaFailures;
+  const failures = params.failures ?? ctx.MediaFailures;
   if (!failures || failures.length === 0) {
     return;
   }
@@ -104,8 +116,14 @@ export async function sendInboundMediaFailureNotice(params: {
       bestEffort: true,
       durability: "best_effort",
     });
-    if (send.status === "failed") {
+    if (send.status === "failed" || send.status === "partial_failed") {
       throw send.error;
+    }
+    if (send.status === "suppressed") {
+      if (shouldLogVerbose()) {
+        logVerbose(`media: attachment-failure notice suppressed (${send.reason})`);
+      }
+      return;
     }
     if (shouldLogVerbose()) {
       logVerbose(`media: attachment-failure notice sent to ${normalizedChannel}/${to}`);

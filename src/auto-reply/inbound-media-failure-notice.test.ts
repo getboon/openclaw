@@ -1,6 +1,6 @@
 // Inbound attachment-failure notice tests cover destination resolution,
 // event-kind gating, empty-input skipping, copy rendering, and failure
-// swallowing (ENG-18116). Mock shape mirrors media-understanding/echo-transcript.test.ts.
+// swallowing. Mock shape mirrors media-understanding/echo-transcript.test.ts.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/types.js";
 import type { InboundMediaFailure, MsgContext } from "./templating.js";
@@ -167,7 +167,7 @@ describe("sendInboundMediaFailureNotice", () => {
   it("survives a turn that would otherwise end with no visible reply (NO_REPLY) — the notice is independent of the agent's own reply", async () => {
     // The notice fires from get-reply.ts before the agent attempt even
     // starts, so a NO_REPLY/silent final on the agent's side cannot suppress
-    // it — this is the exact failure mode the customer hit (ENG-18116).
+    // it.
     await sendInboundMediaFailureNotice({ ctx: createCtx(), cfg: EMPTY_CONFIG });
 
     expect(mockDeliverOutboundPayloads).toHaveBeenCalledOnce();

@@ -10,7 +10,7 @@ export type SlackMediaResult = {
 /**
  * One Slack file/attachment that failed to download. Reuses core's closed
  * InboundMediaFailureReason (rather than a Slack-local union) so there is one
- * failure vocabulary end to end, not two that can drift (ENG-18116).
+ * failure vocabulary end to end, not two that can drift.
  */
 export type SlackMediaFailure = {
   name?: string;

@@ -272,7 +272,7 @@ describe("stageSandboxMedia", () => {
     });
   });
 
-  it("skips oversized media staging, keeps original media paths, and records the failure (ENG-18116)", async () => {
+  it("skips oversized media staging, keeps original media paths, and records the failure", async () => {
     await withSandboxMediaTempHome("openclaw-triggers-", async (home) => {
       const { cfg, workspaceDir, sandboxDir } = await setupSandboxWorkspace(home);
 
@@ -302,8 +302,8 @@ describe("stageSandboxMedia", () => {
       expect(sessionCtx.MediaPath).toBe(mediaPath);
       // A file that downloaded fine under the channel's own (larger) cap but
       // silently failed to stage past the 5MB cliff used to leave the
-      // sandboxed agent with an unstaged, unopenable path and zero signal
-      // (ENG-18116) — the failure must now be recorded.
+      // sandboxed agent with an unstaged, unopenable path and zero signal —
+      // the failure must now be recorded.
       expect(ctx.MediaFailures).toEqual([{ name: basename(mediaPath), reason: "too_large" }]);
     });
   });

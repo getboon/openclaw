@@ -360,7 +360,7 @@ describe("buildInboundMediaNote", () => {
     expect(note).toBe("[media attached: /tmp/a.png (image/png)]");
   });
 
-  describe("MediaFailures (ENG-18116)", () => {
+  describe("MediaFailures (silent-drop reporting)", () => {
     it("renders a failure line even when no paths ever arrived (total failure)", () => {
       // This is exactly the bug: buildInboundMediaNote used to return
       // undefined whenever MediaPaths was empty, leaving the model with zero

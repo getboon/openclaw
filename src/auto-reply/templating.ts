@@ -36,7 +36,8 @@ export type InboundMediaFailureReason =
   | "expired_link"
   | "fetch_failed"
   | "over_file_limit"
-  | "unavailable";
+  | "unavailable"
+  | "timed_out";
 
 /**
  * One inbound attachment that failed before reaching the model. Deliberately
@@ -231,7 +232,7 @@ export type MsgContext = {
    * Attachments a channel or core staging step failed to deliver, unaligned
    * with MediaPaths/MediaUrls/MediaTypes (see InboundMediaFailure). Read by
    * buildInboundMediaNote (model-facing) and inbound-media-failure-notice.ts
-   * (user-facing) so a dropped attachment is never silent (ENG-18116).
+   * (user-facing) so a dropped attachment is never silent.
    */
   MediaFailures?: InboundMediaFailure[];
   /**

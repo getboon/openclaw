@@ -175,7 +175,7 @@ const SLACK_MEDIA_SSRF_POLICY = {
 };
 export const SLACK_MEDIA_READ_IDLE_TIMEOUT_MS = 60_000;
 export const SLACK_MEDIA_TOTAL_TIMEOUT_MS = 120_000;
-// Bounded retry for a transient download failure (ENG-18116). The 60s idle /
+// Bounded retry for a transient download failure. The 60s idle /
 // 120s total timeouts above already bound the whole retried operation, and
 // shouldRetryMediaFetch (src/media/fetch.ts) already declines to retry
 // max_bytes or an abort, so this cannot turn a permanent failure into a long
@@ -320,6 +320,21 @@ async function looksLikeHtmlFile(filePath: string): Promise<boolean> {
   }
 }
 
+/**
+ * Detects a saved download that resolved to an auth/login HTML page instead
+ * of binary media — the shape an expired/invalid Slack file URL actually
+ * takes (Slack returns 200 with an HTML login page, not an HTTP error).
+ * Shared by the direct-file and forwarded-image download paths so both
+ * report `expired_link` instead of treating the HTML page as a success.
+ */
+async function isHtmlAuthPageDownload(saved: {
+  path: string;
+  contentType?: string;
+}): Promise<boolean> {
+  const detectedMime = normalizeOptionalLowercaseString(saved.contentType?.split(";")[0]);
+  return detectedMime === "text/html" || (await looksLikeHtmlFile(saved.path));
+}
+
 const MAX_SLACK_MEDIA_CONCURRENCY = 3;
 const MAX_SLACK_FORWARDED_ATTACHMENTS = 8;
 
@@ -375,10 +390,15 @@ async function downloadSlackMediaFile(params: {
   totalTimeoutMs?: number;
   abortSignal?: AbortSignal;
 }): Promise<SlackMediaDownloadResult> {
-  const { url: slackUrl, requestInit } = createSlackMediaRequest(params.url, params.token);
-  const fetchImpl = createSlackMediaFetch();
   let saved: Awaited<ReturnType<typeof saveSlackMedia>>;
   try {
+    // createSlackMediaRequest throws on a malformed URL, a non-HTTPS
+    // protocol, or a non-Slack hostname (assertSlackFileUrl) — it must stay
+    // inside this try, or one bad attachment throws out of mapLimit's
+    // Promise.all and rejects the entire batch instead of becoming a
+    // per-attachment failure.
+    const { url: slackUrl, requestInit } = createSlackMediaRequest(params.url, params.token);
+    const fetchImpl = createSlackMediaFetch();
     saved = await saveSlackMedia({
       options: {
         url: slackUrl,
@@ -398,17 +418,14 @@ async function downloadSlackMediaFile(params: {
     return slackMediaDownloadFailure(params.file, classifySlackMediaFetchError(err));
   }
 
-  // Guard against auth/login HTML pages returned instead of binary media —
-  // the shape an expired/invalid Slack file URL actually takes (Slack
-  // returns 200 with an HTML login page, not an HTTP error). Allow
-  // user-provided HTML files through.
+  // Guard against auth/login HTML pages returned instead of binary media.
+  // Allow user-provided HTML files through.
   const fileMime = normalizeOptionalLowercaseString(params.file.mimetype);
   const fileName = normalizeLowercaseStringOrEmpty(params.file.name);
   const isExpectedHtml =
     fileMime === "text/html" || fileName.endsWith(".html") || fileName.endsWith(".htm");
   if (!isExpectedHtml) {
-    const detectedMime = normalizeOptionalLowercaseString(saved.contentType?.split(";")[0]);
-    if (detectedMime === "text/html" || (await looksLikeHtmlFile(saved.path))) {
+    if (await isHtmlAuthPageDownload(saved)) {
       await fs.rm(saved.path, { force: true }).catch(() => undefined);
       logVerbose(
         `slack: file id=${params.file.id} download resolved to an HTML page (expired/invalid link)`,
@@ -480,7 +497,7 @@ async function mapLimit<T, R>(
 /**
  * Downloads all files attached to a Slack message. Never silently drops a
  * failed file — every attachment that didn't download successfully is
- * reported in `failures` instead of vanishing (ENG-18116).
+ * reported in `failures` instead of vanishing.
  */
 export async function resolveSlackMedia(params: {
   files?: SlackFile[];
@@ -515,7 +532,11 @@ export async function resolveSlackMedia(params: {
         totalTimeoutMs: params.totalTimeoutMs,
         abortSignal: params.abortSignal,
       });
-      if (result.status === "ok" || !eventUrl) {
+      // A fresh URL only helps a stale/expired signature — the file is
+      // still oversize (or over the file-count cap) no matter which URL
+      // fetches it, so retrying would just re-download the same too-large
+      // body for nothing.
+      if (result.status === "ok" || !eventUrl || result.failure.reason === "too_large") {
         return result;
       }
 
@@ -608,12 +629,22 @@ export async function resolveSlackAttachmentContent(params: {
           totalTimeoutMs: params.totalTimeoutMs ?? SLACK_MEDIA_TOTAL_TIMEOUT_MS,
           abortSignal: params.abortSignal,
         });
-        const label = saved.fileName ?? "forwarded image";
-        allMedia.push({
-          path: saved.path,
-          contentType: saved.contentType,
-          placeholder: `[Forwarded image: ${label}]`,
-        });
+        // A forwarded attachment is only ever treated as an image (see
+        // resolveForwardedAttachmentImageUrl), so unlike downloadSlackMediaFile
+        // there is no "expected HTML" exception to check first. Note: this
+        // does NOT skip the att.files check below — a forwarded attachment
+        // can carry both an image_url and separate files.
+        if (await isHtmlAuthPageDownload(saved)) {
+          await fs.rm(saved.path, { force: true }).catch(() => undefined);
+          allFailures.push({ reason: "expired_link" });
+        } else {
+          const label = saved.fileName ?? "forwarded image";
+          allMedia.push({
+            path: saved.path,
+            contentType: saved.contentType,
+            placeholder: `[Forwarded image: ${label}]`,
+          });
+        }
       } catch (err) {
         allFailures.push({ reason: classifySlackMediaFetchError(err) });
       }

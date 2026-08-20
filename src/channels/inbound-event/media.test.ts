@@ -86,7 +86,7 @@ describe("channel inbound media facts", () => {
     ]);
   });
 
-  it("adds MediaFailures without touching the aligned arrays (ENG-18116)", () => {
+  it("adds MediaFailures without touching the aligned arrays", () => {
     const payload = buildChannelInboundMediaPayload(
       [{ path: "/tmp/image.png", contentType: "image/png", kind: "image" }],
       [{ name: "spec.pdf", reason: "expired_link" }],

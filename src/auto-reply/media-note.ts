@@ -27,7 +27,14 @@ function normalizeManagedInboundMediaRef(value: string): string {
   return `media://inbound/${path.basename(candidate)}`;
 }
 
-function sanitizeInlineMediaNoteValue(value: string | undefined): string {
+/**
+ * Strips control characters/newlines and closing brackets from a value
+ * before it's interpolated into prompt or chat text. Exported so
+ * inbound-media-failure-notice.ts's user-facing copy stays consistent with
+ * this module's model-facing copy for the same untrusted, user-controlled
+ * attachment filename.
+ */
+export function sanitizeInlineMediaNoteValue(value: string | undefined): string {
   const trimmed = value?.trim();
   if (!trimmed) {
     return "";
@@ -89,16 +96,17 @@ function isAudioPath(pathLocal: string | undefined): boolean {
   return false;
 }
 
-// Model-facing phrase per closed failure reason (ENG-18116). Keyed as a
-// Record so adding a reason to InboundMediaFailureReason is a compile error
-// here until this map handles it too — the same discipline applies to the
-// user-facing copy table in inbound-media-failure-notice.ts.
+// Model-facing phrase per closed failure reason. Keyed as a Record so adding
+// a reason to InboundMediaFailureReason is a compile error here until this
+// map handles it too — the same discipline applies to the user-facing copy
+// table in inbound-media-failure-notice.ts.
 const MEDIA_FAILURE_REASON_TEXT: Record<InboundMediaFailureReason, string> = {
   too_large: "file too large",
   expired_link: "download link expired",
   fetch_failed: "download failed",
   over_file_limit: "too many files attached",
   unavailable: "temporarily unavailable",
+  timed_out: "download timed out",
 };
 
 function formatMediaFailureLine(failure: InboundMediaFailure): string {
@@ -159,7 +167,7 @@ export function buildInboundMediaNote(ctx: MsgContext): string | undefined {
         : [];
   // Failures are unaligned with paths (see InboundMediaFailure) — render them
   // even when paths is empty (a total failure), so the model is never left
-  // with zero signal that an attachment was expected (ENG-18116).
+  // with zero signal that an attachment was expected.
   const failureLines = (ctx.MediaFailures ?? []).map(formatMediaFailureLine);
   if (paths.length === 0) {
     return failureLines.length > 0 ? failureLines.join("\n") : undefined;

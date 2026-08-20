@@ -967,7 +967,7 @@ Second paragraph should still reach the agent after Slack's preview cutoff.`;
     expect(prepared).toBeNull();
   });
 
-  it("delivers file-only message with a per-file failure placeholder and MediaFailures when media download fails (ENG-18116)", async () => {
+  it("delivers file-only message with a per-file failure placeholder and MediaFailures when media download fails", async () => {
     // Files without url_private will fail to download, simulating a download
     // failure. The message should still be delivered with a fallback
     // placeholder instead of being silently dropped (#25064), and every
@@ -992,7 +992,7 @@ Second paragraph should still reach the agent after Slack's preview cutoff.`;
     ]);
   });
 
-  it("reports only the failed file when 1 of 2 attachments succeeds (partial failure, ENG-18116)", async () => {
+  it("reports only the failed file when 1 of 2 attachments succeeds (partial failure)", async () => {
     // The old `!mediaPlaceholder` guard in prepare-content.ts meant a
     // successful sibling attachment hid every other file's failure. This is
     // the regression guard for that hole.
