@@ -271,7 +271,7 @@ describe("createSlackMessageHandler", () => {
     await Promise.all([handledFailure, flushFailure]);
   });
 
-  it("preserves an unrelated app_mention's winner marker across a raced message dispatch failure (ENG-18283 P1)", async () => {
+  it("preserves an unrelated app_mention's winner marker across a raced message dispatch failure", async () => {
     createHandlerWithTracker();
     const ts = "1709000000.000750";
     const appMentionEntry = {
@@ -299,19 +299,27 @@ describe("createSlackMessageHandler", () => {
     await onFlushCallbacks[0]?.([appMentionEntry]);
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(2);
 
-    // Now let the message's raced dispatch settle retryable. A native
-    // (non-relay) retry gets scheduled, so the flush resolves rather than
-    // rejecting (ENG-18283 P2). Its cleanup must only undo its own optimistic
-    // state, not app_mention's just-set marker.
-    rejectMessageDispatch?.(
-      new Error("reply session initialization conflicted for agent:main:slack:channel:C111"),
-    );
-    await expect(messageFlush).resolves.toBeUndefined();
+    // Rejecting below schedules a real internal retry via setTimeout. Fake
+    // timers keep that scheduled retry from firing after this test ends and
+    // leaking an extra enqueue call into a later test's assertions.
+    vi.useFakeTimers();
+    try {
+      // Now let the message's raced dispatch settle retryable. A native
+      // (non-relay) retry gets scheduled, so the flush resolves rather than
+      // rejecting. Its cleanup must only undo its own optimistic state, not
+      // app_mention's just-set marker.
+      rejectMessageDispatch?.(
+        new Error("reply session initialization conflicted for agent:main:slack:channel:C111"),
+      );
+      await expect(messageFlush).resolves.toBeUndefined();
 
-    // A later replay for the same ts must still be deduped by app_mention's
-    // preserved marker rather than dispatching a duplicate reply.
-    await onFlushCallbacks[0]?.([messageEntry]);
-    expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(2);
+      // A later replay for the same ts must still be deduped by app_mention's
+      // preserved marker rather than dispatching a duplicate reply.
+      await onFlushCallbacks[0]?.([messageEntry]);
+      expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not auto-retry a relay-owned dispatch after a retryable session-init-conflict failure", async () => {

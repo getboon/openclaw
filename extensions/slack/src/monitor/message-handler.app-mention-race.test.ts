@@ -263,7 +263,7 @@ describe("createSlackMessageHandler app_mention race handling", () => {
 
     // A scheduled retry already owns recovery, so the flush does not rethrow to
     // the debounce onError log (which would otherwise still fire the watchdog
-    // alert ENG-18283 exists to remove) for a failure a later attempt resolves.
+    // alert this fix exists to remove) for a failure a later attempt resolves.
     await expect(sendMessageEvent(handler, "1700000000.000250")).resolves.toBeUndefined();
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(1);
 
