@@ -99,6 +99,11 @@ const DEFAULT_MEDIA_AUTH_HOST_ALLOWLIST = [
   "graph.microsoft.us",
   "graph.microsoft.de",
   "graph.microsoft.cn",
+  // Teams drag-drop file CDN. The pre-authenticated *.asyncgw.teams.microsoft.com
+  // URL 401s once its embedded token goes stale; this entry lets the bot-token
+  // auth-fallback retry attach a token instead of silently dropping the media.
+  // (ENG-15866)
+  "asyncgw.teams.microsoft.com",
 ] as const;
 
 export const GRAPH_ROOT = "https://graph.microsoft.com/v1.0";
