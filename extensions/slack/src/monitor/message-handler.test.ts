@@ -286,7 +286,7 @@ describe("createSlackMessageHandler", () => {
     // Message's flush starts first (finding no app_mention marker set yet) and is
     // held pending mid-dispatch while app_mention's own, separate flush completes.
     let rejectMessageDispatch: ((err: unknown) => void) | undefined;
-    const messageDispatchPending = new Promise((_resolve, reject) => {
+    const messageDispatchPending = new Promise<void>((_resolve, reject) => {
       rejectMessageDispatch = reject;
     });
     dispatchPreparedSlackMessageMock.mockImplementationOnce(() => messageDispatchPending);
