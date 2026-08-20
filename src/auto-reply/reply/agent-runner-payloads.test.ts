@@ -208,6 +208,41 @@ describe("buildReplyPayloads media filter integration", () => {
     );
   });
 
+  it("preserves source-reply mirrors when matching-route text evidence would dedupe them", async () => {
+    const payload = setReplyPayloadMetadata(
+      { text: "source reply" },
+      {
+        sourceReplyTranscriptMirror: {
+          sessionKey: "agent:main",
+          text: "source reply",
+        },
+      },
+    );
+
+    const { replyPayloads } = await buildReplyPayloads({
+      ...baseParams,
+      payloads: [payload],
+      messageProvider: "telegram",
+      originatingTo: "268300329",
+      messagingToolSentTexts: ["source reply"],
+      messagingToolSentTargets: [
+        {
+          tool: "telegram",
+          provider: "telegram",
+          to: "268300329",
+          text: "source reply",
+        },
+      ],
+    });
+
+    expect(replyPayloads).toHaveLength(1);
+    expect(replyPayloads[0]?.text).toBe("source reply");
+    expect(getReplyPayloadMetadata(replyPayloads[0])?.sourceReplyTranscriptMirror).toEqual({
+      sessionKey: "agent:main",
+      text: "source reply",
+    });
+  });
+
   it("strips media URL from payload when in messagingToolSentMediaUrls", async () => {
     const { replyPayloads } = await buildReplyPayloads({
       ...baseParams,
