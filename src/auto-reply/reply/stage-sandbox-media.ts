@@ -39,6 +39,15 @@ export type StageSandboxMediaResult = {
 
 const EMPTY_STAGE_RESULT: StageSandboxMediaResult = { staged: new Map() };
 
+// Tracks, per ctx, the exact absolute source paths already recorded as a
+// staging failure — keyed by ctx identity (not name+reason) so two distinct
+// files that happen to share a basename (allocateStagedFileName renames
+// staged-success collisions to `name-1.ext`, but a failure never reaches
+// that rename) are never conflated: only a genuine re-invocation on the SAME
+// source is suppressed. A WeakMap lets entries be collected once ctx is no
+// longer referenced elsewhere.
+const recordedStagingFailureSources = new WeakMap<MsgContext, Set<string>>();
+
 export async function stageSandboxMedia(params: {
   ctx: MsgContext;
   sessionCtx: TemplateContext;
@@ -83,19 +92,21 @@ export async function stageSandboxMedia(params: {
   // Without this, the sandboxed agent gets an unstaged absolute host path it
   // cannot open and may confidently describe a file it never read.
   //
-  // Idempotent by name+reason: stageRemoteInboundMediaBeforeUnderstandingIfNeeded
+  // Idempotent per exact source path: stageRemoteInboundMediaBeforeUnderstandingIfNeeded
   // (get-reply.ts) can invoke stageSandboxMedia a second time on the SAME ctx
   // for remote-host media when the first attempt staged nothing — without
   // this guard the same file's failure would be appended twice.
   const recordStagingFailure = (source: string, reason: "too_large" | "unavailable") => {
-    const name = path.basename(source);
-    const alreadyRecorded = ctx.MediaFailures?.some(
-      (failure) => failure.name === name && failure.reason === reason,
-    );
-    if (alreadyRecorded) {
+    let recordedSources = recordedStagingFailureSources.get(ctx);
+    if (!recordedSources) {
+      recordedSources = new Set();
+      recordedStagingFailureSources.set(ctx, recordedSources);
+    }
+    if (recordedSources.has(source)) {
       return;
     }
-    (ctx.MediaFailures ??= []).push({ name, reason });
+    recordedSources.add(source);
+    (ctx.MediaFailures ??= []).push({ name: path.basename(source), reason });
   };
 
   for (const raw of rawPaths) {

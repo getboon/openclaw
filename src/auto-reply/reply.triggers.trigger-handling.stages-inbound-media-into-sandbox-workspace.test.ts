@@ -307,4 +307,39 @@ describe("stageSandboxMedia", () => {
       expect(ctx.MediaFailures).toEqual([{ name: basename(mediaPath), reason: "too_large" }]);
     });
   });
+
+  it("records a staging failure for each of two different oversized files that share a basename", async () => {
+    await withSandboxMediaTempHome("openclaw-triggers-", async (home) => {
+      const { cfg, workspaceDir } = await setupSandboxWorkspace(home);
+
+      const oversizedPayload = Buffer.alloc(MEDIA_MAX_BYTES + 1, 0x41);
+      const firstDir = join(home, ".openclaw", "media", "inbound", "a");
+      const secondDir = join(home, ".openclaw", "media", "inbound", "b");
+      await fs.mkdir(firstDir, { recursive: true });
+      await fs.mkdir(secondDir, { recursive: true });
+      const firstPath = join(firstDir, "oversized.bin");
+      const secondPath = join(secondDir, "oversized.bin");
+      await fs.writeFile(firstPath, oversizedPayload);
+      await fs.writeFile(secondPath, oversizedPayload);
+
+      const { ctx, sessionCtx } = createSandboxMediaContexts(firstPath);
+      ctx.MediaPaths = [firstPath, secondPath];
+      sessionCtx.MediaPaths = ctx.MediaPaths;
+
+      await stageSandboxMedia({
+        ctx,
+        sessionCtx,
+        cfg,
+        sessionKey: "agent:main:main",
+        workspaceDir,
+      });
+
+      // Both distinct sources must be reported even though they share a
+      // basename — a name+reason dedup would wrongly collapse this to one.
+      expect(ctx.MediaFailures).toEqual([
+        { name: "oversized.bin", reason: "too_large" },
+        { name: "oversized.bin", reason: "too_large" },
+      ]);
+    });
+  });
 });

@@ -1218,7 +1218,34 @@ describe("resolveSlackAttachmentContent", () => {
       maxBytes: 1024 * 1024,
     });
 
-    expect(result).toEqual({ text: "", media: [], failures: [{ reason: "fetch_failed" }] });
+    expect(result).toEqual({
+      text: "",
+      media: [],
+      failures: [{ name: "forwarded.jpg", reason: "fetch_failed" }],
+    });
+  });
+
+  it("reports an expired_link failure with a filename for an HTML auth page on a forwarded image", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response("<!DOCTYPE html><html><body>login</body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      }),
+    );
+
+    const result = await resolveSlackAttachmentContent({
+      attachments: [{ is_share: true, image_url: "https://files.slack.com/forwarded.jpg" }],
+      token: "xoxb-test-token",
+      maxBytes: 1024 * 1024,
+    });
+
+    expect(result).toEqual({
+      text: "",
+      media: [],
+      failures: [
+        { name: "forwarded.jpg", contentType: "text/html; charset=utf-8", reason: "expired_link" },
+      ],
+    });
   });
 
   it("merges nested file-attachment failures alongside forwarded-image failures", async () => {

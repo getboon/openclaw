@@ -485,6 +485,20 @@ function resolveForwardedAttachmentImageUrl(attachment: SlackAttachment): string
   }
 }
 
+/**
+ * Best-effort display name for a forwarded image that failed before a local
+ * filename was ever known (saveSlackMedia threw) — falls back to the URL's
+ * basename so the failure names something more specific than "file 1".
+ */
+function resolveForwardedImageUrlBasename(imageUrl: string): string {
+  try {
+    const basename = new URL(imageUrl).pathname.split("/").at(-1);
+    return basename ? decodeURIComponent(basename) : "forwarded image";
+  } catch {
+    return "forwarded image";
+  }
+}
+
 async function mapLimit<T, R>(
   items: T[],
   limit: number,
@@ -653,7 +667,11 @@ export async function resolveSlackAttachmentContent(params: {
         // can carry both an image_url and separate files.
         if (await isHtmlAuthPageDownload(saved)) {
           await fs.rm(saved.path, { force: true }).catch(() => undefined);
-          allFailures.push({ reason: "expired_link" });
+          allFailures.push({
+            name: saved.fileName ?? "forwarded image",
+            contentType: saved.contentType,
+            reason: "expired_link",
+          });
         } else {
           const label = saved.fileName ?? "forwarded image";
           allMedia.push({
@@ -663,7 +681,10 @@ export async function resolveSlackAttachmentContent(params: {
           });
         }
       } catch (err) {
-        allFailures.push({ reason: classifySlackMediaFetchError(err) });
+        allFailures.push({
+          name: resolveForwardedImageUrlBasename(imageUrl),
+          reason: classifySlackMediaFetchError(err),
+        });
       }
     }
 

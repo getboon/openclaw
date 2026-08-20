@@ -333,6 +333,37 @@ export async function getReplyFromConfig(
         attributes: traceAttributes,
       }),
     );
+
+  // Reports ctx.MediaFailures added since the last call, so the notice fires
+  // exactly once per failure regardless of where in this function it's
+  // known: channel-reported failures are already on ctx by the time this
+  // function is entered, but several branches below (native slash command,
+  // directive, inline action, before_agent_reply hook) can return a synthetic
+  // reply before sandbox staging (further down) ever runs and adds its own
+  // failures. Calling this here, before every one of those early-return
+  // paths, means a plugin/command-handled message still gets notified about
+  // channel-level failures; calling it again after staging picks up anything
+  // staging added, without repeating what was already reported. `finalized`
+  // and `ctx` are the same object (finalizeInboundContext casts in place),
+  // so ctx.MediaFailures already reflects it here.
+  let reportedMediaFailureCount = 0;
+  const reportNewMediaFailures = async () => {
+    if (useFastTestBootstrap) {
+      return;
+    }
+    const failures = ctx.MediaFailures ?? [];
+    const newFailures = failures.slice(reportedMediaFailureCount);
+    if (newFailures.length === 0) {
+      return;
+    }
+    reportedMediaFailureCount = failures.length;
+    const { sendInboundMediaFailureNotice } = await loadInboundMediaFailureNoticeRuntime();
+    void traceGetReplyPhase("reply.media_failure_notice", () =>
+      sendInboundMediaFailureNotice({ ctx, cfg, failures: newFailures }),
+    );
+  };
+  await reportNewMediaFailures();
+
   const mergedSkillFilter = resolverTiming.measureSync("reply.resolve_skill_filter", () =>
     mergeSkillFilters(opts?.skillFilter, resolveAgentSkillsFilter(cfg, agentId)),
   );
@@ -963,33 +994,6 @@ export async function getReplyFromConfig(
     }
   }
 
-  // Reports ctx.MediaFailures added since the last call, so the notice fires
-  // exactly once per failure regardless of where in this function it's
-  // known: channel-reported failures are already on ctx by the time this
-  // function is entered, but a before_agent_reply hook below can claim the
-  // turn and return before sandbox staging (further below) ever runs and
-  // adds its own failures. Calling this before the hook check means a
-  // plugin-handled message still gets notified about channel-level
-  // failures; calling it again after staging picks up anything staging
-  // added, without repeating what was already reported.
-  let reportedMediaFailureCount = 0;
-  const reportNewMediaFailures = async () => {
-    if (useFastTestBootstrap) {
-      return;
-    }
-    const failures = ctx.MediaFailures ?? [];
-    const newFailures = failures.slice(reportedMediaFailureCount);
-    if (newFailures.length === 0) {
-      return;
-    }
-    reportedMediaFailureCount = failures.length;
-    const { sendInboundMediaFailureNotice } = await loadInboundMediaFailureNoticeRuntime();
-    void traceGetReplyPhase("reply.media_failure_notice", () =>
-      sendInboundMediaFailureNotice({ ctx, cfg, failures: newFailures }),
-    );
-  };
-  await reportNewMediaFailures();
-
   // Allow plugins to intercept and return a synthetic reply before the LLM runs.
   if (!useFastTestBootstrap) {
     const { getGlobalHookRunner } = await loadHookRunnerGlobal();
@@ -1054,7 +1058,8 @@ export async function getReplyFromConfig(
   }
 
   // Report any failures sandbox staging just added (channel-level failures
-  // were already reported before the hook check above).
+  // were already reported by the earlier call, before every early-return
+  // path above).
   await reportNewMediaFailures();
 
   logResolverTiming("milestone", "before_run_prepared_reply");
