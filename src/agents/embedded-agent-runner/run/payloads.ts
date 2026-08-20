@@ -299,12 +299,19 @@ function resolveToolErrorWarningPolicy(params: {
       includeDetails,
     };
   }
-  // ENG-16330: recovered exec/process/tmux failures are non-terminal status, not
-  // errors — the model saw the exit code and still produced the answer. Without
-  // details to show, a warning badge only alarms the customer. Upstream #103574
-  // relocates this above the mutating branch as `!hasUserFacingReply`; boon keeps
-  // the quieter placement deliberately.
-  if (isExecLikeToolName(params.lastToolError.toolName) && !includeDetails) {
+  // ENG-16330: a recovered exec/process/tmux failure is non-terminal status, not an
+  // error — the model saw the exit code and still produced the answer, so with no
+  // details to show a warning badge only alarms the customer. Boon keeps this below
+  // the mutating branch (upstream #103574 hoists it above and drops includeDetails),
+  // but the suppression REQUIRES a delivered reply: a read-only exec failure
+  // (mutatingAction false) with no reply otherwise produced zero payloads and the
+  // failure vanished silently. That is the gap upstream's `!hasUserFacingReply`
+  // closed; keep boon's placement and close it here.
+  if (
+    isExecLikeToolName(params.lastToolError.toolName) &&
+    params.hasUserFacingReply &&
+    !includeDetails
+  ) {
     return { showWarning: false, includeDetails };
   }
   return {
