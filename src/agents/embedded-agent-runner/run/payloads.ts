@@ -299,6 +299,11 @@ function resolveToolErrorWarningPolicy(params: {
       includeDetails,
     };
   }
+  // ENG-16330: recovered exec/process/tmux failures are non-terminal status, not
+  // errors — the model saw the exit code and still produced the answer. Without
+  // details to show, a warning badge only alarms the customer. Upstream #103574
+  // relocates this above the mutating branch as `!hasUserFacingReply`; boon keeps
+  // the quieter placement deliberately.
   if (isExecLikeToolName(params.lastToolError.toolName) && !includeDetails) {
     return { showWarning: false, includeDetails };
   }

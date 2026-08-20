@@ -79,6 +79,10 @@ export {
 const log = createSubsystemLogger("errors");
 const sandboxToolPolicyAuditMessages = new WeakSet<AssistantMessage>();
 export const GENERIC_ASSISTANT_ERROR_TEXT = "LLM request failed.";
+export const AUTH_INVALID_TOKEN_USER_TEXT =
+  "Authentication failed (provider returned HTTP 401). " +
+  "Your provider token may have expired — try the request again in a moment. " +
+  "If the failure persists, re-authenticate this provider.";
 const PROVIDER_SCHEMA_REJECTION_USER_TEXT =
   "LLM request failed: provider rejected the request schema or tool payload.";
 const MODEL_NOT_FOUND_USER_TEXT =
@@ -1141,6 +1145,26 @@ function classifyFailoverReasonFromCode(raw: string | undefined): FailoverReason
   }
 }
 
+function classifyFailoverReasonFromErrorType(raw: string | undefined): FailoverReason | null {
+  const normalized = normalizeOptionalLowercaseString(raw);
+  switch (normalized) {
+    case "server_error":
+    case "upstream_error":
+      return "server_error";
+    case "overloaded_error":
+      return "overloaded";
+    default:
+      return null;
+  }
+}
+
+function classifyFailoverClassificationFromErrorType(
+  raw: string | undefined,
+): FailoverClassification | null {
+  const reason = classifyFailoverReasonFromErrorType(raw);
+  return reason ? toReasonClassification(reason) : null;
+}
+
 function isProvider(provider: string | undefined, match: string): boolean {
   const normalized = normalizeOptionalLowercaseString(provider);
   return Boolean(normalized && normalized.includes(match));
@@ -1400,9 +1424,14 @@ export function classifyFailoverSignal(signal: FailoverSignal): FailoverClassifi
           errorType: signal.errorType,
         })
       : null;
+  const messageOrDetailClassification = mergeMessageAndDetailClassification(
+    messageClassification,
+    detailClassification,
+  );
+  const errorTypeClassification = classifyFailoverClassificationFromErrorType(signal.errorType);
   const effectiveMessageClassification = providerPluginReason
     ? toReasonClassification(providerPluginReason)
-    : mergeMessageAndDetailClassification(messageClassification, detailClassification);
+    : (messageOrDetailClassification ?? errorTypeClassification);
   const codeReason = classifyFailoverReasonFromCode(signal.code);
   if (codeReason === "auth_permanent") {
     return toReasonClassification(codeReason);
@@ -1658,11 +1687,7 @@ export function formatAssistantErrorText(
   }
 
   if (providerRuntimeFailureKind === "auth_invalid_token") {
-    return (
-      "Authentication failed (provider returned HTTP 401). " +
-      "Your provider token may have expired — try the request again in a moment. " +
-      "If the failure persists, re-authenticate this provider."
-    );
+    return AUTH_INVALID_TOKEN_USER_TEXT;
   }
 
   if (providerRuntimeFailureKind === "upstream_html") {
@@ -1909,8 +1934,17 @@ function isStructuredServerErrorMessage(raw: string): boolean {
   if (!raw) {
     return false;
   }
+  const parsedType = normalizeOptionalLowercaseString(parseApiErrorInfo(raw)?.type);
+  if (parsedType === "server_error" || parsedType === "upstream_error") {
+    return true;
+  }
   const value = normalizeLowercaseStringOrEmpty(raw);
-  return value.includes('"type":"server_error"') || value.includes('"code":"server_error"');
+  return (
+    value.includes('"type":"server_error"') ||
+    value.includes('"code":"server_error"') ||
+    value.includes('"type":"upstream_error"') ||
+    value.includes('"code":"upstream_error"')
+  );
 }
 
 export function parseImageDimensionError(raw: string): {

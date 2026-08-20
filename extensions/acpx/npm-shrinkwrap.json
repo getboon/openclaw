@@ -1,12 +1,12 @@
 {
   "name": "@openclaw/acpx",
-  "version": "2026.6.11",
+  "version": "2026.6.34",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/acpx",
-      "version": "2026.6.11",
+      "version": "2026.6.34",
       "dependencies": {
         "@agentclientprotocol/claude-agent-acp": "0.39.0",
         "@zed-industries/codex-acp": "0.15.0",
@@ -1404,9 +1404,9 @@
       }
     },
     "node_modules/fast-uri": {
-      "version": "3.1.5",
-      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.5.tgz",
-      "integrity": "sha512-gHwA1O9LDIcKunMKhObS/HimwtehO1nPUECKAu5TpKgaO19fcWEl4bliWe1jWxVFvIXztJjjQ4L8XQ1EU9f7Jw==",
+      "version": "4.1.2",
+      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-4.1.2.tgz",
+      "integrity": "sha512-TyGmBcbDTZXcb2cj5MV89DrF42DKvb3y5DDUNh95iO+IMeAzMkVSxK1PZRrRIpc9yg8U2GhGdbofNa0LS/a4Bw==",
       "funding": [
         {
           "type": "github",

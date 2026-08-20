@@ -1,7 +1,10 @@
 // Tracks active reply runs so stop, queue, and status commands can coordinate.
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { createAgentRunRestartAbortError } from "../../agents/run-termination.js";
+import { areDiagnosticsEnabledForProcess } from "../../infra/diagnostic-events.js";
 import {
+  BLOCKED_TOOL_CALL_ABORT_FLOOR_MS,
+  getDiagnosticSessionActivitySnapshot,
   markDiagnosticEmbeddedRunEnded,
   markDiagnosticEmbeddedRunStarted,
 } from "../../logging/diagnostic-run-activity.js";
@@ -20,6 +23,7 @@ export type ReplyBackendHandle = {
   readonly kind: ReplyBackendKind;
   cancel(reason?: ReplyBackendCancelReason): void;
   isStreaming(): boolean;
+  isAbortable?: () => boolean;
   queueMessage?: (text: string) => Promise<void>;
   /**
    * Compatibility-only hook so legacy "abort compacting runs" paths can still
@@ -84,6 +88,8 @@ export type ReplyOperation = {
   readonly result: ReplyOperationResult | null;
   /** Epoch ms captured when the operation was created (turn start). */
   readonly startedAt: number;
+  readonly lastActivityAtMs: number;
+  recordActivity(): void;
   setPhase(next: "queued" | "preflight_compacting" | "memory_flushing" | "running"): void;
   updateSessionId(nextSessionId: string): void;
   attachBackend(handle: ReplyBackendHandle): void;
@@ -108,8 +114,8 @@ export type ReplyOperation = {
     timeout?: number | ReplyFollowupAdmissionBarrierTimeoutPolicy,
   ): void;
   fail(code: Exclude<ReplyOperationFailureCode, "aborted_by_user">, cause?: unknown): void;
-  abortByUser(): void;
-  abortForRestart(): void;
+  abortByUser(): boolean;
+  abortForRestart(): boolean;
 };
 
 export type ReplyRunRegistry = {
@@ -164,6 +170,7 @@ const replyRunState = resolveGlobalSingleton<ReplyRunState>(REPLY_RUN_STATE_KEY,
 replyRunState.followupAdmissionBarriersByKey ??= new Map();
 
 export const REPLY_RUN_IDLE_SETTLE_TIMEOUT_MS = 15_000;
+const REPLY_RUN_STALE_TAKEOVER_MS = 10 * 60_000;
 
 const REPLY_RUN_TERMINAL_LISTENERS_KEY = Symbol.for("openclaw.replyRunTerminalListeners");
 const replyRunTerminalListeners = resolveGlobalSingleton<
@@ -266,6 +273,21 @@ const afterClearCallbacksByOperation = new WeakMap<
 
 function getAttachedBackend(operation: ReplyOperation): ReplyBackendHandle | undefined {
   return attachedBackendByOperation.get(operation);
+}
+
+function isReplyOperationAbortable(operation: ReplyOperation): boolean {
+  if (operation.result) {
+    return false;
+  }
+  const backend = getAttachedBackend(operation);
+  if (!backend?.isAbortable) {
+    return true;
+  }
+  try {
+    return backend.isAbortable();
+  } catch {
+    return false;
+  }
 }
 
 /** Run work after an operation no longer owns its session lane. */
@@ -448,9 +470,14 @@ export function createReplyOperation(params: {
   let currentSessionId = sessionId;
   let phase: ReplyOperationPhase = "queued";
   let result: ReplyOperationResult | null = null;
+  let lastActivityAtMs = Date.now();
   let stateCleared = false;
   let retainFailureUntilComplete = false;
   let deadlineTimer: NodeJS.Timeout | undefined;
+
+  const recordActivity = () => {
+    lastActivityAtMs = Date.now();
+  };
 
   const clearState = (
     afterClearBarrier?: PromiseLike<unknown>,
@@ -548,10 +575,15 @@ export function createReplyOperation(params: {
     get startedAt() {
       return startedAt;
     },
+    get lastActivityAtMs() {
+      return lastActivityAtMs;
+    },
+    recordActivity,
     setPhase(next) {
       if (result) {
         return;
       }
+      recordActivity();
       phase = next;
     },
     updateSessionId(nextSessionId) {
@@ -562,6 +594,7 @@ export function createReplyOperation(params: {
       if (!normalizedNextSessionId || normalizedNextSessionId === currentSessionId) {
         return;
       }
+      recordActivity();
       if (
         replyRunState.activeKeysBySessionId.has(normalizedNextSessionId) &&
         replyRunState.activeKeysBySessionId.get(normalizedNextSessionId) !== sessionKey
@@ -590,6 +623,7 @@ export function createReplyOperation(params: {
         );
         return;
       }
+      recordActivity();
       attachedBackendByOperation.set(operation, handle);
       if (controller.signal.aborted) {
         handle.cancel("superseded");
@@ -631,6 +665,9 @@ export function createReplyOperation(params: {
       }
     },
     abortByUser() {
+      if (!isReplyOperationAbortable(operation)) {
+        return false;
+      }
       const phaseBeforeAbort = phase;
       abortWithReason("user_abort", createUserAbortError(), {
         abortedCode: "aborted_by_user",
@@ -638,8 +675,12 @@ export function createReplyOperation(params: {
       if (phaseBeforeAbort === "queued") {
         clearState();
       }
+      return true;
     },
     abortForRestart() {
+      if (!isReplyOperationAbortable(operation)) {
+        return false;
+      }
       const phaseBeforeAbort = phase;
       abortWithReason("restart", createAgentRunRestartAbortError(), {
         abortedCode: "aborted_for_restart",
@@ -647,6 +688,7 @@ export function createReplyOperation(params: {
       if (phaseBeforeAbort === "queued") {
         clearState();
       }
+      return true;
     },
   };
 
@@ -709,8 +751,7 @@ export const replyRunRegistry: ReplyRunRegistry = {
     if (!operation) {
       return false;
     }
-    operation.abortByUser();
-    return true;
+    return operation.abortByUser();
   },
   waitForIdle(sessionKey, timeoutMs, opts) {
     const normalizedSessionKey = normalizeOptionalString(sessionKey);
@@ -798,10 +839,36 @@ export function isReplyRunStreamingForSessionId(sessionId: string): boolean {
   return getAttachedBackend(operation)?.isStreaming() ?? false;
 }
 
+export function isReplyRunEvidenceStaleBySessionId(sessionId: string): boolean {
+  const operation = resolveReplyRunForCurrentSessionId(sessionId);
+  if (!operation || operation.result || !areDiagnosticsEnabledForProcess()) {
+    return false;
+  }
+  const activity = getDiagnosticSessionActivitySnapshot({
+    sessionId: operation.sessionId,
+    sessionKey: operation.key,
+  });
+  const staleThresholdMs =
+    activity.activeWorkKind === "tool_call"
+      ? Math.max(REPLY_RUN_STALE_TAKEOVER_MS, BLOCKED_TOOL_CALL_ABORT_FLOOR_MS)
+      : REPLY_RUN_STALE_TAKEOVER_MS;
+  const replyActivityAgeMs = Date.now() - operation.lastActivityAtMs;
+  const evidenceAgeMs =
+    typeof activity.lastProgressAgeMs === "number"
+      ? Math.min(replyActivityAgeMs, activity.lastProgressAgeMs)
+      : replyActivityAgeMs;
+  return evidenceAgeMs > staleThresholdMs;
+}
+
 export function queueReplyRunMessage(sessionId: string, text: string): boolean {
   const operation = resolveReplyRunForCurrentSessionId(sessionId);
   const backend = operation ? getAttachedBackend(operation) : undefined;
   if (!operation || operation.phase !== "running" || !backend?.queueMessage) {
+    return false;
+  }
+  // Injection is not liveness evidence. Reject an evidence-dead backend so the
+  // caller can deliver directly instead of swallowing the message in a stale run.
+  if (isReplyRunEvidenceStaleBySessionId(sessionId)) {
     return false;
   }
   if (!backend.isStreaming()) {
@@ -816,8 +883,7 @@ export function abortReplyRunBySessionId(sessionId: string): boolean {
   if (!operation) {
     return false;
   }
-  operation.abortByUser();
-  return true;
+  return operation.abortByUser();
 }
 
 export function forceClearReplyRunBySessionId(sessionId: string, cause?: unknown): boolean {
@@ -901,8 +967,7 @@ export function abortActiveReplyRuns(opts: { mode: "all" | "compacting" }): bool
     if (opts.mode === "compacting" && !isReplyRunCompacting(operation)) {
       continue;
     }
-    operation.abortForRestart();
-    aborted = true;
+    aborted = operation.abortForRestart() || aborted;
   }
   return aborted;
 }

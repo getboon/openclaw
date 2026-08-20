@@ -1124,7 +1124,7 @@ Notes:
 - `enabled`: master toggle for instrumentation output (default: `true`).
 - `flags`: array of flag strings enabling targeted log output (supports wildcards like `"telegram.*"` or `"*"`).
 - `stuckSessionWarnMs`: no-progress age threshold in ms for classifying long-running processing sessions as `session.long_running`, `session.stalled`, or `session.stuck`. Reply, tool, status, block, and ACP progress reset the timer; repeated `session.stuck` diagnostics back off while unchanged.
-- `stuckSessionAbortMs`: no-progress age threshold in ms before eligible stalled active work may be abort-drained for recovery. When unset, OpenClaw uses the safer extended embedded-run window of at least 5 minutes and 3x `stuckSessionWarnMs`.
+- `stuckSessionAbortMs`: no-progress age threshold in ms before eligible stalled active work may be abort-drained for recovery. When unset, OpenClaw uses the safer extended embedded-run window of at least 5 minutes and 3x `stuckSessionWarnMs`. Blocked tool calls always retain a 15-minute minimum, even when this value is lower, so quiet long-running tools are not reclaimed while healthy.
 - `memoryPressureSnapshot`: captures a redacted pre-OOM stability snapshot when memory pressure reaches `critical` (default: `false`). Set to `true` to add the stability bundle file scan/write while keeping normal memory pressure events.
 - `otel.enabled`: enables the OpenTelemetry export pipeline (default: `false`). For the full configuration, signal catalog, and privacy model, see [OpenTelemetry export](/gateway/opentelemetry).
 - `otel.endpoint`: collector URL for OTel export.
@@ -1151,7 +1151,7 @@ Notes:
 ```json5
 {
   update: {
-    channel: "stable", // stable | beta | dev
+    channel: "stable", // stable | extended-stable | beta | dev
     checkOnStart: true,
 
     auto: {
@@ -1164,12 +1164,12 @@ Notes:
 }
 ```
 
-- `channel`: release channel for npm/git installs - `"stable"`, `"beta"`, or `"dev"`.
-- `checkOnStart`: check for npm updates when the gateway starts (default: `true`).
-- `auto.enabled`: enable background auto-update for package installs (default: `false`).
+- `channel`: release channel - `"stable"`, `"extended-stable"`, `"beta"`, or `"dev"`. Extended-stable is package-only: foreground commands own installation, while the Gateway may emit read-only update hints.
+- `checkOnStart`: check for npm updates when the gateway starts (default: `true`). Stored extended-stable selections use the same read-only hint and 24-hour hint schedule.
+- `auto.enabled`: enable background auto-update for stable and beta package installs (default: `false`). Extended-stable never applies automatically.
 - `auto.stableDelayHours`: minimum delay in hours before stable-channel auto-apply (default: `6`; max: `168`).
 - `auto.stableJitterHours`: extra stable-channel rollout spread window in hours (default: `12`; max: `168`).
-- `auto.betaCheckIntervalHours`: how often beta-channel checks run in hours (default: `1`; max: `24`).
+- `auto.betaCheckIntervalHours`: how often beta-channel checks run in hours (default: `1`; max: `24`). Stable delay/jitter and beta polling settings do not apply to extended-stable.
 
 ---
 

@@ -169,6 +169,8 @@ export type LegacyStateDetection = {
     targetPath: string;
     hasLegacy: boolean;
   };
+  warnings: string[];
+  notices: string[];
   preview: string[];
 };
 
@@ -2289,7 +2291,7 @@ function migrateLegacyPluginBindingApprovals(params: {
 }): { changes: string[]; warnings: string[] } {
   const changes: string[] = [];
   const warnings: string[] = [];
-  if (!fileExists(params.detected.sourcePath)) {
+  if (!params.detected.hasLegacy || !fileExists(params.detected.sourcePath)) {
     return { changes, warnings };
   }
   let approvals: LegacyPluginBindingApprovalEntry[];
@@ -3815,11 +3817,13 @@ export async function autoMigrateLegacyTaskStateSidecars(params: {
   env?: NodeJS.ProcessEnv;
   homedir?: () => string;
   log?: MigrationLogger;
+  crossStateDirImports?: boolean;
 }): Promise<{
   migrated: boolean;
   skipped: boolean;
   changes: string[];
   warnings: string[];
+  notices?: string[];
 }> {
   if (autoMigrateTaskStateSidecarsChecked) {
     return { migrated: false, skipped: true, changes: [], warnings: [] };
@@ -3828,13 +3832,21 @@ export async function autoMigrateLegacyTaskStateSidecars(params: {
 
   const stateDir = resolveStateDir(params.env ?? process.env, params.homedir);
   const result = await migrateLegacyTaskStateSidecars({ stateDir });
+  const detectedExecApprovals = detectLegacyExecApprovalsMigration({
+    env: params.env ?? process.env,
+    homedir: params.homedir ?? os.homedir,
+    stateDir,
+  });
+  const crossStateDirImports = params.crossStateDirImports === true;
   const execApprovals = migrateLegacyExecApprovals(
-    detectLegacyExecApprovalsMigration({
-      env: params.env ?? process.env,
-      homedir: params.homedir ?? os.homedir,
-      stateDir,
-    }),
+    crossStateDirImports ? detectedExecApprovals : { ...detectedExecApprovals, hasLegacy: false },
   );
+  const notices =
+    detectedExecApprovals.hasLegacy && !crossStateDirImports
+      ? [
+          `Exec approvals in the default state dir were not imported into OPENCLAW_STATE_DIR automatically (${detectedExecApprovals.sourcePath} -> ${detectedExecApprovals.targetPath}); run \`openclaw doctor --fix\` to import them.`,
+        ]
+      : [];
   const changes = [...result.changes, ...execApprovals.changes];
   const warnings = [...result.warnings, ...execApprovals.warnings];
   const logger = params.log ?? createSubsystemLogger("state-migrations");
@@ -3851,6 +3863,7 @@ export async function autoMigrateLegacyTaskStateSidecars(params: {
     skipped: false,
     changes,
     warnings,
+    ...(notices.length > 0 ? { notices } : {}),
   };
 }
 
@@ -3931,12 +3944,23 @@ export async function detectLegacyStateMigrations(params: {
   cfg: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
   homedir?: () => string;
+  crossStateDirImports?: boolean;
 }): Promise<LegacyStateDetection> {
   const env = params.env ?? process.env;
   const homedir = params.homedir ?? os.homedir;
   const stateDir = resolveStateDir(env, homedir);
   const oauthDir = resolveOAuthDir(env, stateDir);
-  const execApprovals = detectLegacyExecApprovalsMigration({ env, homedir, stateDir });
+  const crossStateDirImports = params.crossStateDirImports === true;
+  const notices: string[] = [];
+  const detectedExecApprovals = detectLegacyExecApprovalsMigration({ env, homedir, stateDir });
+  const execApprovals = crossStateDirImports
+    ? detectedExecApprovals
+    : { ...detectedExecApprovals, hasLegacy: false };
+  if (detectedExecApprovals.hasLegacy && !crossStateDirImports) {
+    notices.push(
+      `Exec approvals in the default state dir were not imported into OPENCLAW_STATE_DIR automatically (${detectedExecApprovals.sourcePath} -> ${detectedExecApprovals.targetPath}); run \`openclaw doctor --fix\` to import them.`,
+    );
+  }
 
   const targetAgentId = normalizeAgentId(resolveDefaultAgentId(params.cfg));
   const rawMainKey = params.cfg.session?.mainKey;
@@ -4033,7 +4057,20 @@ export async function detectLegacyStateMigrations(params: {
   const pluginBindingApprovals = {
     sourcePath: resolveLegacyPluginBindingApprovalsPath(env, homedir),
   };
-  const hasPluginBindingApprovals = fileExists(pluginBindingApprovals.sourcePath);
+  const pluginBindingApprovalsCrossDir =
+    path.resolve(path.dirname(pluginBindingApprovals.sourcePath)) !== path.resolve(stateDir);
+  const hasPluginBindingApprovals =
+    fileExists(pluginBindingApprovals.sourcePath) &&
+    (crossStateDirImports || !pluginBindingApprovalsCrossDir);
+  if (
+    fileExists(pluginBindingApprovals.sourcePath) &&
+    pluginBindingApprovalsCrossDir &&
+    !crossStateDirImports
+  ) {
+    notices.push(
+      `Plugin binding approvals in the default state dir were not imported into OPENCLAW_STATE_DIR automatically (${pluginBindingApprovals.sourcePath}); run \`openclaw doctor --fix\` to import them.`,
+    );
+  }
   const currentConversationBindings = {
     sourcePath: resolveLegacyCurrentConversationBindingsPath(stateDir),
   };
@@ -4194,6 +4231,8 @@ export async function detectLegacyStateMigrations(params: {
       hasLegacy: hasCurrentConversationBindings,
     },
     execApprovals,
+    warnings: [],
+    notices,
     preview,
   };
 }
@@ -5035,11 +5074,13 @@ export async function autoMigrateLegacyState(params: {
   log?: MigrationLogger;
   now?: () => number;
   recoverCorruptTargetStore?: boolean;
+  crossStateDirImports?: boolean;
 }): Promise<{
   migrated: boolean;
   skipped: boolean;
   changes: string[];
   warnings: string[];
+  notices?: string[];
 }> {
   if (autoMigrateChecked) {
     return { migrated: false, skipped: true, changes: [], warnings: [] };
@@ -5088,6 +5129,7 @@ export async function autoMigrateLegacyState(params: {
     cfg: params.cfg,
     env,
     homedir: params.homedir,
+    crossStateDirImports: params.crossStateDirImports,
   });
   const hasCustomAgentDir = env.OPENCLAW_AGENT_DIR?.trim() || env.PI_CODING_AGENT_DIR?.trim();
   if (hasCustomAgentDir) {
@@ -5196,6 +5238,7 @@ export async function autoMigrateLegacyState(params: {
       skipped: true,
       changes,
       warnings,
+      ...(detected.notices?.length ? { notices: detected.notices } : {}),
     };
   }
   if (
@@ -5238,6 +5281,7 @@ export async function autoMigrateLegacyState(params: {
       skipped: false,
       changes,
       warnings,
+      ...(detected.notices?.length ? { notices: detected.notices } : {}),
     };
   }
 
@@ -5352,5 +5396,6 @@ export async function autoMigrateLegacyState(params: {
     skipped: false,
     changes,
     warnings,
+    ...(detected.notices?.length ? { notices: detected.notices } : {}),
   };
 }

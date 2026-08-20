@@ -851,6 +851,7 @@ describe("buildEmbeddedRunPayloads", () => {
       lastToolError: {
         toolName: "exec",
         error: "/bin/bash: line 1: python: command not found",
+        mutatingAction: true,
       },
     });
 

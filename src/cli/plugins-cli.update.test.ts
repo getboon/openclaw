@@ -978,6 +978,58 @@ describe("plugins cli update", () => {
     const updateParams = expectSingleCallParams(updateNpmInstalledPlugins);
     expect(updateParams.pluginIds).toEqual(["codex"]);
     expect(updateParams.syncOfficialPluginInstalls).toBeUndefined();
+    expect(updateParams.updateChannel).toBeUndefined();
+    expect(updateParams.officialPluginUpdateChannel).toBeUndefined();
+  });
+
+  it("syncs official catalog specs with beta channel context for update --all", async () => {
+    const config = createTrackedPluginConfig({
+      pluginId: "codex",
+      spec: "@openclaw/codex@2026.6.8-beta.1",
+      resolvedName: "@openclaw/codex",
+    });
+    config.update = { channel: "beta" };
+    loadConfig.mockReturnValue(config);
+    setInstalledPluginIndexInstallRecords(config.plugins?.installs ?? {});
+    updateNpmInstalledPlugins.mockResolvedValue({
+      config,
+      changed: false,
+      outcomes: [],
+    });
+
+    await runPluginsCommand(["plugins", "update", "--all"]);
+
+    const updateParams = expectSingleCallParams(updateNpmInstalledPlugins);
+    expect(updateParams.pluginIds).toEqual(["codex"]);
+    expect(updateParams.syncOfficialPluginInstalls).toBe(true);
+    expect(updateParams.officialPluginUpdateChannel).toBe("beta");
+    expect(updateParams.updateChannel).toBeUndefined();
+  });
+
+  it("passes extended-stable channel and installed core version to update --all", async () => {
+    const config = createTrackedPluginConfig({
+      pluginId: "codex",
+      spec: "@openclaw/codex",
+      resolvedName: "@openclaw/codex",
+    });
+    config.update = { channel: "extended-stable" };
+    loadConfig.mockReturnValue(config);
+    setInstalledPluginIndexInstallRecords(config.plugins?.installs ?? {});
+    updateNpmInstalledPlugins.mockResolvedValue({
+      config,
+      changed: false,
+      outcomes: [],
+    });
+
+    await runPluginsCommand(["plugins", "update", "--all"]);
+
+    expect(updateNpmInstalledPlugins).toHaveBeenCalledWith(
+      expect.objectContaining({
+        officialPluginUpdateChannel: "extended-stable",
+        syncOfficialPluginInstalls: true,
+        coreVersion: expect.any(String),
+      }),
+    );
   });
 
   it("writes updated config when updater reports changes", async () => {

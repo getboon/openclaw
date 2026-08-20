@@ -388,7 +388,12 @@ const McpServerSchema = z
     enabled: z.boolean().optional(),
     command: z.string().optional(),
     args: z.array(z.string()).optional(),
-    env: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+    env: z
+      .record(
+        z.string(),
+        z.union([z.string().register(sensitive), z.number(), z.boolean()]).register(sensitive),
+      )
+      .optional(),
     cwd: z.string().optional(),
     workingDirectory: z.string().optional(),
     url: HttpUrlSchema.optional(),
@@ -629,7 +634,14 @@ export const OpenClawSchema = z
     crestodian: CrestodianSchema,
     update: z
       .object({
-        channel: z.union([z.literal("stable"), z.literal("beta"), z.literal("dev")]).optional(),
+        channel: z
+          .union([
+            z.literal("stable"),
+            z.literal("extended-stable"),
+            z.literal("beta"),
+            z.literal("dev"),
+          ])
+          .optional(),
         checkOnStart: z.boolean().optional(),
         auto: z
           .object({

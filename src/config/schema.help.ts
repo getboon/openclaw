@@ -56,9 +56,12 @@ export const FIELD_HELP: Record<string, string> = {
     'Controls tagline style in the CLI startup banner: "random" (default) picks from the rotating tagline pool, "default" always shows the neutral default tagline, and "off" hides tagline text while keeping the banner version line.',
   update:
     "Update-channel and startup-check behavior for keeping OpenClaw runtime versions current. Use conservative channels in production and more experimental channels only in controlled environments.",
-  "update.channel": 'Update channel for git + npm installs ("stable", "beta", or "dev").',
-  "update.checkOnStart": "Check for npm updates when the gateway starts (default: true).",
-  "update.auto.enabled": "Enable background auto-update for package installs (default: false).",
+  "update.channel":
+    'Update channel for git + npm installs ("stable", "extended-stable", "beta", or "dev"). Extended-stable is package-only: installation is foreground-only, with optional read-only startup hints.',
+  "update.checkOnStart":
+    "Check for npm updates when the gateway starts, including read-only extended-stable hints (default: true).",
+  "update.auto.enabled":
+    "Enable background auto-update for stable and beta package installs; extended-stable never auto-applies (default: false).",
   "update.auto.stableDelayHours":
     "Minimum delay before stable-channel auto-apply starts (default: 6).",
   "update.auto.stableJitterHours":
@@ -421,9 +424,9 @@ export const FIELD_HELP: Record<string, string> = {
   "tools.exec.reviewer":
     "Model-backed exec reviewer used by auto mode before human approval fallback. Configure a narrow model override here when you want exec review isolated from the main agent model.",
   "tools.exec.reviewer.model":
-    "Optional provider/model override for the exec reviewer agent. Omit to reuse the current agent model.",
+    "Optional provider/model override for the exec reviewer agent. Omit to reuse the configured primary model for the target agent.",
   "tools.exec.reviewer.timeoutMs":
-    "Exec reviewer timeout in milliseconds before falling back to human approval (default: 30000).",
+    "Per-stage exec reviewer timeout in milliseconds for model preparation and completion before falling back to human approval (default: 30000).",
   "tools.exec.security":
     "Execution security posture selector controlling sandbox/approval expectations for command execution. Keep strict security mode for untrusted prompts and relax only for trusted operator workflows.",
   "tools.exec.ask":
@@ -669,7 +672,7 @@ export const FIELD_HELP: Record<string, string> = {
   "diagnostics.stuckSessionWarnMs":
     "No-progress age threshold in milliseconds for classifying long processing sessions as long-running, stalled, or stuck. Reply, tool, status, block, and ACP progress reset the timer; repeated stuck diagnostics back off while unchanged.",
   "diagnostics.stuckSessionAbortMs":
-    "No-progress age threshold in milliseconds before eligible stalled active work may be abort-drained for recovery. Defaults to the safer extended embedded-run recovery window.",
+    "No-progress age threshold in milliseconds before eligible stalled active work may be abort-drained for recovery. Defaults to the safer extended embedded-run recovery window; blocked tool calls always retain a 15-minute minimum.",
   "diagnostics.otel.enabled":
     "Enables OpenTelemetry export pipeline for traces, metrics, and logs based on configured endpoint/protocol settings. Keep disabled unless your collector endpoint and auth are fully configured.",
   "diagnostics.otel.endpoint":
