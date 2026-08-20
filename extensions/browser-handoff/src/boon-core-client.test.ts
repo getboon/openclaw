@@ -110,6 +110,23 @@ describe("requestBrowserLoginHandoff", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("propagates an AbortError as-is instead of retrying it", async () => {
+    const abortError = new DOMException("The operation was aborted.", "AbortError");
+    fetchMock.mockRejectedValue(abortError);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      requestBrowserLoginHandoff({
+        baseUrl: "https://app.getboon.ai",
+        apiKey: "test-key",
+        site: "app.procore.com",
+        signal: controller.signal,
+      }),
+    ).rejects.toBe(abortError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("throws a non-retryable error on 4xx without retrying", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse(409, { error: { code: "already_pending", message: "already pending" } }),

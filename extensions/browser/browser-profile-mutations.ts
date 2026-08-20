@@ -22,8 +22,11 @@ export type RegisterRemoteCdpBrowserProfileResult =
  * `name`, replacing any existing profile with that name.
  *
  * Registration is create-only, but a re-attach after the prior session
- * expired reuses the same profile name — delete-then-create gives that call
- * replace semantics instead of failing on the conflict.
+ * expired reuses the same profile name. `replaceExisting` overwrites in the
+ * same config mutation instead of deleting first: a failed replacement
+ * (invalid endpoint, exhausted ports) then leaves the old working profile in
+ * place rather than deleting it and returning an error with nothing left, and
+ * `browser.defaultProfile` is never touched either way.
  */
 export async function registerRemoteCdpBrowserProfile(params: {
   name: string;
@@ -35,12 +38,12 @@ export async function registerRemoteCdpBrowserProfile(params: {
     return { ok: false, error: formatErrorMessage(err) };
   }
   try {
-    await deleteBrowserProfileConfig(params.name);
     const profile = await createBrowserProfileConfig({
       name: params.name,
       resolved: resolveBrowserConfig(undefined, undefined),
       parsedCdpUrl: params.cdpUrl,
       driver: "existing-session",
+      replaceExisting: true,
     });
     if (!profile) {
       return { ok: false, error: "profile mutation returned no result" };

@@ -29,7 +29,7 @@ describe("registerRemoteCdpBrowserProfile", () => {
     expect(createBrowserProfileConfigMock).not.toHaveBeenCalled();
   });
 
-  it("deletes any existing profile before creating, to support replace-on-reattach", async () => {
+  it("replaces atomically (replaceExisting: true) instead of deleting first, to support replace-on-reattach", async () => {
     createBrowserProfileConfigMock.mockResolvedValue({ cdpUrl: "wss://proxy.example/cdp" });
 
     const result = await registerRemoteCdpBrowserProfile({
@@ -38,13 +38,13 @@ describe("registerRemoteCdpBrowserProfile", () => {
     });
 
     expect(result).toStrictEqual({ ok: true, name: "handoff-example.com" });
-    expect(deleteBrowserProfileConfigMock).toHaveBeenCalledWith("handoff-example.com");
-    expect(deleteBrowserProfileConfigMock.mock.invocationCallOrder[0]).toBeLessThan(
-      createBrowserProfileConfigMock.mock.invocationCallOrder[0],
+    expect(deleteBrowserProfileConfigMock).not.toHaveBeenCalled();
+    expect(createBrowserProfileConfigMock).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "handoff-example.com", replaceExisting: true }),
     );
   });
 
-  it("surfaces config-mutation errors", async () => {
+  it("leaves the existing profile untouched when the replacement mutation fails", async () => {
     createBrowserProfileConfigMock.mockRejectedValue(new Error("boom"));
 
     const result = await registerRemoteCdpBrowserProfile({
@@ -53,6 +53,9 @@ describe("registerRemoteCdpBrowserProfile", () => {
     });
 
     expect(result).toStrictEqual({ ok: false, error: "boom" });
+    // No compensating delete on failure: createBrowserProfileConfig's own
+    // mutateConfigFile call never wrote anything, so nothing needs undoing.
+    expect(deleteBrowserProfileConfigMock).not.toHaveBeenCalled();
   });
 });
 

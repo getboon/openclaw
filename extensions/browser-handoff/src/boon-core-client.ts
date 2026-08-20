@@ -90,6 +90,12 @@ async function guardedFetchOrWrapError(
       auditContext: "browser-handoff",
     });
   } catch (err) {
+    // A caller-initiated abort should propagate as-is and stop, not get
+    // wrapped as retryable and burn two more attempts against a request the
+    // caller already gave up on.
+    if (init.signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+      throw err;
+    }
     if (err instanceof BrowserHandoffApiError) {
       throw err;
     }
