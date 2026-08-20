@@ -23,10 +23,13 @@ export type BrowserHandoffToolParams = {
   reason?: string;
 };
 
-export type BrowserHandoffToolTextResult = { content: [{ type: "text"; text: string }] };
+export type BrowserHandoffToolTextResult = {
+  content: [{ type: "text"; text: string }];
+  details: undefined;
+};
 
 function textResult(text: string): BrowserHandoffToolTextResult {
-  return { content: [{ type: "text", text }] };
+  return { content: [{ type: "text", text }], details: undefined };
 }
 
 function openHandoffStore(api: OpenClawPluginApi): PluginStateKeyedStore<BrowserHandoffRecord> {

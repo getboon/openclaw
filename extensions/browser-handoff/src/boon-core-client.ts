@@ -9,6 +9,10 @@
  * copy of the same wire contract rather than a shared dependency.
  */
 import { retryAsync } from "openclaw/plugin-sdk/retry-runtime";
+import {
+  fetchWithSsrFGuard,
+  ssrfPolicyFromHttpBaseUrlAllowedHostname,
+} from "openclaw/plugin-sdk/ssrf-runtime";
 
 export type BrowserHandoffRequestResult = {
   handoffToken: string;
@@ -30,7 +34,9 @@ export class BrowserHandoffApiError extends Error {
     this.name = "BrowserHandoffApiError";
     this.status = status;
     this.retryable = retryable;
-    if (code !== undefined) this.code = code;
+    if (code !== undefined) {
+      this.code = code;
+    }
   }
 }
 
@@ -64,19 +70,25 @@ async function extractError(res: Response): Promise<{ code?: string; message?: s
 }
 
 /**
- * Run a fetch and convert both HTTP error statuses and thrown network errors
- * (DNS/connection failures, resets) into `BrowserHandoffApiError` so the retry
+ * Fetch via the shared SSRF-guarded wrapper (required for outbound
+ * channel/plugin runtime calls) and convert both HTTP error statuses and
+ * thrown network/SSRF errors into `BrowserHandoffApiError` so the retry
  * predicate below can see them; a bare fetch rejection would otherwise never
  * match `err instanceof BrowserHandoffApiError` and retry would be dead for
  * the most common transient failure mode.
  */
-async function fetchOrWrapNetworkError(
+async function guardedFetchOrWrapError(
   url: string,
   init: RequestInit,
   failureLabel: string,
-): Promise<Response> {
+): Promise<{ response: Response; release: () => Promise<void> }> {
   try {
-    return await fetch(url, init);
+    return await fetchWithSsrFGuard({
+      url,
+      init,
+      policy: ssrfPolicyFromHttpBaseUrlAllowedHostname(url),
+      auditContext: "browser-handoff",
+    });
   } catch (err) {
     if (err instanceof BrowserHandoffApiError) {
       throw err;
@@ -98,7 +110,7 @@ async function postJson(params: {
 }): Promise<unknown> {
   return await retryAsync(
     async () => {
-      const res = await fetchOrWrapNetworkError(
+      const { response: res, release } = await guardedFetchOrWrapError(
         params.url,
         {
           method: "POST",
@@ -112,25 +124,29 @@ async function postJson(params: {
         },
         "browser-handoff request network error",
       );
-      if (res.status >= 400 && res.status < 500) {
-        const { code, message } = await extractError(res);
-        throw new BrowserHandoffApiError(
-          message ?? `browser-handoff request rejected: ${res.status}`,
-          res.status,
-          false,
-          code,
-        );
+      try {
+        if (res.status >= 400 && res.status < 500) {
+          const { code, message } = await extractError(res);
+          throw new BrowserHandoffApiError(
+            message ?? `browser-handoff request rejected: ${res.status}`,
+            res.status,
+            false,
+            code,
+          );
+        }
+        if (!res.ok) {
+          const { code, message } = await extractError(res);
+          throw new BrowserHandoffApiError(
+            message ?? `browser-handoff request failed: ${res.status}`,
+            res.status,
+            true,
+            code,
+          );
+        }
+        return await res.json();
+      } finally {
+        await release();
       }
-      if (!res.ok) {
-        const { code, message } = await extractError(res);
-        throw new BrowserHandoffApiError(
-          message ?? `browser-handoff request failed: ${res.status}`,
-          res.status,
-          true,
-          code,
-        );
-      }
-      return await res.json();
     },
     {
       attempts: 3,
@@ -146,7 +162,7 @@ async function getJson(params: {
 }): Promise<unknown> {
   return await retryAsync(
     async () => {
-      const res = await fetchOrWrapNetworkError(
+      const { response: res, release } = await guardedFetchOrWrapError(
         params.url,
         {
           method: "GET",
@@ -155,25 +171,29 @@ async function getJson(params: {
         },
         "browser-handoff status network error",
       );
-      if (res.status >= 400 && res.status < 500) {
-        const { code, message } = await extractError(res);
-        throw new BrowserHandoffApiError(
-          message ?? `browser-handoff status rejected: ${res.status}`,
-          res.status,
-          false,
-          code,
-        );
+      try {
+        if (res.status >= 400 && res.status < 500) {
+          const { code, message } = await extractError(res);
+          throw new BrowserHandoffApiError(
+            message ?? `browser-handoff status rejected: ${res.status}`,
+            res.status,
+            false,
+            code,
+          );
+        }
+        if (!res.ok) {
+          const { code, message } = await extractError(res);
+          throw new BrowserHandoffApiError(
+            message ?? `browser-handoff status failed: ${res.status}`,
+            res.status,
+            true,
+            code,
+          );
+        }
+        return await res.json();
+      } finally {
+        await release();
       }
-      if (!res.ok) {
-        const { code, message } = await extractError(res);
-        throw new BrowserHandoffApiError(
-          message ?? `browser-handoff status failed: ${res.status}`,
-          res.status,
-          true,
-          code,
-        );
-      }
-      return await res.json();
     },
     {
       attempts: 3,

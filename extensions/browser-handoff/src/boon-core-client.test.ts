@@ -83,14 +83,10 @@ describe("requestBrowserLoginHandoff", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    const firstHeaders = (fetchMock.mock.calls[0]![1] as RequestInit).headers as Record<
-      string,
-      string
-    >;
-    const secondHeaders = (fetchMock.mock.calls[1]![1] as RequestInit).headers as Record<
-      string,
-      string
-    >;
+    const [, firstInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [, secondInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const firstHeaders = firstInit.headers as Record<string, string>;
+    const secondHeaders = secondInit.headers as Record<string, string>;
     expect(secondHeaders["Idempotency-Key"]).toBe(firstHeaders["Idempotency-Key"]);
   });
 
