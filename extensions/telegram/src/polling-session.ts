@@ -6,6 +6,7 @@ import { drainPendingDeliveries } from "openclaw/plugin-sdk/delivery-queue-runti
 import {
   collectErrorGraphCandidates,
   formatErrorMessage,
+  isReplySessionInitializationConflictError,
   readErrorName,
 } from "openclaw/plugin-sdk/error-runtime";
 import {
@@ -142,7 +143,6 @@ const TELEGRAM_POLLING_CLIENT_TIMEOUT_FLOOR_SECONDS = Math.ceil(
 );
 const MISSING_AGENT_HARNESS_ERROR_NAME = "MissingAgentHarnessError";
 const MISSING_AGENT_HARNESS_MESSAGE_RE = /Requested agent harness "[^"]+" is not registered\./u;
-const REPLY_SESSION_INIT_CONFLICT_MESSAGE_RE = /reply session initialization conflicted for \S+/u;
 
 function normalizeTelegramAccountId(accountId?: string | null): string {
   return accountId?.trim() || "default";
@@ -180,7 +180,7 @@ function resolveSpooledUpdateRetryDelayMs(update: TelegramSpooledUpdate, now = D
   const attempts = update.attempts ?? 0;
   if (
     !update.lastError ||
-    !REPLY_SESSION_INIT_CONFLICT_MESSAGE_RE.test(update.lastError) ||
+    !isReplySessionInitializationConflictError(update.lastError) ||
     update.lastAttemptAt === undefined ||
     attempts <= 0
   ) {
