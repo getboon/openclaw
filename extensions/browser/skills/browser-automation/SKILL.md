@@ -31,7 +31,8 @@ Use this skill when you need the `browser` tool for anything beyond a single pag
    - After navigation, modal changes, or form submission, snapshot again before the next action.
    - Avoid blind waits. Wait for visible UI state when possible.
 5. Report real blockers:
-   - If the page needs login, permission, captcha, 2FA, camera/microphone approval, or another manual step, stop and tell the user exactly what is needed.
+   - If the page needs login, CAPTCHA, or 2FA and the `browser_handoff` tool is available, use it instead of dead-ending: call `browser_handoff` with `action="request_login"` and the target `site`, share the returned link with the customer, then poll with `action="status"` and finish with `action="attach"` once they're done. Never enter the customer's credentials yourself.
+   - For permission, camera/microphone approval, or another manual step with no handoff tool available, stop and tell the user exactly what is needed.
    - Do not claim the browser is not logged in just because the current page shows a permission or onboarding dialog. Inspect the visible UI first.
 
 ## Tab Hygiene

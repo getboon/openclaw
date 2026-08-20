@@ -1,0 +1,26 @@
+{
+  "id": "browser-handoff",
+  "enabledByDefault": false,
+  "activation": {
+    "onStartup": false
+  },
+  "contracts": {
+    "tools": ["browser_handoff"]
+  },
+  "skills": ["./skills"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "boonCoreBaseUrl": {
+        "type": "string"
+      }
+    }
+  },
+  "uiHints": {
+    "boonCoreBaseUrl": {
+      "label": "boon-core base URL",
+      "help": "Base URL for boon-core's agent-facing browser handoff endpoints, e.g. https://app.getboon.ai."
+    }
+  }
+}
