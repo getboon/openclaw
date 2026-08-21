@@ -161,6 +161,16 @@ const ERROR_PATTERNS = {
     /\benotfound\b/i,
     /\beai_again\b/i,
     /without sending (?:any )?chunks?/i,
+    // ENG-18472: anthropic-transport-stream.ts / amazon-bedrock's
+    // stream.runtime.ts now enforce message_stop unconditionally (not just
+    // for the Fable-5 refusal buffer) — a clean EOF without it is a dropped
+    // connection (observed with the boon-llm-gateway/Bedrock path: the
+    // connection drops on a frame boundary mid-generation, indistinguishable
+    // from a normal stream end at the transport layer). Without this match
+    // the thrown error classifies as unclassified, which — per ENG-16815's
+    // own finding for a different trigger — routes to continue_normal (no
+    // failover) instead of walking the configured fallback chain.
+    /\bstream ended before message_?stop\b/i,
     /\bstop reason:\s*(?:abort|error|malformed_response|network_error)\b/i,
     /\breason:\s*(?:abort|error|malformed_response|network_error)\b/i,
     /\bunhandled stop reason:\s*(?:abort|error|malformed_response|network_error)\b/i,

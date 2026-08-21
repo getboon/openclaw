@@ -442,6 +442,58 @@ describe("Bedrock Fable contract", () => {
   });
 });
 
+// ENG-18472: messageStop enforcement used to be gated on the Fable-5
+// refusal buffer only — every other Bedrock model accepted a stream that
+// ended without messageStop as a successful completion.
+describe("Bedrock messageStop enforcement (ENG-18472)", () => {
+  function context() {
+    return { messages: [{ role: "user", content: "hi", timestamp: 0 }] } as never;
+  }
+
+  it("throws when a non-Fable stream ends before messageStop after streaming content", async () => {
+    vi.spyOn(BedrockRuntimeClient.prototype, "send").mockResolvedValue({
+      $metadata: { httpStatusCode: 200 },
+      stream: streamEvents([
+        { messageStart: { role: ConversationRole.ASSISTANT } },
+        {
+          contentBlockDelta: {
+            contentBlockIndex: 0,
+            delta: { text: "There" },
+          },
+        },
+        // No messageStop — the connection simply ends here.
+      ]),
+    } as never);
+
+    const stream = streamSimpleBedrock(bedrockModel({}), context());
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    expect(result.errorMessage).toContain("ended before messageStop");
+  });
+
+  it("completes normally when a non-Fable stream sends messageStop", async () => {
+    vi.spyOn(BedrockRuntimeClient.prototype, "send").mockResolvedValue({
+      $metadata: { httpStatusCode: 200 },
+      stream: streamEvents([
+        { messageStart: { role: ConversationRole.ASSISTANT } },
+        {
+          contentBlockDelta: {
+            contentBlockIndex: 0,
+            delta: { text: "no" },
+          },
+        },
+        { messageStop: { stopReason: "end_turn" } },
+      ]),
+    } as never);
+
+    const stream = streamSimpleBedrock(bedrockModel({}), context());
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("stop");
+  });
+});
+
 describe("Bedrock canonical Claude aliases", () => {
   it.each([
     {

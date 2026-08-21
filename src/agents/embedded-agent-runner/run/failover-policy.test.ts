@@ -743,3 +743,64 @@ describe("ENG-16815 gateway-relayed Bedrock 503 walks the fallback ladder", () =
     });
   });
 });
+
+// ENG-18472: same shape of bug as ENG-16815 above, different trigger. A
+// clean stream end without message_stop (Bedrock dropping the connection
+// mid-generation) throws "stream ended before message_stop" from the
+// transport. Before adding the failover-matches.ts pattern, that message
+// classified as unclassified -> continue_normal, blocking the customer
+// instead of walking the configured fallback chain.
+describe("ENG-18472 truncated stream (missing message_stop) walks the fallback ladder", () => {
+  function truncatedStreamAssistantError(overrides?: Partial<AssistantMessage>): AssistantMessage {
+    return {
+      role: "assistant",
+      api: "anthropic-messages",
+      provider: "bedrock",
+      model: "claude-opus-4-8-bedrock",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "error",
+      errorMessage: "Anthropic stream ended before message_stop",
+      content: [],
+      timestamp: 0,
+      ...overrides,
+    } as AssistantMessage;
+  }
+
+  it("classifies the truncation as a timeout failover", () => {
+    const assistant = truncatedStreamAssistantError();
+    expect(classifyAssistantFailoverReason(assistant)).toBe("timeout");
+    expect(isFailoverAssistantError(assistant)).toBe(true);
+  });
+
+  it("routes the classified truncation to fallback_model when a fallback is configured", () => {
+    const assistant = truncatedStreamAssistantError();
+    const failoverReason = classifyAssistantFailoverReason(assistant);
+    const failoverFailure = isFailoverAssistantError(assistant);
+
+    expect(
+      resolveRunFailoverDecision({
+        stage: "assistant",
+        aborted: false,
+        externalAbort: false,
+        fallbackConfigured: true,
+        failoverFailure,
+        failoverReason,
+        timedOut: false,
+        idleTimedOut: false,
+        timedOutDuringCompaction: false,
+        timedOutDuringToolExecution: false,
+        profileRotated: true,
+      }),
+    ).toEqual({
+      action: "fallback_model",
+      reason: "timeout",
+    });
+  });
+});
