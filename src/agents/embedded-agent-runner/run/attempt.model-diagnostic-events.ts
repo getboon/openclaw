@@ -600,6 +600,9 @@ function withBoonUsageHeaders(
     if (!safe) {
       continue;
     }
+    if (Object.keys(headers).some((key) => key.toLowerCase() === name)) {
+      continue;
+    }
     headers[name] = safe;
     added = true;
   }

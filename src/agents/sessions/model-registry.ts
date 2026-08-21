@@ -30,6 +30,7 @@ import {
   listPluginModelCatalogFiles,
   type PluginModelCatalogMetadataSnapshot,
 } from "../plugin-model-catalog.js";
+import { mergeTransportHeaders } from "../transport-stream-shared.js";
 import type { AuthStatus, AuthStorage } from "./auth-storage.js";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "./provider-display-names.js";
 import {
@@ -669,22 +670,23 @@ export class ModelRegistry {
         `model "${model.provider}/${model.id}"`,
       );
 
-      let headers =
-        model.headers || providerHeaders || modelHeaders
-          ? { ...model.headers, ...providerHeaders, ...modelHeaders }
-          : undefined;
+      const headers = mergeTransportHeaders(modelHeaders, providerHeaders, model.headers);
 
       if (providerConfig?.authHeader) {
         if (!apiKey) {
           return { ok: false, error: `No API key found for "${model.provider}"` };
         }
-        headers = { ...headers, Authorization: `Bearer ${apiKey}` };
+        return {
+          ok: true,
+          apiKey,
+          headers: mergeTransportHeaders(headers, { Authorization: `Bearer ${apiKey}` }),
+        };
       }
 
       return {
         ok: true,
         apiKey,
-        headers: headers && Object.keys(headers).length > 0 ? headers : undefined,
+        headers,
       };
     } catch (error) {
       return {

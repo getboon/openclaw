@@ -241,6 +241,27 @@ describe("anthropic transport stream", () => {
     );
   });
 
+  it("preserves an explicit smoke session over runtime attribution", async () => {
+    const model = makeAnthropicTransportModel({
+      headers: { "X-Boon-Session-ID": "provisioning-smoke-session" },
+    });
+
+    await runTransportStream(
+      model,
+      {
+        messages: [{ role: "user", content: "hello" }],
+      } as AnthropicStreamContext,
+      {
+        apiKey: "sk-ant-api",
+        headers: { "x-boon-session-id": "ordinary-session" },
+      } as AnthropicStreamOptions,
+    );
+
+    expect(latestAnthropicRequestHeaders().get("x-boon-session-id")).toBe(
+      "provisioning-smoke-session",
+    );
+  });
+
   it("uses bearer auth for Microsoft Foundry Anthropic transport requests", async () => {
     const model = makeAnthropicTransportModel({
       provider: "microsoft-foundry",

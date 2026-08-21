@@ -21,7 +21,7 @@ vi.mock("@anthropic-ai/sdk", () => ({
   },
 }));
 
-import { streamAnthropic, streamSimpleAnthropic } from "./anthropic.js";
+import { mergeAnthropicHeaders, streamAnthropic, streamSimpleAnthropic } from "./anthropic.js";
 
 function createSseResponse(events: Record<string, unknown>[] = []): Response {
   const body = events
@@ -52,6 +52,18 @@ function makeAnthropicModel(overrides: Partial<Model<"anthropic-messages">> = {}
 describe("Anthropic provider", () => {
   beforeEach(() => {
     anthropicMockState.configs = [];
+  });
+
+  it("merges header names case-insensitively so provider session headers are not duplicated", () => {
+    const merged = mergeAnthropicHeaders(
+      { "x-boon-session-id": "ordinary-session" },
+      { "X-Boon-Session-ID": "provisioning-smoke-session" },
+    );
+
+    expect(
+      Object.keys(merged).filter((key) => key.toLowerCase() === "x-boon-session-id"),
+    ).toHaveLength(1);
+    expect(merged["X-Boon-Session-ID"]).toBe("provisioning-smoke-session");
   });
 
   it("keeps Cloudflare AI Gateway upstream provider auth on the Anthropic API key", async () => {

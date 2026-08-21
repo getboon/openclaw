@@ -71,9 +71,18 @@ export function mergeTransportHeaders(
   ...headerSources: Array<Record<string, string> | undefined>
 ): Record<string, string> | undefined {
   const merged: Record<string, string> = {};
+  const headerNamesByLowerKey = new Map<string, string>();
   for (const headers of headerSources) {
     if (headers) {
-      Object.assign(merged, headers);
+      for (const [key, value] of Object.entries(headers)) {
+        const normalizedKey = key.toLowerCase();
+        const previousKey = headerNamesByLowerKey.get(normalizedKey);
+        if (previousKey && previousKey !== key) {
+          delete merged[previousKey];
+        }
+        merged[key] = value;
+        headerNamesByLowerKey.set(normalizedKey, key);
+      }
     }
   }
   return Object.keys(merged).length > 0 ? merged : undefined;

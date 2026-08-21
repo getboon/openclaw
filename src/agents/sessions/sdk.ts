@@ -202,6 +202,30 @@ function getAttributionHeaders(
   return undefined;
 }
 
+function mergeRequestHeaders(
+  attributionHeaders: Record<string, string> | undefined,
+  runtimeHeaders: Record<string, string> | undefined,
+  authHeaders: Record<string, string> | undefined,
+  modelHeaders: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  const merged: Record<string, string> = {};
+  const keysByLowerCase = new Map<string, string>();
+
+  for (const source of [attributionHeaders, runtimeHeaders, authHeaders, modelHeaders]) {
+    for (const [key, value] of Object.entries(source ?? {})) {
+      const normalizedKey = key.toLowerCase();
+      const previousKey = keysByLowerCase.get(normalizedKey);
+      if (previousKey !== undefined) {
+        delete merged[previousKey];
+      }
+      merged[key] = value;
+      keysByLowerCase.set(normalizedKey, key);
+    }
+  }
+
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 /**
  * Create an AgentSession with the specified options.
  *
@@ -424,10 +448,15 @@ export async function createAgentSession(
         timeoutMs: optionsLocal?.timeoutMs ?? providerRetrySettings.timeoutMs,
         maxRetries: optionsLocal?.maxRetries ?? providerRetrySettings.maxRetries,
         maxRetryDelayMs: optionsLocal?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
-        headers:
-          attributionHeaders || auth.headers || optionsLocal?.headers
-            ? { ...attributionHeaders, ...auth.headers, ...optionsLocal?.headers }
-            : undefined,
+        // Explicit model headers are applied last. This preserves per-turn
+        // credentials when the model registry or runtime attribution has a
+        // stale session header for the same request.
+        headers: mergeRequestHeaders(
+          attributionHeaders,
+          optionsLocal?.headers,
+          auth.headers,
+          modelResult.headers,
+        ),
       });
     },
     onPayload: async (payload, modelValue) => {

@@ -108,6 +108,25 @@ type AnthropicMessagesClient = {
   };
 };
 
+function mergeAnthropicRequestHeaders(
+  baseHeaders: Record<string, string>,
+  modelHeaders: Record<string, string> | undefined,
+  ...optionHeaderSources: Array<Record<string, string> | undefined>
+): Record<string, string> | undefined {
+  const merged = mergeTransportHeaders(baseHeaders, modelHeaders, ...optionHeaderSources);
+  const modelSessionHeader = Object.entries(modelHeaders ?? {}).find(
+    ([key]) => key.toLowerCase() === "x-boon-session-id",
+  );
+  if (!modelSessionHeader) {
+    return merged;
+  }
+
+  // A smoke turn carries a signed session identity; runtime attribution must not replace it.
+  return mergeTransportHeaders(merged, {
+    [modelSessionHeader[0]]: modelSessionHeader[1],
+  });
+}
+
 function resolveAnthropicRequestModelId(model: AnthropicTransportModel): string {
   if (isDirectAnthropicModel(model) && /^anthropic\//i.test(model.id)) {
     return model.id.replace(/^anthropic\//i, "");
@@ -809,7 +828,7 @@ function createAnthropicTransportClient(params: {
         apiKey: null,
         authToken: apiKey,
         baseURL: model.baseUrl,
-        defaultHeaders: mergeTransportHeaders(
+        defaultHeaders: mergeAnthropicRequestHeaders(
           {
             accept: "application/json",
             "anthropic-dangerous-direct-browser-access": "true",
@@ -834,7 +853,7 @@ function createAnthropicTransportClient(params: {
         apiKey: null,
         authToken: apiKey,
         baseURL: model.baseUrl,
-        defaultHeaders: mergeTransportHeaders(
+        defaultHeaders: mergeAnthropicRequestHeaders(
           {
             accept: "application/json",
             "anthropic-dangerous-direct-browser-access": "true",
@@ -859,7 +878,7 @@ function createAnthropicTransportClient(params: {
         apiKey: null,
         authToken: apiKey,
         baseURL: model.baseUrl,
-        defaultHeaders: mergeTransportHeaders(
+        defaultHeaders: mergeAnthropicRequestHeaders(
           {
             accept: "application/json",
             "anthropic-dangerous-direct-browser-access": "true",
@@ -880,7 +899,7 @@ function createAnthropicTransportClient(params: {
     client: createAnthropicMessagesClient({
       apiKey,
       baseURL: model.baseUrl,
-      defaultHeaders: mergeTransportHeaders(
+      defaultHeaders: mergeAnthropicRequestHeaders(
         {
           accept: "application/json",
           "anthropic-dangerous-direct-browser-access": "true",

@@ -238,13 +238,22 @@ export interface AnthropicOptions extends StreamOptions {
   client?: Anthropic;
 }
 
-function mergeHeaders(
+export function mergeAnthropicHeaders(
   ...headerSources: (Record<string, string | null> | undefined)[]
 ): Record<string, string | null> {
   const merged: Record<string, string | null> = {};
+  const headerNamesByLowerKey = new Map<string, string>();
   for (const headers of headerSources) {
     if (headers) {
-      Object.assign(merged, headers);
+      for (const [key, value] of Object.entries(headers)) {
+        const normalizedKey = key.toLowerCase();
+        const previousKey = headerNamesByLowerKey.get(normalizedKey);
+        if (previousKey && previousKey !== key) {
+          delete merged[previousKey];
+        }
+        merged[key] = value;
+        headerNamesByLowerKey.set(normalizedKey, key);
+      }
     }
   }
   return merged;
@@ -909,15 +918,15 @@ function createClient(
       authToken: null,
       baseURL: resolveCloudflareBaseUrl(model),
       dangerouslyAllowBrowser: true,
-      defaultHeaders: mergeHeaders(
+      defaultHeaders: mergeAnthropicHeaders(
         {
           accept: "application/json",
           "anthropic-dangerous-direct-browser-access": "true",
           Authorization: null,
           ...(betaFeatures.length > 0 ? { "anthropic-beta": betaFeatures.join(",") } : {}),
         },
-        model.headers,
         optionsHeaders,
+        model.headers,
       ),
     });
 
@@ -931,15 +940,15 @@ function createClient(
       authToken: apiKey,
       baseURL: model.baseUrl,
       dangerouslyAllowBrowser: true,
-      defaultHeaders: mergeHeaders(
+      defaultHeaders: mergeAnthropicHeaders(
         {
           accept: "application/json",
           "anthropic-dangerous-direct-browser-access": "true",
           ...(betaFeatures.length > 0 ? { "anthropic-beta": betaFeatures.join(",") } : {}),
         },
-        model.headers,
         dynamicHeaders,
         optionsHeaders,
+        model.headers,
       ),
     });
 
@@ -952,15 +961,15 @@ function createClient(
       authToken: apiKey,
       baseURL: model.baseUrl,
       dangerouslyAllowBrowser: true,
-      defaultHeaders: mergeHeaders(
+      defaultHeaders: mergeAnthropicHeaders(
         {
           accept: "application/json",
           "anthropic-dangerous-direct-browser-access": "true",
           ...(betaFeatures.length > 0 ? { "anthropic-beta": betaFeatures.join(",") } : {}),
         },
-        omitFoundryBearerCredentialHeaders(model.headers),
         dynamicHeaders,
         optionsHeaders,
+        omitFoundryBearerCredentialHeaders(model.headers),
       ),
     });
 
@@ -974,7 +983,7 @@ function createClient(
       authToken: apiKey,
       baseURL: model.baseUrl,
       dangerouslyAllowBrowser: true,
-      defaultHeaders: mergeHeaders(
+      defaultHeaders: mergeAnthropicHeaders(
         {
           accept: "application/json",
           "anthropic-dangerous-direct-browser-access": "true",
@@ -982,8 +991,8 @@ function createClient(
           "user-agent": `claude-cli/${claudeCodeVersion}`,
           "x-app": "cli",
         },
-        model.headers,
         optionsHeaders,
+        model.headers,
       ),
     });
 
@@ -1000,15 +1009,15 @@ function createClient(
     authToken: null,
     baseURL: model.baseUrl,
     dangerouslyAllowBrowser: true,
-    defaultHeaders: mergeHeaders(
+    defaultHeaders: mergeAnthropicHeaders(
       {
         accept: "application/json",
         "anthropic-dangerous-direct-browser-access": "true",
         ...(betaFeatures.length > 0 ? { "anthropic-beta": betaFeatures.join(",") } : {}),
       },
       sessionAffinityHeaders,
-      model.headers,
       optionsHeaders,
+      model.headers,
     ),
   });
 
