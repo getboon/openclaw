@@ -193,7 +193,11 @@ describe("anthropic transport stream", () => {
     buildGuardedModelFetchMock.mockReset();
     guardedFetchMock.mockReset();
     buildGuardedModelFetchMock.mockReturnValue(guardedFetchMock);
-    guardedFetchMock.mockResolvedValue(createSseResponse());
+    // message_stop is now enforced unconditionally, so the default
+    // fixture (used by tests that only care about the outgoing request
+    // payload, not the streamed response) must include it — a bare empty
+    // stream is otherwise indistinguishable from a dropped connection.
+    guardedFetchMock.mockResolvedValue(createSseResponse([{ type: "message_stop" }]));
   });
 
   afterEach(() => {
@@ -810,6 +814,86 @@ describe("anthropic transport stream", () => {
     expect(result.errorMessage).toBe("Anthropic stream ended before message_stop");
   });
 
+  // message_stop enforcement used to be gated on the Fable-5 refusal
+  // buffer only — every other model (all Bedrock/gateway traffic
+  // included) accepted a clean EOF without message_stop as a successful
+  // completion: a real answer partially streamed, then nothing — no
+  // error, no terminator.
+  it("throws when a non-Fable stream ends before message_stop after streaming content", async () => {
+    guardedFetchMock.mockResolvedValueOnce(
+      createSseResponse([
+        {
+          type: "message_start",
+          message: { id: "msg_1", usage: { input_tokens: 8, output_tokens: 0 } },
+        },
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "text", text: "" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "There" },
+        },
+        // No content_block_stop, message_delta, or message_stop — the
+        // connection simply ends here.
+      ]),
+    );
+    const model = makeAnthropicTransportModel();
+    const result = await runTransportStream(
+      model,
+      { messages: [{ role: "user", content: "hello" }] } as AnthropicStreamContext,
+      { apiKey: "sk-ant-api" } as AnthropicStreamOptions,
+    );
+
+    expect(result.stopReason).toBe("error");
+    expect(result.errorMessage).toBe("Anthropic stream ended before message_stop");
+  });
+
+  // Regression guard for the fix above: a stream that DOES send a real
+  // message_stop must still complete normally, even though enforcement is
+  // no longer gated on the Fable-5 refusal buffer.
+  it("completes normally when a non-Fable stream sends message_stop", async () => {
+    guardedFetchMock.mockResolvedValueOnce(
+      createSseResponse([
+        {
+          type: "message_start",
+          message: { id: "msg_1", usage: { input_tokens: 8, output_tokens: 0 } },
+        },
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "text", text: "" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "no" },
+        },
+        {
+          type: "content_block_stop",
+          index: 0,
+        },
+        {
+          type: "message_delta",
+          delta: { stop_reason: "end_turn" },
+          usage: { input_tokens: 8, output_tokens: 1 },
+        },
+        { type: "message_stop" },
+      ]),
+    );
+    const model = makeAnthropicTransportModel();
+    const result = await runTransportStream(
+      model,
+      { messages: [{ role: "user", content: "hello" }] } as AnthropicStreamContext,
+      { apiKey: "sk-ant-api" } as AnthropicStreamOptions,
+    );
+
+    expect(result.stopReason).toBe("stop");
+    expect(result.content).toEqual([{ type: "text", text: "no" }]);
+  });
+
   it("preserves unsafe integer Anthropic tool-use input deltas", async () => {
     guardedFetchMock.mockResolvedValueOnce(
       createSseResponse([
@@ -893,6 +977,7 @@ describe("anthropic transport stream", () => {
           delta: { stop_reason: "tool_use" },
           usage: { input_tokens: 10, output_tokens: 5 },
         },
+        { type: "message_stop" },
       ]),
     );
     const model = makeAnthropicTransportModel({
@@ -1276,6 +1361,7 @@ describe("anthropic transport stream", () => {
           delta: { stop_reason: "end_turn" },
           usage: { input_tokens: 6, output_tokens: 2 },
         },
+        { type: "message_stop" },
       ]),
     );
     const model = makeAnthropicTransportModel({
@@ -1493,6 +1579,7 @@ describe("anthropic transport stream", () => {
           delta: { stop_reason: "end_turn" },
           usage: { input_tokens: 6, output_tokens: 1 },
         },
+        { type: "message_stop" },
       ]),
     );
     const streamFn = createAnthropicMessagesTransportStreamFn();

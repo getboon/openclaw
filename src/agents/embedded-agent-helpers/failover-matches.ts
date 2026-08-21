@@ -161,6 +161,11 @@ const ERROR_PATTERNS = {
     /\benotfound\b/i,
     /\beai_again\b/i,
     /without sending (?:any )?chunks?/i,
+    // Both Anthropic and Bedrock transports require message_stop: a clean
+    // EOF without it is a dropped connection, not a completion. Without
+    // this matcher the thrown error classifies as unclassified, which
+    // blocks failover instead of walking the configured fallback chain.
+    /\bstream ended before message_?stop\b/i,
     /\bstop reason:\s*(?:abort|error|malformed_response|network_error)\b/i,
     /\breason:\s*(?:abort|error|malformed_response|network_error)\b/i,
     /\bunhandled stop reason:\s*(?:abort|error|malformed_response|network_error)\b/i,
