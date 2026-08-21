@@ -2,6 +2,15 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.22
+
+Surfaces a previously-silent inbound chat attachment failure to both the user and the model, retries a Slack reply-session race that could drop a reply, and adds a browser login handoff tool for CAPTCHA/2FA sign-in.
+
+- **#139 (ENG-18116):** an inbound attachment that failed to download or stage (too large, expired link, network/timeout, over the per-turn file limit) was silently dropped — the agent had no signal it ever existed and told the user no file was attached, with no error surfaced anywhere. Adds a closed `InboundMediaFailureReason` union carried on `MsgContext.MediaFailures`, a model-facing prompt note describing each failure, and a new user-facing chat notice sent before the agent's own reply so a silent/`NO_REPLY` turn still tells the user what happened. `extensions/slack` adopts this end to end: `downloadSlackMediaFile`/`resolveSlackMedia`/`resolveSlackAttachmentContent` stop swallowing failures to `null`, classify them (size/expired-link/timeout/fetch-failed/over-file-limit) instead, and retry transient download errors. The 5MB post-download sandbox-staging cliff (below Slack's own larger download cap) is also now reported instead of leaving an unopenable absolute host path in `MediaPaths`.
+- **#132 (ENG-18283):** Slack delivers `app_mention` and `message` events for the same message separately; when they missed each other's debounce window they raced on session init and hard-failed instead of retrying, occasionally dropping a reply and firing a watchdog alert. Slack's debounce flush now retries native (non-relay) reply-session-init conflicts up to 3 times with backoff, reusing the same classifier Telegram already had for this identical race (`isReplySessionInitializationConflictError`, now shared via `openclaw/plugin-sdk/error-runtime`).
+- **#137:** adds a bundled `browser-handoff` extension exposing a `browser_handoff` agent tool (`request_login` / `status` / `attach`), so an agent that hits a login/CAPTCHA/2FA wall during browser automation can hand the session to the customer via a hosted sign-in link instead of dead-ending the task.
+- Base = `2026.6.11-boon.21`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.22` in lockstep. No other code changes; #132, #137, and #139 were merged onto `boon` before this release.
+
 ## 2026.6.11-boon.21
 
 Preserves source reply transcript mirrors when sent-text deduplication sees matching outbound text.
