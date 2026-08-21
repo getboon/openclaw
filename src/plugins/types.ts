@@ -2611,7 +2611,15 @@ export type OpenClawPluginLifecycleApi = {
 export type OpenClawPluginApi = {
   id: string;
   name: string;
+  /** This plugin's own declared version, from its manifest/package.json. */
   version?: string;
+  /**
+   * The host OpenClaw application/gateway version (same value for every
+   * plugin in the process). Distinct from `version` above, which is this
+   * plugin's own release — a monitoring/telemetry plugin that wants to tag
+   * captures with the build actually running wants this field, not `version`.
+   */
+  hostVersion?: string;
   description?: string;
   source: string;
   rootDir?: string;

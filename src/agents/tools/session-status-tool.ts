@@ -63,10 +63,10 @@ import {
   createAgentToAgentPolicy,
   createSessionVisibilityGuard,
   resolveCurrentSessionClientAlias,
-  resolveEffectiveSessionToolsVisibility,
   resolveInternalSessionKey,
   resolveSandboxedSessionToolContext,
   resolveSessionReference,
+  resolveSessionVisibilityContext,
   resolveVisibleSessionReference,
   shouldResolveSessionIdInput,
 } from "./sessions-helpers.js";
@@ -555,14 +555,16 @@ export function createSessionStatusTool(opts?: {
         }
         return trimmed;
       };
+      const { visibility, clampedFromSandbox } = resolveSessionVisibilityContext({
+        cfg,
+        sandboxed: opts?.sandboxed === true,
+      });
       const visibilityGuard = await createSessionVisibilityGuard({
         action: "status",
         requesterSessionKey: visibilityRequesterKey,
-        visibility: resolveEffectiveSessionToolsVisibility({
-          cfg,
-          sandboxed: opts?.sandboxed === true,
-        }),
+        visibility,
         a2aPolicy,
+        clampedFromSandbox,
       });
 
       const requestedKeyParam = readStringParam(params, "sessionKey");

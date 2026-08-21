@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Theme } from "../../modes/interactive/theme/theme.js";
 import { createEditTool, createEditToolDefinition, type EditOperations } from "./edit.js";
+import type { EditToolInput } from "./tool-contracts.js";
 
 const testTheme = {
   bg: (_name: string, text: string) => text,
@@ -173,5 +174,87 @@ describe("edit tool", () => {
     expect((component as { preview?: { diff?: string } } | undefined)?.preview?.diff).toContain(
       "remote changed",
     );
+  });
+});
+
+// editSchema/replaceEditSchema are additionalProperties: false, so
+// Claude-Code-style names (file_path, old_string, new_string) — which the
+// tool's own TUI renderers already read, e.g. RenderableEditArgs.file_path —
+// were hard schema rejections. prepareArguments now aliases them the same way
+// it already rescues top-level oldText/newText and a stringified edits[].
+describe("prepareEditArguments alias normalization", () => {
+  function prepare(input: unknown): EditToolInput {
+    const definition = createEditToolDefinition("/workspace");
+    return definition.prepareArguments?.(input) as EditToolInput;
+  }
+
+  it("never mutates the caller's raw arguments object", () => {
+    const raw = {
+      file_path: "notes.txt",
+      edits: [{ old_string: "alpha", new_string: "ALPHA" }],
+    };
+    const snapshot = JSON.parse(JSON.stringify(raw));
+    prepare(raw);
+    expect(raw).toEqual(snapshot);
+  });
+
+  it("maps file_path to path", () => {
+    const prepared = prepare({
+      file_path: "notes.txt",
+      edits: [{ oldText: "a", newText: "b" }],
+    });
+    expect(prepared).toEqual({
+      path: "notes.txt",
+      edits: [{ oldText: "a", newText: "b" }],
+    });
+  });
+
+  it("does not override an explicit path with file_path", () => {
+    const prepared = prepare({
+      path: "real.txt",
+      file_path: "ignored.txt",
+      edits: [{ oldText: "a", newText: "b" }],
+    });
+    expect(prepared.path).toBe("real.txt");
+  });
+
+  it("maps old_string/new_string inside each edits[] entry", () => {
+    const prepared = prepare({
+      path: "notes.txt",
+      edits: [
+        { old_string: "alpha", new_string: "ALPHA" },
+        { oldText: "beta", newText: "BETA" },
+      ],
+    });
+    expect(prepared).toEqual({
+      path: "notes.txt",
+      edits: [
+        { oldText: "alpha", newText: "ALPHA" },
+        { oldText: "beta", newText: "BETA" },
+      ],
+    });
+  });
+
+  it("maps top-level file_path/old_string/new_string with no edits[] wrapper (Claude Code's single-edit shape)", () => {
+    const prepared = prepare({
+      file_path: "notes.txt",
+      old_string: "alpha",
+      new_string: "ALPHA",
+    });
+    expect(prepared).toEqual({
+      path: "notes.txt",
+      edits: [{ oldText: "alpha", newText: "ALPHA" }],
+    });
+  });
+
+  it("still rescues edits sent as a JSON string alongside snake_case fields", () => {
+    const prepared = prepare({
+      path: "notes.txt",
+      edits: JSON.stringify([{ old_string: "alpha", new_string: "ALPHA" }]),
+    });
+    expect(prepared).toEqual({
+      path: "notes.txt",
+      edits: [{ oldText: "alpha", newText: "ALPHA" }],
+    });
   });
 });

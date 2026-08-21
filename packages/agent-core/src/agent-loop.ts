@@ -21,7 +21,7 @@ import type {
   AgentToolResult,
   StreamFn,
 } from "./types.js";
-import { validateToolArguments } from "./validation.js";
+import { ToolArgumentValidationError, validateToolArguments } from "./validation.js";
 
 /** Callback used by synchronous loop runners to publish agent lifecycle events. */
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
@@ -910,9 +910,19 @@ async function prepareToolCall(
       args: validatedArgs,
     };
   } catch (error) {
+    // Put the single-line summary in `details.error` so a caller keying off
+    // structured details sees which field failed, not just the generic
+    // multi-line `message`'s first line.
+    const details =
+      error instanceof ToolArgumentValidationError
+        ? { status: "error", error: error.summary }
+        : undefined;
     return {
       kind: "immediate",
-      result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
+      result: createErrorToolResult(
+        error instanceof Error ? error.message : String(error),
+        details,
+      ),
       isError: true,
     };
   }
@@ -1001,10 +1011,13 @@ async function finalizeExecutedToolCall(
   };
 }
 
-function createErrorToolResult(message: string): AgentToolResult<unknown> {
+function createErrorToolResult(
+  message: string,
+  details?: Record<string, unknown>,
+): AgentToolResult<unknown> {
   return {
     content: [{ type: "text", text: message }],
-    details: {},
+    details: details ?? {},
   };
 }
 

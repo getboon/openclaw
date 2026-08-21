@@ -6,9 +6,11 @@ import {
   createAgentToAgentPolicy,
   createSessionVisibilityGuard,
   createSessionVisibilityRowChecker,
+  isSessionToolsVisibilityClampedToTree,
   resolveEffectiveSessionToolsVisibility,
   resolveSandboxSessionToolsVisibility,
   resolveSessionToolsVisibility,
+  resolveSessionVisibilityContext,
 } from "../../plugin-sdk/session-visibility.js";
 import { resolveSandboxedSessionToolContext } from "./sessions-access.js";
 import { testing as sessionsResolutionTesting } from "./sessions-resolution.js";
@@ -47,6 +49,51 @@ describe("resolveEffectiveSessionToolsVisibility", () => {
       agents: { defaults: { sandbox: { sessionToolsVisibility: "all" } } },
     } as unknown as OpenClawConfig;
     expect(resolveEffectiveSessionToolsVisibility({ cfg, sandboxed: true })).toBe("all");
+  });
+});
+
+// The "tree" denial message always names tools.sessions.visibility=tree as
+// the cause, but a sandbox clamp can force "tree" even when the operator
+// configured something else — this is what lets the message tell those two
+// cases apart.
+describe("isSessionToolsVisibilityClampedToTree", () => {
+  it("is false outside a sandboxed session", () => {
+    const cfg = {
+      tools: { sessions: { visibility: "all" } },
+    } as unknown as OpenClawConfig;
+    expect(isSessionToolsVisibilityClampedToTree({ cfg, sandboxed: false })).toBe(false);
+  });
+
+  it("is false when the operator already configured tree", () => {
+    const cfg = { tools: { sessions: { visibility: "tree" } } } as unknown as OpenClawConfig;
+    expect(isSessionToolsVisibilityClampedToTree({ cfg, sandboxed: true })).toBe(false);
+  });
+
+  it("is false when the sandbox clamp itself is set to all", () => {
+    const cfg = {
+      tools: { sessions: { visibility: "all" } },
+      agents: { defaults: { sandbox: { sessionToolsVisibility: "all" } } },
+    } as unknown as OpenClawConfig;
+    expect(isSessionToolsVisibilityClampedToTree({ cfg, sandboxed: true })).toBe(false);
+  });
+
+  it("is true when a sandboxed session silently overrides a configured non-tree visibility", () => {
+    const cfg = { tools: { sessions: { visibility: "all" } } } as unknown as OpenClawConfig;
+    expect(isSessionToolsVisibilityClampedToTree({ cfg, sandboxed: true })).toBe(true);
+  });
+});
+
+describe("resolveSessionVisibilityContext", () => {
+  it("combines the effective visibility and clamp flag in one call", () => {
+    const cfg = { tools: { sessions: { visibility: "all" } } } as unknown as OpenClawConfig;
+    expect(resolveSessionVisibilityContext({ cfg, sandboxed: true })).toEqual({
+      visibility: "tree",
+      clampedFromSandbox: true,
+    });
+    expect(resolveSessionVisibilityContext({ cfg, sandboxed: false })).toEqual({
+      visibility: "all",
+      clampedFromSandbox: false,
+    });
   });
 });
 
@@ -280,6 +327,39 @@ describe("createSessionVisibilityGuard", () => {
       error:
         "Session list visibility is restricted. Set tools.sessions.visibility=all and tools.agentToAgent.enabled=true to allow cross-agent access; use tools.agentToAgent.allow to restrict permitted agent pairs.",
     });
+  });
+
+  it("denies a non-owned, non-tree-eligible row with the plain tree message by default", () => {
+    const guard = createSessionVisibilityRowChecker({
+      action: "history",
+      requesterSessionKey: "agent:main:main",
+      visibility: "tree",
+      a2aPolicy: createAgentToAgentPolicy({} as unknown as OpenClawConfig),
+    });
+
+    expect(guard.check({ key: "agent:main:other" })).toEqual({
+      allowed: false,
+      status: "forbidden",
+      error:
+        "Session history visibility is restricted to the current session tree (tools.sessions.visibility=tree).",
+    });
+  });
+
+  it("names the sandbox clamp instead of tools.sessions.visibility when clampedFromSandbox is set", () => {
+    const guard = createSessionVisibilityRowChecker({
+      action: "history",
+      requesterSessionKey: "agent:main:main",
+      visibility: "tree",
+      a2aPolicy: createAgentToAgentPolicy({} as unknown as OpenClawConfig),
+      clampedFromSandbox: true,
+    });
+
+    const result = guard.check({ key: "agent:main:other" });
+    expect(result.allowed).toBe(false);
+    expect(result as { error: string }).toMatchObject({
+      error: expect.stringContaining("sandboxed session is clamped to tree"),
+    });
+    expect((result as { error: string }).error).not.toContain("tools.sessions.visibility=tree");
   });
 
   it("does not do spawned lookup for list visibility without row metadata", async () => {

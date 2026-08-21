@@ -181,7 +181,55 @@ describe("buildAfterToolCallCapture", () => {
     expect(capture?.message).toBe("exit 1");
     expect(capture?.tags.tool).toBe("bash");
     expect(capture?.extra?.tool_call_id).toBe("tc1");
-    expect(capture?.fingerprint).toEqual(["after_tool_call", "bash", "exit 1"]);
+    // The bare "1" is a volatile token: normalized before entering the
+    // fingerprint so re-runs with a different exit detail still bucket
+    // together, even though the raw exception `message` above is untouched.
+    expect(capture?.fingerprint).toEqual(["after_tool_call", "bash", "exit <n>"]);
+  });
+
+  // A policy/permission/visibility denial (e.g. tools.sessions.visibility=tree)
+  // is the system working as intended, not a defect.
+  it("drops a denied error entirely — the system worked as intended", () => {
+    const capture = buildAfterToolCallCapture(
+      {
+        toolName: "sessions_history",
+        params: {},
+        error: "Session history visibility is restricted to the current session tree.",
+        errorKind: "denied",
+      },
+      HOST,
+    );
+    expect(capture).toBeNull();
+  });
+
+  // A model-bad-args rejection is real signal for a genuine schema/producer
+  // mismatch, but the host didn't fail — downgrade instead of dropping it
+  // or paging on it as an exception.
+  it("downgrades an invalid-input error to a non-paging warning", () => {
+    const capture = buildAfterToolCallCapture(
+      {
+        toolName: "write",
+        params: {},
+        error: 'Validation failed for tool "write":',
+        errorKind: "invalid-input",
+        errorCode: "INVALID_REQUEST",
+      },
+      HOST,
+    );
+    expect(capture?.kind).toBe("message");
+    expect(capture?.kind === "message" && capture.level).toBe("warning");
+    expect(capture?.message).toBe('Validation failed for tool "write":');
+    expect(capture?.tags.error_kind).toBe("invalid-input");
+    expect(capture?.tags.error_code).toBe("INVALID_REQUEST");
+  });
+
+  it("still captures an exit-error or upstream failure as an exception", () => {
+    const capture = buildAfterToolCallCapture(
+      { toolName: "exec", params: {}, error: "zip: command not found", errorKind: "exit-error" },
+      HOST,
+    );
+    expect(capture?.kind).toBe("exception");
+    expect(capture?.tags.error_kind).toBe("exit-error");
   });
 
   it("fingerprints different tools' failures into different issues", () => {
@@ -209,6 +257,61 @@ describe("buildAfterToolCallCapture", () => {
       HOST,
     );
     expect(timeout?.fingerprint).not.toEqual(denied?.fingerprint);
+  });
+
+  it("prefers errorCode over normalized message text in the fingerprint", () => {
+    const withCode = buildAfterToolCallCapture(
+      {
+        toolName: "exec",
+        params: {},
+        error: "System run denied for /tmp/a.sh",
+        errorCode: "SYSTEM_RUN_DENIED",
+      },
+      HOST,
+    );
+    expect(withCode?.fingerprint).toEqual(["after_tool_call", "exec", "SYSTEM_RUN_DENIED"]);
+  });
+
+  it("collapses repeated occurrences that differ only by volatile tokens (path, size, timestamp)", () => {
+    const first = buildAfterToolCallCapture(
+      {
+        toolName: "exec",
+        params: {},
+        error: "-rw-rw-r-- 1 ubuntu ubuntu 31429 Aug 20 13:33 report.xlsx",
+      },
+      HOST,
+    );
+    const second = buildAfterToolCallCapture(
+      {
+        toolName: "exec",
+        params: {},
+        error: "-rw-rw-r-- 1 ubuntu ubuntu 88 Aug 21 09:02 report.xlsx",
+      },
+      HOST,
+    );
+    expect(first?.fingerprint).toEqual(second?.fingerprint);
+  });
+
+  it("collapses an image-dimensions-exceeded error across different resolutions", () => {
+    const first = buildAfterToolCallCapture(
+      {
+        toolName: "image",
+        params: {},
+        error:
+          "Image dimensions exceed the 25,000,000 pixel input limit: 9072x3240 (29393280 pixels)",
+      },
+      HOST,
+    );
+    const second = buildAfterToolCallCapture(
+      {
+        toolName: "image",
+        params: {},
+        error:
+          "Image dimensions exceed the 25,000,000 pixel input limit: 4000x8000 (32000000 pixels)",
+      },
+      HOST,
+    );
+    expect(first?.fingerprint).toEqual(second?.fingerprint);
   });
 });
 

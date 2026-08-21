@@ -38,7 +38,7 @@ function makeApi(pluginConfig?: Record<string, unknown>) {
   const debug = vi.fn<(message: string) => void>();
   const api: SentryMonitorApi = {
     pluginConfig,
-    version: "1.2.3",
+    hostVersion: "1.2.3",
     logger: { info, warn, error, debug },
     on,
     lifecycle: { registerRuntimeLifecycle },

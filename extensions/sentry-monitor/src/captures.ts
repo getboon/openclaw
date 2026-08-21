@@ -14,7 +14,13 @@ import type {
   PluginHookSessionEndEvent,
   PluginHookSubagentEndedEvent,
 } from "openclaw/plugin-sdk/types";
-import { describeModelCallError, fingerprintOf, pruneTags, runContext } from "./format.js";
+import {
+  describeModelCallError,
+  fingerprintOf,
+  normalizeFingerprintText,
+  pruneTags,
+  runContext,
+} from "./format.js";
 
 export type SentryLevel = "fatal" | "error" | "warning" | "info" | "debug";
 
@@ -95,7 +101,10 @@ export function buildAgentEndCapture(
     kind: "exception",
     message: event.error ?? "agent_end success=false",
     tags: pruneTags({ hook: "agent_end", host }),
-    fingerprint: fingerprintOf("agent_end", event.error ?? "success=false"),
+    fingerprint: fingerprintOf(
+      "agent_end",
+      event.error ? normalizeFingerprintText(event.error) : "success=false",
+    ),
     contexts: { run: runContext(event.runId) },
     extra: {
       duration_ms: event.durationMs,
@@ -111,15 +120,51 @@ export function buildAfterToolCallCapture(
   if (!event.error) {
     return null;
   }
+  // A policy/permission/visibility denial is the system working as intended,
+  // not a defect: reporting it as an exception buries real regressions
+  // behind expected, unactionable noise.
+  if (event.errorKind === "denied") {
+    return null;
+  }
+  const tags = pruneTags({
+    hook: "after_tool_call",
+    host,
+    tool: event.toolName,
+    error_kind: event.errorKind,
+    error_code: event.errorCode,
+  });
+  // tool + errorKind/errorCode (falling back to normalized message) so a
+  // recurring failure with a different path/id/timestamp lands in one issue,
+  // and different tools/causes never share a bucket (see file header).
+  const fingerprint = fingerprintOf(
+    "after_tool_call",
+    event.toolName,
+    event.errorKind,
+    event.errorCode ?? normalizeFingerprintText(event.error),
+  );
+  const contexts = { run: runContext(event.runId) };
+  const extra = { tool_call_id: event.toolCallId, duration_ms: event.durationMs };
+  // A validation/argument-preparation rejection is a model-input problem, not
+  // a host exception, but it can still signal a real schema mismatch — so
+  // downgrade to a non-paging warning instead of dropping it outright.
+  if (event.errorKind === "invalid-input") {
+    return {
+      kind: "message",
+      level: "warning",
+      message: event.error,
+      tags,
+      fingerprint,
+      contexts,
+      extra,
+    };
+  }
   return {
     kind: "exception",
     message: event.error,
-    tags: pruneTags({ hook: "after_tool_call", host, tool: event.toolName }),
-    // tool + message, not just message: the same tool can fail for unrelated
-    // reasons and different tools must never share a bucket (see file header).
-    fingerprint: fingerprintOf("after_tool_call", event.toolName, event.error),
-    contexts: { run: runContext(event.runId) },
-    extra: { tool_call_id: event.toolCallId, duration_ms: event.durationMs },
+    tags,
+    fingerprint,
+    contexts,
+    extra,
   };
 }
 
@@ -134,7 +179,10 @@ export function buildMessageSentCapture(
     kind: "exception",
     message: event.error ?? "message_sent success=false",
     tags: pruneTags({ hook: "message_sent", host }),
-    fingerprint: fingerprintOf("message_sent", event.error ?? "success=false"),
+    fingerprint: fingerprintOf(
+      "message_sent",
+      event.error ? normalizeFingerprintText(event.error) : "success=false",
+    ),
     contexts: { run: runContext(event.runId, event.sessionKey) },
     extra: { message_id: event.messageId, trace_id: event.traceId, span_id: event.spanId },
   };
@@ -161,7 +209,7 @@ export function buildSubagentEndedCapture(
       "subagent_ended",
       event.outcome,
       event.targetKind,
-      event.error ?? `outcome=${event.outcome}`,
+      event.error ? normalizeFingerprintText(event.error) : `outcome=${event.outcome}`,
     ),
     contexts: { run: runContext(event.runId) },
     extra: {
@@ -207,7 +255,7 @@ export function buildCronChangedCapture(
       event.action,
       event.status,
       event.deliveryStatus,
-      message,
+      normalizeFingerprintText(message),
     ),
     contexts: { run: runContext(event.runId, event.sessionId) },
     // `summary` is intentionally omitted: it is free-form cron run output

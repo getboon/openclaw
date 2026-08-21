@@ -23,9 +23,9 @@ import { jsonResult, readPositiveIntegerParam, readStringParam } from "./common.
 import {
   createSessionVisibilityGuard,
   createAgentToAgentPolicy,
-  resolveEffectiveSessionToolsVisibility,
   resolveSessionReference,
   resolveSandboxedSessionToolContext,
+  resolveSessionVisibilityContext,
   resolveVisibleSessionReference,
 } from "./sessions-helpers.js";
 
@@ -235,7 +235,7 @@ export function createSessionsHistoryTool(opts?: {
       const displayKey = visibleSession.displayKey;
 
       const a2aPolicy = createAgentToAgentPolicy(cfg);
-      const visibility = resolveEffectiveSessionToolsVisibility({
+      const { visibility, clampedFromSandbox } = resolveSessionVisibilityContext({
         cfg,
         sandboxed: opts?.sandboxed === true,
       });
@@ -244,6 +244,7 @@ export function createSessionsHistoryTool(opts?: {
         requesterSessionKey: effectiveRequesterKey,
         visibility,
         a2aPolicy,
+        clampedFromSandbox,
       });
       const access = visibilityGuard.check(resolvedKey);
       if (!access.allowed) {

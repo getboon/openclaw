@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { createWriteTool, type WriteOperations } from "./write.js";
+import type { WriteToolInput } from "./tool-contracts.js";
+import { createWriteTool, createWriteToolDefinition, type WriteOperations } from "./write.js";
 
 describe("write tool", () => {
   let tmpDir = "";
@@ -121,5 +122,37 @@ describe("write tool", () => {
     );
 
     await expect(fs.readFile(filePath, "utf-8")).resolves.toBe("finished\n");
+  });
+});
+
+// writeSchema requires `path`; a model sending Claude-Code-style file_path
+// (which the tool's own render helpers already read) was a hard
+// "Validation failed" rejection.
+describe("prepareArguments alias normalization", () => {
+  it("maps file_path to path", () => {
+    const definition = createWriteToolDefinition("/workspace");
+    const prepared = definition.prepareArguments?.({
+      file_path: "notes.txt",
+      content: "hello",
+    }) as WriteToolInput;
+    expect(prepared).toEqual({ path: "notes.txt", content: "hello" });
+  });
+
+  it("does not override an explicit path with file_path", () => {
+    const definition = createWriteToolDefinition("/workspace");
+    const prepared = definition.prepareArguments?.({
+      path: "real.txt",
+      file_path: "ignored.txt",
+      content: "hello",
+    }) as WriteToolInput;
+    expect(prepared.path).toBe("real.txt");
+  });
+
+  it("never mutates the caller's raw arguments object", () => {
+    const definition = createWriteToolDefinition("/workspace");
+    const raw = { file_path: "notes.txt", content: "hello" };
+    const snapshot = { ...raw };
+    definition.prepareArguments?.(raw);
+    expect(raw).toEqual(snapshot);
   });
 });

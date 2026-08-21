@@ -30,6 +30,12 @@ vi.mock("./sessions-helpers.js", async (importActual) => {
     createSessionVisibilityGuard: async () => await mocks.createSessionVisibilityGuard(),
     resolveEffectiveSessionToolsVisibility: () => mocks.resolveEffectiveSessionToolsVisibility(),
     resolveSandboxedSessionToolContext: () => mocks.resolveSandboxedSessionToolContext(),
+    // Drives off the same mock as resolveEffectiveSessionToolsVisibility so
+    // there is still one visibility knob for tests to control.
+    resolveSessionVisibilityContext: () => ({
+      visibility: mocks.resolveEffectiveSessionToolsVisibility(),
+      clampedFromSandbox: false,
+    }),
   };
 });
 

@@ -47,9 +47,9 @@ import {
   classifySessionKind,
   deriveChannel,
   resolveDisplaySessionKey,
-  resolveEffectiveSessionToolsVisibility,
   resolveInternalSessionKey,
   resolveSandboxedSessionToolContext,
+  resolveSessionVisibilityContext,
   type SessionListRow,
   type SessionRunStatus,
 } from "./sessions-helpers.js";
@@ -103,7 +103,7 @@ export function createSessionsListTool(opts?: {
           sandboxed: opts?.sandboxed,
         });
       const effectiveRequesterKey = requesterInternalKey ?? alias;
-      const visibility = resolveEffectiveSessionToolsVisibility({
+      const { visibility, clampedFromSandbox } = resolveSessionVisibilityContext({
         cfg,
         sandboxed: opts?.sandboxed === true,
       });
@@ -152,6 +152,7 @@ export function createSessionsListTool(opts?: {
         requesterSessionKey: effectiveRequesterKey,
         visibility,
         a2aPolicy,
+        clampedFromSandbox,
       });
       const rows: SessionListRow[] = [];
       const historyTargets: Array<{ row: SessionListRow; resolvedKey: string }> = [];

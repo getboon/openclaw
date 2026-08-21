@@ -16,6 +16,7 @@ import { keyHint } from "../../modes/interactive/components/keybinding-hints.js"
 import { getLanguageFromPath, highlightCode } from "../../modes/interactive/theme/theme.js";
 import type { AgentTool } from "../../runtime/index.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
+import { renameStringKeyAlias } from "./argument-aliases.js";
 import { withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
 import {
@@ -25,13 +26,27 @@ import {
   shortenPath,
   str,
 } from "./render-utils.js";
+import type { WriteToolInput } from "./tool-contracts.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 
 const writeSchema = Type.Object({
   path: Type.String({ description: "Path to the file to write (relative or absolute)" }),
   content: Type.String({ description: "Content to write to the file" }),
 });
-export type { WriteToolInput } from "./tool-contracts.js";
+export type { WriteToolInput };
+
+// Claude-Code-style file_path — this tool's own render helpers already read
+// it (below) but the schema requires `path`.
+function prepareWriteArguments(input: unknown): WriteToolInput {
+  if (!input || typeof input !== "object") {
+    return input as WriteToolInput;
+  }
+  return renameStringKeyAlias(
+    input as Record<string, unknown>,
+    "path",
+    "file_path",
+  ) as unknown as WriteToolInput;
+}
 
 /**
  * Pluggable operations for the write tool.
@@ -379,6 +394,7 @@ export function createWriteToolDefinition(
     promptSnippet: "Create or overwrite files",
     promptGuidelines: ["Use write only for new files or complete rewrites."],
     parameters: writeSchema,
+    prepareArguments: prepareWriteArguments,
     async execute(
       toolCallId,
       { path, content }: { path: string; content: string },
