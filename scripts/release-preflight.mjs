@@ -118,9 +118,14 @@ function collectNpmVersionErrors(rootDir = resolve(".")) {
   } catch (error) {
     return [`unable to read package.json: ${formatError(error)}`];
   }
-  if (!parseReleaseVersion(rootVersion)) {
+  const parsedRootVersion = parseReleaseVersion(rootVersion);
+  if (!parsedRootVersion) {
     return [`package.json has invalid release version ${JSON.stringify(rootVersion)}`];
   }
+  // Upstream-owned publishable plugins intentionally keep the upstream base
+  // version through a fork `-boon.N` correction release; only plugins the
+  // fork actually patches get bumped to the corrected version.
+  const acceptedVersions = new Set([rootVersion, parsedRootVersion.baseVersion]);
 
   const errors = [];
   const extensionsDir = resolve(rootDir, "extensions");
@@ -148,9 +153,9 @@ function collectNpmVersionErrors(rootDir = resolve(".")) {
     if (packageJson.openclaw?.release?.publishToNpm !== true) {
       continue;
     }
-    if (packageJson.version !== rootVersion) {
+    if (!acceptedVersions.has(packageJson.version)) {
       errors.push(
-        `extensions/${entry.name}/package.json version is ${JSON.stringify(packageJson.version)}; expected ${JSON.stringify(rootVersion)}`,
+        `extensions/${entry.name}/package.json version is ${JSON.stringify(packageJson.version)}; expected ${JSON.stringify(rootVersion)} or ${JSON.stringify(parsedRootVersion.baseVersion)}`,
       );
     }
   }

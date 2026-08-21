@@ -1,5 +1,9 @@
 import { isDirectRunUrl } from "./direct-run.mjs";
-import { classifyReleaseTrain, parseReleaseVersion } from "./npm-publish-plan.mjs";
+import {
+  classifyReleaseTrain,
+  isBoonCorrectionVersion,
+  parseReleaseVersion,
+} from "./npm-publish-plan.mjs";
 
 const STABLE_ALIASES = Object.freeze({
   default: Object.freeze(["latest", "main"]),
@@ -54,6 +58,17 @@ export function resolveDockerReleasePolicy(version) {
     };
   }
   if (releaseTrain === "unsupported-extended-stable-correction") {
+    // The Boon fork ships `-boon.N` corrections on the extended-stable line
+    // (e.g. 2026.6.34-boon.1); those move the extended-stable aliases same
+    // as a final release. Upstream's plain numeric `-N` correction on this
+    // line has no such contract and stays rejected.
+    if (isBoonCorrectionVersion(version)) {
+      return {
+        version: parsed.version,
+        channel: "extended-stable",
+        movingAliases: EXTENDED_STABLE_ALIASES,
+      };
+    }
     throw new Error(
       `Extended-stable Docker publication requires a final YYYY.M.PATCH version; found "${version}".`,
     );

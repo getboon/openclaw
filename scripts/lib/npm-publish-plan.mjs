@@ -207,6 +207,22 @@ function parseSafeIntegerPart(value) {
 }
 
 /**
+ * The Boon fork publishes `-boon.N` corrections on the extended-stable line
+ * (patch >= {@link EXTENDED_STABLE_PATCH_FLOOR}) under the extended-stable
+ * npm/Docker channel, unlike upstream's plain numeric `-N` correction (which
+ * `classifyReleaseTrain` still rejects there). Callers that need to allow
+ * only the fork's correction suffix check this instead of widening
+ * `classifyReleaseTrain` itself, so upstream-facing consumers (e.g. npm
+ * provenance workflow-ref verification) keep their existing behavior.
+ *
+ * @param {string} version
+ * @returns {boolean}
+ */
+export function isBoonCorrectionVersion(version) {
+  return BOON_VERSION_REGEX.test(version.trim());
+}
+
+/**
  * @param {string} version
  * @returns {ParsedReleaseVersion | null}
  */
@@ -353,7 +369,9 @@ export function resolveNpmPublishPlan(version, currentBetaVersion, publishTagOve
     );
   }
   if (normalizedOverride === "extended-stable") {
-    if (releaseTrain !== "extended-stable") {
+    const isBoonExtendedStableCorrection =
+      releaseTrain === "unsupported-extended-stable-correction" && isBoonCorrectionVersion(version);
+    if (releaseTrain !== "extended-stable" && !isBoonExtendedStableCorrection) {
       throw new Error(
         `Extended-stable npm publication requires a final YYYY.M.PATCH version with PATCH >= 33; found "${version}".`,
       );

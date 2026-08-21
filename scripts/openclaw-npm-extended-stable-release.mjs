@@ -3,7 +3,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { classifyReleaseTrain, parseReleaseVersion } from "./lib/npm-publish-plan.mjs";
+import {
+  classifyReleaseTrain,
+  isBoonCorrectionVersion,
+  parseReleaseVersion,
+} from "./lib/npm-publish-plan.mjs";
 
 const SUPPORTED_DIST_TAGS = new Set(["alpha", "beta", "latest", "extended-stable"]);
 
@@ -54,10 +58,20 @@ export function validateNpmPublishBoundary(
   }
 
   if (npmDistTag === "extended-stable") {
-    if (parsed.correctionNumber !== undefined) {
+    // The Boon fork ships `-boon.N` corrections on the extended-stable line
+    // through this same npm dist-tag; upstream's plain numeric `-N`
+    // correction has no such contract and keeps being rejected here.
+    const isBoonExtendedStableCorrection =
+      releaseTrain === "unsupported-extended-stable-correction" &&
+      isBoonCorrectionVersion(packageVersion);
+    if (parsed.correctionNumber !== undefined && !isBoonExtendedStableCorrection) {
       throw new Error("Extended-stable npm publication does not allow correction suffixes.");
     }
-    if (!bypassExtendedStableGuard && releaseTrain !== "extended-stable") {
+    if (
+      !bypassExtendedStableGuard &&
+      releaseTrain !== "extended-stable" &&
+      !isBoonExtendedStableCorrection
+    ) {
       throw new Error("Extended-stable npm publication requires release patch 33 or above.");
     }
     return parsed;
