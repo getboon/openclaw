@@ -46,7 +46,7 @@ import { formatErrorMessage, toErrorObject } from "../../../infra/errors.js";
 import { resolveHeartbeatSummaryForAgent } from "../../../infra/heartbeat-summary.js";
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
 import { createCodexNativeWebSearchWrapper } from "../../../llm/providers/stream-wrappers/openai.js";
-import type { AssistantMessage, Model } from "../../../llm/types.js";
+import type { AssistantMessage } from "../../../llm/types.js";
 import { listRegisteredPluginAgentPromptGuidance } from "../../../plugins/command-registry-state.js";
 import { getCurrentPluginMetadataSnapshot } from "../../../plugins/current-plugin-metadata-snapshot.js";
 import {
@@ -257,7 +257,6 @@ import {
   type CronCreatorToolAllowlistEntry,
 } from "../../tools/cron-tool.js";
 import { shouldAllowProviderOwnedThinkingReplay } from "../../transcript-policy.js";
-import { mergeTransportHeaders } from "../../transport-stream-shared.js";
 import { normalizeUsage, type NormalizedUsage } from "../../usage.js";
 import {
   DEFAULT_BOOTSTRAP_FILENAME,
@@ -501,6 +500,7 @@ import {
   isMidTurnPrecheckSignal,
   type MidTurnPrecheckRequest,
 } from "./midturn-precheck.js";
+import { applyModelRequestHeaders } from "./model-request-headers.js";
 import { normalizeToolMetas } from "./normalize-tool-metas.js";
 import {
   PREEMPTIVE_OVERFLOW_ERROR_TEXT,
@@ -840,16 +840,6 @@ async function loadAttemptSessionEntryAfterQuotaMaintenance(params: {
     },
   );
   return updated ?? entry;
-}
-
-export function applyModelRequestHeaders(model: Model, headers?: Record<string, string>): Model {
-  if (!headers) {
-    return model;
-  }
-  return {
-    ...model,
-    headers: mergeTransportHeaders(model.headers, headers),
-  };
 }
 
 export async function runEmbeddedAttempt(

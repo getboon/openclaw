@@ -126,6 +126,36 @@ describe("ModelRegistry models.json auth", () => {
     });
   });
 
+  it("keeps dynamic bearer auth ahead of a static model Authorization header", async () => {
+    const registry = ModelRegistry.inMemory(AuthStorage.inMemory());
+    registry.registerProvider("boon-llm-gateway", {
+      api: "anthropic-messages",
+      apiKey: "gateway-key",
+      authHeader: true,
+      baseUrl: "https://gateway.example/v1",
+      models: [
+        {
+          id: "claude-sonnet-4-6",
+          name: "Claude Sonnet 4.6",
+          reasoning: true,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 200_000,
+          maxTokens: 4096,
+          headers: { Authorization: "Bearer stale-model-token" },
+        },
+      ],
+    });
+
+    const model = registry.find("boon-llm-gateway", "claude-sonnet-4-6");
+
+    await expect(registry.getApiKeyAndHeaders(model!)).resolves.toEqual({
+      ok: true,
+      apiKey: "gateway-key",
+      headers: { Authorization: "Bearer gateway-key" },
+    });
+  });
+
   it("accepts Bedrock AWS SDK auth without apiKey", async () => {
     // AWS SDK credential resolution is provider-owned; requiring an apiKey here
     // would make Bedrock catalogs impossible to express in models.json.

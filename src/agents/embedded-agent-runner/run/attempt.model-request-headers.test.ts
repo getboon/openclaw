@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyModelRequestHeaders } from "./attempt.js";
+import type { Model } from "../../../llm/types.js";
+import { applyModelRequestHeaders } from "./model-request-headers.js";
 
 const model = {
   id: "claude-haiku",
@@ -16,7 +17,7 @@ const model = {
     "X-Boon-Instance": "acme",
     "X-Boon-Session-ID": "ordinary-session",
   },
-} as const;
+} satisfies Model<"anthropic-messages">;
 
 describe("applyModelRequestHeaders", () => {
   it("applies explicit per-turn headers after cached model headers", () => {

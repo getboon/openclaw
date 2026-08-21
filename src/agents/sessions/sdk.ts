@@ -18,6 +18,10 @@ import {
   type AgentOptions,
   type ThinkingLevel,
 } from "../runtime/index.js";
+import {
+  mergeTransportHeaders,
+  preserveProvisioningSmokeSessionHeader,
+} from "../transport-stream-shared.js";
 import { AgentSession, type AgentSessionWriteLockRunner } from "./agent-session.js";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.js";
 import { AuthStorage } from "./auth-storage.js";
@@ -208,22 +212,10 @@ function mergeRequestHeaders(
   authHeaders: Record<string, string> | undefined,
   modelHeaders: Record<string, string> | undefined,
 ): Record<string, string> | undefined {
-  const merged: Record<string, string> = {};
-  const keysByLowerCase = new Map<string, string>();
-
-  for (const source of [attributionHeaders, runtimeHeaders, authHeaders, modelHeaders]) {
-    for (const [key, value] of Object.entries(source ?? {})) {
-      const normalizedKey = key.toLowerCase();
-      const previousKey = keysByLowerCase.get(normalizedKey);
-      if (previousKey !== undefined) {
-        delete merged[previousKey];
-      }
-      merged[key] = value;
-      keysByLowerCase.set(normalizedKey, key);
-    }
-  }
-
-  return Object.keys(merged).length > 0 ? merged : undefined;
+  return preserveProvisioningSmokeSessionHeader(
+    mergeTransportHeaders(attributionHeaders, authHeaders, runtimeHeaders),
+    modelHeaders,
+  );
 }
 
 /**
@@ -448,9 +440,8 @@ export async function createAgentSession(
         timeoutMs: optionsLocal?.timeoutMs ?? providerRetrySettings.timeoutMs,
         maxRetries: optionsLocal?.maxRetries ?? providerRetrySettings.maxRetries,
         maxRetryDelayMs: optionsLocal?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
-        // Explicit model headers are applied last. This preserves per-turn
-        // credentials when the model registry or runtime attribution has a
-        // stale session header for the same request.
+        // Normal runtime precedence is unchanged. Only a signed smoke session
+        // is reasserted when ordinary attribution carries a stale session.
         headers: mergeRequestHeaders(
           attributionHeaders,
           optionsLocal?.headers,

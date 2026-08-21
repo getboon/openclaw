@@ -30,7 +30,10 @@ import {
   listPluginModelCatalogFiles,
   type PluginModelCatalogMetadataSnapshot,
 } from "../plugin-model-catalog.js";
-import { mergeTransportHeaders } from "../transport-stream-shared.js";
+import {
+  mergeTransportHeaders,
+  preserveProvisioningSmokeSessionHeader,
+} from "../transport-stream-shared.js";
 import type { AuthStatus, AuthStorage } from "./auth-storage.js";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "./provider-display-names.js";
 import {
@@ -670,7 +673,10 @@ export class ModelRegistry {
         `model "${model.provider}/${model.id}"`,
       );
 
-      const headers = mergeTransportHeaders(modelHeaders, providerHeaders, model.headers);
+      const headers = preserveProvisioningSmokeSessionHeader(
+        mergeTransportHeaders(modelHeaders, providerHeaders, model.headers),
+        model.headers,
+      );
 
       if (providerConfig?.authHeader) {
         if (!apiKey) {

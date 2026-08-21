@@ -5,6 +5,7 @@ import {
   failTransportStream,
   finalizeTransportStream,
   mergeTransportHeaders,
+  preserveProvisioningSmokeSessionHeader,
   sanitizeNonEmptyTransportPayloadText,
   sanitizeTransportPayloadText,
 } from "./transport-stream-shared.js";
@@ -55,6 +56,28 @@ describe("transport stream shared helpers", () => {
       "x-base": "two",
     });
     expect(mergeTransportHeaders(undefined, undefined)).toBeUndefined();
+  });
+
+  it("preserves only signed smoke sessions over later runtime attribution", () => {
+    expect(
+      preserveProvisioningSmokeSessionHeader(
+        mergeTransportHeaders(
+          { "X-Boon-Session-ID": "ordinary-model-session" },
+          { "x-boon-session-id": "ordinary-runtime-session" },
+        ),
+        { "X-Boon-Session-ID": "provisioning-smoke-run" },
+      ),
+    ).toEqual({ "X-Boon-Session-ID": "provisioning-smoke-run" });
+
+    expect(
+      preserveProvisioningSmokeSessionHeader(
+        mergeTransportHeaders(
+          { "X-Boon-Session-ID": "ordinary-model-session" },
+          { "x-boon-session-id": "ordinary-runtime-session" },
+        ),
+        { "X-Boon-Session-ID": "ordinary-model-session" },
+      ),
+    ).toEqual({ "x-boon-session-id": "ordinary-runtime-session" });
   });
 
   it("finalizes successful transport streams", () => {

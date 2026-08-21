@@ -61,6 +61,7 @@ import {
   failTransportStream,
   finalizeTransportStream,
   mergeTransportHeaders,
+  preserveProvisioningSmokeSessionHeader,
   sanitizeNonEmptyTransportPayloadText,
   sanitizeTransportPayloadText,
 } from "./transport-stream-shared.js";
@@ -113,18 +114,10 @@ function mergeAnthropicRequestHeaders(
   modelHeaders: Record<string, string> | undefined,
   ...optionHeaderSources: Array<Record<string, string> | undefined>
 ): Record<string, string> | undefined {
-  const merged = mergeTransportHeaders(baseHeaders, modelHeaders, ...optionHeaderSources);
-  const modelSessionHeader = Object.entries(modelHeaders ?? {}).find(
-    ([key]) => key.toLowerCase() === "x-boon-session-id",
+  return preserveProvisioningSmokeSessionHeader(
+    mergeTransportHeaders(baseHeaders, modelHeaders, ...optionHeaderSources),
+    modelHeaders,
   );
-  if (!modelSessionHeader) {
-    return merged;
-  }
-
-  // A smoke turn carries a signed session identity; runtime attribution must not replace it.
-  return mergeTransportHeaders(merged, {
-    [modelSessionHeader[0]]: modelSessionHeader[1],
-  });
 }
 
 function resolveAnthropicRequestModelId(model: AnthropicTransportModel): string {

@@ -262,6 +262,27 @@ describe("anthropic transport stream", () => {
     );
   });
 
+  it("keeps ordinary runtime attribution ahead of an ordinary model session", async () => {
+    const model = makeAnthropicTransportModel({
+      headers: { "X-Boon-Session-ID": "ordinary-model-session" },
+    });
+
+    await runTransportStream(
+      model,
+      {
+        messages: [{ role: "user", content: "hello" }],
+      } as AnthropicStreamContext,
+      {
+        apiKey: "sk-ant-api",
+        headers: { "x-boon-session-id": "ordinary-runtime-session" },
+      } as AnthropicStreamOptions,
+    );
+
+    expect(latestAnthropicRequestHeaders().get("x-boon-session-id")).toBe(
+      "ordinary-runtime-session",
+    );
+  });
+
   it("uses bearer auth for Microsoft Foundry Anthropic transport requests", async () => {
     const model = makeAnthropicTransportModel({
       provider: "microsoft-foundry",

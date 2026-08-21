@@ -88,6 +88,19 @@ export function mergeTransportHeaders(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
+export function preserveProvisioningSmokeSessionHeader(
+  headers: Record<string, string> | undefined,
+  modelHeaders: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  const smokeSessionHeader = Object.entries(modelHeaders ?? {}).find(
+    ([key, value]) =>
+      key.toLowerCase() === "x-boon-session-id" && value.startsWith("provisioning-smoke-"),
+  );
+  return smokeSessionHeader
+    ? mergeTransportHeaders(headers, { [smokeSessionHeader[0]]: smokeSessionHeader[1] })
+    : headers;
+}
+
 export function mergeTransportMetadata<T extends Record<string, unknown>>(
   payload: T,
   metadata?: Record<string, string>,

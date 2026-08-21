@@ -266,6 +266,29 @@ describe("createAgentSession attribution headers", () => {
     });
   });
 
+  it("keeps ordinary runtime headers ahead of ordinary model headers", async () => {
+    const options = await createSessionAndStreamModel(
+      {
+        ...testModel,
+        headers: {
+          Authorization: "Bearer model-token",
+          "X-Boon-Session-ID": "ordinary-model-session",
+        },
+      },
+      {
+        headers: {
+          Authorization: "Bearer runtime-token",
+          "x-boon-session-id": "ordinary-runtime-session",
+        },
+      },
+    );
+
+    expect(options.headers).toEqual({
+      Authorization: "Bearer runtime-token",
+      "x-boon-session-id": "ordinary-runtime-session",
+    });
+  });
+
   it("keeps resolved model headers when the registry has stale session attribution", async () => {
     const modelRegistry = {
       getApiKeyAndHeaders: vi.fn().mockResolvedValue({
