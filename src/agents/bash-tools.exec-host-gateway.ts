@@ -421,6 +421,10 @@ function buildGatewayExecApprovalDeniedToolResult(params: {
     content: [{ type: "text", text }],
     details: {
       status: "failed",
+      // Structured denial signal: `status` alone can't distinguish a policy
+      // denial from a genuine process failure, and after_tool_call
+      // classification must not sniff message text for this.
+      denied: true,
       exitCode: null,
       durationMs: 0,
       aggregated: text,

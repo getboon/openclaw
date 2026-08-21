@@ -62,6 +62,8 @@ function getAfterToolCallCall(index = 0) {
           toolName?: string;
           params?: unknown;
           error?: unknown;
+          errorKind?: unknown;
+          errorCode?: unknown;
           durationMs?: unknown;
           runId?: string;
           toolCallId?: string;
@@ -203,7 +205,7 @@ describe("after_tool_call hook wiring", () => {
     expect(context.agentId).toBeUndefined();
   });
 
-  it("classifies a validation rejection as invalid-input with the denial error code", async () => {
+  it("classifies a validation rejection as invalid-input", async () => {
     hookMocks.runner.hasHooks.mockReturnValue(true);
 
     const ctx = createToolHandlerCtx({ runId: "test-run-invalid" });

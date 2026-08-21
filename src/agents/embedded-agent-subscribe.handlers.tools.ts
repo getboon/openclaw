@@ -1588,6 +1588,11 @@ export async function handleToolExecutionEnd(
           middlewareError: isMiddlewareToolResultError(sanitizedResult),
         })
       : undefined;
+    // Only meaningful for exit-error: an exec exit code, unlike other
+    // details.exitCode readings, is genuine diagnostic signal worth
+    // preserving in a Sentry fingerprint rather than treating as noise.
+    const hookExitCode =
+      hookErrorKind === "exit-error" ? readToolResultDetails(sanitizedResult)?.exitCode : undefined;
     const hookEvent: PluginHookAfterToolCallEvent = {
       toolName,
       params: startArgs,
@@ -1597,6 +1602,7 @@ export async function handleToolExecutionEnd(
       error: isToolError ? extractToolErrorMessage(sanitizedResult) : undefined,
       ...(hookErrorKind ? { errorKind: hookErrorKind } : {}),
       ...(hookErrorCode ? { errorCode: hookErrorCode } : {}),
+      ...(typeof hookExitCode === "number" ? { exitCode: hookExitCode } : {}),
       durationMs,
     };
     void hookRunnerAfter

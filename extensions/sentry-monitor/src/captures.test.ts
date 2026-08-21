@@ -232,6 +232,48 @@ describe("buildAfterToolCallCapture", () => {
     expect(capture?.tags.error_kind).toBe("exit-error");
   });
 
+  it("tags the exit code and prefers it over normalized message text in the fingerprint", () => {
+    const capture = buildAfterToolCallCapture(
+      {
+        toolName: "exec",
+        params: {},
+        error: "Command exited with code 1",
+        errorKind: "exit-error",
+        exitCode: 1,
+      },
+      HOST,
+    );
+    expect(capture?.tags.exit_code).toBe("1");
+    expect(capture?.fingerprint).toEqual(["after_tool_call", "exec", "exit-error", "1"]);
+  });
+
+  it("keeps distinct exit codes in distinct fingerprints even when the surrounding text scrubs identically", () => {
+    // Without threading the exit code through explicitly, both of these would
+    // normalize to the same "Command exited with code <n>" text and collapse
+    // into one issue, hiding that they're different bugs.
+    const exit1 = buildAfterToolCallCapture(
+      {
+        toolName: "exec",
+        params: {},
+        error: "Command exited with code 1",
+        errorKind: "exit-error",
+        exitCode: 1,
+      },
+      HOST,
+    );
+    const exit127 = buildAfterToolCallCapture(
+      {
+        toolName: "exec",
+        params: {},
+        error: "Command exited with code 127",
+        errorKind: "exit-error",
+        exitCode: 127,
+      },
+      HOST,
+    );
+    expect(exit1?.fingerprint).not.toEqual(exit127?.fingerprint);
+  });
+
   it("fingerprints different tools' failures into different issues", () => {
     // Every after_tool_call capture is thrown from the same call site in
     // dispatch.ts, so without an explicit fingerprint Sentry's stack-based

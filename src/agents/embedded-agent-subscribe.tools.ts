@@ -732,19 +732,24 @@ export function classifyToolCallErrorKind(params: {
   middlewareError: boolean;
 }): PluginHookAfterToolCallErrorKind {
   const status = readToolResultStatus(params.result);
-  if (status && DENIAL_STATUSES.has(status)) {
+  const details = readToolResultDetails(params.result);
+  // `status` alone can't always distinguish a denial from a genuine failure
+  // (e.g. a denied exec approval keeps status: "failed"), so producers that
+  // need to signal a denial without a dedicated status set `details.denied`.
+  const isDeniedStatus = Boolean(status && DENIAL_STATUSES.has(status));
+  if (isDeniedStatus || details?.denied === true) {
     return "denied";
   }
   if (!params.executionStarted || status === "invalid") {
     return "invalid-input";
   }
-  if (isToolResultTimedOut(params.result)) {
+  if (isToolResultTimedOut(params.result) || status === "timed_out") {
     return "timeout";
   }
   if (params.middlewareError) {
     return "internal";
   }
-  const exitCode = readToolResultDetails(params.result)?.exitCode;
+  const exitCode = details?.exitCode;
   if (typeof exitCode === "number" && Number.isFinite(exitCode) && exitCode !== 0) {
     return "exit-error";
   }

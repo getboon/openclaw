@@ -700,6 +700,8 @@ export type PluginHookAfterToolCallEvent = {
   errorKind?: PluginHookAfterToolCallErrorKind;
   /** Present only alongside `error`, when the host resolved a denial/error code. */
   errorCode?: string;
+  /** Present only when `errorKind` is "exit-error": the process's exit code. */
+  exitCode?: number;
   durationMs?: number;
 };
 

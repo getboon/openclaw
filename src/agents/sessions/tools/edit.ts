@@ -101,15 +101,18 @@ export interface EditToolOptions {
 // false — has always hard-rejected. Never mutates `input`: it may be the
 // model's persisted tool-call arguments.
 function applyEditArgumentAliases(input: Record<string, unknown>): Record<string, unknown> {
-  let args = renameStringKeyAlias(input, "path", "file_path");
-  // Top-level old_string/new_string is Claude Code's single-edit tool shape
-  // (no edits[] wrapper); renaming to oldText/newText lets the legacy-rescue
-  // below (which already wraps top-level oldText/newText into edits[]) pick
-  // it up with no duplicated wrapping logic.
-  args = renameStringKeyAlias(args, "oldText", "old_string");
-  args = renameStringKeyAlias(args, "newText", "new_string");
+  const args = renameStringKeyAlias(input, "path", "file_path");
   if (!Array.isArray(args.edits)) {
-    return args;
+    // Top-level old_string/new_string is Claude Code's single-edit tool
+    // shape (no edits[] wrapper); renaming to oldText/newText lets the
+    // legacy-rescue below (which already wraps top-level oldText/newText
+    // into edits[]) pick it up with no duplicated wrapping logic. Only do
+    // this when edits[] is absent — otherwise a model that (unusually)
+    // sends both would have its top-level pair silently appended as an
+    // extra, unintended edit on top of the real edits[] array.
+    let renamed = renameStringKeyAlias(args, "oldText", "old_string");
+    renamed = renameStringKeyAlias(renamed, "newText", "new_string");
+    return renamed;
   }
   return {
     ...args,
@@ -252,11 +255,19 @@ function getEditCallRenderComponent(
 }
 
 function getRenderablePreviewInput(
-  args: RenderableEditArgs | undefined,
+  rawArgs: RenderableEditArgs | undefined,
 ): { path: string; edits: Edit[] } | null {
-  if (!args) {
+  if (!rawArgs) {
     return null;
   }
+
+  // The live preview reads the raw, in-flight streamed tool call — it never
+  // goes through prepareArguments — so it must apply the same alias
+  // normalization here on a local copy, or the diff preview silently goes
+  // blank for models using the snake_case aliases.
+  const args = applyEditArgumentAliases(
+    rawArgs as unknown as Record<string, unknown>,
+  ) as RenderableEditArgs;
 
   const path =
     typeof args.path === "string"

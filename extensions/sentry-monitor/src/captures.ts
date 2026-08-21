@@ -132,15 +132,19 @@ export function buildAfterToolCallCapture(
     tool: event.toolName,
     error_kind: event.errorKind,
     error_code: event.errorCode,
+    exit_code: typeof event.exitCode === "number" ? String(event.exitCode) : undefined,
   });
-  // tool + errorKind/errorCode (falling back to normalized message) so a
-  // recurring failure with a different path/id/timestamp lands in one issue,
-  // and different tools/causes never share a bucket (see file header).
+  // tool + errorKind/errorCode/exitCode (falling back to normalized message)
+  // so a recurring failure with a different path/id/timestamp lands in one
+  // issue, different tools/causes never share a bucket (see file header),
+  // and distinct exit codes never collapse into one just because the
+  // generic number-scrub in normalizeFingerprintText would otherwise erase
+  // the only thing that told them apart.
   const fingerprint = fingerprintOf(
     "after_tool_call",
     event.toolName,
     event.errorKind,
-    event.errorCode ?? normalizeFingerprintText(event.error),
+    event.errorCode ?? event.exitCode ?? normalizeFingerprintText(event.error),
   );
   const contexts = { run: runContext(event.runId) };
   const extra = { tool_call_id: event.toolCallId, duration_ms: event.durationMs };

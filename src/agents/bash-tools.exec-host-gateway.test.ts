@@ -428,6 +428,7 @@ describe("processGatewayAllowlist", () => {
     }
 
     expect(result!.deniedResult?.details.status).toBe("failed");
+    expect(result!.deniedResult?.details.denied).toBe(true);
     expect(captured.events).toHaveLength(2);
     expect(captured.events[0]).toMatchObject({
       action: "exec.approval.requested",
@@ -1032,6 +1033,7 @@ describe("processGatewayAllowlist", () => {
       }),
     );
     expect(result.deniedResult?.details.status).toBe("failed");
+    expect(result.deniedResult?.details.denied).toBe(true);
     expect(result.deniedResult?.content[0]).toEqual(
       expect.objectContaining({
         text: "Exec denied (gateway id=req-1, approval-timeout): echo 'unterminated",
@@ -1084,6 +1086,7 @@ describe("processGatewayAllowlist", () => {
       }),
     );
     expect(result.deniedResult?.details.status).toBe("failed");
+    expect(result.deniedResult?.details.denied).toBe(true);
     expect(result.deniedResult?.content[0]).toEqual(
       expect.objectContaining({
         text: "Exec denied (gateway id=req-1, approval-timeout): echo ok",
@@ -1556,6 +1559,7 @@ EOF`,
 
       expect(result.pendingResult).toBeUndefined();
       expect(result.deniedResult?.details.status).toBe("failed");
+      expect(result.deniedResult?.details.denied).toBe(true);
       expect(result.deniedResult?.content[0]).toEqual(
         expect.objectContaining({
           text: "Exec denied (gateway id=req-1, user-denied): find . -maxdepth 1",
@@ -1642,6 +1646,7 @@ EOF`,
 
     expect(result.pendingResult).toBeUndefined();
     expect(result.deniedResult?.details.status).toBe("failed");
+    expect(result.deniedResult?.details.denied).toBe(true);
     expect(result.deniedResult?.content[0]).toEqual(
       expect.objectContaining({
         text: "Exec denied (gateway id=req-1, user-denied): pwd && df -h",

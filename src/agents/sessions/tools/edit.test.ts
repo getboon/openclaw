@@ -175,6 +175,42 @@ describe("edit tool", () => {
       "remote changed",
     );
   });
+
+  it("renders a preview for snake_case aliases (the live streamed args never run through prepareArguments)", async () => {
+    const readFile = vi.fn(async () => Buffer.from("remote original\n"));
+    const operations: EditOperations = {
+      access: async () => {},
+      readFile,
+      writeFile: async () => {},
+    };
+    const tool = createEditToolDefinition("/workspace", { operations });
+    const args = {
+      file_path: "remote.txt",
+      edits: [{ old_string: "remote original", new_string: "remote changed" }],
+    };
+    const context = {
+      args,
+      argsComplete: true,
+      cwd: "/workspace",
+      executionStarted: false,
+      expanded: false,
+      invalidate: vi.fn(),
+      isError: false,
+      isPartial: false,
+      lastComponent: undefined,
+      showImages: false,
+      state: {},
+      toolCallId: "call-preview-alias",
+    };
+
+    const component = tool.renderCall?.(args, testTheme, context);
+    await vi.waitFor(() => expect(context.invalidate).toHaveBeenCalled());
+
+    expect(readFile).toHaveBeenCalledWith(path.join("/workspace", "remote.txt"));
+    expect((component as { preview?: { diff?: string } } | undefined)?.preview?.diff).toContain(
+      "remote changed",
+    );
+  });
 });
 
 // editSchema/replaceEditSchema are additionalProperties: false, so
@@ -193,7 +229,7 @@ describe("prepareEditArguments alias normalization", () => {
       file_path: "notes.txt",
       edits: [{ old_string: "alpha", new_string: "ALPHA" }],
     };
-    const snapshot = JSON.parse(JSON.stringify(raw));
+    const snapshot = structuredClone(raw);
     prepare(raw);
     expect(raw).toEqual(snapshot);
   });
@@ -245,6 +281,21 @@ describe("prepareEditArguments alias normalization", () => {
       path: "notes.txt",
       edits: [{ oldText: "alpha", newText: "ALPHA" }],
     });
+  });
+
+  it("does not merge top-level old_string/new_string into an edits[] array that is already present", () => {
+    // A model that (unusually) sends both would otherwise get its top-level
+    // pair silently appended as an extra, unintended edit on top of the real
+    // edits[] array.
+    const prepared = prepare({
+      path: "notes.txt",
+      edits: [{ oldText: "alpha", newText: "ALPHA" }],
+      old_string: "unrelated",
+      new_string: "should not apply",
+    });
+    expect(prepared.edits).toEqual([{ oldText: "alpha", newText: "ALPHA" }]);
+    expect((prepared as unknown as Record<string, unknown>).old_string).toBe("unrelated");
+    expect((prepared as unknown as Record<string, unknown>).new_string).toBe("should not apply");
   });
 
   it("still rescues edits sent as a JSON string alongside snake_case fields", () => {
