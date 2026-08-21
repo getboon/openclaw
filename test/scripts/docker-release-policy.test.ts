@@ -30,6 +30,20 @@ describe("Docker release policy", () => {
     }
   });
 
+  it("treats a fork boon correction on the extended-stable line as extended-stable", () => {
+    for (const version of ["2026.6.34-boon.1", "2026.6.99-boon.4"]) {
+      expect(resolveDockerReleasePolicy(version)).toEqual({
+        version,
+        channel: "extended-stable",
+        movingAliases: {
+          default: ["extended-stable"],
+          slim: ["extended-stable-slim"],
+          browser: ["extended-stable-browser"],
+        },
+      });
+    }
+  });
+
   it("publishes beta versions without moving a channel alias", () => {
     expect(resolveDockerReleasePolicy("2026.7.2-beta.3")).toEqual({
       version: "2026.7.2-beta.3",

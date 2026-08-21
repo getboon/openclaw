@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { runManagedCommand } from "./lib/managed-child-process.mjs";
-import { parseReleaseVersion } from "./lib/npm-publish-plan.mjs";
+import { isBoonCorrectionVersion, parseReleaseVersion } from "./lib/npm-publish-plan.mjs";
 
 const parsedArgs = parseArgs(process.argv.slice(2));
 const fix = parsedArgs.fix;
@@ -124,8 +124,13 @@ function collectNpmVersionErrors(rootDir = resolve(".")) {
   }
   // Upstream-owned publishable plugins intentionally keep the upstream base
   // version through a fork `-boon.N` correction release; only plugins the
-  // fork actually patches get bumped to the corrected version.
-  const acceptedVersions = new Set([rootVersion, parsedRootVersion.baseVersion]);
+  // fork actually patches get bumped to the corrected version. Restricted to
+  // boon corrections so an alpha/beta/upstream-numeric-correction root
+  // version can't let mismatched plugin metadata pass.
+  const acceptedVersions = new Set([
+    rootVersion,
+    ...(isBoonCorrectionVersion(rootVersion) ? [parsedRootVersion.baseVersion] : []),
+  ]);
 
   const errors = [];
   const extensionsDir = resolve(rootDir, "extensions");
