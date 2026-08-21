@@ -203,7 +203,7 @@ describe("edit tool", () => {
       toolCallId: "call-preview-alias",
     };
 
-    const component = tool.renderCall?.(args, testTheme, context);
+    const component = tool.renderCall?.(args as never, testTheme, context);
     await vi.waitFor(() => expect(context.invalidate).toHaveBeenCalled());
 
     expect(readFile).toHaveBeenCalledWith(path.join("/workspace", "remote.txt"));
