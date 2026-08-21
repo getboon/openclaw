@@ -159,8 +159,9 @@ function collectNpmVersionErrors(rootDir = resolve(".")) {
       continue;
     }
     if (!acceptedVersions.has(packageJson.version)) {
+      const expected = [...acceptedVersions].map((version) => JSON.stringify(version)).join(" or ");
       errors.push(
-        `extensions/${entry.name}/package.json version is ${JSON.stringify(packageJson.version)}; expected ${JSON.stringify(rootVersion)} or ${JSON.stringify(parsedRootVersion.baseVersion)}`,
+        `extensions/${entry.name}/package.json version is ${JSON.stringify(packageJson.version)}; expected ${expected}`,
       );
     }
   }
