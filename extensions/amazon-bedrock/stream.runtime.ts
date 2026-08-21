@@ -282,10 +282,10 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
         }
       }
 
-      // ENG-18472: same fix as anthropic-transport-stream.ts — enforce
-      // messageStop for every model, not just the Fable-5 refusal-buffer
-      // path. A stream that ends without it is a dropped connection, not
-      // a completed turn, on this direct-to-Bedrock path too.
+      // Same fix as anthropic-transport-stream.ts — enforce messageStop
+      // for every model, not just the Fable-5 refusal-buffer path. A
+      // stream that ends without it is a dropped connection, not a
+      // completed turn, on this direct-to-Bedrock path too.
       if (!sawMessageStop) {
         throw new Error("Bedrock stream ended before messageStop");
       }

@@ -442,10 +442,10 @@ describe("Bedrock Fable contract", () => {
   });
 });
 
-// ENG-18472: messageStop enforcement used to be gated on the Fable-5
-// refusal buffer only — every other Bedrock model accepted a stream that
-// ended without messageStop as a successful completion.
-describe("Bedrock messageStop enforcement (ENG-18472)", () => {
+// messageStop enforcement used to be gated on the Fable-5 refusal buffer
+// only — every other Bedrock model accepted a stream that ended without
+// messageStop as a successful completion.
+describe("Bedrock messageStop enforcement", () => {
   function context() {
     return { messages: [{ role: "user", content: "hi", timestamp: 0 }] } as never;
   }

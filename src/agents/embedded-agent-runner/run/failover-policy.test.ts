@@ -744,13 +744,13 @@ describe("ENG-16815 gateway-relayed Bedrock 503 walks the fallback ladder", () =
   });
 });
 
-// ENG-18472: same shape of bug as ENG-16815 above, different trigger. A
-// clean stream end without message_stop (Bedrock dropping the connection
+// Same shape of bug as the gateway-relayed 5xx case above, different
+// trigger. A clean stream end without message_stop (a dropped connection
 // mid-generation) throws "stream ended before message_stop" from the
 // transport. Before adding the failover-matches.ts pattern, that message
 // classified as unclassified -> continue_normal, blocking the customer
 // instead of walking the configured fallback chain.
-describe("ENG-18472 truncated stream (missing message_stop) walks the fallback ladder", () => {
+describe("truncated stream (missing message_stop) walks the fallback ladder", () => {
   function truncatedStreamAssistantError(overrides?: Partial<AssistantMessage>): AssistantMessage {
     return {
       role: "assistant",

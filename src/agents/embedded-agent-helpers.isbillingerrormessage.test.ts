@@ -1361,10 +1361,10 @@ describe("classifyFailoverReason provider messages", () => {
     expect(classifyFailoverReason(INSUFFICIENT_QUOTA_PAYLOAD)).toBe("billing");
     expect(classifyFailoverReason("deadline exceeded")).toBe("timeout");
     expect(classifyFailoverReason("request ended without sending any chunks")).toBe("timeout");
-    // ENG-18472: message_stop enforcement is now unconditional (not just
-    // Fable-5) — this message must classify as failover-eligible, not
-    // unclassified, or a truncated stream dead-ends the customer's turn
-    // instead of walking the configured fallback chain.
+    // message_stop enforcement is now unconditional (not just Fable-5) —
+    // this message must classify as failover-eligible, not unclassified,
+    // or a truncated stream dead-ends the customer's turn instead of
+    // walking the configured fallback chain.
     expect(classifyFailoverReason("Anthropic stream ended before message_stop")).toBe("timeout");
     expect(classifyFailoverReason("Bedrock stream ended before messageStop")).toBe("timeout");
     expect(classifyFailoverReason("Connection error.")).toBe("timeout");

@@ -1557,15 +1557,11 @@ export function createAnthropicMessagesTransportStreamFn(): StreamFn {
             calculateCost(model, output.usage);
           }
         }
-        // ENG-18472: enforce message_stop for every model, not just the
-        // Fable-5 refusal-buffer path. A stream that ends at a clean EOF
-        // without message_stop is a dropped connection wearing a
-        // clean-shutdown disguise (observed with the boon-llm-gateway/
-        // Bedrock path) — accepting it as `stopReason: "stop"` persists a
-        // truncated one-word answer as a successful turn. The legacy
-        // `src/llm/providers/anthropic.ts` provider already enforces this
-        // unconditionally (`sawMessageStart || requireMessageStop`); this
-        // transport had narrowed the check to the refusal-buffer case only.
+        // Require message_stop for every model, not only the Fable-5
+        // refusal-buffer path — a clean EOF without it is a dropped
+        // connection, not a completion, and must not be accepted as
+        // `stopReason: "stop"`. The legacy anthropic.ts provider already
+        // enforces this unconditionally; this transport had narrowed it.
         if (!sawMessageStop) {
           throw new Error("Anthropic stream ended before message_stop");
         }

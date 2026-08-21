@@ -193,11 +193,10 @@ describe("anthropic transport stream", () => {
     buildGuardedModelFetchMock.mockReset();
     guardedFetchMock.mockReset();
     buildGuardedModelFetchMock.mockReturnValue(guardedFetchMock);
-    // ENG-18472: message_stop is now enforced unconditionally, so the
-    // default fixture (used by tests that only care about the outgoing
-    // request payload, not the streamed response) must include it — a
-    // bare empty stream is otherwise indistinguishable from Bedrock
-    // dropping the connection mid-generation.
+    // message_stop is now enforced unconditionally, so the default
+    // fixture (used by tests that only care about the outgoing request
+    // payload, not the streamed response) must include it — a bare empty
+    // stream is otherwise indistinguishable from a dropped connection.
     guardedFetchMock.mockResolvedValue(createSseResponse([{ type: "message_stop" }]));
   });
 
@@ -815,12 +814,11 @@ describe("anthropic transport stream", () => {
     expect(result.errorMessage).toBe("Anthropic stream ended before message_stop");
   });
 
-  // ENG-18472: message_stop enforcement used to be gated on the Fable-5
-  // refusal buffer only — every other model (all Bedrock/gateway traffic
+  // message_stop enforcement used to be gated on the Fable-5 refusal
+  // buffer only — every other model (all Bedrock/gateway traffic
   // included) accepted a clean EOF without message_stop as a successful
-  // completion. This is the exact shape Bedrock produces when the
-  // connection drops on a frame boundary mid-generation: a real answer
-  // partially streamed, then nothing — no error, no terminator.
+  // completion: a real answer partially streamed, then nothing — no
+  // error, no terminator.
   it("throws when a non-Fable stream ends before message_stop after streaming content", async () => {
     guardedFetchMock.mockResolvedValueOnce(
       createSseResponse([
