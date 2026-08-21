@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { runManagedCommand } from "./lib/managed-child-process.mjs";
-import { isBoonCorrectionVersion, parseReleaseVersion } from "./lib/npm-publish-plan.mjs";
+import { parseReleaseVersion } from "./lib/npm-publish-plan.mjs";
 
 const parsedArgs = parseArgs(process.argv.slice(2));
 const fix = parsedArgs.fix;
@@ -118,19 +118,9 @@ function collectNpmVersionErrors(rootDir = resolve(".")) {
   } catch (error) {
     return [`unable to read package.json: ${formatError(error)}`];
   }
-  const parsedRootVersion = parseReleaseVersion(rootVersion);
-  if (!parsedRootVersion) {
+  if (!parseReleaseVersion(rootVersion)) {
     return [`package.json has invalid release version ${JSON.stringify(rootVersion)}`];
   }
-  // Upstream-owned publishable plugins intentionally keep the upstream base
-  // version through a fork `-boon.N` correction release; only plugins the
-  // fork actually patches get bumped to the corrected version. Restricted to
-  // boon corrections so an alpha/beta/upstream-numeric-correction root
-  // version can't let mismatched plugin metadata pass.
-  const acceptedVersions = new Set([
-    rootVersion,
-    ...(isBoonCorrectionVersion(rootVersion) ? [parsedRootVersion.baseVersion] : []),
-  ]);
 
   const errors = [];
   const extensionsDir = resolve(rootDir, "extensions");
@@ -158,10 +148,9 @@ function collectNpmVersionErrors(rootDir = resolve(".")) {
     if (packageJson.openclaw?.release?.publishToNpm !== true) {
       continue;
     }
-    if (!acceptedVersions.has(packageJson.version)) {
-      const expected = [...acceptedVersions].map((version) => JSON.stringify(version)).join(" or ");
+    if (packageJson.version !== rootVersion) {
       errors.push(
-        `extensions/${entry.name}/package.json version is ${JSON.stringify(packageJson.version)}; expected ${expected}`,
+        `extensions/${entry.name}/package.json version is ${JSON.stringify(packageJson.version)}; expected ${JSON.stringify(rootVersion)}`,
       );
     }
   }
