@@ -178,3 +178,41 @@ describe("read tool", () => {
     expect(textContent(result)).toBe("/workspace/legacy.txt:c4e3bac3");
   });
 });
+
+// readSchema requires `path`; a model sending Claude-Code-style file_path
+// (which this tool's own render helpers already read, e.g.
+// ReadRenderArgs.file_path) was a hard "Validation failed" rejection.
+describe("prepareArguments alias normalization", () => {
+  it("maps file_path to path", () => {
+    const definition = createReadToolDefinition("/workspace");
+    const prepared = definition.prepareArguments?.({ file_path: "notes.txt" });
+    expect(prepared).toEqual({ path: "notes.txt" });
+  });
+
+  it("does not override an explicit path with file_path", () => {
+    const definition = createReadToolDefinition("/workspace");
+    const prepared = definition.prepareArguments?.({
+      path: "real.txt",
+      file_path: "ignored.txt",
+    }) as { path?: string };
+    expect(prepared.path).toBe("real.txt");
+  });
+
+  it("preserves offset/limit alongside the aliased path", () => {
+    const definition = createReadToolDefinition("/workspace");
+    const prepared = definition.prepareArguments?.({
+      file_path: "notes.txt",
+      offset: 10,
+      limit: 50,
+    });
+    expect(prepared).toEqual({ path: "notes.txt", offset: 10, limit: 50 });
+  });
+
+  it("never mutates the caller's raw arguments object", () => {
+    const definition = createReadToolDefinition("/workspace");
+    const raw = { file_path: "notes.txt" };
+    const snapshot = { ...raw };
+    definition.prepareArguments?.(raw);
+    expect(raw).toEqual(snapshot);
+  });
+});

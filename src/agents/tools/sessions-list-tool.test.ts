@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     check: () => ({ allowed: true }),
   })),
   resolveEffectiveSessionToolsVisibility: vi.fn(() => "all"),
+  clampedFromSandbox: vi.fn(() => false),
   resolveSandboxedSessionToolContext: vi.fn(() => ({
     mainKey: "main",
     alias: "main",
@@ -30,10 +31,17 @@ vi.mock("./sessions-helpers.js", async (importActual) => {
     createSessionVisibilityGuard: async () => await mocks.createSessionVisibilityGuard(),
     resolveEffectiveSessionToolsVisibility: () => mocks.resolveEffectiveSessionToolsVisibility(),
     resolveSandboxedSessionToolContext: () => mocks.resolveSandboxedSessionToolContext(),
+    // Drives off the same mock as resolveEffectiveSessionToolsVisibility so
+    // there is still one visibility knob for tests to control.
+    resolveSessionVisibilityContext: () => ({
+      visibility: mocks.resolveEffectiveSessionToolsVisibility(),
+      clampedFromSandbox: mocks.clampedFromSandbox(),
+    }),
   };
 });
 
 type SessionsListDetails = {
+  visibility?: { mode: string; restricted: true; warning: string };
   sessions?: Array<{
     deliveryContext?: {
       accountId?: string;
@@ -65,6 +73,7 @@ describe("sessions-list-tool", () => {
       check: () => ({ allowed: true }),
     });
     mocks.resolveEffectiveSessionToolsVisibility.mockReturnValue("all");
+    mocks.clampedFromSandbox.mockReturnValue(false);
     mocks.resolveSandboxedSessionToolContext.mockReturnValue({
       mainKey: "main",
       alias: "main",
@@ -220,5 +229,44 @@ describe("sessions-list-tool", () => {
 
     await expect(tool.execute("call-4", params)).rejects.toThrow(message);
     expect(mocks.gatewayCall).not.toHaveBeenCalled();
+  });
+
+  it("names the configured visibility in the warning when not sandbox-clamped", async () => {
+    mocks.resolveEffectiveSessionToolsVisibility.mockReturnValue("tree");
+    mocks.gatewayCall.mockResolvedValue({ path: "/tmp/sessions.json", sessions: [] });
+    const tool = createSessionsListTool({ config: {} as never });
+
+    const result = await tool.execute("call-5", {});
+    const details = getSessionsListDetails(result);
+
+    expect(details.visibility).toEqual({
+      mode: "tree",
+      restricted: true,
+      warning:
+        "Session visibility is restricted (effective tools.sessions.visibility=tree). Results may omit sessions outside the current scope. The count field reflects only sessions within the current scope.",
+    });
+  });
+
+  it("names the sandbox clamp in the warning instead of tools.sessions.visibility when clamped", async () => {
+    mocks.resolveEffectiveSessionToolsVisibility.mockReturnValue("tree");
+    mocks.clampedFromSandbox.mockReturnValue(true);
+    mocks.gatewayCall.mockResolvedValue({ path: "/tmp/sessions.json", sessions: [] });
+    const tool = createSessionsListTool({ config: {} as never });
+
+    const result = await tool.execute("call-6", {});
+    const details = getSessionsListDetails(result);
+
+    expect(details.visibility?.warning).toContain("sandboxed session is clamped to tree");
+    expect(details.visibility?.warning).not.toContain("tools.sessions.visibility=tree");
+  });
+
+  it("omits the visibility warning entirely when visibility is all", async () => {
+    mocks.gatewayCall.mockResolvedValue({ path: "/tmp/sessions.json", sessions: [] });
+    const tool = createSessionsListTool({ config: {} as never });
+
+    const result = await tool.execute("call-7", {});
+    const details = getSessionsListDetails(result);
+
+    expect(details.visibility).toBeUndefined();
   });
 });

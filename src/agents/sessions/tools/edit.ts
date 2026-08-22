@@ -14,6 +14,7 @@ import { Type } from "typebox";
 import { renderDiff } from "../../modes/interactive/components/diff.js";
 import type { AgentTool } from "../../runtime/index.js";
 import type { ToolDefinition } from "../extensions/types.js";
+import { renameStringKeyAlias } from "./argument-aliases.js";
 import {
   applyEditsToNormalizedContent,
   computeEditsDiff,
@@ -95,22 +96,55 @@ export interface EditToolOptions {
   operations?: EditOperations;
 }
 
+// Claude-Code-style names this tool's own TUI renderers already read
+// (RenderableEditArgs.file_path below) but the schema — additionalProperties:
+// false — has always hard-rejected. Never mutates `input`: it may be the
+// model's persisted tool-call arguments.
+function applyEditArgumentAliases(input: Record<string, unknown>): Record<string, unknown> {
+  const args = renameStringKeyAlias(input, "path", "file_path");
+  if (!Array.isArray(args.edits)) {
+    // Top-level old_string/new_string is Claude Code's single-edit tool
+    // shape (no edits[] wrapper); renaming to oldText/newText lets the
+    // legacy-rescue below (which already wraps top-level oldText/newText
+    // into edits[]) pick it up with no duplicated wrapping logic. Only do
+    // this when edits[] is absent — otherwise a model that (unusually)
+    // sends both would have its top-level pair silently appended as an
+    // extra, unintended edit on top of the real edits[] array.
+    let renamed = renameStringKeyAlias(args, "oldText", "old_string");
+    renamed = renameStringKeyAlias(renamed, "newText", "new_string");
+    return renamed;
+  }
+  return {
+    ...args,
+    edits: args.edits.map((edit) => {
+      if (!edit || typeof edit !== "object") {
+        return edit;
+      }
+      let entry = renameStringKeyAlias(edit as Record<string, unknown>, "oldText", "old_string");
+      entry = renameStringKeyAlias(entry, "newText", "new_string");
+      return entry;
+    }),
+  };
+}
+
 function prepareEditArguments(input: unknown): EditToolInput {
   if (!input || typeof input !== "object") {
     return input as EditToolInput;
   }
 
-  const args = input as Record<string, unknown>;
+  let args = input as Record<string, unknown>;
 
   // Some models (Opus 4.6, GLM-5.1) send edits as a JSON string instead of an array
   if (typeof args.edits === "string") {
     try {
       const parsed = JSON.parse(args.edits);
       if (Array.isArray(parsed)) {
-        args.edits = parsed;
+        args = { ...args, edits: parsed };
       }
     } catch {}
   }
+
+  args = applyEditArgumentAliases(args);
 
   const legacy = args as LegacyEditToolInput;
   if (typeof legacy.oldText !== "string" || typeof legacy.newText !== "string") {
@@ -221,11 +255,19 @@ function getEditCallRenderComponent(
 }
 
 function getRenderablePreviewInput(
-  args: RenderableEditArgs | undefined,
+  rawArgs: RenderableEditArgs | undefined,
 ): { path: string; edits: Edit[] } | null {
-  if (!args) {
+  if (!rawArgs) {
     return null;
   }
+
+  // The live preview reads the raw, in-flight streamed tool call — it never
+  // goes through prepareArguments — so it must apply the same alias
+  // normalization here on a local copy, or the diff preview silently goes
+  // blank for models using the snake_case aliases.
+  const args = applyEditArgumentAliases(
+    rawArgs as unknown as Record<string, unknown>,
+  ) as RenderableEditArgs;
 
   const path =
     typeof args.path === "string"

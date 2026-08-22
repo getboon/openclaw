@@ -260,17 +260,21 @@ function formatSlackWebApiErrorMessage(err: unknown): string | undefined {
     return undefined;
   }
   const details: string[] = [];
+  // Slack sets `needed` only on a genuine missing_scope failure. `scopes` and
+  // `acceptedScopes` come from headers Slack attaches to EVERY response,
+  // success or failure — gate all three on `needed` so they only appear
+  // together, on an actual scope failure, not any unrelated error.
   const needed = normalizeSlackApiString(data?.needed);
   if (needed) {
     details.push(`needed: ${needed}`);
-  }
-  const scopes = normalizeSlackScopeList(data?.response_metadata?.scopes);
-  if (scopes.length) {
-    details.push(`granted: ${scopes.join(", ")}`);
-  }
-  const acceptedScopes = normalizeSlackScopeList(data?.response_metadata?.acceptedScopes);
-  if (acceptedScopes.length) {
-    details.push(`accepted: ${acceptedScopes.join(", ")}`);
+    const scopes = normalizeSlackScopeList(data?.response_metadata?.scopes);
+    if (scopes.length) {
+      details.push(`granted: ${scopes.join(", ")}`);
+    }
+    const acceptedScopes = normalizeSlackScopeList(data?.response_metadata?.acceptedScopes);
+    if (acceptedScopes.length) {
+      details.push(`accepted: ${acceptedScopes.join(", ")}`);
+    }
   }
   return `${err.message || `An API error occurred: ${code}`}${
     details.length ? ` (${details.join("; ")})` : ""

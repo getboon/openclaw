@@ -38,7 +38,7 @@ Set the Sentry DSN via one of:
   }
   ```
 
-The `environment` tag defaults to the host's hostname, and the OpenClaw version is sent as the Sentry `release` for built-in regression tracking across upgrades.
+The `environment` tag defaults to the host's hostname, and the running OpenClaw application version — the same value across every bundled plugin in the process — is sent as the Sentry `release` for built-in regression tracking across upgrades.
 
 ## What it captures
 
@@ -48,7 +48,7 @@ Every error-bearing lifecycle hook plus node-level uncaught exceptions and unhan
 | ------------------ | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `model_call_ended` | `outcome === "error"`                                       | `provider`, `model`, `api`, `transport`, `failure_kind`, `error_category`, `error_class` |
 | `agent_end`        | `success === false`                                         | `host`                                                                                   |
-| `after_tool_call`  | `error` is set                                              | `tool`                                                                                   |
+| `after_tool_call`  | `error` is set and `errorKind !== "denied"`                 | `tool`, `error_kind`, `error_code`, `exit_code`                                          |
 | `message_sent`     | `success === false`                                         | `host`                                                                                   |
 | `subagent_ended`   | `outcome ∈ {error, timeout, killed, reset, deleted}`        | `outcome`, `target_kind`                                                                 |
 | `cron_changed`     | `status === "error"` or `deliveryError` set                 | `action`, `status`, `delivery_status`                                                    |
@@ -56,6 +56,8 @@ Every error-bearing lifecycle hook plus node-level uncaught exceptions and unhan
 | node-level         | `uncaughtException` / `unhandledRejection`                  | _(Sentry auto-tags)_                                                                     |
 
 For a `model_call_ended` error, `error_class` classifies a 5xx failure by source so an alert can page on the two differently (ENG-16922): `upstream_provider_5xx` is a Bedrock/Anthropic 5xx (500/503/529, `api_error`/`overloaded`/`overloaded_error`) relayed verbatim by boon-llm-gateway — a provider outage, not our infra — while `gateway_origin_5xx` is a gateway-synthesized 5xx (chiefly a 502 from an exhausted chain, a WAF/HTML block page, or a no-response transport fault). It is unset for non-5xx failures. The raw numeric `http_status` is attached as event `extra` for drilldown. The classification is status-driven (see `classify5xxSource`), not message-text-driven.
+
+For `after_tool_call`, `errorKind` classifies the failure so expected, policy-driven outcomes don't page next to real defects: a policy/permission/visibility denial (`errorKind: "denied"`) is not captured at all — the system worked as intended; a model argument-validation rejection (`errorKind: "invalid-input"`) is captured as a non-paging `warning`-level message rather than an exception, since it's a signal worth triaging for a genuine schema mismatch but not a host defect. Every other capture — including an exec-family exit error — stays a full exception. `error_code` is set when the host resolved a denial/error code (e.g. `SYSTEM_RUN_DENIED`); `exit_code` is set for an exec-family exit error. The fingerprint prefers `error_code` or `exit_code` over the free-form `error` text — so distinct exit codes or HTTP statuses never collapse into one bucket — and otherwise scrubs volatile substrings (paths, ids, timestamps, byte/pixel counts) from `error` before grouping, so the same underlying failure recurring with different incidental detail still lands in one issue instead of one-per-occurrence.
 
 Each capture is wrapped so a bug in the reporting path cannot take down the gateway. Performance tracing is off by default (`tracesSampleRate: 0`).
 

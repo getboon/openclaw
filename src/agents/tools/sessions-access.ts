@@ -13,7 +13,9 @@ export {
   createAgentToAgentPolicy,
   createSessionVisibilityGuard,
   createSessionVisibilityRowChecker,
+  isSessionToolsVisibilityClampedToTree,
   resolveEffectiveSessionToolsVisibility,
+  resolveSessionVisibilityContext,
 } from "../../plugin-sdk/session-visibility.js";
 
 /** Resolves the requester context used to filter sandboxed session-tool access. */

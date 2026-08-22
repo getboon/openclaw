@@ -15,6 +15,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizeTargetForProvider } from "../infra/outbound/target-normalization.js";
 import { normalizeInteractiveReply, normalizeMessagePresentation } from "../interactive/payload.js";
 import { redactSensitiveFieldValue, redactToolPayloadText } from "../logging/redact.js";
+import type { PluginHookAfterToolCallErrorKind } from "../plugins/hook-types.js";
 import { truncateUtf16Safe } from "../utils.js";
 import { collectTextContentBlocks } from "./content-blocks.js";
 import { isMessagingToolTargetEvidenceAction } from "./embedded-agent-messaging.js";
@@ -709,6 +710,50 @@ export function isToolResultTimedOut(result: unknown): boolean {
     return true;
   }
   return readToolResultDetails(result)?.timedOut === true;
+}
+
+// Deliberately narrower than isToolResultError's full failure-status list:
+// only statuses verified to mean a policy/permission decision. Others in
+// that list (aborted, unavailable, timed_out) are routinely infra/dependency
+// failures too, not safe to assume "expected" without a per-value audit.
+const DENIAL_STATUSES = new Set(["forbidden", "denied", "blocked"]);
+
+/**
+ * Classifies a failed tool result for `after_tool_call` hook consumers (see
+ * `PluginHookAfterToolCallErrorKind`), using only structured signals the host
+ * already computes — never `error` text. Precedence matters: a denial or an
+ * unstarted execution takes priority over an exec exit code, since a policy
+ * check or validation failure can leave stale/irrelevant `details.exitCode`
+ * behind from an unrelated earlier attempt.
+ */
+export function classifyToolCallErrorKind(params: {
+  result: unknown;
+  executionStarted: boolean;
+  middlewareError: boolean;
+}): PluginHookAfterToolCallErrorKind {
+  const status = readToolResultStatus(params.result);
+  const details = readToolResultDetails(params.result);
+  // `status` alone can't always distinguish a denial from a genuine failure
+  // (e.g. a denied exec approval keeps status: "failed"), so producers that
+  // need to signal a denial without a dedicated status set `details.denied`.
+  const isDeniedStatus = Boolean(status && DENIAL_STATUSES.has(status));
+  if (isDeniedStatus || details?.denied === true) {
+    return "denied";
+  }
+  if (!params.executionStarted || status === "invalid") {
+    return "invalid-input";
+  }
+  if (isToolResultTimedOut(params.result) || status === "timed_out") {
+    return "timeout";
+  }
+  if (params.middlewareError) {
+    return "internal";
+  }
+  const exitCode = details?.exitCode;
+  if (typeof exitCode === "number" && Number.isFinite(exitCode) && exitCode !== 0) {
+    return "exit-error";
+  }
+  return "upstream";
 }
 
 export function extractToolErrorMessage(result: unknown): string | undefined {
