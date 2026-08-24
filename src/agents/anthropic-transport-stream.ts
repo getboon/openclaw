@@ -1573,7 +1573,12 @@ export function createAnthropicMessagesTransportStreamFn(): StreamFn {
             calculateCost(model, output.usage);
           }
         }
-        if (refusalBuffer && !sawMessageStop) {
+        // Require message_stop for every model, not only the Fable-5
+        // refusal-buffer path — a clean EOF without it is a dropped
+        // connection, not a completion, and must not be accepted as
+        // `stopReason: "stop"`. The legacy anthropic.ts provider already
+        // enforces this unconditionally; this transport had narrowed it.
+        if (!sawMessageStop) {
           throw new Error("Anthropic stream ended before message_stop");
         }
         if (transportOptions.signal?.aborted) {

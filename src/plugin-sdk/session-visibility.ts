@@ -105,6 +105,35 @@ export function resolveSandboxSessionToolsVisibility(cfg: OpenClawConfig): "spaw
   return cfg.agents?.defaults?.sandbox?.sessionToolsVisibility ?? "spawned";
 }
 
+/**
+ * True when a sandboxed session's visibility was silently overridden to
+ * "tree" by the sandbox clamp, even though the operator configured something
+ * else (self/agent/all). The denial message otherwise always names
+ * `tools.sessions.visibility=tree` as the cause, which is wrong in this case
+ * — the operator's actual config is being ignored, not enforced.
+ */
+export function isSessionToolsVisibilityClampedToTree(params: {
+  cfg: OpenClawConfig;
+  sandboxed: boolean;
+}): boolean {
+  if (!params.sandboxed) {
+    return false;
+  }
+  const configured = resolveSessionToolsVisibility(params.cfg);
+  return resolveSandboxSessionToolsVisibility(params.cfg) === "spawned" && configured !== "tree";
+}
+
+/** The effective visibility plus whether a sandbox clamp is the reason, in one lookup. */
+export function resolveSessionVisibilityContext(params: {
+  cfg: OpenClawConfig;
+  sandboxed: boolean;
+}): { visibility: SessionToolsVisibility; clampedFromSandbox: boolean } {
+  return {
+    visibility: resolveEffectiveSessionToolsVisibility(params),
+    clampedFromSandbox: isSessionToolsVisibilityClampedToTree(params),
+  };
+}
+
 type CompiledAgentAllowPattern =
   | { kind: "all" }
   | { kind: "deny" }
@@ -264,7 +293,14 @@ function selfVisibilityMessage(action: SessionAccessAction): string {
   return `${actionPrefix(action)} visibility is restricted to the current session (tools.sessions.visibility=self).`;
 }
 
-function treeVisibilityMessage(action: SessionAccessAction): string {
+function treeVisibilityMessage(action: SessionAccessAction, clampedFromSandbox: boolean): string {
+  if (clampedFromSandbox) {
+    return (
+      `${actionPrefix(action)} visibility is restricted to the current session tree — ` +
+      "this sandboxed session is clamped to tree regardless of tools.sessions.visibility " +
+      "(see agents.defaults.sandbox.sessionToolsVisibility)."
+    );
+  }
   return `${actionPrefix(action)} visibility is restricted to the current session tree (tools.sessions.visibility=tree).`;
 }
 
@@ -275,6 +311,8 @@ export function createSessionVisibilityChecker(params: {
   visibility: SessionToolsVisibility;
   a2aPolicy: AgentToAgentPolicy;
   spawnedKeys: Set<string> | null;
+  /** See `isSessionToolsVisibilityClampedToTree`. Defaults to false. */
+  clampedFromSandbox?: boolean;
 }): { check: (targetSessionKey: string) => SessionAccessResult } {
   const spawnedKeys = params.spawnedKeys;
   const rowChecker = createSessionVisibilityRowChecker({
@@ -282,6 +320,7 @@ export function createSessionVisibilityChecker(params: {
     requesterSessionKey: params.requesterSessionKey,
     visibility: params.visibility,
     a2aPolicy: params.a2aPolicy,
+    clampedFromSandbox: params.clampedFromSandbox,
   });
 
   const check = (targetSessionKey: string): SessionAccessResult => {
@@ -309,8 +348,11 @@ export function createSessionVisibilityRowChecker(params: {
   requesterSessionKey: string;
   visibility: SessionToolsVisibility;
   a2aPolicy: AgentToAgentPolicy;
+  /** See `isSessionToolsVisibilityClampedToTree`. Defaults to false. */
+  clampedFromSandbox?: boolean;
 }): { check: (row: SessionVisibilityRow) => SessionAccessResult } {
   const requesterAgentId = resolveAgentIdFromSessionKey(params.requesterSessionKey);
+  const clampedFromSandbox = params.clampedFromSandbox === true;
 
   const check = (row: SessionVisibilityRow): SessionAccessResult => {
     const targetSessionKey = row.key;
@@ -365,7 +407,7 @@ export function createSessionVisibilityRowChecker(params: {
       return {
         allowed: false,
         status: "forbidden",
-        error: treeVisibilityMessage(params.action),
+        error: treeVisibilityMessage(params.action, clampedFromSandbox),
       };
     }
 
@@ -381,6 +423,8 @@ export async function createSessionVisibilityGuard(params: {
   requesterSessionKey: string;
   visibility: SessionToolsVisibility;
   a2aPolicy: AgentToAgentPolicy;
+  /** See `isSessionToolsVisibilityClampedToTree`. Defaults to false. */
+  clampedFromSandbox?: boolean;
 }): Promise<{
   check: (targetSessionKey: string) => SessionAccessResult;
 }> {
@@ -396,5 +440,6 @@ export async function createSessionVisibilityGuard(params: {
     visibility: params.visibility,
     a2aPolicy: params.a2aPolicy,
     spawnedKeys,
+    clampedFromSandbox: params.clampedFromSandbox,
   });
 }

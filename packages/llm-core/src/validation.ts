@@ -269,6 +269,25 @@ function getValidator(schema: Tool["parameters"]): ReturnType<typeof Compile> {
   return validator;
 }
 
+/**
+ * Thrown by `validateToolArguments` when a tool call's arguments fail schema
+ * validation. `message` (via `Error`) keeps the full multi-line detail;
+ * `summary` carries the same per-field issues joined onto one line, for
+ * callers that can only surface one line of an error and would otherwise see
+ * just the generic `Validation failed for tool "<name>":`.
+ */
+export class ToolArgumentValidationError extends Error {
+  readonly toolName: string;
+  readonly summary: string;
+
+  constructor(params: { toolName: string; summary: string; message: string }) {
+    super(params.message);
+    this.name = "ToolArgumentValidationError";
+    this.toolName = params.toolName;
+    this.summary = params.summary;
+  }
+}
+
 function formatValidationPath(error: TLocalizedValidationError): string {
   if (error.keyword === "required") {
     const requiredProperty = (error.params as { requiredProperties?: string[] })
@@ -317,13 +336,20 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): unknown {
     return args;
   }
 
-  const errors =
-    validator
-      .Errors(args)
-      .map((error) => `  - ${formatValidationPath(error)}: ${error.message}`)
-      .join("\n") || "Unknown validation error";
-
-  throw new Error(
-    `Validation failed for tool "${toolCall.name}":\n${errors}\n\nReceived arguments:\n${JSON.stringify(toolCall.arguments, null, 2)}`,
+  // TypeBox's Errors() returns a one-shot iterator; format each issue once
+  // and derive both the multi-line detail and the single-line summary from
+  // that single pass.
+  const issueLines = [...validator.Errors(args)].map(
+    (error) => `${formatValidationPath(error)}: ${error.message}`,
   );
+  const errors = issueLines.length
+    ? issueLines.map((line) => `  - ${line}`).join("\n")
+    : "Unknown validation error";
+  const summary = issueLines.join("; ") || "Unknown validation error";
+
+  throw new ToolArgumentValidationError({
+    toolName: toolCall.name,
+    summary,
+    message: `Validation failed for tool "${toolCall.name}":\n${errors}\n\nReceived arguments:\n${JSON.stringify(toolCall.arguments, null, 2)}`,
+  });
 }

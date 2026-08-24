@@ -26,7 +26,7 @@ type MonitorConfig = {
 // stubbing the whole host API.
 export type SentryMonitorApi = Pick<
   OpenClawPluginApi,
-  "pluginConfig" | "version" | "logger" | "on" | "lifecycle"
+  "pluginConfig" | "hostVersion" | "logger" | "on" | "lifecycle"
 >;
 
 export function registerSentryMonitor(api: SentryMonitorApi): void {
@@ -48,7 +48,7 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
   // whenever an operator sets a custom environment.
   const hostname = os.hostname();
   const environment = cfg.environment || hostname;
-  // Deploy coordinates: `release` (fork version, below) already lets
+  // Deploy coordinates: `release` (host app version, below) already lets
   // Sentry cluster a post-deploy regression by build — the arguijo signature was
   // the same error across every host on one release. These tags add the finer
   // rollout dimensions so a spike also attributes to a boon-skills ref and a
@@ -69,7 +69,10 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
   Sentry.init({
     dsn,
     environment,
-    release: typeof api.version === "string" ? api.version : undefined,
+    // Must be the running app's version, not this plugin's own manifest
+    // version — otherwise every host on every release reports the same
+    // `release` tag and a per-deploy regression can never be attributed.
+    release: typeof api.hostVersion === "string" ? api.hostVersion : undefined,
     // Guard the untrusted config value: only a finite number enables tracing;
     // anything else (string, NaN, Infinity, missing) falls back to 0. Note
     // `typeof NaN === "number"`, so the finite check is what rejects NaN.
@@ -96,7 +99,7 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
   }
 
   api.logger.info(
-    `${PLUGIN_ID}: Sentry initialized (environment=${environment}${api.version ? `, release=${api.version}` : ""})`,
+    `${PLUGIN_ID}: Sentry initialized (environment=${environment}${api.hostVersion ? `, release=${api.hostVersion}` : ""})`,
   );
 
   // Typed lifecycle subscriptions. api.on supplies a payload already typed per

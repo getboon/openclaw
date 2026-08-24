@@ -1,5 +1,6 @@
 // Builds plugin API objects from config, registries, and runtime helpers.
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { VERSION as HOST_VERSION } from "../version.js";
 import { attachPluginApiFacades, type OpenClawPluginApiWithoutFacades } from "./api-facades.js";
 import type { PluginRuntime } from "./runtime/types.js";
 import type { OpenClawPluginApi, PluginLogger } from "./types.js";
@@ -187,6 +188,9 @@ export function buildPluginApi(params: BuildPluginApiParams): OpenClawPluginApi 
     id: params.id,
     name: params.name,
     version: params.version,
+    // The running host app's version, same for every plugin in this process
+    // (unlike `version` above, which is each plugin's own declared release).
+    hostVersion: HOST_VERSION,
     description: params.description,
     source: params.source,
     rootDir: params.rootDir,

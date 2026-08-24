@@ -60,6 +60,7 @@ import type {
 } from "./embedded-agent-subscribe.handlers.types.js";
 import { isPromiseLike } from "./embedded-agent-subscribe.promise.js";
 import {
+  classifyToolCallErrorKind,
   collectMessagingMediaUrlsFromRecord,
   collectMessagingMediaUrlsFromToolResult,
   extractMessagingToolSourceReplyPayload,
@@ -1196,6 +1197,7 @@ export async function handleToolExecutionEnd(
   if (isToolError) {
     const errorMessage = extractToolErrorMessage(sanitizedResult);
     const errorCode = extractToolErrorCode(sanitizedResult);
+    const middlewareError = isMiddlewareToolResultError(sanitizedResult);
     // For exec/bash, flag an error whose command was entirely benign
     // housekeeping (scratch setup + inspection like `mkdir … && find /`). The
     // reply builder uses this to drop a false failure note when the task itself
@@ -1210,7 +1212,7 @@ export async function handleToolExecutionEnd(
       ...(errorCode ? { errorCode } : {}),
       error: errorMessage,
       timedOut: isToolResultTimedOut(sanitizedResult) || undefined,
-      middlewareError: isMiddlewareToolResultError(sanitizedResult) || undefined,
+      middlewareError: middlewareError || undefined,
       mutatingAction: attemptedMutatingAction,
       actionFingerprint: attemptedMutatingAction ? callSummary.actionFingerprint : undefined,
       fileTarget: attemptedMutatingAction ? callSummary.fileTarget : undefined,
@@ -1578,6 +1580,19 @@ export async function handleToolExecutionEnd(
   const hookRunnerAfter = ctx.hookRunner ?? (await loadHookRunnerGlobal()).getGlobalHookRunner();
   if (hookRunnerAfter?.hasHooks("after_tool_call")) {
     const durationMs = startData?.startTime != null ? Date.now() - startData.startTime : undefined;
+    const hookErrorCode = isToolError ? extractToolErrorCode(sanitizedResult) : undefined;
+    const hookErrorKind = isToolError
+      ? classifyToolCallErrorKind({
+          result: sanitizedResult,
+          executionStarted,
+          middlewareError: isMiddlewareToolResultError(sanitizedResult),
+        })
+      : undefined;
+    // Only meaningful for exit-error: an exec exit code, unlike other
+    // details.exitCode readings, is genuine diagnostic signal worth
+    // preserving in a Sentry fingerprint rather than treating as noise.
+    const hookExitCode =
+      hookErrorKind === "exit-error" ? readToolResultDetails(sanitizedResult)?.exitCode : undefined;
     const hookEvent: PluginHookAfterToolCallEvent = {
       toolName,
       params: startArgs,
@@ -1585,6 +1600,9 @@ export async function handleToolExecutionEnd(
       toolCallId,
       result: sanitizedResult,
       error: isToolError ? extractToolErrorMessage(sanitizedResult) : undefined,
+      ...(hookErrorKind ? { errorKind: hookErrorKind } : {}),
+      ...(hookErrorCode ? { errorCode: hookErrorCode } : {}),
+      ...(typeof hookExitCode === "number" ? { exitCode: hookExitCode } : {}),
       durationMs,
     };
     void hookRunnerAfter

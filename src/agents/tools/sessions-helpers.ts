@@ -7,8 +7,10 @@ export {
   createAgentToAgentPolicy,
   createSessionVisibilityGuard,
   createSessionVisibilityRowChecker,
+  isSessionToolsVisibilityClampedToTree,
   resolveEffectiveSessionToolsVisibility,
   resolveSandboxedSessionToolContext,
+  resolveSessionVisibilityContext,
 } from "./sessions-access.js";
 import { resolveSandboxedSessionToolContext } from "./sessions-access.js";
 export {

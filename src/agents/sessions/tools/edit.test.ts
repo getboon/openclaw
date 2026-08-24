@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Theme } from "../../modes/interactive/theme/theme.js";
 import { createEditTool, createEditToolDefinition, type EditOperations } from "./edit.js";
+import type { EditToolInput } from "./tool-contracts.js";
 
 const testTheme = {
   bg: (_name: string, text: string) => text,
@@ -170,6 +171,42 @@ describe("edit tool", () => {
     };
 
     const component = tool.renderCall?.(args, testTheme, context);
+    await vi.waitFor(() => expect(context.invalidate).toHaveBeenCalled());
+
+    expect(readFile).toHaveBeenCalledWith(path.join("/workspace", "remote.txt"));
+    expect((component as { preview?: { diff?: string } } | undefined)?.preview?.diff).toContain(
+      "remote changed",
+    );
+  });
+
+  it("renders a preview for snake_case aliases (the live streamed args never run through prepareArguments)", async () => {
+    const readFile = vi.fn(async () => Buffer.from("remote original\n"));
+    const operations: EditOperations = {
+      access: async () => {},
+      readFile,
+      writeFile: async () => {},
+    };
+    const tool = createEditToolDefinition("/workspace", { operations });
+    const args = {
+      file_path: "remote.txt",
+      edits: [{ old_string: "remote original", new_string: "remote changed" }],
+    };
+    const context = {
+      args,
+      argsComplete: true,
+      cwd: "/workspace",
+      executionStarted: false,
+      expanded: false,
+      invalidate: vi.fn(),
+      isError: false,
+      isPartial: false,
+      lastComponent: undefined,
+      showImages: false,
+      state: {},
+      toolCallId: "call-preview-alias",
+    };
+
+    const component = tool.renderCall?.(args as never, testTheme, context as never);
     await vi.waitFor(() => expect(context.invalidate).toHaveBeenCalled());
 
     expect(readFile).toHaveBeenCalledWith(path.join("/workspace", "remote.txt"));
@@ -518,5 +555,102 @@ describe("edit tool", () => {
     const tc1 = result.content[0];
     expect("text" in tc1 ? tc1.text : "").toContain("Successfully replaced");
     await expect(fs.readFile(filePath, "utf-8")).resolves.toBe("new content\n");
+  });
+});
+
+// editSchema/replaceEditSchema are additionalProperties: false, so
+// Claude-Code-style names (file_path, old_string, new_string) — which the
+// tool's own TUI renderers already read, e.g. RenderableEditArgs.file_path —
+// were hard schema rejections. prepareArguments now aliases them the same way
+// it already rescues top-level oldText/newText and a stringified edits[].
+describe("prepareEditArguments alias normalization", () => {
+  function prepare(input: unknown): EditToolInput {
+    const definition = createEditToolDefinition("/workspace");
+    return definition.prepareArguments?.(input) as EditToolInput;
+  }
+
+  it("never mutates the caller's raw arguments object", () => {
+    const raw = {
+      file_path: "notes.txt",
+      edits: [{ old_string: "alpha", new_string: "ALPHA" }],
+    };
+    const snapshot = structuredClone(raw);
+    prepare(raw);
+    expect(raw).toEqual(snapshot);
+  });
+
+  it("maps file_path to path", () => {
+    const prepared = prepare({
+      file_path: "notes.txt",
+      edits: [{ oldText: "a", newText: "b" }],
+    });
+    expect(prepared).toEqual({
+      path: "notes.txt",
+      edits: [{ oldText: "a", newText: "b" }],
+    });
+  });
+
+  it("does not override an explicit path with file_path", () => {
+    const prepared = prepare({
+      path: "real.txt",
+      file_path: "ignored.txt",
+      edits: [{ oldText: "a", newText: "b" }],
+    });
+    expect(prepared.path).toBe("real.txt");
+  });
+
+  it("maps old_string/new_string inside each edits[] entry", () => {
+    const prepared = prepare({
+      path: "notes.txt",
+      edits: [
+        { old_string: "alpha", new_string: "ALPHA" },
+        { oldText: "beta", newText: "BETA" },
+      ],
+    });
+    expect(prepared).toEqual({
+      path: "notes.txt",
+      edits: [
+        { oldText: "alpha", newText: "ALPHA" },
+        { oldText: "beta", newText: "BETA" },
+      ],
+    });
+  });
+
+  it("maps top-level file_path/old_string/new_string with no edits[] wrapper (Claude Code's single-edit shape)", () => {
+    const prepared = prepare({
+      file_path: "notes.txt",
+      old_string: "alpha",
+      new_string: "ALPHA",
+    });
+    expect(prepared).toEqual({
+      path: "notes.txt",
+      edits: [{ oldText: "alpha", newText: "ALPHA" }],
+    });
+  });
+
+  it("does not merge top-level old_string/new_string into an edits[] array that is already present", () => {
+    // A model that (unusually) sends both would otherwise get its top-level
+    // pair silently appended as an extra, unintended edit on top of the real
+    // edits[] array.
+    const prepared = prepare({
+      path: "notes.txt",
+      edits: [{ oldText: "alpha", newText: "ALPHA" }],
+      old_string: "unrelated",
+      new_string: "should not apply",
+    });
+    expect(prepared.edits).toEqual([{ oldText: "alpha", newText: "ALPHA" }]);
+    expect((prepared as unknown as Record<string, unknown>).old_string).toBe("unrelated");
+    expect((prepared as unknown as Record<string, unknown>).new_string).toBe("should not apply");
+  });
+
+  it("still rescues edits sent as a JSON string alongside snake_case fields", () => {
+    const prepared = prepare({
+      path: "notes.txt",
+      edits: JSON.stringify([{ old_string: "alpha", new_string: "ALPHA" }]),
+    });
+    expect(prepared).toEqual({
+      path: "notes.txt",
+      edits: [{ oldText: "alpha", newText: "ALPHA" }],
+    });
   });
 });

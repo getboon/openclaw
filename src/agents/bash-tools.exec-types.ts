@@ -128,6 +128,8 @@ export type ExecToolDetails =
       aggregated: string;
       timedOut?: boolean;
       cwd?: string;
+      /** Set when `status: "failed"` is a policy/approval denial, not a process failure. */
+      denied?: boolean;
     }
   | {
       status: "approval-pending";

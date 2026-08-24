@@ -665,6 +665,30 @@ export type PluginHookBeforeToolCallEvent = {
   derivedPaths?: readonly string[];
 };
 
+/**
+ * Host-authoritative classification of an `after_tool_call` failure, derived
+ * from structured signals the host already computes (result status, exec
+ * exit code, execution-started flag, middleware/timeout markers) — never from
+ * sniffing `error` text. Closed set so consumers can exhaustively branch
+ * instead of pattern-matching a free-form string:
+ * - "denied": a policy/permission/visibility check blocked the call. The
+ *   system worked as intended.
+ * - "invalid-input": schema/argument preparation rejected the call before
+ *   execution started. A model bad-args problem, not a host defect.
+ * - "timeout": the tool started but did not finish in time.
+ * - "internal": an `AgentToolResultMiddleware` raised while post-processing
+ *   an otherwise-successful result — a host-side defect.
+ * - "exit-error": (exec-family tools) the process ran and exited non-zero.
+ * - "upstream": none of the above — a dependency/provider/network failure.
+ */
+export type PluginHookAfterToolCallErrorKind =
+  | "denied"
+  | "invalid-input"
+  | "timeout"
+  | "internal"
+  | "exit-error"
+  | "upstream";
+
 export type PluginHookAfterToolCallEvent = {
   toolName: string;
   params: Record<string, unknown>;
@@ -672,6 +696,12 @@ export type PluginHookAfterToolCallEvent = {
   toolCallId?: string;
   result?: unknown;
   error?: string;
+  /** Present only alongside `error`. See `PluginHookAfterToolCallErrorKind`. */
+  errorKind?: PluginHookAfterToolCallErrorKind;
+  /** Present only alongside `error`, when the host resolved a denial/error code. */
+  errorCode?: string;
+  /** Present only when `errorKind` is "exit-error": the process's exit code. */
+  exitCode?: number;
   durationMs?: number;
 };
 
