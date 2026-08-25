@@ -55,6 +55,11 @@ async function authorizeSmsSender(params: {
       ? {
           cfg: params.cfg,
           modeWhenAccessGroupsOff: "configured",
+          allowTextCommands: true,
+          hasControlCommand: params.channelRuntime.commands.isControlCommandMessage(
+            params.rawBody,
+            params.cfg,
+          ),
         }
       : undefined,
   });
