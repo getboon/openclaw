@@ -2,6 +2,30 @@ import { recordChannelBotPairLoopAndCheckSuppression } from "openclaw/plugin-sdk
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { TelegramContext } from "./bot/types.js";
 
+/**
+ * Shared tail for both Telegram bot-loop suppression paths (native commands
+ * and generic peer-bot turns). Each caller keeps its own pre-guard for which
+ * messages count as a peer-bot loop candidate; only the suppression-recording
+ * call itself is shared, so the two ingress paths cannot drift on it.
+ */
+export function recordTelegramBotPairLoopSuppression(params: {
+  chatId: number;
+  messageThreadId?: number;
+  senderId: string;
+  receiverId: string;
+  accountId: string;
+  cfg: OpenClawConfig;
+}): boolean {
+  return recordChannelBotPairLoopAndCheckSuppression({
+    scopeId: params.accountId,
+    conversationId: `${params.chatId}:${params.messageThreadId ?? ""}`,
+    senderId: params.senderId,
+    receiverId: params.receiverId,
+    defaultsConfig: params.cfg.channels?.defaults?.botLoopProtection,
+    defaultEnabled: true,
+  }).suppressed;
+}
+
 export function shouldSuppressTelegramPeerBotTurn(params: {
   ctx: TelegramContext;
   cfg: OpenClawConfig;
@@ -16,12 +40,12 @@ export function shouldSuppressTelegramPeerBotTurn(params: {
   ) {
     return false;
   }
-  return recordChannelBotPairLoopAndCheckSuppression({
-    scopeId: params.accountId,
-    conversationId: `${msg.chat.id}:${msg.message_thread_id ?? ""}`,
+  return recordTelegramBotPairLoopSuppression({
+    chatId: msg.chat.id,
+    messageThreadId: msg.message_thread_id,
     senderId: String(msg.from.id),
     receiverId: String(params.ctx.me.id),
-    defaultsConfig: params.cfg.channels?.defaults?.botLoopProtection,
-    defaultEnabled: true,
-  }).suppressed;
+    accountId: params.accountId,
+    cfg: params.cfg,
+  });
 }

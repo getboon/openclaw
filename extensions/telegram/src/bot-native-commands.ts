@@ -7,7 +7,6 @@ import {
   resolveDefaultModelForAgent,
   resolveThinkingDefaultWithRuntimeCatalog,
 } from "openclaw/plugin-sdk/agent-runtime";
-import { recordChannelBotPairLoopAndCheckSuppression } from "openclaw/plugin-sdk/channel-inbound";
 import { resolveChannelStreamingBlockEnabled } from "openclaw/plugin-sdk/channel-outbound";
 import { resolveNativeCommandSessionTargets } from "openclaw/plugin-sdk/command-auth-native";
 import {
@@ -113,6 +112,7 @@ import {
   createTelegramPeerBotAdmissionCoordinator,
   type TelegramPeerBotAdmissionCoordinator,
 } from "./peer-bot-admission.js";
+import { recordTelegramBotPairLoopSuppression } from "./peer-bot-loop.js";
 import { runWithTelegramPeerBotTurn } from "./peer-bot-turn.js";
 import { recordSentMessage } from "./sent-message-cache.js";
 import { getTopicName, resolveTopicNameCacheScope } from "./topic-name-cache.js";
@@ -155,14 +155,14 @@ function shouldSuppressTelegramBotCommandLoop(params: {
   ) {
     return false;
   }
-  return recordChannelBotPairLoopAndCheckSuppression({
-    scopeId: params.accountId,
-    conversationId: `${msg.chat.id}:${msg.message_thread_id ?? ""}`,
+  return recordTelegramBotPairLoopSuppression({
+    chatId: msg.chat.id,
+    messageThreadId: msg.message_thread_id,
     senderId: String(sender.id),
     receiverId: String(params.botId),
-    defaultsConfig: params.cfg.channels?.defaults?.botLoopProtection,
-    defaultEnabled: true,
-  }).suppressed;
+    accountId: params.accountId,
+    cfg: params.cfg,
+  });
 }
 type TelegramResolvedGroupConfig = {
   groupConfig?: TelegramGroupConfig | TelegramDirectConfig;
