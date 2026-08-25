@@ -124,7 +124,7 @@ artifact from an exact release SHA without entering any publish approval,
 environment, secret, OIDC, npm mutation, or ClawHub mutation path:
 
 ```bash
-release_sha="$(git rev-parse origin/release/2026.7.1)"
+release_sha="$(git rev-parse <branch-or-sha>)"
 ghx workflow run plugin-npm-release.yml \
   --repo openclaw/openclaw \
   --ref main \

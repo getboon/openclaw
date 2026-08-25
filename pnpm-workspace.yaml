@@ -17,7 +17,6 @@ minimumReleaseAgeExclude:
   - "axios"
   - "basic-ftp"
   - "baileys@7.0.0-rc13"
-  - "brace-expansion@5.0.9"
   - "hono"
   - "libopus-wasm@0.2.0"
   - "libsignal@6.0.0"

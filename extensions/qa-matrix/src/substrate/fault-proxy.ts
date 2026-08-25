@@ -302,7 +302,13 @@ export async function startMatrixQaFaultProxy(params: {
   const maxRequestBytes = params.maxRequestBytes ?? DEFAULT_FAULT_PROXY_REQUEST_MAX_BYTES;
   const maxResponseBytes = params.maxResponseBytes ?? DEFAULT_FAULT_PROXY_RESPONSE_MAX_BYTES;
   const hits: MatrixQaFaultProxyHit[] = [];
-  const rules = new Map(params.rules.map((rule) => [rule.id, rule]));
+  const rules = new Map<string, MatrixQaFaultProxyRule>();
+  for (const rule of params.rules) {
+    if (rules.has(rule.id)) {
+      throw new Error(`Matrix QA fault proxy rule id "${rule.id}" is registered more than once.`);
+    }
+    rules.set(rule.id, rule);
+  }
   const server = createServer((req, res) => {
     void (async () => {
       try {
@@ -384,6 +390,9 @@ export async function startMatrixQaFaultProxy(params: {
     baseUrl: `http://127.0.0.1:${address.port}`,
     hits: () => [...hits],
     installRule: (rule) => {
+      if (rules.has(rule.id)) {
+        throw new Error(`Matrix QA fault proxy rule id "${rule.id}" is already installed.`);
+      }
       rules.set(rule.id, rule);
     },
     removeRule: (ruleId) => {

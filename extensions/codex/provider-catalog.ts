@@ -94,7 +94,7 @@ export function buildCodexModelDefinition(model: {
       ...(supportedReasoningEfforts !== undefined
         ? { supportsReasoningEffort: supportedReasoningEfforts.length > 0 }
         : {}),
-      ...(supportedReasoningEfforts && supportedReasoningEfforts.length > 0
+      ...(supportedReasoningEfforts !== undefined
         ? { supportedReasoningEfforts: [...supportedReasoningEfforts] }
         : {}),
       supportsUsageInStreaming: true,
