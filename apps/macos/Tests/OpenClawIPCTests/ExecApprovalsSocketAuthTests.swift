@@ -72,6 +72,31 @@ struct ExecApprovalsSocketAuthTests {
         #expect(result.exitCode == 0)
     }
 
+    @Test
+    func `run detailed caps buffered output in memory while still fully draining the pipes`() async throws {
+        // Without a cap, ShellExecutor buffers the whole pipe before ExecHostOutputLimiter.truncate
+        // ever runs, so an unbounded command could exhaust memory before truncation helps at all.
+        // maxOutputBytes must bound what's held in memory here, and the excess must still be read
+        // (and discarded) rather than left in the pipe, or the child would block on a full pipe
+        // buffer and never exit.
+        let cap = 1024
+        let result = await ShellExecutor.runDetailed(
+            command: [
+                "/usr/bin/perl",
+                "-e",
+                "print 'x' x (4 * 1024 * 1024); print STDERR 'y' x (4 * 1024 * 1024);",
+            ],
+            cwd: nil,
+            env: nil,
+            timeout: 10,
+            maxOutputBytes: cap)
+
+        #expect(result.stdout.utf8.count <= cap)
+        #expect(result.stderr.utf8.count <= cap)
+        #expect(result.exitCode == 0)
+        #expect(!result.timedOut)
+    }
+
     private struct EncodedExecHostResponse: Codable {
         var type: String
         var id: String

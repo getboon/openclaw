@@ -633,7 +633,12 @@ private enum ExecHostExecutor {
                 command: command,
                 cwd: cwd,
                 env: env,
-                timeout: timeoutSec)
+                timeout: timeoutSec,
+                // Drain stdout/stderr bounded by one byte over the truncator's field
+                // limit: an approved command with unbounded output must not be able
+                // to exhaust memory while the process buffers it, and the extra byte
+                // keeps ExecHostOutputLimiter.truncate's own overflow check accurate.
+                maxOutputBytes: ExecHostOutputLimiter.maxOutputFieldBytes + 1)
         }.value
         let payload = ExecHostRunResult(
             exitCode: result.exitCode,
