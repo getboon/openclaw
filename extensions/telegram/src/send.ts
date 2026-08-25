@@ -685,7 +685,13 @@ export async function sendMessageTelegram(
   });
   const richThreadParams = toTelegramRichMessageContextParams(threadParams);
   const hasThreadParams = Object.keys(threadParams).length > 0;
-  const hasRichThreadParams = Object.keys(richThreadParams).length > 0;
+  // A single logical send can still fan out into several physical Telegram
+  // messages once the text is chunked. `message_thread_id` is forum routing
+  // and belongs on every chunk, but the reply pointer (`reply_to_message_id`
+  // / `reply_parameters`) must land on only the first chunk — otherwise every
+  // chunk shows its own "replying to" indicator for what is one message.
+  const { message_thread_id: textThreadOnlyId, ...textReplyOnlyParams } = threadParams;
+  const { message_thread_id: richThreadOnlyId, ...richReplyOnlyParams } = richThreadParams;
   const requestWithDiag = createTelegramNonIdempotentRequestWithDiag({
     cfg,
     account,
@@ -759,21 +765,35 @@ export async function sendMessageTelegram(
     return { result, acceptedParams: params };
   };
 
-  const buildTextParams = (isLastChunk: boolean) =>
-    hasThreadParams || (isLastChunk && replyMarkup)
-      ? {
-          ...threadParams,
-          ...(isLastChunk && replyMarkup ? { reply_markup: replyMarkup } : {}),
-        }
-      : undefined;
+  const buildTextParams = ({
+    isFirstChunk,
+    isLastChunk,
+  }: {
+    isFirstChunk: boolean;
+    isLastChunk: boolean;
+  }) => {
+    const params = {
+      ...(textThreadOnlyId !== undefined ? { message_thread_id: textThreadOnlyId } : {}),
+      ...(isFirstChunk ? textReplyOnlyParams : {}),
+      ...(isLastChunk && replyMarkup ? { reply_markup: replyMarkup } : {}),
+    };
+    return Object.keys(params).length > 0 ? params : undefined;
+  };
 
-  const buildRichTextParams = (isLastChunk: boolean) =>
-    hasRichThreadParams || (isLastChunk && replyMarkup)
-      ? {
-          ...richThreadParams,
-          ...(isLastChunk && replyMarkup ? { reply_markup: replyMarkup } : {}),
-        }
-      : undefined;
+  const buildRichTextParams = ({
+    isFirstChunk,
+    isLastChunk,
+  }: {
+    isFirstChunk: boolean;
+    isLastChunk: boolean;
+  }) => {
+    const params = {
+      ...(richThreadOnlyId !== undefined ? { message_thread_id: richThreadOnlyId } : {}),
+      ...(isFirstChunk ? richReplyOnlyParams : {}),
+      ...(isLastChunk && replyMarkup ? { reply_markup: replyMarkup } : {}),
+    };
+    return Object.keys(params).length > 0 ? params : undefined;
+  };
 
   const sendTelegramTextChunks = async (
     chunks: TelegramTextChunk[],
@@ -795,7 +815,10 @@ export async function sendMessageTelegram(
       try {
         const { result: res, acceptedParams } = await sendTelegramTextChunk(
           chunk,
-          buildTextParams(index === chunks.length - 1),
+          buildTextParams({
+            isFirstChunk: sentChunkCount === 0,
+            isLastChunk: index === chunks.length - 1,
+          }),
         );
         sentChunkCount += 1;
         const messageId = resolveTelegramMessageIdOrThrow(res, context);
@@ -830,7 +853,7 @@ export async function sendMessageTelegram(
           if (abortText) {
             await sendTelegramTextChunk(
               { text: abortText, plainText: abortText },
-              buildTextParams(false),
+              buildTextParams({ isFirstChunk: false, isLastChunk: false }),
             ).catch(() => undefined);
           }
           if (!priorVisibleDelivery) {
@@ -954,7 +977,10 @@ export async function sendMessageTelegram(
       if (!chunk) {
         continue;
       }
-      const acceptedParams = buildRichTextParams(index === chunks.length - 1);
+      const acceptedParams = buildRichTextParams({
+        isFirstChunk: sentChunkCount === 0,
+        isLastChunk: index === chunks.length - 1,
+      });
       const result = await requestWithChatNotFound(
         () =>
           richRawApi.sendRichMessage({
