@@ -12,6 +12,7 @@ import {
   BROWSER_HANDOFF_STATE_DEFAULT_TTL_MS,
   BROWSER_HANDOFF_STATE_MAX_ENTRIES,
   BROWSER_HANDOFF_STATE_NAMESPACE,
+  browserHandoffScheduleTag,
   browserHandoffStateKey,
   type BrowserHandoffRecord,
 } from "./state.js";
@@ -22,6 +23,80 @@ export type BrowserHandoffToolParams = {
   loginUrl?: string;
   reason?: string;
 };
+
+/**
+ * Trusted, host-provided context — never model-facing args. `sessionKey` is
+ * what lets this tool schedule a durable resume; when it's unavailable (e.g.
+ * a bare unit-test call), scheduling is skipped rather than failing, since
+ * the tool's own text guidance already gives a model a manual fallback path.
+ */
+export type BrowserHandoffToolContext = {
+  sessionKey?: string;
+};
+
+// Recheck backoff: fast at first (a human might finish a plain login in
+// seconds), backing off because most of the wait is 2FA/CAPTCHA the human is
+// actively doing, not something worth polling tightly for. The 30-minute cap
+// matches the ticket's realistic "human got distracted or gave up" window,
+// not Anchor's own 15-minute token expiry (that's boon-core's concern).
+const FIRST_RECHECK_DELAY_MS = 30_000;
+const MAX_RECHECK_DELAY_MS = 5 * 60_000;
+const RECHECK_BACKOFF_MULTIPLIER = 2;
+const MAX_TOTAL_WAIT_MS = 30 * 60_000;
+
+function nextRecheckDelayMs(previousCheckCount: number): number {
+  const delay = FIRST_RECHECK_DELAY_MS * RECHECK_BACKOFF_MULTIPLIER ** previousCheckCount;
+  return Math.min(delay, MAX_RECHECK_DELAY_MS);
+}
+
+/**
+ * Schedules the next durable status recheck for `site`, if a sessionKey is
+ * available. Best-effort: a scheduling failure (e.g. cron unavailable) must
+ * not fail the tool call itself — the model's own text guidance is still a
+ * valid, if less durable, fallback path.
+ *
+ * `deliveryMode: "none"` keeps routine rechecks silent (no "still waiting"
+ * spam) — NOT yet live-verified against a real session that the eventual
+ * ready/expired reply still reaches the channel once this silent schedule
+ * fires; confirm before relying on this for the terminal messages too.
+ */
+async function scheduleRecheck(
+  api: OpenClawPluginApi,
+  context: BrowserHandoffToolContext,
+  params: { site: string; delayMs: number },
+): Promise<void> {
+  const sessionKey = context.sessionKey;
+  if (!sessionKey) {
+    return;
+  }
+  await api.session.workflow.scheduleSessionTurn({
+    sessionKey,
+    message: `Check the browser login handoff status for "${params.site}" (call browser_handoff with action="status").`,
+    delayMs: params.delayMs,
+    deleteAfterRun: true,
+    tag: browserHandoffScheduleTag(params.site),
+    deliveryMode: "none",
+  });
+}
+
+/** Best-effort cleanup once a handoff resolves — not a hard dependency: each
+ * recheck is already a one-shot (`deleteAfterRun: true`), so this only
+ * matters for the rare case of a schedule still in flight when the outcome
+ * lands some other way (e.g. a human-driven manual status check). */
+async function clearScheduledRecheck(
+  api: OpenClawPluginApi,
+  context: BrowserHandoffToolContext,
+  site: string,
+): Promise<void> {
+  const sessionKey = context.sessionKey;
+  if (!sessionKey) {
+    return;
+  }
+  await api.session.workflow.unscheduleSessionTurnsByTag({
+    sessionKey,
+    tag: browserHandoffScheduleTag(site),
+  });
+}
 
 export type BrowserHandoffToolTextResult = {
   content: [{ type: "text"; text: string }];
@@ -53,6 +128,7 @@ function requireBoonCoreBaseUrl(api: OpenClawPluginApi): string {
 async function handleRequestLogin(
   api: OpenClawPluginApi,
   params: BrowserHandoffToolParams,
+  context: BrowserHandoffToolContext,
 ): Promise<BrowserHandoffToolTextResult> {
   const baseUrl = requireBoonCoreBaseUrl(api);
   const apiKey = requireBoonApiKey();
@@ -69,16 +145,19 @@ async function handleRequestLogin(
     handoffToken: handoff.handoffToken,
     status: "pending",
     createdAtMs: Date.now(),
+    checkCount: 0,
   };
   await openHandoffStore(api).register(browserHandoffStateKey(params.site), record);
+  await scheduleRecheck(api, context, { site: params.site, delayMs: FIRST_RECHECK_DELAY_MS });
 
   return textResult(
     [
       `Share this sign-in link with the customer so they can log in themselves (including any CAPTCHA/2FA):`,
       handoff.liveViewUrl,
       "",
-      "Do not enter credentials on their behalf. Once they say they're done, call this tool again " +
-        `with action=status and site="${params.site}".`,
+      "Do not enter credentials on their behalf. You'll be resumed automatically once they finish " +
+        `— you can end your turn now. If needed, you can also call this tool again with action=status ` +
+        `and site="${params.site}" to check manually.`,
     ].join("\n"),
   );
 }
@@ -86,6 +165,7 @@ async function handleRequestLogin(
 async function handleStatus(
   api: OpenClawPluginApi,
   params: BrowserHandoffToolParams,
+  context: BrowserHandoffToolContext,
 ): Promise<BrowserHandoffToolTextResult> {
   const baseUrl = requireBoonCoreBaseUrl(api);
   const apiKey = requireBoonApiKey();
@@ -105,15 +185,31 @@ async function handleStatus(
   });
 
   if (result.status === "pending") {
+    const previousCheckCount = record.checkCount ?? 0;
+    if (Date.now() - record.createdAtMs >= MAX_TOTAL_WAIT_MS) {
+      await store.delete(key);
+      return textResult(
+        `The login link for "${params.site}" may have expired after too long without the customer ` +
+          "finishing. Call action=request_login to send a fresh one.",
+      );
+    }
+    const nextCheckCount = previousCheckCount + 1;
+    await store.register(key, { ...record, checkCount: nextCheckCount });
+    await scheduleRecheck(api, context, {
+      site: params.site,
+      delayMs: nextRecheckDelayMs(nextCheckCount),
+    });
     return textResult(`Still waiting on the customer to finish signing in to "${params.site}".`);
   }
   if (result.status === "failed") {
     await store.delete(key);
+    await clearScheduledRecheck(api, context, params.site);
     return textResult(
       `The login handoff for "${params.site}" failed or expired. Call action=request_login to try again.`,
     );
   }
 
+  await clearScheduledRecheck(api, context, params.site);
   await store.register(key, {
     ...record,
     status: "ready",
@@ -170,13 +266,14 @@ async function handleAttach(
 export async function executeBrowserHandoffTool(
   api: OpenClawPluginApi,
   params: BrowserHandoffToolParams,
+  context: BrowserHandoffToolContext = {},
 ): Promise<BrowserHandoffToolTextResult> {
   try {
     if (params.action === "request_login") {
-      return await handleRequestLogin(api, params);
+      return await handleRequestLogin(api, params, context);
     }
     if (params.action === "status") {
-      return await handleStatus(api, params);
+      return await handleStatus(api, params, context);
     }
     return await handleAttach(api, params);
   } catch (err) {
@@ -215,17 +312,22 @@ function readOptionalString(raw: Record<string, unknown>, key: string): string |
 export async function executeBrowserHandoffToolFromArgs(
   api: OpenClawPluginApi,
   args: unknown,
+  context: BrowserHandoffToolContext = {},
 ): Promise<BrowserHandoffToolTextResult> {
   try {
     const raw = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
     const loginUrl = readOptionalString(raw, "loginUrl");
     const reason = readOptionalString(raw, "reason");
-    return await executeBrowserHandoffTool(api, {
-      action: readAction(raw),
-      site: readSite(raw),
-      ...(loginUrl ? { loginUrl } : {}),
-      ...(reason ? { reason } : {}),
-    });
+    return await executeBrowserHandoffTool(
+      api,
+      {
+        action: readAction(raw),
+        site: readSite(raw),
+        ...(loginUrl ? { loginUrl } : {}),
+        ...(reason ? { reason } : {}),
+      },
+      context,
+    );
   } catch (err) {
     return textResult(`browser-handoff error: ${formatErrorMessage(err)}`);
   }

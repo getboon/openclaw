@@ -16,9 +16,20 @@ export type BrowserHandoffRecord = {
   status: BrowserHandoffStatus;
   profileName?: string;
   createdAtMs: number;
+  /** Number of "still pending" status checks so far; drives the recheck backoff. */
+  checkCount?: number;
 };
 
 /** Normalize a site identifier into a stable, case-insensitive state key. */
 export function browserHandoffStateKey(site: string): string {
   return site.trim().toLowerCase();
+}
+
+/**
+ * Cron tag for this site's scheduled recheck turn. Cron tag names reject the
+ * `:` delimiter (reserved for its own name encoding), so this must never
+ * pass a raw, unnormalized site straight through.
+ */
+export function browserHandoffScheduleTag(site: string): string {
+  return `handoff-${browserHandoffStateKey(site).replace(/:/g, "-")}`;
 }

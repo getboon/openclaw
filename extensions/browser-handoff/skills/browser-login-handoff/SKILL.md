@@ -23,9 +23,12 @@ mint the sign-in link, hand it off, wait, then reuse the resulting session.
 2. Share the returned link with the customer in the current conversation and ask
    them to sign in there, including any CAPTCHA/2FA challenge. Do not proceed on
    the site yourself while this is pending.
-3. Once the customer says they're done (or after a reasonable wait), call
-   `browser_handoff` with `action="status"` and the same `site`. If it reports
-   still pending, wait and check again; do not spam status checks in a tight loop.
+3. You'll be resumed automatically once the customer finishes — you can end your
+   turn now instead of waiting. When you're resumed, call `browser_handoff` with
+   `action="status"` and the same `site`; if it still reports pending, just end
+   your turn again (you'll be resumed again automatically). Only fall back to
+   manually re-checking yourself if the customer explicitly tells you they're
+   done and you haven't been resumed yet.
 4. When status reports the customer is done, call `browser_handoff` with
    `action="attach"` and the same `site`. This registers the resulting session as
    a reusable browser profile and returns its name.
