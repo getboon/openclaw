@@ -175,6 +175,7 @@ async function summarizeChunks(params: {
           maxDelayMs: 5000,
           jitter: 0.2,
           label: "compaction/generateSummary",
+          signal: params.signal,
           shouldRetry: (err) => {
             // Stop retrying when the caller explicitly cancelled.
             if (params.signal.aborted) {
