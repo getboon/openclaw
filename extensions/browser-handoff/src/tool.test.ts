@@ -462,6 +462,36 @@ describe("browser-handoff tool", () => {
         expect(result.content[0].text).toContain("not available");
       },
     );
+
+    it(
+      "tells the model to check back manually when a pending-check reschedule fails, instead of " +
+        "silently reporting only 'still waiting' with no future recheck",
+      async () => {
+        requestBrowserLoginHandoffMock.mockResolvedValue({
+          handoffToken: "tok_123",
+          liveViewUrl: "https://live.example/view",
+        });
+        const scheduleSessionTurn = vi.fn().mockResolvedValue({ id: "job_1" });
+        const unscheduleSessionTurnsByTag = vi.fn().mockResolvedValue({ removed: 1, failed: 0 });
+        const api = createApi({ scheduleSessionTurn, unscheduleSessionTurnsByTag });
+        await executeBrowserHandoffTool(
+          api,
+          { action: "request_login", site: "example.com" },
+          { sessionKey },
+        );
+
+        unscheduleSessionTurnsByTag.mockResolvedValue({ removed: 0, failed: 1 });
+        pollBrowserHandoffStatusMock.mockResolvedValue({ status: "pending" });
+        const result = await executeBrowserHandoffTool(
+          api,
+          { action: "status", site: "example.com" },
+          { sessionKey },
+        );
+
+        expect(result.content[0].text).toContain("Still waiting");
+        expect(result.content[0].text).toContain("not available");
+      },
+    );
   });
 });
 

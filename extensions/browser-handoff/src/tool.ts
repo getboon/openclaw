@@ -230,11 +230,22 @@ async function handleStatus(
     }
     const nextCheckCount = previousCheckCount + 1;
     await store.register(key, { ...record, checkCount: nextCheckCount });
-    await scheduleRecheck(api, context, {
+    const scheduled = await scheduleRecheck(api, context, {
       site: params.site,
       delayMs: nextRecheckDelayMs(nextCheckCount),
     });
-    return textResult(`Still waiting on the customer to finish signing in to "${params.site}".`);
+    const stillWaiting = `Still waiting on the customer to finish signing in to "${params.site}".`;
+    if (!scheduled) {
+      // No durable recheck is queued (no sessionKey, or cleanup couldn't confirm
+      // the old one is gone) — say so explicitly, since a silently-resumed turn
+      // that just reads "still waiting" would otherwise end its turn assuming
+      // it'll be woken again, stranding the handoff with no future check.
+      return textResult(
+        `${stillWaiting} Automatic resume is not available right now, so check back yourself with ` +
+          `action=status once the customer says they're done.`,
+      );
+    }
+    return textResult(stillWaiting);
   }
   if (result.status === "failed") {
     await store.delete(key);
