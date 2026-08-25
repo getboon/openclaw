@@ -2,7 +2,8 @@
   "id": "browser-handoff",
   "enabledByDefault": false,
   "activation": {
-    "onStartup": false
+    "onStartup": false,
+    "onConfigPaths": ["plugins.entries.browser-handoff"]
   },
   "contracts": {
     "tools": ["browser_handoff"]
