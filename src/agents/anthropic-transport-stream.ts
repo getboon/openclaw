@@ -674,12 +674,18 @@ function parseAnthropicSseEventData(data: string): Record<string, unknown> {
   }
 }
 
-function assertAnthropicSsePendingBufferWithinLimit(pendingChars: number): void {
+function assertAnthropicSsePendingBufferWithinLimit(
+  pendingChars: number,
+  params?: { hasEventBoundary?: boolean },
+): void {
   if (pendingChars <= ANTHROPIC_MESSAGES_SSE_PENDING_BUFFER_MAX_CHARS) {
     return;
   }
+  const detail = params?.hasEventBoundary
+    ? "with a single event exceeding it"
+    : "without event boundary";
   throw new Error(
-    `Anthropic Messages SSE response exceeded max pending buffer size (${ANTHROPIC_MESSAGES_SSE_PENDING_BUFFER_MAX_CHARS} chars) without event boundary`,
+    `Anthropic Messages SSE response exceeded max pending buffer size (${ANTHROPIC_MESSAGES_SSE_PENDING_BUFFER_MAX_CHARS} chars) ${detail}`,
   );
 }
 
@@ -701,7 +707,7 @@ async function* parseAnthropicSseBody(
       buffer = `${buffer}${decoder.decode(value, { stream: true })}`.replaceAll("\r\n", "\n");
       let frameEnd = buffer.indexOf("\n\n");
       while (frameEnd >= 0) {
-        assertAnthropicSsePendingBufferWithinLimit(frameEnd);
+        assertAnthropicSsePendingBufferWithinLimit(frameEnd, { hasEventBoundary: true });
         const frame = buffer.slice(0, frameEnd);
         buffer = buffer.slice(frameEnd + 2);
         const data = frame

@@ -161,8 +161,8 @@ export function collectDockerAttestationErrors(params) {
   return errors;
 }
 
-function inspectRaw(imageRef) {
-  return execFileSync("docker", ["buildx", "imagetools", "inspect", "--raw", imageRef], {
+function inspectRaw(imageRef, { execFileSyncImpl = execFileSync } = {}) {
+  return execFileSyncImpl("docker", ["buildx", "imagetools", "inspect", "--raw", imageRef], {
     encoding: "utf8",
     maxBuffer: 20 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
