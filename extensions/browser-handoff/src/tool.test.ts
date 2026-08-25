@@ -24,7 +24,10 @@ vi.mock("openclaw/plugin-sdk/browser-profile-config", () => ({
   registerRemoteCdpBrowserProfile: registerRemoteCdpBrowserProfileMock,
 }));
 
+import { browserHandoffScheduleTag } from "./state.js";
 import { executeBrowserHandoffTool, executeBrowserHandoffToolFromArgs } from "./tool.js";
+
+const exampleComTag = browserHandoffScheduleTag("example.com");
 
 describe("browser-handoff tool", () => {
   let stateDir: string;
@@ -182,7 +185,7 @@ describe("browser-handoff tool", () => {
           sessionKey,
           delayMs: 30_000,
           deleteAfterRun: true,
-          tag: "handoff-example.com",
+          tag: exampleComTag,
           deliveryMode: "none",
         }),
       );
@@ -228,7 +231,7 @@ describe("browser-handoff tool", () => {
       expect(scheduleSessionTurn).toHaveBeenCalledTimes(2);
       const secondDelayMs = scheduleSessionTurn.mock.calls[1][0].delayMs;
       expect(secondDelayMs).toBeGreaterThan(firstDelayMs);
-      expect(scheduleSessionTurn.mock.calls[1][0].tag).toBe("handoff-example.com");
+      expect(scheduleSessionTurn.mock.calls[1][0].tag).toBe(exampleComTag);
     });
 
     it("stops rescheduling and clears the handoff once the max wait has elapsed", async () => {
@@ -296,7 +299,7 @@ describe("browser-handoff tool", () => {
       expect(scheduleSessionTurn).not.toHaveBeenCalled();
       expect(unscheduleSessionTurnsByTag).toHaveBeenCalledWith({
         sessionKey,
-        tag: "handoff-example.com",
+        tag: exampleComTag,
       });
     });
 
@@ -325,8 +328,116 @@ describe("browser-handoff tool", () => {
       expect(scheduleSessionTurn).not.toHaveBeenCalled();
       expect(unscheduleSessionTurnsByTag).toHaveBeenCalledWith({
         sessionKey,
-        tag: "handoff-example.com",
+        tag: exampleComTag,
       });
+    });
+
+    it("clears the schedule tag when giving up after the max wait", async () => {
+      vi.useFakeTimers();
+      try {
+        requestBrowserLoginHandoffMock.mockResolvedValue({
+          handoffToken: "tok_123",
+          liveViewUrl: "https://live.example/view",
+        });
+        const scheduleSessionTurn = vi.fn().mockResolvedValue({ id: "job_1" });
+        const unscheduleSessionTurnsByTag = vi.fn().mockResolvedValue({ removed: 1, failed: 0 });
+        const api = createApi({ scheduleSessionTurn, unscheduleSessionTurnsByTag });
+        await executeBrowserHandoffTool(
+          api,
+          { action: "request_login", site: "example.com" },
+          { sessionKey },
+        );
+        unscheduleSessionTurnsByTag.mockClear();
+
+        vi.advanceTimersByTime(31 * 60_000);
+        pollBrowserHandoffStatusMock.mockResolvedValue({ status: "pending" });
+        await executeBrowserHandoffTool(
+          api,
+          { action: "status", site: "example.com" },
+          { sessionKey },
+        );
+
+        expect(unscheduleSessionTurnsByTag).toHaveBeenCalledWith({
+          sessionKey,
+          tag: exampleComTag,
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it(
+      "cancels any already-queued recheck before scheduling a new one, so a manual check " +
+        "in between doesn't leave two schedules stacked",
+      async () => {
+        requestBrowserLoginHandoffMock.mockResolvedValue({
+          handoffToken: "tok_123",
+          liveViewUrl: "https://live.example/view",
+        });
+        const scheduleSessionTurn = vi.fn().mockResolvedValue({ id: "job_1" });
+        const unscheduleSessionTurnsByTag = vi.fn().mockResolvedValue({ removed: 1, failed: 0 });
+        const api = createApi({ scheduleSessionTurn, unscheduleSessionTurnsByTag });
+        await executeBrowserHandoffTool(
+          api,
+          { action: "request_login", site: "example.com" },
+          { sessionKey },
+        );
+        unscheduleSessionTurnsByTag.mockClear();
+        scheduleSessionTurn.mockClear();
+
+        pollBrowserHandoffStatusMock.mockResolvedValue({ status: "pending" });
+        await executeBrowserHandoffTool(
+          api,
+          { action: "status", site: "example.com" },
+          { sessionKey },
+        );
+
+        const scheduleOrder = scheduleSessionTurn.mock.invocationCallOrder[0];
+        const unscheduleOrder = unscheduleSessionTurnsByTag.mock.invocationCallOrder[0];
+        expect(unscheduleSessionTurnsByTag).toHaveBeenCalledWith({
+          sessionKey,
+          tag: exampleComTag,
+        });
+        expect(unscheduleOrder).toBeLessThan(scheduleOrder);
+      },
+    );
+
+    it(
+      "instructs the resumed turn to use the message tool for a terminal outcome, since " +
+        "routine rechecks are silent",
+      async () => {
+        requestBrowserLoginHandoffMock.mockResolvedValue({
+          handoffToken: "tok_123",
+          liveViewUrl: "https://live.example/view",
+        });
+        const scheduleSessionTurn = vi.fn().mockResolvedValue({ id: "job_1" });
+
+        await executeBrowserHandoffTool(
+          createApi({ scheduleSessionTurn }),
+          { action: "request_login", site: "example.com" },
+          { sessionKey },
+        );
+
+        const scheduledMessage = scheduleSessionTurn.mock.calls[0][0].message;
+        expect(scheduledMessage).toContain("message");
+        expect(scheduledMessage.toLowerCase()).toContain("ready");
+      },
+    );
+
+    it("tells the model automatic resume isn't available when scheduling fails", async () => {
+      requestBrowserLoginHandoffMock.mockResolvedValue({
+        handoffToken: "tok_123",
+        liveViewUrl: "https://live.example/view",
+      });
+      const scheduleSessionTurn = vi.fn().mockResolvedValue(undefined);
+
+      const result = await executeBrowserHandoffTool(
+        createApi({ scheduleSessionTurn }),
+        { action: "request_login", site: "example.com" },
+        { sessionKey },
+      );
+
+      expect(result.content[0].text).toContain("not available");
     });
   });
 });

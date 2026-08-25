@@ -13,11 +13,18 @@ describe("browserHandoffStateKey", () => {
 });
 
 describe("browserHandoffScheduleTag", () => {
-  it("prefixes the normalized site with handoff-", () => {
-    expect(browserHandoffScheduleTag("  App.Procore.com  ")).toBe("handoff-app.procore.com");
+  it("prefixes the normalized, base64url-encoded site with handoff-", () => {
+    const expected = `handoff-${Buffer.from("app.procore.com").toString("base64url")}`;
+    expect(browserHandoffScheduleTag("  App.Procore.com  ")).toBe(expected);
   });
 
-  it("strips colons, since cron tags reject the reserved : delimiter", () => {
+  it("never contains a colon, since cron tags reject the reserved : delimiter", () => {
     expect(browserHandoffScheduleTag("weird:site.com")).not.toContain(":");
+  });
+
+  it("does not collide between sites that differ only by : vs -", () => {
+    const colonTag = browserHandoffScheduleTag("example.com:8080");
+    const dashTag = browserHandoffScheduleTag("example.com-8080");
+    expect(colonTag).not.toBe(dashTag);
   });
 });

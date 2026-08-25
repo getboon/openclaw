@@ -27,9 +27,11 @@ export function browserHandoffStateKey(site: string): string {
 
 /**
  * Cron tag for this site's scheduled recheck turn. Cron tag names reject the
- * `:` delimiter (reserved for its own name encoding), so this must never
- * pass a raw, unnormalized site straight through.
+ * `:` delimiter (reserved for its own name encoding). Base64url-encode the
+ * normalized site rather than substituting `:` for another character: a
+ * naive substitution collides (`example.com:8080` and `example.com-8080`
+ * would both produce the same tag), silently merging two sites' schedules.
  */
 export function browserHandoffScheduleTag(site: string): string {
-  return `handoff-${browserHandoffStateKey(site).replace(/:/g, "-")}`;
+  return `handoff-${Buffer.from(browserHandoffStateKey(site)).toString("base64url")}`;
 }

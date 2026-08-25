@@ -53,30 +53,42 @@ function nextRecheckDelayMs(previousCheckCount: number): number {
  * Schedules the next durable status recheck for `site`, if a sessionKey is
  * available. Best-effort: a scheduling failure (e.g. cron unavailable) must
  * not fail the tool call itself — the model's own text guidance is still a
- * valid, if less durable, fallback path.
+ * valid, if less durable, fallback path. Returns whether scheduling actually
+ * happened, so callers can tell the model when automatic resume isn't live.
  *
  * `deliveryMode: "none"` keeps routine rechecks silent (no "still waiting"
- * spam) — NOT yet live-verified against a real session that the eventual
- * ready/expired reply still reaches the channel once this silent schedule
- * fires; confirm before relying on this for the terminal messages too.
+ * spam), which also suppresses the turn's own reply for a terminal outcome
+ * (ready/failed/expired) — the scheduled message text below explicitly tells
+ * the resumed model to use the `message` tool for those cases instead.
+ *
+ * Always clears any previously-scheduled recheck for this site first, so
+ * every call site is dedup-by-construction against stacking overlapping
+ * schedules (e.g. a manual status check racing the scheduled one).
  */
 async function scheduleRecheck(
   api: OpenClawPluginApi,
   context: BrowserHandoffToolContext,
   params: { site: string; delayMs: number },
-): Promise<void> {
+): Promise<boolean> {
   const sessionKey = context.sessionKey;
   if (!sessionKey) {
-    return;
+    return false;
   }
-  await api.session.workflow.scheduleSessionTurn({
+  await clearScheduledRecheck(api, context, params.site);
+  const job = await api.session.workflow.scheduleSessionTurn({
     sessionKey,
-    message: `Check the browser login handoff status for "${params.site}" (call browser_handoff with action="status").`,
+    message: [
+      `Check the browser login handoff status for "${params.site}" (call browser_handoff with`,
+      `action="status"). This check runs silently — if the result is ready, failed, or expired,`,
+      `use the message tool (action="send") to tell the customer; only end your turn without`,
+      `replying if it's still pending.`,
+    ].join(" "),
     delayMs: params.delayMs,
     deleteAfterRun: true,
     tag: browserHandoffScheduleTag(params.site),
     deliveryMode: "none",
   });
+  return Boolean(job);
 }
 
 /** Best-effort cleanup once a handoff resolves — not a hard dependency: each
@@ -148,16 +160,25 @@ async function handleRequestLogin(
     checkCount: 0,
   };
   await openHandoffStore(api).register(browserHandoffStateKey(params.site), record);
-  await scheduleRecheck(api, context, { site: params.site, delayMs: FIRST_RECHECK_DELAY_MS });
+  const scheduled = await scheduleRecheck(api, context, {
+    site: params.site,
+    delayMs: FIRST_RECHECK_DELAY_MS,
+  });
+
+  const followUp = scheduled
+    ? "Do not enter credentials on their behalf. You'll be resumed automatically once they finish " +
+      `— you can end your turn now. If needed, you can also call this tool again with action=status ` +
+      `and site="${params.site}" to check manually.`
+    : "Do not enter credentials on their behalf. Automatic resume is not available right now, so " +
+      `you'll need to check back yourself — call this tool again with action=status and ` +
+      `site="${params.site}" once the customer says they're done.`;
 
   return textResult(
     [
       `Share this sign-in link with the customer so they can log in themselves (including any CAPTCHA/2FA):`,
       handoff.liveViewUrl,
       "",
-      "Do not enter credentials on their behalf. You'll be resumed automatically once they finish " +
-        `— you can end your turn now. If needed, you can also call this tool again with action=status ` +
-        `and site="${params.site}" to check manually.`,
+      followUp,
     ].join("\n"),
   );
 }
@@ -188,6 +209,7 @@ async function handleStatus(
     const previousCheckCount = record.checkCount ?? 0;
     if (Date.now() - record.createdAtMs >= MAX_TOTAL_WAIT_MS) {
       await store.delete(key);
+      await clearScheduledRecheck(api, context, params.site);
       return textResult(
         `The login link for "${params.site}" may have expired after too long without the customer ` +
           "finishing. Call action=request_login to send a fresh one.",
