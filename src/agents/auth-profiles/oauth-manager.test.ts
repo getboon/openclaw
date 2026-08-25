@@ -708,7 +708,7 @@ describe("createOAuthManager", () => {
     });
   });
 
-  it("force-persists a refreshed credential after a same-slot CAS race with no tracked identity", async () => {
+  it("force-persists a refreshed credential after a same-slot CAS race with no tracked identity and an unusable racer value", async () => {
     await withOAuthTempRoot("oauth-manager-cas-no-identity-", async (tempRoot) => {
       const agentDir = path.join(tempRoot, "agents", "main", "agent");
       await fs.mkdir(agentDir, { recursive: true });
@@ -734,8 +734,10 @@ describe("createOAuthManager", () => {
         buildApiKey: async (_provider, credential) => credential.access,
         refreshCredential: vi.fn(async () => {
           // Simulate a concurrent writer racing the store for the same
-          // provider/profile slot, without either credential carrying an
-          // identity to compare.
+          // provider/profile slot with an already-expired value -- an
+          // in-flight refresh race artifact, not a relogin (a relogin
+          // always produces something immediately usable) -- and neither
+          // credential carries an identity to compare.
           saveAuthProfileStore(
             {
               version: 1,
@@ -743,7 +745,7 @@ describe("createOAuthManager", () => {
                 [profileId]: createCredential({
                   access: "stale-race-access",
                   refresh: "consumed-race-refresh",
-                  expires: Date.now() + 10 * 60_000,
+                  expires: Date.now() - 30_000,
                 }),
               },
             },
@@ -777,6 +779,80 @@ describe("createOAuthManager", () => {
         type: "oauth",
         access: "rotated-access",
         refresh: "rotated-refresh",
+      });
+    });
+  });
+
+  it("defers to a usable identity-less relogin instead of clobbering it with a stale rotation", async () => {
+    await withOAuthTempRoot("oauth-manager-cas-no-identity-relogin-", async (tempRoot) => {
+      const agentDir = path.join(tempRoot, "agents", "main", "agent");
+      await fs.mkdir(agentDir, { recursive: true });
+      const profileId = "openai:oauth";
+      // Legacy profile: no accountId/email tracked at all.
+      const expired = createCredential({
+        access: "expired-access",
+        refresh: "expired-refresh",
+        expires: Date.now() - 60_000,
+      });
+      saveAuthProfileStore(
+        {
+          version: 1,
+          profiles: {
+            [profileId]: expired,
+          },
+        },
+        agentDir,
+        { filterExternalAuthProfiles: false },
+      );
+
+      const manager = createOAuthManager({
+        buildApiKey: async (_provider, credential) => credential.access,
+        refreshCredential: vi.fn(async () => {
+          // Simulate a relogin to a different account racing the store
+          // while the old refresh is in flight: the racer's value is
+          // immediately usable (not expired), which a relogin always
+          // produces but a same-account refresh race artifact would not.
+          saveAuthProfileStore(
+            {
+              version: 1,
+              profiles: {
+                [profileId]: createCredential({
+                  access: "relogged-access",
+                  refresh: "relogged-refresh",
+                  expires: Date.now() + 10 * 60_000,
+                }),
+              },
+            },
+            agentDir,
+            { filterExternalAuthProfiles: false },
+          );
+          return {
+            access: "rotated-access",
+            refresh: "rotated-refresh",
+            expires: Date.now() + 60_000,
+          };
+        }),
+        readBootstrapCredential: () => null,
+        isRefreshTokenReusedError: () => false,
+      });
+
+      const result = await manager.resolveOAuthAccess({
+        store: ensureAuthProfileStoreWithoutExternalProfiles(agentDir, {
+          allowKeychainPrompt: false,
+        }),
+        profileId,
+        credential: expired,
+        agentDir,
+      });
+
+      expect(result?.apiKey).toBe("relogged-access");
+      const persisted = ensureAuthProfileStoreWithoutExternalProfiles(agentDir, {
+        allowKeychainPrompt: false,
+      });
+      expect(persisted.profiles[profileId]).toMatchObject({
+        type: "oauth",
+        access: "relogged-access",
+        refresh: "relogged-refresh",
       });
     });
   });

@@ -19,6 +19,7 @@ import {
 import {
   areOAuthCredentialsEquivalent,
   hasMatchingOAuthIdentity,
+  hasOAuthIdentity,
   hasUsableOAuthCredential,
   isSafeToAdoptBootstrapOAuthIdentity,
   isSafeToAdoptMainStoreOAuthIdentity,
@@ -482,10 +483,19 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
         }
         // Refresh tokens rotate server-side before persist. Same-identity CAS
         // losers must win the store or the token family is bricked. Legacy
-        // profiles with no tracked identity can't be identity-matched, so
-        // fall back to same-provider/same-slot as the only ownership signal
-        // available rather than always discarding a valid rotation.
-        if (isSafeToForcePersistOAuthRefreshRotation(existing, params.refreshed)) {
+        // profiles with no tracked identity can't be identity-matched, so a
+        // same-provider/same-slot write is the only ownership signal
+        // available -- but a relogin to a *different* account always
+        // produces something immediately usable, so only trust that signal
+        // while the stored value is not: an unusable existing credential
+        // can only be an artifact of the same in-flight refresh race, never
+        // a fresh relogin, so it's safe to overwrite; a usable existing
+        // credential might be a relogin, so defer to it instead of risking
+        // clobbering it with a stale rotation.
+        if (
+          isSafeToForcePersistOAuthRefreshRotation(existing, params.refreshed) &&
+          (hasOAuthIdentity(existing) || !hasUsableOAuthCredential(existing))
+        ) {
           store.profiles[params.profileId] = { ...params.refreshed };
           adopted = params.refreshed;
           return true;
