@@ -95,9 +95,14 @@ export function collectRuntimeConfigAssignments(params: {
   // appId+appSecret even when every named account overrides appSecret.  The
   // shared helper's isBaseFieldActiveForChannelSurface only checks whether any
   // explicit account inherits the field, so top-level appSecret refs would be
-  // skipped when all accounts override.  Account for the implicit default here.
+  // skipped when all accounts override.  Account for the implicit default here,
+  // unless an explicit accounts.default entry disables it: an explicitly
+  // disabled default account must not still count as an active implicit one.
+  const explicitDefaultAccountDisabled =
+    surface.accounts.find((entry) => entry.accountId === "default")?.enabled === false;
   const hasImplicitDefaultAccount =
     surface.channelEnabled &&
+    !explicitDefaultAccountDisabled &&
     hasConfiguredSecretInputValue(feishu.appId, params.defaults) &&
     hasConfiguredSecretInputValue(feishu.appSecret, params.defaults);
   const topLevelAppSecretActive =

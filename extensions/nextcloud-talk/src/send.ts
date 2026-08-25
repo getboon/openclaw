@@ -24,9 +24,16 @@ import type { CoreConfig, NextcloudTalkSendResult } from "./types.js";
 const NEXTCLOUD_TALK_ERROR_SNIPPET_MAX_BYTES = 8 * 1024;
 const NEXTCLOUD_TALK_ERROR_SNIPPET_MAX_CHARS = 200;
 
+// Self-hosted endpoints are not trusted to return plain text: strip non-whitespace
+// C0/C1 control characters (ESC included) before collapsing whitespace, so a
+// hostile or misbehaving endpoint cannot smuggle terminal escape sequences into
+// operator logs through this error-body snippet.
+const NEXTCLOUD_TALK_NON_WHITESPACE_CONTROL_CHARS_RE = /[\x00-\x08\x0e-\x1f\x7f-\x9f]/g;
+
 /** Collapses whitespace and caps an error-body prefix to a short, log-safe snippet. */
-function collapseErrorSnippet(text: string): string {
-  const collapsed = text.replace(/\s+/g, " ").trim();
+export function collapseErrorSnippet(text: string): string {
+  const sanitized = text.replace(NEXTCLOUD_TALK_NON_WHITESPACE_CONTROL_CHARS_RE, "");
+  const collapsed = sanitized.replace(/\s+/g, " ").trim();
   if (collapsed.length > NEXTCLOUD_TALK_ERROR_SNIPPET_MAX_CHARS) {
     return `${collapsed.slice(0, NEXTCLOUD_TALK_ERROR_SNIPPET_MAX_CHARS)}…`;
   }
