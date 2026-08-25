@@ -45,16 +45,21 @@ enum ShellExecutor {
             errorMessage: status == 0 ? nil : "exit \(status)")
     }
 
-    /// Drains `handle` to EOF in bounded chunks, keeping at most `maxBytes` of it. Excess bytes
-    /// are read and discarded rather than left unread, so a command with unbounded output can't
-    /// block on a full pipe buffer while also not accumulating unbounded memory here.
+    /// Drains `handle` to EOF in bounded chunks, keeping only the trailing `maxBytes` of it.
+    /// ExecHostOutputLimiter.truncate presents the tail of whatever it's given (the end of a
+    /// command's output is where errors/status usually land), so this must retain the tail too,
+    /// not the head, or a truncated response silently shows stale early output instead. Older
+    /// bytes are dropped as newer ones arrive rather than left unread, so a command with
+    /// unbounded output can't block on a full pipe buffer while also not accumulating unbounded
+    /// memory here.
     private static func readCapped(_ handle: FileHandle, maxBytes: Int) -> Data {
         var result = Data()
         while true {
             let chunk = handle.readSafely(upToCount: 65536)
             if chunk.isEmpty { break }
-            if result.count < maxBytes {
-                result.append(chunk.prefix(maxBytes - result.count))
+            result.append(chunk)
+            if result.count > maxBytes {
+                result.removeFirst(result.count - maxBytes)
             }
         }
         return result

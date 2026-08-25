@@ -97,6 +97,30 @@ struct ExecApprovalsSocketAuthTests {
         #expect(!result.timedOut)
     }
 
+    @Test
+    func `run detailed keeps the tail of oversized output, not the head`() async throws {
+        // ExecHostOutputLimiter.truncate presents the tail of whatever it's given, since a
+        // command's trailing error/status lines usually matter more than its start. A cap that
+        // kept the head instead would silently show stale early output and drop the real tail.
+        let cap = 1024
+        let result = await ShellExecutor.runDetailed(
+            command: [
+                "/usr/bin/perl",
+                "-e",
+                "print 'H' x (4 * 1024 * 1024); print 'TAIL_MARKER';",
+            ],
+            cwd: nil,
+            env: nil,
+            timeout: 10,
+            maxOutputBytes: cap)
+
+        #expect(result.stdout.utf8.count <= cap)
+        // The head-capping bug would keep only the first `cap` bytes -- all 'H' -- so the
+        // marker, written 4MB into the stream, would never appear at all.
+        #expect(result.stdout.hasSuffix("TAIL_MARKER"))
+        #expect(result.exitCode == 0)
+    }
+
     private struct EncodedExecHostResponse: Codable {
         var type: String
         var id: String
