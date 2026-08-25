@@ -22,6 +22,7 @@ import {
   hasUsableOAuthCredential,
   isSafeToAdoptBootstrapOAuthIdentity,
   isSafeToAdoptMainStoreOAuthIdentity,
+  isSafeToForcePersistOAuthRefreshRotation,
   isSafeToOverwriteStoredOAuthIdentity,
   overlayRuntimeExternalOAuthProfiles,
   shouldBootstrapFromExternalCliCredential,
@@ -480,8 +481,11 @@ export function createOAuthManager(adapter: OAuthManagerAdapter) {
           return false;
         }
         // Refresh tokens rotate server-side before persist. Same-identity CAS
-        // losers must win the store or the token family is bricked.
-        if (hasMatchingOAuthIdentity(existing, params.refreshed)) {
+        // losers must win the store or the token family is bricked. Legacy
+        // profiles with no tracked identity can't be identity-matched, so
+        // fall back to same-provider/same-slot as the only ownership signal
+        // available rather than always discarding a valid rotation.
+        if (isSafeToForcePersistOAuthRefreshRotation(existing, params.refreshed)) {
           store.profiles[params.profileId] = { ...params.refreshed };
           adopted = params.refreshed;
           return true;
