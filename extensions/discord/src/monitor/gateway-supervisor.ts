@@ -54,7 +54,7 @@ function removeDiscordGatewayLateErrorGuard(emitter: EventEmitter): void {
 }
 
 function ensureDiscordGatewayLateErrorGuard(emitter: EventEmitter): void {
-  if (emitter.listenerCount("error") > 0) {
+  if (discordGatewayLateErrorGuards.has(emitter)) {
     return;
   }
   const seenMessages = new Set<string>();

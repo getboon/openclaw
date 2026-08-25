@@ -153,15 +153,17 @@ export const buildTelegramMessageContext = async ({
 }: BuildTelegramMessageContextParams): Promise<TelegramMessageContext | null> => {
   const msg = primaryCtx.message;
   let admissionFinalized = false;
-  const finalizeAdmission = async (admitted: boolean): Promise<boolean> => {
+  const finalizeAdmission = async (admitted: boolean, cacheMessage = true): Promise<boolean> => {
     if (admissionFinalized) {
       return false;
     }
     admissionFinalized = true;
-    return (await options?.afterAdmissionShouldDrop?.(admitted)) ?? false;
+    return (await options?.afterAdmissionShouldDrop?.(admitted, cacheMessage)) ?? false;
   };
   const dropBeforeAdmission = async (): Promise<null> => {
-    await finalizeAdmission(false);
+    // Rejected before admission was ever attempted; the message was never
+    // really seen, so it must not be recorded as a cached/dropped-history entry.
+    await finalizeAdmission(false, false);
     return null;
   };
   const chatId = msg.chat.id;

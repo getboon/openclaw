@@ -238,7 +238,7 @@ describe("buildTelegramMessageContext requireMention precedence", () => {
 
     expect(ctx).toBeNull();
     expect(afterAdmissionShouldDrop).toHaveBeenCalledOnce();
-    expect(afterAdmissionShouldDrop).toHaveBeenCalledWith(false);
+    expect(afterAdmissionShouldDrop).toHaveBeenCalledWith(false, false);
   });
 
   it("lets deferred admission suppress an addressed group turn", async () => {
@@ -256,7 +256,7 @@ describe("buildTelegramMessageContext requireMention precedence", () => {
 
     expect(ctx).toBeNull();
     expect(afterAdmissionShouldDrop).toHaveBeenCalledOnce();
-    expect(afterAdmissionShouldDrop).toHaveBeenCalledWith(true);
+    expect(afterAdmissionShouldDrop).toHaveBeenCalledWith(true, true);
   });
 
   it("finalizes deferred admission when group policy drops before body admission", async () => {
@@ -274,7 +274,7 @@ describe("buildTelegramMessageContext requireMention precedence", () => {
 
     expect(ctx).toBeNull();
     expect(afterAdmissionShouldDrop).toHaveBeenCalledOnce();
-    expect(afterAdmissionShouldDrop).toHaveBeenCalledWith(false);
+    expect(afterAdmissionShouldDrop).toHaveBeenCalledWith(false, false);
   });
 
   it("keeps activation fallback when no topic requireMention is configured", async () => {

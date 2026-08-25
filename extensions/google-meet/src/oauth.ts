@@ -217,11 +217,8 @@ function isLocalCallbackListenerError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
   }
-  return (
-    error.message.includes("EADDRINUSE") ||
-    error.message.includes("port") ||
-    error.message.includes("listen")
-  );
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "EADDRINUSE" || code === "EACCES" || code === "EADDRNOTAVAIL";
 }
 
 async function readManualGoogleMeetAuthCode(params: {

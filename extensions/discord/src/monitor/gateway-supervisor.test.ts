@@ -151,4 +151,27 @@ describe("createDiscordGatewaySupervisor", () => {
       "suppressed late gateway error after dispose: Error: late gateway error 2",
     );
   });
+
+  it("still installs the late error guard when an unrelated error listener is present at dispose", () => {
+    const emitter = new EventEmitter();
+    gatewayLogError.mockClear();
+    const otherListener = vi.fn();
+    emitter.on("error", otherListener);
+
+    const supervisor = createDiscordGatewaySupervisor({
+      gateway: { emitter },
+      isDisallowedIntentsError: () => false,
+      runtime: { error: vi.fn() } as never,
+    });
+    supervisor.dispose();
+
+    // The other listener later goes away (its owner cleaned up independently);
+    // our guard must still be attached or this emit would throw unhandled.
+    emitter.off("error", otherListener);
+    const error = new Error("late gateway error after unrelated listener removed");
+    expect(() => emitter.emit("error", error)).not.toThrow();
+    expect(gatewayLogError).toHaveBeenCalledWith(
+      "suppressed late gateway error after dispose: Error: late gateway error after unrelated listener removed",
+    );
+  });
 });

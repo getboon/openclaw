@@ -227,4 +227,32 @@ describe("Google Meet OAuth", () => {
     ).rejects.toThrow(/timeout/i);
     expect(promptInput).not.toHaveBeenCalled();
   });
+
+  it("propagates a Google OAuth error redirect instead of falling back to manual mode", async () => {
+    // "unsupported_response_type" contains the substring "port"; a message-substring
+    // classifier would misclassify this as a local listener failure (regression guard).
+    const promptInput = vi.fn(async () => "unused");
+    const state = "state-token";
+    const resultPromise = waitForGoogleMeetAuthCode({
+      state,
+      manual: false,
+      timeoutMs: 60_000,
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth?x=1",
+      promptInput,
+      writeLine: () => {},
+    });
+    // Attach the rejection assertion before triggering the callback so nothing
+    // observes an unhandled rejection in the gap between reject() and await.
+    const assertion = expect(resultPromise).rejects.toThrow(/unsupported_response_type/);
+
+    await vi.waitFor(async () => {
+      const response = await fetch(
+        `http://localhost:8085/oauth2callback?error=unsupported_response_type&state=${state}`,
+      );
+      expect(response.status).toBe(400);
+    });
+
+    await assertion;
+    expect(promptInput).not.toHaveBeenCalled();
+  });
 });
