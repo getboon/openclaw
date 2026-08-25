@@ -22,6 +22,11 @@ function check(label, val) {
 
 // Server-side byte counter: track how many response bytes were actually written to the socket.
 let serverBytesWritten = 0;
+// Resolves once the "/huge" response's connection closes, so callers can wait
+// for the deterministic post-cancellation byte count instead of racing a
+// fixed sleep against however long the OS socket buffer takes to drain and
+// report the client's disconnect back to the server.
+let hugeResponseClosed = Promise.resolve();
 
 async function withServer(fn) {
   serverBytesWritten = 0;
@@ -33,8 +38,21 @@ async function withServer(fn) {
       res.write(header);
       serverBytesWritten += header.length;
 
+      // A cancelled fetch reader destroys the client connection, but the
+      // server only learns about it once the socket reports "close" — an
+      // async network event, not something writeNext can see synchronously.
+      // Stop pumping as soon as it fires so serverBytesWritten stops growing
+      // at the same moment a caller can deterministically observe.
+      let closed = false;
+      hugeResponseClosed = once(res, "close").then(() => {
+        closed = true;
+      });
+
       let sent = header.length;
       const writeNext = () => {
+        if (closed) {
+          return;
+        }
         if (sent >= STREAM_SIZE) {
           const tail = Buffer.from("]}");
           res.write(tail);
@@ -95,10 +113,16 @@ await withServer(async (port) => {
   } catch (e) {
     err = e;
   }
-  // Give server a tick to flush its internal counter before checking
-  await new Promise((done) => {
-    setTimeout(done, 50);
-  });
+  // Wait for the server to observe the cancelled connection close instead of
+  // racing a fixed sleep: writeNext stops on that same event, so once it
+  // resolves serverBytesWritten can no longer grow and the read below is a
+  // deterministic snapshot, not a timing guess.
+  await Promise.race([
+    hugeResponseClosed,
+    new Promise((done) => {
+      setTimeout(done, 2000);
+    }),
+  ]);
   const sent = serverBytesWritten;
   check(`oversized body rejected (threw=${err != null})`, err != null);
   check(

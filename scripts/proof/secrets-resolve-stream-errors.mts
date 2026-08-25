@@ -34,15 +34,20 @@ echo '{"protocolVersion":1,"values":{"my-secret":"super-secret-value"}}'
 await fs.chmod(fakeSecret, 0o755);
 
 // Patch spawn so the exec child is a real process whose streams we can make
-// emit error events after runExecResolver attaches listeners.
+// emit error events after runExecResolver attaches listeners. A fixed delay
+// would race the child's completion (the fake provider is a near-instant
+// `echo`, and runExecResolver resolves on `close`), so wait for the child's
+// own `spawn` event instead: it fires only after this constructor call
+// returns, by which point runExecResolver has already synchronously attached
+// its stdout/stderr error listeners.
 childProcess.spawn = (...args: Parameters<typeof originalSpawn>) => {
   const child = originalSpawn.apply(childProcess, args);
   const cmd = args[0] ?? "";
   if (cmd === fakeSecret) {
-    setTimeout(() => {
+    child.once("spawn", () => {
       child.stdout?.emit("error", new Error("stdout read failed"));
       child.stderr?.emit("error", new Error("stderr read failed"));
-    }, 50);
+    });
   }
   return child;
 };
