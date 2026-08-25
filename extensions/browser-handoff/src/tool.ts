@@ -63,7 +63,9 @@ function nextRecheckDelayMs(previousCheckCount: number): number {
  *
  * Always clears any previously-scheduled recheck for this site first, so
  * every call site is dedup-by-construction against stacking overlapping
- * schedules (e.g. a manual status check racing the scheduled one).
+ * schedules (e.g. a manual status check racing the scheduled one). If that
+ * cleanup can't confirm the old job is gone, skip scheduling a replacement
+ * rather than risk two overlapping rechecks firing.
  */
 async function scheduleRecheck(
   api: OpenClawPluginApi,
@@ -74,7 +76,10 @@ async function scheduleRecheck(
   if (!sessionKey) {
     return false;
   }
-  await clearScheduledRecheck(api, context, params.site);
+  const cleared = await clearScheduledRecheck(api, context, params.site);
+  if (!cleared) {
+    return false;
+  }
   const job = await api.session.workflow.scheduleSessionTurn({
     sessionKey,
     message: [
@@ -91,23 +96,31 @@ async function scheduleRecheck(
   return Boolean(job);
 }
 
-/** Best-effort cleanup once a handoff resolves — not a hard dependency: each
+/**
+ * Best-effort cleanup once a handoff resolves — not a hard dependency: each
  * recheck is already a one-shot (`deleteAfterRun: true`), so this only
  * matters for the rare case of a schedule still in flight when the outcome
- * lands some other way (e.g. a human-driven manual status check). */
+ * lands some other way (e.g. a human-driven manual status check).
+ *
+ * Returns whether the site is now confirmed clear of scheduled rechecks
+ * (true when there was nothing to clear, or cleanup reported no failures),
+ * so `scheduleRecheck` can refuse to add a replacement it can't be sure is
+ * the only one.
+ */
 async function clearScheduledRecheck(
   api: OpenClawPluginApi,
   context: BrowserHandoffToolContext,
   site: string,
-): Promise<void> {
+): Promise<boolean> {
   const sessionKey = context.sessionKey;
   if (!sessionKey) {
-    return;
+    return true;
   }
-  await api.session.workflow.unscheduleSessionTurnsByTag({
+  const result = await api.session.workflow.unscheduleSessionTurnsByTag({
     sessionKey,
     tag: browserHandoffScheduleTag(site),
   });
+  return result.failed === 0;
 }
 
 export type BrowserHandoffToolTextResult = {

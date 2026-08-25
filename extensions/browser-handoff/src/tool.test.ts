@@ -439,6 +439,29 @@ describe("browser-handoff tool", () => {
 
       expect(result.content[0].text).toContain("not available");
     });
+
+    it(
+      "does not schedule a replacement recheck when clearing the previous one fails, to avoid " +
+        "stacking a duplicate on top of a job that's still there",
+      async () => {
+        requestBrowserLoginHandoffMock.mockResolvedValue({
+          handoffToken: "tok_123",
+          liveViewUrl: "https://live.example/view",
+        });
+        const scheduleSessionTurn = vi.fn().mockResolvedValue({ id: "job_1" });
+        const unscheduleSessionTurnsByTag = vi.fn().mockResolvedValue({ removed: 0, failed: 1 });
+        const api = createApi({ scheduleSessionTurn, unscheduleSessionTurnsByTag });
+
+        const result = await executeBrowserHandoffTool(
+          api,
+          { action: "request_login", site: "example.com" },
+          { sessionKey },
+        );
+
+        expect(scheduleSessionTurn).not.toHaveBeenCalled();
+        expect(result.content[0].text).toContain("not available");
+      },
+    );
   });
 });
 
