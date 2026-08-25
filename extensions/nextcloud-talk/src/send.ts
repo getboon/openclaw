@@ -27,8 +27,16 @@ const NEXTCLOUD_TALK_ERROR_SNIPPET_MAX_CHARS = 200;
 // Self-hosted endpoints are not trusted to return plain text: strip non-whitespace
 // C0/C1 control characters (ESC included) before collapsing whitespace, so a
 // hostile or misbehaving endpoint cannot smuggle terminal escape sequences into
-// operator logs through this error-body snippet.
-const NEXTCLOUD_TALK_NON_WHITESPACE_CONTROL_CHARS_RE = /[\x00-\x08\x0e-\x1f\x7f-\x9f]/g;
+// operator logs through this error-body snippet. Pattern built at runtime (like
+// packages/terminal-core/src/ansi.ts's sanitizeForLog) so the source stays free
+// of literal control characters and the no-control-regex lint rule doesn't flag
+// an intentional pattern as an accidental one.
+const NEXTCLOUD_TALK_NON_WHITESPACE_CONTROL_CHARS_RE = new RegExp(
+  `[${String.fromCharCode(0x00)}-${String.fromCharCode(0x08)}` +
+    `${String.fromCharCode(0x0e)}-${String.fromCharCode(0x1f)}` +
+    `${String.fromCharCode(0x7f)}-${String.fromCharCode(0x9f)}]`,
+  "g",
+);
 
 /** Collapses whitespace and caps an error-body prefix to a short, log-safe snippet. */
 export function collapseErrorSnippet(text: string): string {
