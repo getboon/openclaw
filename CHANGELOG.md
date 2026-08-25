@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.23
+
+Fixes a truncated-stream failure mode that could silently drop the tail of a Bedrock/boon-llm-gateway model reply, and reworks how the sentry-monitor plugin classifies and tags tool-call errors.
+
+- **#143 (ENG-18472):** the Anthropic transport stream only enforced `message_stop` when a Fable-5 refusal buffer was active, so a dropped upstream connection on any Sonnet/Opus/Haiku (Bedrock/boon-llm-gateway) turn finalized as a clean `stopReason:"stop"` — byte-identical to a legitimate short answer, with no signal a truncation occurred. `message_stop` is now enforced unconditionally for every model, mirrored in the direct-to-Bedrock stream path, and the resulting error now classifies as failover-eligible `"timeout"` instead of `"unclassified"` so a fallback model can pick up the turn.
+- **#144:** the sentry-monitor plugin's `release` tag was its own pinned manifest version rather than the running app version, so every host on every release reported the same tag and per-deploy regressions couldn't be attributed — it now reports a real `hostVersion`. Tool-call error captures carry a structured `errorKind` derived from host-computed signals instead of message-text sniffing; expected policy/permission/visibility denials are no longer captured to Sentry at all, and argument-validation rejections downgrade to a non-paging warning. Fingerprints scrub volatile tokens (paths, UUIDs, timestamps, exit codes) so recurring failures group into one issue. Also fixes a Slack error-formatter false positive that appended OAuth scope lists to unrelated errors, and a session-visibility denial message that always blamed `tools.sessions.visibility=tree` even when a sandbox clamp was the real cause.
+- Base = `2026.6.11-boon.22`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.23` in lockstep. No other code changes; #143 and #144 were merged onto `boon` before this release.
+
 ## 2026.6.11-boon.22
 
 Surfaces a previously-silent inbound chat attachment failure to both the user and the model, retries a Slack reply-session race that could drop a reply, and adds a browser login handoff tool for CAPTCHA/2FA sign-in.
