@@ -206,6 +206,31 @@ describe("buildProbeTargets reason codes", () => {
     ]);
   });
 
+  it("reports malformed_api_key with an actionable diagnosis instead of collapsing to ineligible_profile", async () => {
+    resolveAuthProfileEligibilityMock.mockReturnValue({
+      eligible: false,
+      reasonCode: "malformed_api_key",
+    });
+
+    const plan = await buildAnthropicProbePlan(["anthropic:default"]);
+
+    expect(plan.targets).toStrictEqual([]);
+    expect(plan.results).toStrictEqual([
+      {
+        error:
+          "Auth profile credentials are missing or expired.\n↳ Auth reason [malformed_api_key]: paste the API key value, not an onboarding command.",
+        label: "anthropic:default",
+        mode: "token",
+        model: "anthropic/claude-sonnet-4-6",
+        profileId: "anthropic:default",
+        provider: "anthropic",
+        reasonCode: "malformed_api_key",
+        source: "profile",
+        status: "unknown",
+      },
+    ]);
+  });
+
   it("reports excluded_by_auth_order when profile id is not present in explicit order", async () => {
     mockStore.order = {
       anthropic: ["anthropic:work"],

@@ -1240,7 +1240,7 @@ export async function runToolProgressMentionSafetyScenario(context: MatrixQaScen
     label: "tool progress mention safety",
     allowFinalBeforeProgress: true,
     mentionSafety: true,
-    progressPattern: /\b(?:exec|print text\s*→\s*run sleep 2)\b/i,
+    progressPattern: /@room|@alice:matrix-qa\.test|!room:matrix-qa\.test/i,
     triggerBodyBuilder: buildMatrixToolProgressMentionSafetyPrompt,
   });
 }
