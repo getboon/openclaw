@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 const { resolveStableChannelMessageIngress } = vi.hoisted(() => ({
   resolveStableChannelMessageIngress: vi.fn(async () => ({
     senderAccess: { allowed: true, decision: "allow" },
-    commandAccess: { requested: true, authorized: false },
+    commandAccess: { requested: true, authorized: false, shouldBlockControlCommand: true },
   })),
 }));
 
@@ -90,5 +90,47 @@ describe("authorizeSmsSender command gate wiring", () => {
         hasControlCommand: true,
       }),
     );
+    // The gate must actually drop the message, not just be computed and
+    // carried along in a payload for some downstream consumer to check.
+    expect(runtime.inbound.run).not.toHaveBeenCalled();
+  });
+
+  it("dispatches the turn when the control command gate does not block", async () => {
+    resolveStableChannelMessageIngress.mockResolvedValueOnce({
+      senderAccess: { allowed: true, decision: "allow" },
+      commandAccess: { requested: true, authorized: true, shouldBlockControlCommand: false },
+    });
+    const runtime = {
+      commands: {
+        isControlCommandMessage: vi.fn(() => true),
+        shouldComputeCommandAuthorized: vi.fn(() => true),
+      },
+      pairing: { readAllowFromStore: vi.fn(async () => []) },
+      routing: {
+        resolveAgentRoute: vi.fn(() => ({
+          agentId: "main",
+          accountId: "default",
+          sessionKey: "agent:main:sms:direct:+15551234567",
+        })),
+      },
+      inbound: { run: vi.fn(), buildContext: vi.fn() },
+      session: { resolveStorePath: vi.fn(), recordInboundSession: vi.fn() },
+      reply: { dispatchReplyWithBufferedBlockDispatcher: vi.fn() },
+    } as unknown as SmsChannelRuntime;
+
+    await dispatchSmsInboundEvent({
+      cfg: {},
+      account: createAccount(),
+      channelRuntime: runtime,
+      msg: {
+        from: "+15551234567",
+        to: "+15557654321",
+        body: "/authorized-command",
+        messageSid: "SM-allowed-command",
+        accountSid: "AC123",
+      },
+    });
+
+    expect(runtime.inbound.run).toHaveBeenCalledTimes(1);
   });
 });

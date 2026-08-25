@@ -140,6 +140,10 @@ export async function dispatchSmsInboundEvent(params: {
   const sessionKey = route.sessionKey;
   const commandRequested = auth.commandAccess.requested;
   const commandAuthorized = auth.commandAccess.authorized;
+  if (auth.commandAccess.shouldBlockControlCommand) {
+    params.log?.warn?.(`SMS control command from ${from} is not authorized`);
+    return;
+  }
   const isTextCommand = params.channelRuntime.commands.isControlCommandMessage(
     params.msg.body,
     params.cfg,
