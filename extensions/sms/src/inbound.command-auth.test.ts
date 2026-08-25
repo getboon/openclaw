@@ -1,13 +1,16 @@
 // Regression coverage for the SMS command-authorization gate: a control
 // command from a sender who is not command-authorized must be blocked, not
 // silently admitted because allowTextCommands was left at its false default.
+import type { ResolveStableChannelMessageIngressParams } from "openclaw/plugin-sdk/channel-ingress-runtime";
 import { describe, expect, it, vi } from "vitest";
 
 const { resolveStableChannelMessageIngress } = vi.hoisted(() => ({
-  resolveStableChannelMessageIngress: vi.fn(async () => ({
-    senderAccess: { allowed: true, decision: "allow" },
-    commandAccess: { requested: true, authorized: false, shouldBlockControlCommand: true },
-  })),
+  resolveStableChannelMessageIngress: vi.fn(
+    async (_params: ResolveStableChannelMessageIngressParams) => ({
+      senderAccess: { allowed: true, decision: "allow" },
+      commandAccess: { requested: true, authorized: false, shouldBlockControlCommand: true },
+    }),
+  ),
 }));
 
 vi.mock("openclaw/plugin-sdk/channel-ingress-runtime", () => ({
@@ -84,7 +87,7 @@ describe("authorizeSmsSender command gate wiring", () => {
 
     expect(isControlCommandMessage).toHaveBeenCalledWith("/dangerous-command", {});
     const call = resolveStableChannelMessageIngress.mock.calls[0]?.[0];
-    expect(call.command).toEqual(
+    expect(call?.command).toEqual(
       expect.objectContaining({
         allowTextCommands: true,
         hasControlCommand: true,
