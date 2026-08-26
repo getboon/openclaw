@@ -2,6 +2,15 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.24
+
+Makes the browser login handoff tool's login link actually durable: the agent now resumes automatically once the customer finishes signing in, instead of the handoff silently going nowhere.
+
+- **#146:** the `browser_handoff` tool's `request_login`/`status` actions now schedule a durable, session-scoped recheck (`scheduleSessionTurn`, exponential backoff capped at 5 minutes with a 30-minute give-up) instead of relying on the model to self-repoll within the same live turn. Terminal outcomes (ready/failed/expired) are delivered via the `message` tool since the recheck itself is silent; every branch where automatic resume can't be armed (no session context, a failed schedule, a failed cleanup) now says so explicitly instead of leaving the model to assume it'll be resumed.
+- **#148:** the `browser-handoff` plugin's manifest never declared `activation.onConfigPaths`, so enabling it in config never actually counted it into the Gateway's activated plugin registry — `scheduleSessionTurn` from #146 silently never armed in any real deployment, always falling back to "automatic resume is not available." Fixed to match the same `onConfigPaths` convention every other `plugins.entries.<id>`-configured bundled plugin already uses.
+- **#147:** bumps the `tar` dependency override from `7.5.20` to `7.5.21`, closing a HIGH-severity advisory (GHSA-r292-9mhp-454m, stack-overflow DoS via a crafted long-path tar archive).
+- Base = `2026.6.11-boon.23`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.24` in lockstep. No other code changes; #146, #147, and #148 were merged onto `boon` before this release.
+
 ## 2026.6.11-boon.23
 
 Fixes a truncated-stream failure mode that could silently drop the tail of a Bedrock/boon-llm-gateway model reply, and reworks how the sentry-monitor plugin classifies and tags tool-call errors.
