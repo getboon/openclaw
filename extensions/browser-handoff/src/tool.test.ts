@@ -144,9 +144,12 @@ describe("browser-handoff tool", () => {
       site: "example.com",
     });
     expect(attachResult.content[0].text).toContain('profile="handoff-example.com"');
+    // The boon-core API key is embedded as Basic-auth userinfo (not a header)
+    // because the underlying remote-CDP client (Playwright's connectOverCDP)
+    // can only carry credentials embedded in the connect URL.
     expect(registerRemoteCdpBrowserProfileMock).toHaveBeenCalledWith({
       name: "handoff-example.com",
-      cdpUrl: "wss://proxy/cdp",
+      cdpUrl: "wss://test-key@proxy/cdp",
     });
 
     const secondAttach = await executeBrowserHandoffTool(api, {
