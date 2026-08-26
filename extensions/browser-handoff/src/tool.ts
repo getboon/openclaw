@@ -278,7 +278,11 @@ async function handleStatus(
  */
 function withBearerAsBasicAuth(cdpUrl: string, apiKey: string): string {
   const url = new URL(cdpUrl);
-  url.username = apiKey;
+  // The username setter doesn't escape a literal "%" — left as-is, a key
+  // like "ab%41cd" would decode back as "abAcd" (a different, wrong value)
+  // instead of throwing, since "%41" alone is a valid escape. Escaping "%"
+  // to "%25" first guarantees one decode round-trips to the original key.
+  url.username = apiKey.replaceAll("%", "%25");
   url.password = "";
   return url.toString();
 }
