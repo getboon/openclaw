@@ -63,6 +63,7 @@ export function respondUnavailableOnNodeInvokeError<T extends { ok: boolean; err
     undefined,
     errorShape(ErrorCodes.UNAVAILABLE, message, {
       details: { nodeError: res.error ?? null },
+      retryable: nodeCode === ErrorCodes.UNAVAILABLE,
     }),
   );
   return false;
