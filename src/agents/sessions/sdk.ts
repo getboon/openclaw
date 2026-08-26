@@ -213,7 +213,7 @@ function mergeRequestHeaders(
   modelHeaders: Record<string, string> | undefined,
 ): Record<string, string> | undefined {
   return preserveProvisioningSmokeSessionHeader(
-    mergeTransportHeaders(attributionHeaders, authHeaders, runtimeHeaders),
+    mergeTransportHeaders(attributionHeaders, authHeaders, modelHeaders, runtimeHeaders),
     modelHeaders,
   );
 }

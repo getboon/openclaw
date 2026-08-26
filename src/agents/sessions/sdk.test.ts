@@ -303,6 +303,7 @@ describe("createAgentSession attribution headers", () => {
         ...testModel,
         headers: {
           "X-Boon-Session-ID": "provisioning-smoke-run",
+          "X-Boon-Provisioning-Smoke-Run-ID": "smoke-run-1",
         },
       },
       {
@@ -316,10 +317,12 @@ describe("createAgentSession attribution headers", () => {
     expect(streamMocks.streamSimple.mock.lastCall?.[0]).toMatchObject({
       headers: {
         "X-Boon-Session-ID": "provisioning-smoke-run",
+        "X-Boon-Provisioning-Smoke-Run-ID": "smoke-run-1",
       },
     });
     expect(options.headers).toEqual({
       "X-Boon-Session-ID": "provisioning-smoke-run",
+      "X-Boon-Provisioning-Smoke-Run-ID": "smoke-run-1",
     });
   });
 });
