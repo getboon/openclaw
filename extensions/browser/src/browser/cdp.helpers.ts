@@ -141,7 +141,13 @@ export function getHeadersWithAuth(url: string, headers: Record<string, string> 
       return mergedHeaders;
     }
     if (parsed.username || parsed.password) {
-      const auth = Buffer.from(`${parsed.username}:${parsed.password}`).toString("base64");
+      // `.username`/`.password` return the URL Standard's percent-encoded
+      // form, not the original bytes — decode before building the Basic
+      // payload, or a credential containing a reserved character (":",
+      // "@", etc.) would send the mangled encoded form instead.
+      const username = decodeURIComponent(parsed.username);
+      const password = decodeURIComponent(parsed.password);
+      const auth = Buffer.from(`${username}:${password}`).toString("base64");
       return { ...mergedHeaders, Authorization: `Basic ${auth}` };
     }
   } catch {

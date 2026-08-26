@@ -279,6 +279,7 @@ async function handleStatus(
 function withBearerAsBasicAuth(cdpUrl: string, apiKey: string): string {
   const url = new URL(cdpUrl);
   url.username = apiKey;
+  url.password = "";
   return url.toString();
 }
 

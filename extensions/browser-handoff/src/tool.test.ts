@@ -159,6 +159,38 @@ describe("browser-handoff tool", () => {
     expect(secondAttach.content[0].text).toContain("No completed login handoff found");
   });
 
+  it("attach clears any preexisting password on the relay URL rather than carrying it into the Basic payload", async () => {
+    requestBrowserLoginHandoffMock.mockResolvedValue({
+      handoffToken: "tok_123",
+      liveViewUrl: "https://live.example/view",
+    });
+    const api = createApi();
+    await executeBrowserHandoffTool(api, { action: "request_login", site: "example.com" });
+
+    pollBrowserHandoffStatusMock.mockResolvedValue({
+      status: "ready",
+      profileName: "handoff-example.com",
+    });
+    await executeBrowserHandoffTool(api, { action: "status", site: "example.com" });
+
+    pollBrowserHandoffStatusMock.mockResolvedValue({
+      status: "ready",
+      profileName: "handoff-example.com",
+      cdpUrl: "wss://existing-user:existing-pass@proxy/cdp",
+    });
+    registerRemoteCdpBrowserProfileMock.mockResolvedValue({
+      ok: true,
+      name: "handoff-example.com",
+    });
+
+    await executeBrowserHandoffTool(api, { action: "attach", site: "example.com" });
+
+    expect(registerRemoteCdpBrowserProfileMock).toHaveBeenCalledWith({
+      name: "handoff-example.com",
+      cdpUrl: "wss://test-key@proxy/cdp",
+    });
+  });
+
   it("surfaces boon-core errors without throwing", async () => {
     requestBrowserLoginHandoffMock.mockRejectedValue(new Error("boon-core unreachable"));
     const result = await executeBrowserHandoffTool(createApi(), {
