@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.25
+
+Fixes the browser login handoff tool's CDP attach step, which 401'd on every real attempt because the underlying client has no way to send the header boon-core's relay required.
+
+- **#150:** `action=attach` registers boon-core's CDP relay URL as a remote-CDP browser profile via Playwright's `connectOverCDP`, which can only carry credentials embedded in the connect URL (HTTP Basic auth) — it has no way to attach a custom `Authorization: Bearer` header. boon-core's relay required exactly that header in addition to its signed `ref` query param, so every real attach 401'd even though the relay itself worked (previously verified manually with a raw client that could set headers by hand). The boon API key is now embedded as URL userinfo, with the literal `%` character escaped first so the credential round-trips exactly regardless of content, and `getHeadersWithAuth` (shared by every remote-CDP profile) now percent-decodes URL-embedded credentials before building the Basic payload, falling back to the raw value if decoding fails rather than silently dropping auth. Companion boon-core fix: `AgentBearerAuthentication` now also accepts the same token via `Basic base64(token:)`.
+- Base = `2026.6.11-boon.24`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.25` in lockstep. No other code changes; #150 was merged onto `boon` before this release.
+
 ## 2026.6.11-boon.24
 
 Makes the browser login handoff tool's login link actually durable: the agent now resumes automatically once the customer finishes signing in, instead of the handoff silently going nowhere.
