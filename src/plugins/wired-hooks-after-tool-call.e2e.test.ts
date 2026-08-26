@@ -62,6 +62,8 @@ function getAfterToolCallCall(index = 0) {
           toolName?: string;
           params?: unknown;
           error?: unknown;
+          errorKind?: unknown;
+          errorCode?: unknown;
           durationMs?: unknown;
           runId?: string;
           toolCallId?: string;
@@ -201,6 +203,76 @@ describe("after_tool_call hook wiring", () => {
     const { event, context } = requireAfterToolCallCall();
     expect(event.error).toBe("command failed");
     expect(context.agentId).toBeUndefined();
+  });
+
+  it("classifies a validation rejection as invalid-input", async () => {
+    hookMocks.runner.hasHooks.mockReturnValue(true);
+
+    const ctx = createToolHandlerCtx({ runId: "test-run-invalid" });
+
+    await handleToolExecutionStart(
+      ctx as never,
+      {
+        type: "tool_execution_start",
+        toolName: "write",
+        toolCallId: "call-invalid",
+        args: { path: "x" },
+      } as never,
+    );
+
+    await handleToolExecutionEnd(
+      ctx as never,
+      {
+        type: "tool_execution_end",
+        toolName: "write",
+        toolCallId: "call-invalid",
+        isError: true,
+        // executionStarted: false is the host-authoritative signal that
+        // resolution/argument preparation/validation blocked the call before
+        // it ran — see packages/agent-core/src/types.ts's tool_execution_end.
+        executionStarted: false,
+        result: { status: "error", error: "INVALID_REQUEST" },
+      } as never,
+    );
+
+    const { event } = requireAfterToolCallCall();
+    expect(event.errorKind).toBe("invalid-input");
+  });
+
+  it("classifies a session-visibility denial as denied", async () => {
+    hookMocks.runner.hasHooks.mockReturnValue(true);
+
+    const ctx = createToolHandlerCtx({ runId: "test-run-denied" });
+
+    await handleToolExecutionStart(
+      ctx as never,
+      {
+        type: "tool_execution_start",
+        toolName: "sessions_history",
+        toolCallId: "call-denied",
+        args: {},
+      } as never,
+    );
+
+    await handleToolExecutionEnd(
+      ctx as never,
+      {
+        type: "tool_execution_end",
+        toolName: "sessions_history",
+        toolCallId: "call-denied",
+        isError: false,
+        result: {
+          content: [],
+          details: {
+            status: "forbidden",
+            error: "Session history visibility is restricted to the current session tree.",
+          },
+        },
+      } as never,
+    );
+
+    const { event } = requireAfterToolCallCall();
+    expect(event.errorKind).toBe("denied");
   });
 
   it("does not call runAfterToolCall when no hooks registered", async () => {

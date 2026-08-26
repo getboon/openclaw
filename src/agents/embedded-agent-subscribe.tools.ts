@@ -15,6 +15,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizeTargetForProvider } from "../infra/outbound/target-normalization.js";
 import { normalizeInteractiveReply, normalizeMessagePresentation } from "../interactive/payload.js";
 import { redactSensitiveFieldValue, redactToolPayloadText } from "../logging/redact.js";
+import type { PluginHookAfterToolCallErrorKind } from "../plugins/hook-types.js";
 import { truncateUtf16Safe } from "../utils.js";
 import { collectTextContentBlocks } from "./content-blocks.js";
 import { isMessagingToolTargetEvidenceAction } from "./embedded-agent-messaging.js";
@@ -38,18 +39,40 @@ function truncateToolText(text: string): string {
   return `${truncateUtf16Safe(text, TOOL_RESULT_MAX_CHARS)}\n…(truncated)…`;
 }
 
+const PYTHON_TRACEBACK_HEADER = "Traceback (most recent call last):";
+// The exec tool appends a synthetic status line after real process output on
+// non-zero exit (bash-tools.exec-runtime.ts `exitMsg`/`joinExecFailureOutput`,
+// sessions/tools/bash.ts `appendStatus`): "(Command exited with code N)",
+// "Command timed out after N seconds...", "Command aborted by signal N", etc.
+// All of these start with the word "Command", so skip them when hunting for
+// a traceback's real last line — otherwise we'd report the trailer instead of
+// the actual exception (`\b` keeps this from matching "CommandError: ...").
+const EXEC_STATUS_TRAILER_RE = /^\(?Command\b/i;
+
 function normalizeToolErrorText(text: string): string | undefined {
   const trimmed = text.trim();
   if (!trimmed) {
     return undefined;
   }
-  const firstLine = trimmed.split(/\r?\n/)[0]?.trim() ?? "";
-  if (!firstLine) {
+  const lines = trimmed.split(/\r?\n/);
+  // A Python traceback's first line is always this generic header; the actual
+  // "ExceptionType: message" is the last non-empty line. Keeping the first
+  // line here collapses every distinct Python exec failure into the same
+  // uninformative error string for callers/telemetry that key off this text.
+  const summaryLine =
+    lines[0]?.trim() === PYTHON_TRACEBACK_HEADER
+      ? lines.toReversed().find((line) => {
+          const candidate = line.trim();
+          return candidate.length > 0 && !EXEC_STATUS_TRAILER_RE.test(candidate);
+        })
+      : lines[0];
+  const line = summaryLine?.trim() ?? "";
+  if (!line) {
     return undefined;
   }
-  return firstLine.length > TOOL_ERROR_MAX_CHARS
-    ? `${truncateUtf16Safe(firstLine, TOOL_ERROR_MAX_CHARS)}…`
-    : firstLine;
+  return line.length > TOOL_ERROR_MAX_CHARS
+    ? `${truncateUtf16Safe(line, TOOL_ERROR_MAX_CHARS)}…`
+    : line;
 }
 
 function isErrorLikeStatus(status: string): boolean {
@@ -687,6 +710,50 @@ export function isToolResultTimedOut(result: unknown): boolean {
     return true;
   }
   return readToolResultDetails(result)?.timedOut === true;
+}
+
+// Deliberately narrower than isToolResultError's full failure-status list:
+// only statuses verified to mean a policy/permission decision. Others in
+// that list (aborted, unavailable, timed_out) are routinely infra/dependency
+// failures too, not safe to assume "expected" without a per-value audit.
+const DENIAL_STATUSES = new Set(["forbidden", "denied", "blocked"]);
+
+/**
+ * Classifies a failed tool result for `after_tool_call` hook consumers (see
+ * `PluginHookAfterToolCallErrorKind`), using only structured signals the host
+ * already computes — never `error` text. Precedence matters: a denial or an
+ * unstarted execution takes priority over an exec exit code, since a policy
+ * check or validation failure can leave stale/irrelevant `details.exitCode`
+ * behind from an unrelated earlier attempt.
+ */
+export function classifyToolCallErrorKind(params: {
+  result: unknown;
+  executionStarted: boolean;
+  middlewareError: boolean;
+}): PluginHookAfterToolCallErrorKind {
+  const status = readToolResultStatus(params.result);
+  const details = readToolResultDetails(params.result);
+  // `status` alone can't always distinguish a denial from a genuine failure
+  // (e.g. a denied exec approval keeps status: "failed"), so producers that
+  // need to signal a denial without a dedicated status set `details.denied`.
+  const isDeniedStatus = Boolean(status && DENIAL_STATUSES.has(status));
+  if (isDeniedStatus || details?.denied === true) {
+    return "denied";
+  }
+  if (!params.executionStarted || status === "invalid") {
+    return "invalid-input";
+  }
+  if (isToolResultTimedOut(params.result) || status === "timed_out") {
+    return "timeout";
+  }
+  if (params.middlewareError) {
+    return "internal";
+  }
+  const exitCode = details?.exitCode;
+  if (typeof exitCode === "number" && Number.isFinite(exitCode) && exitCode !== 0) {
+    return "exit-error";
+  }
+  return "upstream";
 }
 
 export function extractToolErrorMessage(result: unknown): string | undefined {

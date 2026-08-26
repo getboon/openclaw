@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as loggingConfigModule from "../logging/config.js";
 import {
   buildToolLifecycleErrorResult,
+  classifyToolCallErrorKind,
   extractToolErrorCode,
   extractToolErrorMessage,
   isToolResultError,
@@ -354,6 +355,65 @@ describe("sanitizeToolResult", () => {
     const sanitizedWithRawError = sanitizeToolResult({ details: detailsWithRawError });
     expect(extractToolErrorMessage(sanitizedWithRawError)).toBeUndefined();
   });
+
+  it("uses the last line of a Python traceback instead of the generic header", () => {
+    const traceback = [
+      "Traceback (most recent call last):",
+      '  File "script.py", line 3, in <module>',
+      "    raise ValueError('bad input')",
+      "ValueError: bad input",
+    ].join("\n");
+    const result = {
+      content: [{ type: "text", text: traceback }],
+      details: { status: "completed", exitCode: 1 },
+    };
+    expect(extractToolErrorMessage(result)).toBe("ValueError: bad input");
+  });
+
+  it("skips the exec tool's appended exit-status trailer when picking the traceback line", () => {
+    // bash-tools.exec-runtime.ts appends "\n\n(Command exited with code N)"
+    // after real output on a non-zero exit; that trailer must not be mistaken
+    // for the traceback's real last line.
+    const traceback = [
+      "Traceback (most recent call last):",
+      '  File "script.py", line 3, in <module>',
+      "    raise ValueError('bad input')",
+      "ValueError: bad input",
+      "",
+      "(Command exited with code 1)",
+    ].join("\n");
+    const result = {
+      content: [{ type: "text", text: traceback }],
+      details: { status: "completed", exitCode: 1 },
+    };
+    expect(extractToolErrorMessage(result)).toBe("ValueError: bad input");
+  });
+
+  it("skips a timeout/abort status trailer without parens or an exit code", () => {
+    // sessions/tools/bash.ts's appendStatus() has no parens and can carry
+    // free-form reason text ("Command timed out after N seconds...").
+    const traceback = [
+      "Traceback (most recent call last):",
+      '  File "script.py", line 3, in <module>',
+      "    raise ValueError('bad input')",
+      "ValueError: bad input",
+      "",
+      "Command timed out after 30 seconds",
+    ].join("\n");
+    const result = {
+      content: [{ type: "text", text: traceback }],
+      details: { status: "completed", exitCode: 1 },
+    };
+    expect(extractToolErrorMessage(result)).toBe("ValueError: bad input");
+  });
+
+  it("still uses the first line for non-traceback multi-line tool output", () => {
+    const result = {
+      content: [{ type: "text", text: "connection refused\nretrying in 1s\nretrying in 2s" }],
+      details: { status: "completed", exitCode: 1 },
+    };
+    expect(extractToolErrorMessage(result)).toBe("connection refused");
+  });
 });
 
 describe("sanitizeToolArgs", () => {
@@ -405,5 +465,106 @@ describe("sanitizeToolArgs", () => {
       count: 3,
       file_path: "/tmp/x.txt",
     });
+  });
+});
+
+describe("classifyToolCallErrorKind", () => {
+  it("classifies a forbidden/denied/blocked status as denied", () => {
+    for (const status of ["forbidden", "denied", "blocked"]) {
+      expect(
+        classifyToolCallErrorKind({
+          result: { details: { status } },
+          executionStarted: true,
+          middlewareError: false,
+        }),
+      ).toBe("denied");
+    }
+  });
+
+  it("classifies details.denied === true as denied even when status stays failed", () => {
+    // The gateway exec-approval-denial builder keeps status: "failed" (it's
+    // not a process failure, but there's no dedicated status for it either)
+    // and signals the denial via this structured field instead.
+    expect(
+      classifyToolCallErrorKind({
+        result: { details: { status: "failed", denied: true, exitCode: null } },
+        executionStarted: true,
+        middlewareError: false,
+      }),
+    ).toBe("denied");
+  });
+
+  it("classifies an unstarted execution or invalid status as invalid-input", () => {
+    expect(
+      classifyToolCallErrorKind({
+        result: { details: { status: "error" } },
+        executionStarted: false,
+        middlewareError: false,
+      }),
+    ).toBe("invalid-input");
+    expect(
+      classifyToolCallErrorKind({
+        result: { details: { status: "invalid" } },
+        executionStarted: true,
+        middlewareError: false,
+      }),
+    ).toBe("invalid-input");
+  });
+
+  it("classifies status timeout and status timed_out as timeout", () => {
+    expect(
+      classifyToolCallErrorKind({
+        result: { details: { status: "timeout" } },
+        executionStarted: true,
+        middlewareError: false,
+      }),
+    ).toBe("timeout");
+    expect(
+      classifyToolCallErrorKind({
+        result: { details: { status: "timed_out" } },
+        executionStarted: true,
+        middlewareError: false,
+      }),
+    ).toBe("timeout");
+  });
+
+  it("classifies a middleware error as internal", () => {
+    expect(
+      classifyToolCallErrorKind({
+        result: { details: { status: "error" } },
+        executionStarted: true,
+        middlewareError: true,
+      }),
+    ).toBe("internal");
+  });
+
+  it("classifies a non-zero exit code as exit-error", () => {
+    expect(
+      classifyToolCallErrorKind({
+        result: { details: { status: "failed", exitCode: 1 } },
+        executionStarted: true,
+        middlewareError: false,
+      }),
+    ).toBe("exit-error");
+  });
+
+  it("falls back to upstream when nothing else matches", () => {
+    expect(
+      classifyToolCallErrorKind({
+        result: { details: { status: "failed", exitCode: null } },
+        executionStarted: true,
+        middlewareError: false,
+      }),
+    ).toBe("upstream");
+  });
+
+  it("prioritizes denied over a non-zero exit code from a stale earlier attempt", () => {
+    expect(
+      classifyToolCallErrorKind({
+        result: { details: { status: "denied", exitCode: 1 } },
+        executionStarted: true,
+        middlewareError: false,
+      }),
+    ).toBe("denied");
   });
 });

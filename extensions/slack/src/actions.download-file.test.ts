@@ -74,7 +74,7 @@ function mockSuccessfulMediaDownload(client: ReturnType<typeof createClient>) {
   client.files.info.mockResolvedValueOnce({
     file: makeSlackFileInfo(),
   });
-  resolveSlackMedia.mockResolvedValueOnce([makeResolvedSlackMedia()]);
+  resolveSlackMedia.mockResolvedValueOnce({ media: [makeResolvedSlackMedia()], failures: [] });
 }
 
 describe("downloadSlackFile", () => {
@@ -130,13 +130,16 @@ describe("downloadSlackFile", () => {
         url_private_download: "https://files.slack.com/files-pri/T1-F123/report.pdf",
       }),
     });
-    resolveSlackMedia.mockResolvedValueOnce([
-      makeResolvedSlackMedia({
-        path: "/tmp/report.pdf",
-        contentType: "application/pdf",
-        placeholder: "[Slack file: report.pdf (fileId: F123)]",
-      }),
-    ]);
+    resolveSlackMedia.mockResolvedValueOnce({
+      media: [
+        makeResolvedSlackMedia({
+          path: "/tmp/report.pdf",
+          contentType: "application/pdf",
+          placeholder: "[Slack file: report.pdf (fileId: F123)]",
+        }),
+      ],
+      failures: [],
+    });
 
     const result = await downloadSlackFile("F123", {
       client,

@@ -195,6 +195,8 @@ export type {
 export type {
   CommandFacts,
   InboundMediaFacts,
+  InboundMediaFailure,
+  InboundMediaFailureReason,
   SupplementalContextFacts,
 } from "../channels/turn/types.js";
 export type { InboundEventKind } from "../channels/inbound-event/kind.js";

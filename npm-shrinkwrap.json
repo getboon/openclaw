@@ -1,12 +1,12 @@
 {
   "name": "openclaw",
-  "version": "2026.6.11-boon.19",
+  "version": "2026.6.11-boon.25",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "openclaw",
-      "version": "2026.6.11-boon.19",
+      "version": "2026.6.11-boon.25",
       "hasInstallScript": true,
       "license": "MIT",
       "dependencies": {
@@ -54,7 +54,7 @@
         "qrcode": "1.5.4",
         "quickjs-wasi": "3.0.0",
         "rastermill": "0.3.1",
-        "tar": "7.5.20",
+        "tar": "7.5.21",
         "tree-sitter-bash": "0.25.1",
         "tslog": "4.10.2",
         "typebox": "1.1.39",
@@ -4119,9 +4119,9 @@
       }
     },
     "node_modules/tar": {
-      "version": "7.5.20",
-      "resolved": "https://registry.npmjs.org/tar/-/tar-7.5.20.tgz",
-      "integrity": "sha512-9FcyK4PA6+WbzlTM9WhQm6vB5W7cP7dUiPsv1g7YDwEQnQ1CGpK3MGlKk/ITVWMk05kHZuBhmVhiv8LZoy/PFQ==",
+      "version": "7.5.21",
+      "resolved": "https://registry.npmjs.org/tar/-/tar-7.5.21.tgz",
+      "integrity": "sha512-XdhtCvlMywwxpCW8YEq3lOXBJpUPTR2OHHcwLPO3HwsJqOHa2Ok/oJ7ruGzp+JrKoRPVCzJwAdEjqLW/vNRPHA==",
       "license": "BlueOak-1.0.0",
       "dependencies": {
         "@isaacs/fs-minipass": "^4.0.0",

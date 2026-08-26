@@ -14,12 +14,22 @@ import type {
   PluginHookSessionEndEvent,
   PluginHookSubagentEndedEvent,
 } from "openclaw/plugin-sdk/types";
-import { describeModelCallError, pruneTags, runContext } from "./format.js";
+import {
+  describeModelCallError,
+  fingerprintOf,
+  normalizeFingerprintText,
+  pruneTags,
+  runContext,
+} from "./format.js";
 
 export type SentryLevel = "fatal" | "error" | "warning" | "info" | "debug";
 
 type CaptureFields = {
   tags: Record<string, string>;
+  // Explicit grouping key. Required: every capture is thrown from the same
+  // fixed call site per hook (dispatch.ts), so leaving this to Sentry's
+  // default stack-based grouping merges unrelated failures into one issue.
+  fingerprint: string[];
   contexts?: { run?: Record<string, string | undefined> };
   extra?: Record<string, unknown>;
 };
@@ -57,6 +67,17 @@ export function buildModelCallEndedCapture(
       // upstream_provider_5xx (Bedrock/Anthropic relayed) vs gateway_origin_5xx.
       error_class: event.errorClass,
     }),
+    fingerprint: fingerprintOf(
+      "model_call_ended",
+      event.provider,
+      event.model,
+      event.errorClass,
+      // httpStatus alongside errorClass: same classification, different HTTP
+      // cause (e.g. Bedrock 503 vs a gateway 502) must not share an issue.
+      event.httpStatus,
+      event.failureKind,
+      event.errorCategory,
+    ),
     contexts: { run: runContext(event.runId, event.sessionId, event.callId) },
     extra: {
       duration_ms: event.durationMs,
@@ -80,6 +101,10 @@ export function buildAgentEndCapture(
     kind: "exception",
     message: event.error ?? "agent_end success=false",
     tags: pruneTags({ hook: "agent_end", host }),
+    fingerprint: fingerprintOf(
+      "agent_end",
+      event.error ? normalizeFingerprintText(event.error) : "success=false",
+    ),
     contexts: { run: runContext(event.runId) },
     extra: {
       duration_ms: event.durationMs,
@@ -95,12 +120,55 @@ export function buildAfterToolCallCapture(
   if (!event.error) {
     return null;
   }
+  // A policy/permission/visibility denial is the system working as intended,
+  // not a defect: reporting it as an exception buries real regressions
+  // behind expected, unactionable noise.
+  if (event.errorKind === "denied") {
+    return null;
+  }
+  const tags = pruneTags({
+    hook: "after_tool_call",
+    host,
+    tool: event.toolName,
+    error_kind: event.errorKind,
+    error_code: event.errorCode,
+    exit_code: typeof event.exitCode === "number" ? String(event.exitCode) : undefined,
+  });
+  // tool + errorKind/errorCode/exitCode (falling back to normalized message)
+  // so a recurring failure with a different path/id/timestamp lands in one
+  // issue, different tools/causes never share a bucket (see file header),
+  // and distinct exit codes never collapse into one just because the
+  // generic number-scrub in normalizeFingerprintText would otherwise erase
+  // the only thing that told them apart.
+  const fingerprint = fingerprintOf(
+    "after_tool_call",
+    event.toolName,
+    event.errorKind,
+    event.errorCode ?? event.exitCode ?? normalizeFingerprintText(event.error),
+  );
+  const contexts = { run: runContext(event.runId) };
+  const extra = { tool_call_id: event.toolCallId, duration_ms: event.durationMs };
+  // A validation/argument-preparation rejection is a model-input problem, not
+  // a host exception, but it can still signal a real schema mismatch — so
+  // downgrade to a non-paging warning instead of dropping it outright.
+  if (event.errorKind === "invalid-input") {
+    return {
+      kind: "message",
+      level: "warning",
+      message: event.error,
+      tags,
+      fingerprint,
+      contexts,
+      extra,
+    };
+  }
   return {
     kind: "exception",
     message: event.error,
-    tags: pruneTags({ hook: "after_tool_call", host, tool: event.toolName }),
-    contexts: { run: runContext(event.runId) },
-    extra: { tool_call_id: event.toolCallId, duration_ms: event.durationMs },
+    tags,
+    fingerprint,
+    contexts,
+    extra,
   };
 }
 
@@ -115,6 +183,10 @@ export function buildMessageSentCapture(
     kind: "exception",
     message: event.error ?? "message_sent success=false",
     tags: pruneTags({ hook: "message_sent", host }),
+    fingerprint: fingerprintOf(
+      "message_sent",
+      event.error ? normalizeFingerprintText(event.error) : "success=false",
+    ),
     contexts: { run: runContext(event.runId, event.sessionKey) },
     extra: { message_id: event.messageId, trace_id: event.traceId, span_id: event.spanId },
   };
@@ -137,6 +209,12 @@ export function buildSubagentEndedCapture(
       outcome: event.outcome,
       target_kind: event.targetKind,
     }),
+    fingerprint: fingerprintOf(
+      "subagent_ended",
+      event.outcome,
+      event.targetKind,
+      event.error ? normalizeFingerprintText(event.error) : `outcome=${event.outcome}`,
+    ),
     contexts: { run: runContext(event.runId) },
     extra: {
       target_session_key: event.targetSessionKey,
@@ -160,14 +238,15 @@ export function buildCronChangedCapture(
   if (!hasRunError && !hasDeliveryFailure) {
     return null;
   }
+  // `||` so an empty error string falls through to the delivery error / a
+  // descriptive fallback rather than producing a blank Error("").
+  const message =
+    event.error ||
+    event.deliveryError ||
+    `cron_changed status=${event.status ?? "unknown"} delivery=${event.deliveryStatus ?? "unknown"}`;
   return {
     kind: "exception",
-    // `||` so an empty error string falls through to the delivery error / a
-    // descriptive fallback rather than producing a blank Error("").
-    message:
-      event.error ||
-      event.deliveryError ||
-      `cron_changed status=${event.status ?? "unknown"} delivery=${event.deliveryStatus ?? "unknown"}`,
+    message,
     tags: pruneTags({
       hook: "cron_changed",
       host,
@@ -175,6 +254,13 @@ export function buildCronChangedCapture(
       status: event.status,
       delivery_status: event.deliveryStatus,
     }),
+    fingerprint: fingerprintOf(
+      "cron_changed",
+      event.action,
+      event.status,
+      event.deliveryStatus,
+      normalizeFingerprintText(message),
+    ),
     contexts: { run: runContext(event.runId, event.sessionId) },
     // `summary` is intentionally omitted: it is free-form cron run output
     // (content), and this plugin ships structured metadata only.
@@ -204,6 +290,7 @@ export function buildSessionEndCapture(
     message: "session_end reason=unknown",
     level: "warning",
     tags: pruneTags({ hook: "session_end", host, reason }),
+    fingerprint: fingerprintOf("session_end", reason),
     extra: {
       session_id: event.sessionId,
       message_count: event.messageCount,

@@ -154,6 +154,7 @@
   "allow-from",
   "allowlist-config-edit",
   "browser-config",
+  "browser-profile-config",
   "boolean-param",
   "channel-contract-testing",
   "dangerous-name-runtime",

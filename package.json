@@ -1,6 +1,6 @@
 {
   "name": "openclaw",
-  "version": "2026.6.11-boon.19",
+  "version": "2026.6.11-boon.25",
   "description": "Multi-channel AI gateway with extensible messaging integrations",
   "keywords": [],
   "homepage": "https://github.com/openclaw/openclaw#readme",
@@ -740,6 +740,10 @@
     "./plugin-sdk/browser-config": {
       "types": "./dist/plugin-sdk/browser-config.d.ts",
       "default": "./dist/plugin-sdk/browser-config.js"
+    },
+    "./plugin-sdk/browser-profile-config": {
+      "types": "./dist/plugin-sdk/browser-profile-config.d.ts",
+      "default": "./dist/plugin-sdk/browser-profile-config.js"
     },
     "./plugin-sdk/boolean-param": {
       "types": "./dist/plugin-sdk/boolean-param.d.ts",

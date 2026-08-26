@@ -8,6 +8,7 @@ import {
   formatUncaughtError,
   hasErrnoCode,
   isErrno,
+  isReplySessionInitializationConflictError,
   readErrorName,
 } from "./errors.js";
 
@@ -52,6 +53,28 @@ describe("error helpers", () => {
       ]),
     ).toEqual([root, child, leaf]);
     expect(collectErrorGraphCandidates(null)).toStrictEqual([]);
+  });
+
+  it("classifies the reply-session init CAS-conflict error as retryable, including via .cause and plain strings", () => {
+    expect(
+      isReplySessionInitializationConflictError(
+        new Error("reply session initialization conflicted for agent:main:slack:channel:C1"),
+      ),
+    ).toBe(true);
+    expect(
+      isReplySessionInitializationConflictError(
+        new Error("wrapped", {
+          cause: new Error("reply session initialization conflicted for agent:main:main"),
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isReplySessionInitializationConflictError(
+        "reply session initialization conflicted for agent:main:telegram:chat:1",
+      ),
+    ).toBe(true);
+    expect(isReplySessionInitializationConflictError(new Error("dispatch failed"))).toBe(false);
+    expect(isReplySessionInitializationConflictError(null)).toBe(false);
   });
 
   it("matches errno-shaped errors by code", () => {

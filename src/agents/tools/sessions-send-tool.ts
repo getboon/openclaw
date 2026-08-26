@@ -52,9 +52,9 @@ import { jsonResult, readNonNegativeIntegerParam, readStringParam } from "./comm
 import {
   createSessionVisibilityGuard,
   createAgentToAgentPolicy,
-  resolveEffectiveSessionToolsVisibility,
   resolveSessionReference,
   resolveSessionToolContext,
+  resolveSessionVisibilityContext,
   resolveVisibleSessionReference,
 } from "./sessions-helpers.js";
 import { buildAgentToAgentMessageContext, resolvePingPongTurns } from "./sessions-send-helpers.js";
@@ -363,10 +363,12 @@ export function createSessionsSendTool(opts?: {
         resolveSessionToolContext(opts);
 
       const a2aPolicy = createAgentToAgentPolicy(cfg);
-      const sessionVisibility = resolveEffectiveSessionToolsVisibility({
+      const visibilityContext = resolveSessionVisibilityContext({
         cfg,
         sandboxed: opts?.sandboxed === true,
       });
+      const sessionVisibility = visibilityContext.visibility;
+      const sessionVisibilityClampedFromSandbox = visibilityContext.clampedFromSandbox;
 
       const sessionKeyParam = readStringParam(params, "sessionKey");
       const labelParam = normalizeOptionalString(readStringParam(params, "label"));
@@ -526,6 +528,7 @@ export function createSessionsSendTool(opts?: {
         requesterSessionKey: effectiveRequesterKey,
         visibility: sessionVisibility,
         a2aPolicy,
+        clampedFromSandbox: sessionVisibilityClampedFromSandbox,
       });
       const access = visibilityGuard.check(resolvedKey);
       if (!access.allowed) {

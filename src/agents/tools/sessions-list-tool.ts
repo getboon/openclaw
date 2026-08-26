@@ -47,9 +47,9 @@ import {
   classifySessionKind,
   deriveChannel,
   resolveDisplaySessionKey,
-  resolveEffectiveSessionToolsVisibility,
   resolveInternalSessionKey,
   resolveSandboxedSessionToolContext,
+  resolveSessionVisibilityContext,
   type SessionListRow,
   type SessionRunStatus,
 } from "./sessions-helpers.js";
@@ -103,7 +103,7 @@ export function createSessionsListTool(opts?: {
           sandboxed: opts?.sandboxed,
         });
       const effectiveRequesterKey = requesterInternalKey ?? alias;
-      const visibility = resolveEffectiveSessionToolsVisibility({
+      const { visibility, clampedFromSandbox } = resolveSessionVisibilityContext({
         cfg,
         sandboxed: opts?.sandboxed === true,
       });
@@ -152,6 +152,7 @@ export function createSessionsListTool(opts?: {
         requesterSessionKey: effectiveRequesterKey,
         visibility,
         a2aPolicy,
+        clampedFromSandbox,
       });
       const rows: SessionListRow[] = [];
       const historyTargets: Array<{ row: SessionListRow; resolvedKey: string }> = [];
@@ -445,13 +446,20 @@ export function createSessionsListTool(opts?: {
         await Promise.all(Array.from({ length: maxConcurrent }, () => worker()));
       }
 
+      const visibilityScopeNote =
+        "Results may omit sessions outside the current scope. The count field reflects only sessions within the current scope.";
+      // Name the sandbox clamp specifically when it — not the configured
+      // tools.sessions.visibility — is why results are scoped to tree.
+      const visibilityWarning = clampedFromSandbox
+        ? `Session visibility is restricted to the current session tree because this sandboxed session is clamped to tree regardless of tools.sessions.visibility (see agents.defaults.sandbox.sessionToolsVisibility). ${visibilityScopeNote}`
+        : `Session visibility is restricted (effective tools.sessions.visibility=${visibility}). ${visibilityScopeNote}`;
       const visibilityMetadata =
         visibility === "all"
           ? undefined
           : {
               mode: visibility,
               restricted: true,
-              warning: `Session visibility is restricted (effective tools.sessions.visibility=${visibility}). Results may omit sessions outside the current scope. The count field reflects only sessions within the current scope.`,
+              warning: visibilityWarning,
             };
 
       return jsonResult({

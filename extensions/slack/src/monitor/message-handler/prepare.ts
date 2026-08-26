@@ -1058,7 +1058,7 @@ export async function prepareSlackMessage(params: {
   if (!resolvedMessageContent) {
     return null;
   }
-  const { rawBody, effectiveDirectMedia } = resolvedMessageContent;
+  const { rawBody, effectiveDirectMedia, mediaFailures } = resolvedMessageContent;
   const chatType = resolveSlackChatType(conversation.resolvedChannelType);
   const inboundEventKind = classifyChannelInboundEvent({
     conversation: { kind: chatType },
@@ -1316,6 +1316,11 @@ export async function prepareSlackMessage(params: {
       },
     },
     media: toInboundMediaFacts(effectiveMedia),
+    // Only this message's own failures — deliberately not merged with any
+    // thread-starter hydration failures, which are dropped upstream (see
+    // prepare-thread-context.ts) since the user didn't attach a file in
+    // *this* turn.
+    mediaFailures,
     supplemental: {
       thread: {
         // Only include thread starter body for NEW sessions (existing sessions already have it in their transcript)
