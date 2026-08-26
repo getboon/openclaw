@@ -209,6 +209,28 @@ describe("cdp.helpers", () => {
   it("does not add custom headers when none are required", () => {
     expect(getHeadersWithAuth("http://127.0.0.1:19444/json/version")).toStrictEqual({});
   });
+
+  it("falls back to the raw credential when it decodes to an invalid escape, instead of dropping auth entirely", () => {
+    // The `.username` setter does not escape a literal "%" — if it's
+    // followed by characters that happen to form an invalid UTF-8 escape
+    // (e.g. the always-illegal lead byte C0), decodeURIComponent throws.
+    const url = new URL("https://example.com");
+    url.username = "ab%C0cd";
+    const headers = getHeadersWithAuth(url.toString());
+    expect(headers.Authorization).toBe(`Basic ${Buffer.from("ab%C0cd:").toString("base64")}`);
+  });
+
+  it("percent-decodes URL-embedded credentials before building Basic auth", () => {
+    // The `.username` setter percent-encodes reserved characters (the URL
+    // Standard's userinfo percent-encode set); the getter returns that
+    // encoded form as-is. Without decoding here, a credential containing a
+    // reserved character (":", "@", etc.) would be sent to the Basic-auth
+    // consumer already mangled, not the original value.
+    const url = new URL("https://example.com");
+    url.username = "ab:cd@ef";
+    const headers = getHeadersWithAuth(url.toString());
+    expect(headers.Authorization).toBe(`Basic ${Buffer.from("ab:cd@ef:").toString("base64")}`);
+  });
 });
 
 describe("fetchBrowserJson loopback auth (bridge auth registry)", () => {

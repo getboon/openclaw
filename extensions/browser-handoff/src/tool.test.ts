@@ -13,11 +13,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const requestBrowserLoginHandoffMock = vi.hoisted(() => vi.fn());
 const pollBrowserHandoffStatusMock = vi.hoisted(() => vi.fn());
 const registerRemoteCdpBrowserProfileMock = vi.hoisted(() => vi.fn());
+const requireBoonApiKeyMock = vi.hoisted(() => vi.fn(() => "test-key"));
 
 vi.mock("./boon-core-client.js", () => ({
   requestBrowserLoginHandoff: requestBrowserLoginHandoffMock,
   pollBrowserHandoffStatus: pollBrowserHandoffStatusMock,
-  requireBoonApiKey: () => "test-key",
+  requireBoonApiKey: requireBoonApiKeyMock,
 }));
 
 vi.mock("openclaw/plugin-sdk/browser-profile-config", () => ({
@@ -36,6 +37,9 @@ describe("browser-handoff tool", () => {
   beforeEach(async () => {
     resetPluginStateStoreForTests();
     vi.clearAllMocks();
+    // clearAllMocks() doesn't reset a mockReturnValue override — restore the
+    // default explicitly so one test's override can't leak into the next.
+    requireBoonApiKeyMock.mockReturnValue("test-key");
     stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "browser-handoff-"));
     env = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
   });
@@ -144,9 +148,12 @@ describe("browser-handoff tool", () => {
       site: "example.com",
     });
     expect(attachResult.content[0].text).toContain('profile="handoff-example.com"');
+    // The boon-core API key is embedded as Basic-auth userinfo (not a header)
+    // because the underlying remote-CDP client (Playwright's connectOverCDP)
+    // can only carry credentials embedded in the connect URL.
     expect(registerRemoteCdpBrowserProfileMock).toHaveBeenCalledWith({
       name: "handoff-example.com",
-      cdpUrl: "wss://proxy/cdp",
+      cdpUrl: "wss://test-key@proxy/cdp",
     });
 
     const secondAttach = await executeBrowserHandoffTool(api, {
@@ -154,6 +161,77 @@ describe("browser-handoff tool", () => {
       site: "example.com",
     });
     expect(secondAttach.content[0].text).toContain("No completed login handoff found");
+  });
+
+  it("attach clears any preexisting password on the relay URL rather than carrying it into the Basic payload", async () => {
+    requestBrowserLoginHandoffMock.mockResolvedValue({
+      handoffToken: "tok_123",
+      liveViewUrl: "https://live.example/view",
+    });
+    const api = createApi();
+    await executeBrowserHandoffTool(api, { action: "request_login", site: "example.com" });
+
+    pollBrowserHandoffStatusMock.mockResolvedValue({
+      status: "ready",
+      profileName: "handoff-example.com",
+    });
+    await executeBrowserHandoffTool(api, { action: "status", site: "example.com" });
+
+    pollBrowserHandoffStatusMock.mockResolvedValue({
+      status: "ready",
+      profileName: "handoff-example.com",
+      cdpUrl: "wss://existing-user:existing-pass@proxy/cdp",
+    });
+    registerRemoteCdpBrowserProfileMock.mockResolvedValue({
+      ok: true,
+      name: "handoff-example.com",
+    });
+
+    await executeBrowserHandoffTool(api, { action: "attach", site: "example.com" });
+
+    expect(registerRemoteCdpBrowserProfileMock).toHaveBeenCalledWith({
+      name: "handoff-example.com",
+      cdpUrl: "wss://test-key@proxy/cdp",
+    });
+  });
+
+  it("attach round-trips a boon API key containing a literal % without corrupting it", async () => {
+    // A literal "%" survives the URL username setter unescaped. If it's
+    // followed by two characters that happen to form a *valid* hex escape
+    // (e.g. "%41"), a naive decode on the read side silently produces a
+    // different, wrong token ("ab%41cd" -> "abAcd") instead of throwing —
+    // the encode side must pre-escape "%" to "%25" so decoding is a true
+    // round trip.
+    // request_login, status, and attach each call requireBoonApiKey() once.
+    requireBoonApiKeyMock.mockReturnValue("ab%41cd");
+    requestBrowserLoginHandoffMock.mockResolvedValue({
+      handoffToken: "tok_123",
+      liveViewUrl: "https://live.example/view",
+    });
+    const api = createApi();
+    await executeBrowserHandoffTool(api, { action: "request_login", site: "example.com" });
+
+    pollBrowserHandoffStatusMock.mockResolvedValue({
+      status: "ready",
+      profileName: "handoff-example.com",
+    });
+    await executeBrowserHandoffTool(api, { action: "status", site: "example.com" });
+
+    pollBrowserHandoffStatusMock.mockResolvedValue({
+      status: "ready",
+      profileName: "handoff-example.com",
+      cdpUrl: "wss://proxy/cdp",
+    });
+    registerRemoteCdpBrowserProfileMock.mockResolvedValue({
+      ok: true,
+      name: "handoff-example.com",
+    });
+
+    await executeBrowserHandoffTool(api, { action: "attach", site: "example.com" });
+
+    const registeredCdpUrl = registerRemoteCdpBrowserProfileMock.mock.calls[0][0].cdpUrl;
+    const recoveredKey = decodeURIComponent(new URL(registeredCdpUrl).username);
+    expect(recoveredKey).toBe("ab%41cd");
   });
 
   it("surfaces boon-core errors without throwing", async () => {

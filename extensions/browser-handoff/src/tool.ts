@@ -266,6 +266,27 @@ async function handleStatus(
   );
 }
 
+/**
+ * The remote-CDP profile mechanism (Playwright's `connectOverCDP`) only ever
+ * derives auth from URL-embedded credentials, which become HTTP Basic auth —
+ * it has no way to attach a custom `Bearer` header. boon-core's
+ * `AgentBearerAuthentication` accepts the same token via `Basic
+ * base64(token:)`, so embedding it as URL userinfo (empty password) lets this
+ * one token authenticate through a client that structurally can't send a
+ * header. The resulting profile config is redacted via `redactCdpUrl`
+ * wherever it's displayed or logged.
+ */
+function withBearerAsBasicAuth(cdpUrl: string, apiKey: string): string {
+  const url = new URL(cdpUrl);
+  // The username setter doesn't escape a literal "%" — left as-is, a key
+  // like "ab%41cd" would decode back as "abAcd" (a different, wrong value)
+  // instead of throwing, since "%41" alone is a valid escape. Escaping "%"
+  // to "%25" first guarantees one decode round-trips to the original key.
+  url.username = apiKey.replaceAll("%", "%25");
+  url.password = "";
+  return url.toString();
+}
+
 async function handleAttach(
   api: OpenClawPluginApi,
   params: BrowserHandoffToolParams,
@@ -294,7 +315,7 @@ async function handleAttach(
 
   const registration = await registerRemoteCdpBrowserProfile({
     name: record.profileName,
-    cdpUrl: result.cdpUrl,
+    cdpUrl: withBearerAsBasicAuth(result.cdpUrl, apiKey),
   });
   if (!registration.ok) {
     return textResult(
