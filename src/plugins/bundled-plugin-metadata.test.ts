@@ -622,6 +622,36 @@ describe("bundled plugin metadata", () => {
     ).toContain("bonjour");
   });
 
+  // Startup activation isn't cosmetic: host hooks gated on the plugin being
+  // part of the Gateway's activated registry (e.g. scheduleSessionTurn's
+  // shouldCommit check) silently no-op for a plugin that's only ever loaded
+  // through the lazy per-turn standalone tool path. A plugin whose config
+  // lives under `plugins.entries.<id>` must declare a matching
+  // `activation.onConfigPaths` entry or its host-hook side effects never fire.
+  it("starts browser-handoff when explicitly enabled, so scheduleSessionTurn actually activates", () => {
+    const manifestRegistry = createRepoBundledManifestRegistry();
+    const index = createInstalledPluginIndexForManifests(manifestRegistry);
+
+    expect(
+      resolveGatewayStartupPluginIdsFromRegistry({
+        config: {
+          plugins: {
+            entries: {
+              "browser-handoff": {
+                enabled: true,
+                config: { boonCoreBaseUrl: "https://app.getboon.ai" },
+              },
+            },
+          },
+        },
+        env: process.env,
+        index,
+        manifestRegistry,
+        platform: "linux",
+      }),
+    ).toContain("browser-handoff");
+  });
+
   it("prefers built generated paths when present and falls back to source paths", () => {
     const tempRoot = createGeneratedPluginTempRoot("openclaw-bundled-plugin-metadata-");
     const pluginRoot = path.join(tempRoot, "extensions", "plugin");
