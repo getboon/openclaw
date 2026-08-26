@@ -87,7 +87,7 @@ describe("acquireFileLock", () => {
     }
   });
 
-  it("keeps a reported stale lock when its payload is not readable", async () => {
+  it("reclaims an expired lock when its owner payload is incomplete", async () => {
     const filePath = path.join(tempDir, "payload-pending");
     const lockPath = `${filePath}.lock`;
     const options = {
@@ -101,22 +101,57 @@ describe("acquireFileLock", () => {
     } as const;
 
     await fs.writeFile(lockPath, "{", "utf8");
+    const expiredAt = new Date(Date.now() - 60_000);
+    await fs.utimes(lockPath, expiredAt, expiredAt);
 
-    let caught: { lockPath?: string } | undefined;
-    await expect(
-      (async () => {
-        try {
-          await acquireFileLock(filePath, options);
-        } catch (err) {
-          caught = err as { lockPath?: string };
-          throw err;
-        }
-      })(),
-    ).rejects.toMatchObject({
+    const lock = await acquireFileLock(filePath, options);
+    await lock.release();
+
+    await expect(fs.access(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("keeps a fresh lock when its owner payload is incomplete", async () => {
+    const filePath = path.join(tempDir, "payload-pending");
+    const lockPath = `${filePath}.lock`;
+    const options = {
+      retries: {
+        retries: 0,
+        factor: 1,
+        minTimeout: 1,
+        maxTimeout: 1,
+      },
+      stale: 60_000,
+    } as const;
+
+    await fs.writeFile(lockPath, "{", "utf8");
+
+    await expect(acquireFileLock(filePath, options)).rejects.toMatchObject({
       code: FILE_LOCK_TIMEOUT_ERROR_CODE,
     });
-    await expect(fs.realpath(caught?.lockPath ?? "")).resolves.toBe(await fs.realpath(lockPath));
     await expect(fs.readFile(lockPath, "utf8")).resolves.toBe("{");
+  });
+
+  it("does not re-enter a held lock when disabled by the caller", async () => {
+    const filePath = path.join(tempDir, "exclusive");
+    const options = {
+      allowReentrant: false,
+      retries: {
+        retries: 0,
+        factor: 1,
+        minTimeout: 1,
+        maxTimeout: 1,
+      },
+      stale: 1_000,
+    } as const;
+    const first = await acquireFileLock(filePath, options);
+
+    try {
+      await expect(acquireFileLock(filePath, options)).rejects.toMatchObject({
+        code: FILE_LOCK_TIMEOUT_ERROR_CODE,
+      });
+    } finally {
+      await first.release();
+    }
   });
 
   it("keeps an expired lock when its live owner has no starttime proof", async () => {

@@ -4,6 +4,24 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayClient } from "../gateway/client.js";
+const withExecApprovalsLockMock = vi.hoisted(() => vi.fn());
+
+vi.mock("../infra/exec-approvals.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../infra/exec-approvals.js")>();
+  withExecApprovalsLockMock.mockImplementation(actual.withExecApprovalsLock);
+  return {
+    ...actual,
+    withExecApprovalsLock: withExecApprovalsLockMock,
+  };
+});
+
+import {
+  EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE,
+  ensureExecApprovals,
+  readExecApprovalsSnapshot,
+  saveExecApprovals,
+  withExecApprovalsLock,
+} from "../infra/exec-approvals.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import type { SkillBinsProvider } from "./invoke-types.js";
 import { handleInvoke } from "./invoke.js";
@@ -188,5 +206,155 @@ describe("node host invoke", () => {
       execPolicy?: { security?: string; ask?: string };
     };
     expect(payload.execPolicy).toEqual({ security: "allowlist", ask: "on-miss" });
+  });
+
+  it("rejects a stale exec approvals base hash from the locked write snapshot", async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-invoke-approvals-"));
+    try {
+      await withEnvAsync({ OPENCLAW_HOME: tempHome }, async () => {
+        ensureExecApprovals();
+        const staleSnapshot = readExecApprovalsSnapshot();
+        saveExecApprovals({
+          ...staleSnapshot.file,
+          defaults: { ...staleSnapshot.file.defaults, security: "deny" },
+        });
+        const currentSnapshot = readExecApprovalsSnapshot();
+        const request = vi.fn<GatewayClient["request"]>().mockResolvedValue(null);
+        const skillBins: SkillBinsProvider = { current: async () => [] };
+
+        await handleInvoke(
+          {
+            id: "invoke-stale-approvals",
+            nodeId: "node-1",
+            command: "system.execApprovals.set",
+            paramsJSON: JSON.stringify({
+              baseHash: staleSnapshot.hash,
+              file: {
+                ...staleSnapshot.file,
+                defaults: { ...staleSnapshot.file.defaults, security: "full" },
+              },
+            }),
+          },
+          { request } as unknown as GatewayClient,
+          skillBins,
+        );
+
+        expect(request).toHaveBeenCalledWith(
+          "node.invoke.result",
+          expect.objectContaining({
+            ok: false,
+            error: expect.objectContaining({
+              code: "INVALID_REQUEST",
+              message: expect.stringContaining("exec approvals changed; reload and retry"),
+            }),
+          }),
+        );
+        expect(readExecApprovalsSnapshot().file).toEqual(currentSnapshot.file);
+      });
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("waits for an in-progress writer before setting node exec approvals", async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-invoke-approvals-"));
+    try {
+      await withEnvAsync({ OPENCLAW_HOME: tempHome }, async () => {
+        ensureExecApprovals();
+        const snapshot = readExecApprovalsSnapshot();
+        let releaseHolder!: () => void;
+        let holderEntered!: () => void;
+        const holderEnteredPromise = new Promise<void>((resolve) => {
+          holderEntered = resolve;
+        });
+        const holderReleasePromise = new Promise<void>((resolve) => {
+          releaseHolder = resolve;
+        });
+        const holder = withExecApprovalsLock(async () => {
+          holderEntered();
+          await holderReleasePromise;
+          return { kind: "unchanged", result: undefined };
+        });
+        await holderEnteredPromise;
+
+        const request = vi.fn<GatewayClient["request"]>().mockResolvedValue(null);
+        const skillBins: SkillBinsProvider = { current: async () => [] };
+        const set = handleInvoke(
+          {
+            id: "invoke-waiting-approvals",
+            nodeId: "node-1",
+            command: "system.execApprovals.set",
+            paramsJSON: JSON.stringify({
+              baseHash: snapshot.hash,
+              file: {
+                ...snapshot.file,
+                agents: { video_capture: {} },
+              },
+            }),
+          },
+          { request } as unknown as GatewayClient,
+          skillBins,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        releaseHolder();
+        await Promise.all([holder, set]);
+
+        expect(request).toHaveBeenCalledWith(
+          "node.invoke.result",
+          expect.objectContaining({
+            id: "invoke-waiting-approvals",
+            ok: true,
+          }),
+        );
+      });
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("returns unavailable when the node approvals mutation lock is contended", async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-invoke-approvals-"));
+    try {
+      await withEnvAsync({ OPENCLAW_HOME: tempHome }, async () => {
+        ensureExecApprovals();
+        const snapshot = readExecApprovalsSnapshot();
+        withExecApprovalsLockMock.mockRejectedValueOnce(
+          Object.assign(
+            new Error("Exec approvals update is already in progress; retry this operation."),
+            { code: EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE },
+          ),
+        );
+        const request = vi.fn<GatewayClient["request"]>().mockResolvedValue(null);
+        const skillBins: SkillBinsProvider = { current: async () => [] };
+
+        await handleInvoke(
+          {
+            id: "invoke-contended-approvals",
+            nodeId: "node-1",
+            command: "system.execApprovals.set",
+            paramsJSON: JSON.stringify({
+              baseHash: snapshot.hash,
+              file: snapshot.file,
+            }),
+          },
+          { request } as unknown as GatewayClient,
+          skillBins,
+        );
+
+        expect(request).toHaveBeenCalledWith(
+          "node.invoke.result",
+          expect.objectContaining({
+            ok: false,
+            error: expect.objectContaining({
+              code: "UNAVAILABLE",
+              message: expect.stringContaining("retry"),
+            }),
+          }),
+        );
+      });
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
   });
 });

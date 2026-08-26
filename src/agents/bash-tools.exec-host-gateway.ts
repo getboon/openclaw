@@ -527,7 +527,6 @@ export async function processGatewayAllowlist(
   }
   const recordMatchedAllowlistUse = (resolvedPath?: string) =>
     recordAllowlistMatchesUse({
-      approvals: approvals.file,
       agentId: params.agentId,
       matches: allowlistMatches,
       command: params.command,
@@ -848,11 +847,15 @@ export async function processGatewayAllowlist(
         approvedByAsk = true;
       } else if (decision === "allow-always") {
         approvedByAsk = true;
-        persistAllowAlwaysDecision({
-          approvals: approvals.file,
-          agentId: params.agentId,
-          decision: effectiveAllowAlwaysPersistence,
-        });
+        try {
+          await persistAllowAlwaysDecision({
+            agentId: params.agentId,
+            decision: effectiveAllowAlwaysPersistence,
+          });
+        } catch {
+          approvedByAsk = false;
+          deniedReason = "approval-persistence-failed";
+        }
       }
 
       const strictBoundaryDecision = enforceStrictInlineEvalApprovalBoundary({

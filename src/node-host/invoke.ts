@@ -7,12 +7,13 @@ import { normalizeStringEntries } from "@openclaw/normalization-core/string-norm
 import { GatewayClient } from "../gateway/client.js";
 import {
   analyzeArgvCommand,
+  EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE,
   ensureExecApprovals,
   mergeExecApprovalsSocketDefaults,
   normalizeExecApprovals,
   readExecApprovalsSnapshot,
   resolveAllowAlwaysPatternCoverage,
-  saveExecApprovals,
+  withExecApprovalsLock,
   type ExecAsk,
   type ExecApprovalsFile,
   type ExecApprovalsResolved,
@@ -527,12 +528,12 @@ export async function handleInvoke(
       if (!params.file || typeof params.file !== "object") {
         throw new Error("INVALID_REQUEST: exec approvals file required");
       }
-      ensureExecApprovals();
-      const snapshot = readExecApprovalsSnapshot();
-      requireExecApprovalsBaseHash(params, snapshot);
-      const normalized = normalizeExecApprovals(params.file);
-      const next = mergeExecApprovalsSocketDefaults({ normalized, current: snapshot.file });
-      saveExecApprovals(next);
+      await withExecApprovalsLock((snapshot) => {
+        requireExecApprovalsBaseHash(params, snapshot);
+        const normalized = normalizeExecApprovals(params.file);
+        const next = mergeExecApprovalsSocketDefaults({ normalized, current: snapshot.file });
+        return { kind: "save", file: next, result: undefined };
+      });
       const nextSnapshot = readExecApprovalsSnapshot();
       const payload: ExecApprovalsSnapshot = {
         path: nextSnapshot.path,
@@ -542,6 +543,15 @@ export async function handleInvoke(
       };
       await sendJsonPayloadResult(client, frame, payload);
     } catch (err) {
+      if ((err as { code?: unknown }).code === EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE) {
+        await sendErrorResult(
+          client,
+          frame,
+          "UNAVAILABLE",
+          "exec approvals update is already in progress; retry this operation.",
+        );
+        return;
+      }
       await sendInvalidRequestResult(client, frame, err);
     }
     return;

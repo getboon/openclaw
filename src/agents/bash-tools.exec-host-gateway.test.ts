@@ -116,6 +116,7 @@ const defaultExecAutoReviewerMock = vi.hoisted(() =>
   })),
 );
 const recordAllowlistMatchesUseMock = vi.hoisted(() => vi.fn());
+const persistAllowAlwaysDecisionMock = vi.hoisted(() => vi.fn(async () => undefined));
 const resolveApprovalDecisionOrUndefinedMock = vi.hoisted(() =>
   vi.fn(async (): Promise<string | null | undefined> => undefined),
 );
@@ -158,12 +159,11 @@ vi.mock("../infra/exec-approvals.js", async (importOriginal) => ({
   requiresExecApproval: requiresExecApprovalMock,
   recordAllowlistUse: vi.fn(),
   recordAllowlistMatchesUse: recordAllowlistMatchesUseMock,
+  persistAllowAlwaysDecision: persistAllowAlwaysDecisionMock,
   resolveApprovalAuditTrustPath: vi.fn(() => null),
   resolveAllowAlwaysPatterns: vi.fn(() => []),
   resolveExecApprovalAllowedDecisions: resolveExecApprovalAllowedDecisionsMock,
   resolveExecApprovalUnavailableDecisions: resolveExecApprovalUnavailableDecisionsMock,
-  addAllowlistEntry: vi.fn(),
-  addDurableCommandApproval: vi.fn(),
 }));
 
 vi.mock("../infra/exec-auto-review.js", () => ({
@@ -305,6 +305,8 @@ describe("processGatewayAllowlist", () => {
       rationale: "allowed",
     });
     recordAllowlistMatchesUseMock.mockReset();
+    persistAllowAlwaysDecisionMock.mockReset();
+    persistAllowAlwaysDecisionMock.mockResolvedValue(undefined);
     resolveApprovalDecisionOrUndefinedMock.mockReset();
     resolveApprovalDecisionOrUndefinedMock.mockResolvedValue(undefined);
     shouldResolveExecApprovalUnavailableInlineMock.mockReset();
@@ -910,18 +912,12 @@ describe("processGatewayAllowlist", () => {
         allowedDecisions: ["allow-once", "allow-always", "deny"],
       }),
     );
-    expect(approvalsFile.agents).toEqual({
-      main: {
-        allowlist: [
-          expect.objectContaining({
-            pattern: "/usr/bin/git",
-            source: "allow-always",
-          }),
-          expect.objectContaining({
-            pattern: expect.stringMatching(/^=node-command:[0-9a-f]{16}$/),
-            source: "allow-always",
-          }),
-        ],
+    expect(persistAllowAlwaysDecisionMock).toHaveBeenCalledWith({
+      agentId: undefined,
+      decision: {
+        kind: "patterns",
+        commandText: "sh -c 'git status'",
+        patterns: [{ pattern: "/usr/bin/git", argPattern: undefined }],
       },
     });
   });
@@ -1594,6 +1590,39 @@ EOF`,
       expect(sendExecApprovalFollowupResultMock).toHaveBeenCalledTimes(1);
     });
     expect(runExecProcessMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed with a followup when allow-always persistence fails asynchronously", async () => {
+    resolveExecHostApprovalContextMock.mockReturnValue({
+      approvals: { allowlist: [], file: { version: 1, agents: {} } },
+      hostSecurity: "allowlist",
+      hostAsk: "always",
+      askFallback: "deny",
+    });
+    requiresExecApprovalMock.mockReturnValue(true);
+    resolveApprovalDecisionOrUndefinedMock.mockResolvedValue("allow-always");
+    createExecApprovalDecisionStateMock.mockReturnValue({
+      baseDecision: { timedOut: false },
+      approvedByAsk: true,
+      deniedReason: null,
+    });
+    persistAllowAlwaysDecisionMock.mockRejectedValue(
+      new Error("Exec approvals update is already in progress; retry this operation."),
+    );
+
+    const result = await runGatewayAllowlist({
+      command: "find . -maxdepth 1",
+      turnSourceChannel: "feishu",
+    });
+
+    expect(result.pendingResult?.details.status).toBe("approval-pending");
+    await vi.waitFor(() => {
+      expect(sendExecApprovalFollowupResultMock).toHaveBeenCalledWith(
+        null,
+        "Exec denied (gateway id=req-1, approval-persistence-failed): find . -maxdepth 1",
+      );
+    });
+    expect(runExecProcessMock).not.toHaveBeenCalled();
   });
 
   it("keeps the fire-and-forget path for headless cron approval followups", async () => {
