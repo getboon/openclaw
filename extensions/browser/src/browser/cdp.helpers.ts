@@ -129,6 +129,18 @@ function rawCdpMessageToString(data: WebSocket.RawData): string {
   return Buffer.from(data).toString("utf8");
 }
 
+// A literal "%" isn't escaped by the URL username/password setters, so a
+// credential containing one can decode to an invalid escape (e.g. "%C0").
+// Falling back to the raw value beats throwing past the caller — which
+// would silently drop the Authorization header instead of sending it.
+function safeDecodeUriComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 /** Merge URL basic-auth credentials into headers without overriding explicit auth. */
 export function getHeadersWithAuth(url: string, headers: Record<string, string> = {}) {
   const mergedHeaders = { ...headers };
@@ -141,12 +153,9 @@ export function getHeadersWithAuth(url: string, headers: Record<string, string> 
       return mergedHeaders;
     }
     if (parsed.username || parsed.password) {
-      // `.username`/`.password` return the URL Standard's percent-encoded
-      // form, not the original bytes — decode before building the Basic
-      // payload, or a credential containing a reserved character (":",
-      // "@", etc.) would send the mangled encoded form instead.
-      const username = decodeURIComponent(parsed.username);
-      const password = decodeURIComponent(parsed.password);
+      // Decode: `.username`/`.password` return the percent-encoded form.
+      const username = safeDecodeUriComponent(parsed.username);
+      const password = safeDecodeUriComponent(parsed.password);
       const auth = Buffer.from(`${username}:${password}`).toString("base64");
       return { ...mergedHeaders, Authorization: `Basic ${auth}` };
     }
