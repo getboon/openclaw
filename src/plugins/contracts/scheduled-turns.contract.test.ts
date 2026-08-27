@@ -26,7 +26,11 @@ import {
 import { clearPluginLoaderCache, loadOpenClawPlugins } from "../loader.js";
 import { makeTempDir, writePlugin } from "../loader.test-fixtures.js";
 import { createEmptyPluginRegistry } from "../registry-empty.js";
-import { pinActivePluginChannelRegistry, setActivePluginRegistry } from "../runtime.js";
+import {
+  pinActivePluginChannelRegistry,
+  releasePinnedPluginChannelRegistry,
+  setActivePluginRegistry,
+} from "../runtime.js";
 import { createPluginRecord } from "../status.test-helpers.js";
 import type { OpenClawPluginApi } from "../types.js";
 
@@ -1125,12 +1129,19 @@ describe("plugin scheduled turns", () => {
 
     setActivePluginRegistry(createEmptyPluginRegistry());
 
-    const handle = await capturedApi?.session.workflow.scheduleSessionTurn({
-      sessionKey: "agent:main:main",
-      message: "wake",
-      delayMs: 10,
-    });
-    expectSessionTurnHandle(handle, "job-live", "scheduler-plugin");
+    try {
+      const handle = await capturedApi?.session.workflow.scheduleSessionTurn({
+        sessionKey: "agent:main:main",
+        message: "wake",
+        delayMs: 10,
+      });
+      expectSessionTurnHandle(handle, "job-live", "scheduler-plugin");
+    } finally {
+      // The top-level afterEach only resets the active-registry pointer, not
+      // the channel pin -- release it explicitly so this registry doesn't
+      // stay artificially "live" (via isRegistryLive) for later tests.
+      releasePinnedPluginChannelRegistry(registry.registry);
+    }
   });
 
   it("resolves live cron service for captured plugin scheduled-turn APIs", async () => {
