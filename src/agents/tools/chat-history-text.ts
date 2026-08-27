@@ -25,7 +25,18 @@ function hasAssistantVisibleContentBlock(content: unknown): boolean {
         return false;
       }
       const type = (block as { type?: unknown }).type;
-      return type === "text" || type === "input_text" || type === "output_text" || type === "image";
+      if (type === "image") {
+        return true;
+      }
+      // Matches extractAssistantTextForPhase's non-empty-trim convention: an
+      // empty text block is exactly what a tool-call-only stub looks like,
+      // not visible content.
+      const text = (block as { text?: unknown }).text;
+      return (
+        (type === "text" || type === "input_text" || type === "output_text") &&
+        typeof text === "string" &&
+        text.trim().length > 0
+      );
     });
   }
   return typeof content === "string" && content.trim().length > 0;
@@ -35,12 +46,11 @@ function hasAssistantVisibleContentBlock(content: unknown): boolean {
  * Drops assistant transcript entries that carry only thinking/tool-call
  * plumbing and no visible text or image. In message-tool-only delivery, the
  * real inference-turn record has no text block at all — the reply text lives
- * solely in a paired `delivery-mirror` entry written back after the send
- * (ENG-18919) — so these stubs add zero conversational value once
- * `stripToolMessages` has already dropped tool results, but still eat a
- * caller's requested history window ahead of the turns it actually asked
- * for. `delivery-mirror` entries are the only record of that text and must
- * never be dropped here.
+ * solely in a paired `delivery-mirror` entry written back after the send —
+ * so these stubs add zero conversational value once `stripToolMessages` has
+ * already dropped tool results, but still eat a caller's requested history
+ * window ahead of the turns it actually asked for. `delivery-mirror` entries
+ * are the only record of that text and must never be dropped here.
  */
 export function dropToolPlumbingOnlyAssistantMessages(messages: unknown[]): unknown[] {
   return messages.filter((msg) => {

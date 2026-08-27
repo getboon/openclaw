@@ -41,9 +41,11 @@ const SESSIONS_HISTORY_TEXT_MAX_CHARS = 4000;
 // this tool always sends an explicit raw limit — needed to detect when that
 // raw window undercounts logical turns (see the grow step below).
 const SESSIONS_HISTORY_DEFAULT_LIMIT = 200;
-// chat.history clamps to its own hard cap regardless, so a grown request
-// never asks for more raw entries than the gateway would honor anyway.
-const SESSIONS_HISTORY_GROWN_LIMIT_CEILING = 1000;
+// Mirrors chat.history's own hard cap (chat.ts's hardMax): it clamps
+// internally to this regardless of what we ask, so a caller-requested limit
+// above it can never be satisfied and a grown request never needs to ask
+// for more than this either.
+const SESSIONS_HISTORY_GATEWAY_HARD_CAP = 1000;
 type GatewayCaller = typeof callGateway;
 
 // sandbox policy handling is shared with sessions-list-tool via sessions-helpers.ts
@@ -197,6 +199,37 @@ function selectLogicalHistoryMessages(rawMessages: unknown[], includeTools: bool
   return dropToolPlumbingOnlyAssistantMessages(stripToolMessages(rawMessages));
 }
 
+type RawHistoryWindow = { messages: unknown[]; hasMoreBeforeWindow: boolean };
+
+/**
+ * Fetches up to `rawLimit` raw transcript entries, over-reading by one so an
+ * exact-limit response can be told apart from a response that was capped
+ * with more history still before it — chat.history exposes no separate
+ * has-more signal, so this mirrors the +1 overread it already uses
+ * internally (readRecentSessionMessagesAsync's maxMessages+1) to make the
+ * same distinction. When rawLimit is already at the gateway's own hard cap
+ * there is no room to overread, so a full window is treated as "maybe more"
+ * since it genuinely can't be disproven.
+ */
+async function fetchRawHistoryWindow(params: {
+  gatewayCall: GatewayCaller;
+  resolvedKey: string;
+  rawLimit: number;
+}): Promise<RawHistoryWindow> {
+  const overreadLimit = Math.min(params.rawLimit + 1, SESSIONS_HISTORY_GATEWAY_HARD_CAP);
+  const result = await params.gatewayCall<{ messages: Array<unknown> }>({
+    method: "chat.history",
+    params: { sessionKey: params.resolvedKey, limit: overreadLimit },
+  });
+  const fetched = Array.isArray(result?.messages) ? result.messages : [];
+  const canDetectOverread = overreadLimit > params.rawLimit;
+  const hasMoreBeforeWindow = canDetectOverread
+    ? fetched.length > params.rawLimit
+    : fetched.length >= params.rawLimit;
+  const messages = fetched.length > params.rawLimit ? fetched.slice(-params.rawLimit) : fetched;
+  return { messages, hasMoreBeforeWindow };
+}
+
 export function createSessionsHistoryTool(opts?: {
   agentSessionKey?: string;
   sandboxed?: boolean;
@@ -270,46 +303,51 @@ export function createSessionsHistoryTool(opts?: {
 
       const limit = readPositiveIntegerParam(params, "limit");
       const includeTools = Boolean(params.includeTools);
-      const desiredLimit = limit ?? SESSIONS_HISTORY_DEFAULT_LIMIT;
-
-      const fetchRawMessages = async (rawLimit: number): Promise<unknown[]> => {
-        const result = await gatewayCall<{ messages: Array<unknown> }>({
-          method: "chat.history",
-          params: { sessionKey: resolvedKey, limit: rawLimit },
-        });
-        return Array.isArray(result?.messages) ? result.messages : [];
-      };
+      const requestedLimit = limit ?? SESSIONS_HISTORY_DEFAULT_LIMIT;
+      const desiredLimit = Math.min(requestedLimit, SESSIONS_HISTORY_GATEWAY_HARD_CAP);
+      // A caller-requested limit above the gateway's hard cap can never be
+      // fully satisfied — that alone means this read is truncated, regardless
+      // of what the raw fetch below reports.
+      const requestExceededGatewayCap = requestedLimit > desiredLimit;
 
       let rawLimit = desiredLimit;
-      let rawMessages = await fetchRawMessages(rawLimit);
+      let { messages: rawMessages, hasMoreBeforeWindow } = await fetchRawHistoryWindow({
+        gatewayCall,
+        resolvedKey,
+        rawLimit,
+      });
       let logicalMessages = selectLogicalHistoryMessages(rawMessages, includeTools);
 
       // chat.history's `limit` bounds raw transcript entries — delivery-mirror
       // duplicates and tool-call/thinking-only stubs count against it just
       // like real turns — so a caller asking for N logical turns can get a
-      // window that is mostly noise (ENG-18919). When the raw window was
-      // fully consumed and still came up short, widen it once using the
-      // noise ratio actually observed in this sample rather than guessing a
-      // fixed multiplier.
-      const rawWindowFullyConsumed = rawMessages.length >= rawLimit;
-      if (!includeTools && rawWindowFullyConsumed && logicalMessages.length < desiredLimit) {
+      // window that is mostly noise. When the raw window was fully consumed
+      // and still came up short, widen it once using the noise ratio
+      // actually observed in this sample rather than guessing a fixed
+      // multiplier.
+      if (!includeTools && hasMoreBeforeWindow && logicalMessages.length < desiredLimit) {
         const observedNoiseRatio = rawMessages.length / Math.max(logicalMessages.length, 1);
         const grownLimit = Math.min(
-          SESSIONS_HISTORY_GROWN_LIMIT_CEILING,
+          SESSIONS_HISTORY_GATEWAY_HARD_CAP,
           Math.ceil(desiredLimit * Math.max(observedNoiseRatio, 2)),
         );
         if (grownLimit > rawLimit) {
           rawLimit = grownLimit;
-          rawMessages = await fetchRawMessages(rawLimit);
+          ({ messages: rawMessages, hasMoreBeforeWindow } = await fetchRawHistoryWindow({
+            gatewayCall,
+            resolvedKey,
+            rawLimit,
+          }));
           logicalMessages = selectLogicalHistoryMessages(rawMessages, includeTools);
         }
       }
 
-      // More real history may still exist before this window: either the raw
-      // fetch was fully consumed again after growing, or growth returned more
-      // logical turns than asked for and the tail trim below drops the rest.
+      // More real history may still exist before this window: the raw fetch
+      // was capped with more before it, growth returned more logical turns
+      // than asked for and the tail trim below drops the rest, or the
+      // caller's own request exceeded what the gateway can ever return.
       const moreHistoryAvailable =
-        rawMessages.length >= rawLimit || logicalMessages.length > desiredLimit;
+        hasMoreBeforeWindow || logicalMessages.length > desiredLimit || requestExceededGatewayCap;
       const selectedMessages =
         logicalMessages.length > desiredLimit
           ? logicalMessages.slice(logicalMessages.length - desiredLimit)

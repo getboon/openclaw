@@ -21,6 +21,36 @@ function useLoggingConfig(name: string, logging: Record<string, unknown>): void 
   process.env.OPENCLAW_CONFIG_PATH = configPath;
 }
 
+/**
+ * Shared beforeAll/afterAll lifecycle for a describe block that needs its
+ * own temp config dir with log redaction disabled: creates the dir + config
+ * and dynamically imports the tool under test, then restores the prior
+ * config path and removes the dir.
+ */
+function useSessionsHistoryTestConfig(tempDirPrefix: string): {
+  setup: () => Promise<void>;
+  teardown: () => void;
+} {
+  return {
+    setup: async () => {
+      previousConfigPath = process.env.OPENCLAW_CONFIG_PATH;
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), tempDirPrefix));
+      useLoggingConfig("redaction-off.json", { redactSensitive: "off" });
+      ({ createSessionsHistoryTool } = await import("./sessions-history-tool.js"));
+    },
+    teardown: () => {
+      if (previousConfigPath === undefined) {
+        delete process.env.OPENCLAW_CONFIG_PATH;
+      } else {
+        process.env.OPENCLAW_CONFIG_PATH = previousConfigPath;
+      }
+      if (tempDir) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  };
+}
+
 function createHistoryToolWithMessage(content: string) {
   return createSessionsHistoryTool({
     config: {},
@@ -41,23 +71,9 @@ function createHistoryToolWithMessage(content: string) {
 }
 
 describe("sessions_history redaction", () => {
-  beforeAll(async () => {
-    previousConfigPath = process.env.OPENCLAW_CONFIG_PATH;
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-sessions-history-redact-"));
-    useLoggingConfig("redaction-off.json", { redactSensitive: "off" });
-    ({ createSessionsHistoryTool } = await import("./sessions-history-tool.js"));
-  });
-
-  afterAll(() => {
-    if (previousConfigPath === undefined) {
-      delete process.env.OPENCLAW_CONFIG_PATH;
-    } else {
-      process.env.OPENCLAW_CONFIG_PATH = previousConfigPath;
-    }
-    if (tempDir) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
+  const lifecycle = useSessionsHistoryTestConfig("openclaw-sessions-history-redact-");
+  beforeAll(lifecycle.setup);
+  afterAll(lifecycle.teardown);
 
   it("redacts recalled session text even when log redaction is disabled", async () => {
     // Recalled transcript content is model-visible, so it is always redacted
@@ -97,24 +113,10 @@ describe("sessions_history redaction", () => {
   });
 });
 
-describe("sessions_history raw-window undercounting (ENG-18919)", () => {
-  beforeAll(async () => {
-    previousConfigPath = process.env.OPENCLAW_CONFIG_PATH;
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-sessions-history-window-"));
-    useLoggingConfig("redaction-off.json", { redactSensitive: "off" });
-    ({ createSessionsHistoryTool } = await import("./sessions-history-tool.js"));
-  });
-
-  afterAll(() => {
-    if (previousConfigPath === undefined) {
-      delete process.env.OPENCLAW_CONFIG_PATH;
-    } else {
-      process.env.OPENCLAW_CONFIG_PATH = previousConfigPath;
-    }
-    if (tempDir) {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
+describe("sessions_history raw-window undercounting", () => {
+  const lifecycle = useSessionsHistoryTestConfig("openclaw-sessions-history-window-");
+  beforeAll(lifecycle.setup);
+  afterAll(lifecycle.teardown);
 
   // Builds a raw transcript tail matching the live shape from thread 1141: a
   // toolCall/thinking-only assistant stub immediately followed by the
@@ -175,6 +177,52 @@ describe("sessions_history raw-window undercounting (ENG-18919)", () => {
     expect(requestedLimits.length).toBeGreaterThan(1);
     expect(requestedLimits[requestedLimits.length - 1]).toBeGreaterThan(requestedLimits[0]);
     // More real history exists before this window (30 turns total, 5 returned).
+    expect(details.droppedMessages).toBe(true);
+  });
+
+  it("does not report truncation when the session ends exactly at the requested limit", async () => {
+    const wholeSession = Array.from({ length: 5 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: `turn ${i}`,
+    }));
+    const tool = createSessionsHistoryTool({
+      config: {},
+      callGateway: async <T = Record<string, unknown>>(request: CallGatewayRequest): Promise<T> => {
+        if (request.method === "chat.history") {
+          // The whole session is shorter than even the overread request, so
+          // there is genuinely nothing more before it.
+          return { messages: wholeSession } as T;
+        }
+        return {} as T;
+      },
+    });
+
+    const result = await tool.execute("call-1", { sessionKey: "main", limit: 5 });
+    const details = result.details as { messages: unknown[]; droppedMessages: boolean };
+
+    expect(details.messages).toHaveLength(5);
+    expect(details.droppedMessages).toBe(false);
+  });
+
+  it("flags truncation when the caller asks for more than the gateway's hard cap", async () => {
+    const tool = createSessionsHistoryTool({
+      config: {},
+      callGateway: async <T = Record<string, unknown>>(request: CallGatewayRequest): Promise<T> => {
+        if (request.method === "chat.history") {
+          // Requesting a limit above the gateway's hard cap must clamp, not
+          // ask for (or crash on) more than the cap.
+          expect((request.params as { limit?: number }).limit).toBeLessThanOrEqual(1000);
+          return { messages: [{ role: "user", content: "hi" }] } as T;
+        }
+        return {} as T;
+      },
+    });
+
+    const result = await tool.execute("call-1", { sessionKey: "main", limit: 2000 });
+    const details = result.details as { droppedMessages: boolean };
+
+    // A limit above the hard cap can never be fully satisfied, regardless of
+    // how little history the session actually has.
     expect(details.droppedMessages).toBe(true);
   });
 
