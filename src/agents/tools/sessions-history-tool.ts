@@ -17,7 +17,7 @@ import {
   describeSessionsHistoryTool,
   SESSIONS_HISTORY_TOOL_DISPLAY_SUMMARY,
 } from "../tool-description-presets.js";
-import { stripToolMessages } from "./chat-history-text.js";
+import { dropToolPlumbingOnlyAssistantMessages, stripToolMessages } from "./chat-history-text.js";
 import type { AnyAgentTool } from "./common.js";
 import { jsonResult, readPositiveIntegerParam, readStringParam } from "./common.js";
 import {
@@ -37,6 +37,13 @@ const SessionsHistoryToolSchema = Type.Object({
 
 const SESSIONS_HISTORY_MAX_BYTES = 80 * 1024;
 const SESSIONS_HISTORY_TEXT_MAX_CHARS = 4000;
+// Mirrors chat.history's own default (src/gateway/server-methods/chat.ts) so
+// this tool always sends an explicit raw limit — needed to detect when that
+// raw window undercounts logical turns (see the grow step below).
+const SESSIONS_HISTORY_DEFAULT_LIMIT = 200;
+// chat.history clamps to its own hard cap regardless, so a grown request
+// never asks for more raw entries than the gateway would honor anyway.
+const SESSIONS_HISTORY_GROWN_LIMIT_CEILING = 1000;
 type GatewayCaller = typeof callGateway;
 
 // sandbox policy handling is shared with sessions-list-tool via sessions-helpers.ts
@@ -183,6 +190,13 @@ function enforceSessionsHistoryHardCap(params: {
   return { items: placeholder, bytes: jsonUtf8Bytes(placeholder), hardCapped: true };
 }
 
+function selectLogicalHistoryMessages(rawMessages: unknown[], includeTools: boolean): unknown[] {
+  if (includeTools) {
+    return rawMessages;
+  }
+  return dropToolPlumbingOnlyAssistantMessages(stripToolMessages(rawMessages));
+}
+
 export function createSessionsHistoryTool(opts?: {
   agentSessionKey?: string;
   sandboxed?: boolean;
@@ -256,12 +270,51 @@ export function createSessionsHistoryTool(opts?: {
 
       const limit = readPositiveIntegerParam(params, "limit");
       const includeTools = Boolean(params.includeTools);
-      const result = await gatewayCall<{ messages: Array<unknown> }>({
-        method: "chat.history",
-        params: { sessionKey: resolvedKey, limit },
-      });
-      const rawMessages = Array.isArray(result?.messages) ? result.messages : [];
-      const selectedMessages = includeTools ? rawMessages : stripToolMessages(rawMessages);
+      const desiredLimit = limit ?? SESSIONS_HISTORY_DEFAULT_LIMIT;
+
+      const fetchRawMessages = async (rawLimit: number): Promise<unknown[]> => {
+        const result = await gatewayCall<{ messages: Array<unknown> }>({
+          method: "chat.history",
+          params: { sessionKey: resolvedKey, limit: rawLimit },
+        });
+        return Array.isArray(result?.messages) ? result.messages : [];
+      };
+
+      let rawLimit = desiredLimit;
+      let rawMessages = await fetchRawMessages(rawLimit);
+      let logicalMessages = selectLogicalHistoryMessages(rawMessages, includeTools);
+
+      // chat.history's `limit` bounds raw transcript entries — delivery-mirror
+      // duplicates and tool-call/thinking-only stubs count against it just
+      // like real turns — so a caller asking for N logical turns can get a
+      // window that is mostly noise (ENG-18919). When the raw window was
+      // fully consumed and still came up short, widen it once using the
+      // noise ratio actually observed in this sample rather than guessing a
+      // fixed multiplier.
+      const rawWindowFullyConsumed = rawMessages.length >= rawLimit;
+      if (!includeTools && rawWindowFullyConsumed && logicalMessages.length < desiredLimit) {
+        const observedNoiseRatio = rawMessages.length / Math.max(logicalMessages.length, 1);
+        const grownLimit = Math.min(
+          SESSIONS_HISTORY_GROWN_LIMIT_CEILING,
+          Math.ceil(desiredLimit * Math.max(observedNoiseRatio, 2)),
+        );
+        if (grownLimit > rawLimit) {
+          rawLimit = grownLimit;
+          rawMessages = await fetchRawMessages(rawLimit);
+          logicalMessages = selectLogicalHistoryMessages(rawMessages, includeTools);
+        }
+      }
+
+      // More real history may still exist before this window: either the raw
+      // fetch was fully consumed again after growing, or growth returned more
+      // logical turns than asked for and the tail trim below drops the rest.
+      const moreHistoryAvailable =
+        rawMessages.length >= rawLimit || logicalMessages.length > desiredLimit;
+      const selectedMessages =
+        logicalMessages.length > desiredLimit
+          ? logicalMessages.slice(logicalMessages.length - desiredLimit)
+          : logicalMessages;
+
       const sanitizedMessages = selectedMessages.map((message) => sanitizeHistoryMessage(message));
       const contentTruncated = sanitizedMessages.some((entry) => entry.truncated);
       const contentRedacted = sanitizedMessages.some((entry) => entry.redacted);
@@ -269,17 +322,18 @@ export function createSessionsHistoryTool(opts?: {
         sanitizedMessages.map((entry) => entry.message),
         SESSIONS_HISTORY_MAX_BYTES,
       );
-      const droppedMessages = cappedMessages.items.length < selectedMessages.length;
+      const byteCapped = cappedMessages.items.length < selectedMessages.length;
       const hardened = enforceSessionsHistoryHardCap({
         items: cappedMessages.items,
         bytes: cappedMessages.bytes,
         maxBytes: SESSIONS_HISTORY_MAX_BYTES,
       });
+      const droppedMessages = byteCapped || hardened.hardCapped || moreHistoryAvailable;
       return jsonResult({
         sessionKey: displayKey,
         messages: hardened.items,
-        truncated: droppedMessages || contentTruncated || hardened.hardCapped,
-        droppedMessages: droppedMessages || hardened.hardCapped,
+        truncated: droppedMessages || contentTruncated,
+        droppedMessages,
         contentTruncated,
         contentRedacted,
         bytes: hardened.bytes,
