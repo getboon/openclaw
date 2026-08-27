@@ -26,7 +26,7 @@ import {
 import { clearPluginLoaderCache, loadOpenClawPlugins } from "../loader.js";
 import { makeTempDir, writePlugin } from "../loader.test-fixtures.js";
 import { createEmptyPluginRegistry } from "../registry-empty.js";
-import { setActivePluginRegistry } from "../runtime.js";
+import { pinActivePluginChannelRegistry, setActivePluginRegistry } from "../runtime.js";
 import { createPluginRecord } from "../status.test-helpers.js";
 import type { OpenClawPluginApi } from "../types.js";
 
@@ -1095,6 +1095,42 @@ describe("plugin scheduled turns", () => {
         tag: "nudge",
       }),
     ).resolves.toEqual({ removed: 0, failed: 0 });
+  });
+
+  it("still schedules a session turn when an unrelated registry becomes globally active but this plugin's own registry is still live", async () => {
+    // A cron-triggered or non-default-agent turn can legitimately install its
+    // OWN registry as the global "active" pointer (e.g. on a config-drift
+    // cache miss), without retiring THIS plugin's registry, as long as it's
+    // still referenced by some other tracked surface (e.g. the channel pin
+    // real channel plugins hold). That must not block scheduling -- this
+    // reproduces a live production bug where browser-handoff's
+    // scheduleSessionTurn silently no-op'd on every cron-triggered call.
+    workflowMocks.cronAdd.mockResolvedValue(makeCronJob({ id: "job-live" }));
+    const { config, registry } = createPluginRegistryFixture({}, { hostServices: { cron } });
+    let capturedApi: OpenClawPluginApi | undefined;
+    registerTestPlugin({
+      registry,
+      config,
+      record: createPluginRecord({
+        id: "scheduler-plugin",
+        name: "Scheduler Plugin",
+        origin: "bundled",
+      }),
+      register(api) {
+        capturedApi = api;
+      },
+    });
+    setActivePluginRegistry(registry.registry);
+    pinActivePluginChannelRegistry(registry.registry);
+
+    setActivePluginRegistry(createEmptyPluginRegistry());
+
+    const handle = await capturedApi?.session.workflow.scheduleSessionTurn({
+      sessionKey: "agent:main:main",
+      message: "wake",
+      delayMs: 10,
+    });
+    expectSessionTurnHandle(handle, "job-live", "scheduler-plugin");
   });
 
   it("resolves live cron service for captured plugin scheduled-turn APIs", async () => {
