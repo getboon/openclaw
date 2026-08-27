@@ -141,7 +141,6 @@ export type {
   PluginServiceRegistration,
   PluginSessionExtensionRegistryRegistration,
 } from "./registry-types.js";
-import { getActivePluginRegistry } from "./runtime.js";
 import {
   withPluginRuntimePluginIdScope,
   withPluginRuntimePluginScope,
@@ -2749,8 +2748,16 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     const sideEffectGuard = createPluginSideEffectGuard(record.id);
     const isLoadedRecordInRegistry = () =>
       registry.plugins.some((plugin) => plugin.id === record.id && plugin.status === "loaded");
+    // Per-registry lifecycle flags (activated/retired), not global "active registry"
+    // pointer identity, are the correct liveness signal here -- matching
+    // shouldCommitWorkflowSideEffect below. A cron-triggered or non-default-agent
+    // turn can legitimately install its OWN registry as globally "active" (e.g. on
+    // a config-drift cache miss in ensureStandaloneRuntimePluginRegistryLoaded),
+    // which doesn't mean THIS plugin's own registry was torn down.
     const isLoadedRecordInActiveRegistry = () =>
-      getActivePluginRegistry() === registry && isLoadedRecordInRegistry();
+      !isPluginRegistryRetired(registry) &&
+      isPluginRegistryActivated(registry) &&
+      isLoadedRecordInRegistry();
     const isActivatingLoadedRecord = () =>
       registryParams.activateGlobalSideEffects !== false &&
       record.enabled &&
