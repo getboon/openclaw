@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.29
+
+Fixes the actual root cause behind browser-handoff's durable resume silently no-op'ing on every cron-triggered recheck.
+
+- **#159:** `scheduleSessionTurn`/`unscheduleSessionTurnsByTag` gated a bundled plugin's ability to commit side effects with `isLoadedRecordInActiveRegistry`, which checked exact identity against a single global "active registry" pointer (`getActivePluginRegistry() === registry`). A cron-triggered agent turn -- which is how `scheduleSessionTurn`'s own durable-resume recheck always executes -- can legitimately install its own registry as globally "active" via `ensureStandaloneRuntimePluginRegistryLoaded` on a cache miss, without retiring the original plugin's still-live registry. That made every recheck reject itself with "plugin record is not loaded in the active registry," diagnosable only after #156's new logging shipped. Fixed by switching to per-registry lifecycle flags (`isPluginRegistryActivated`/`isPluginRegistryRetired`), the same liveness signal `shouldCommitWorkflowSideEffect` already used correctly a few lines below. New regression test proves a schedule still succeeds when a second, unrelated registry becomes globally "active" while the original is pinned as the channel registry.
+- Base = `2026.6.11-boon.28`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.29` in lockstep. No other code changes; #159 was merged onto `boon` before this release.
+
 ## 2026.6.11-boon.28
 
 Adds diagnostic logging so a durable session-turn schedule/unschedule that silently no-ops is actually observable.

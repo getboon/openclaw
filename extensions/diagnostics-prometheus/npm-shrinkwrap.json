@@ -1,12 +1,12 @@
 {
   "name": "@openclaw/diagnostics-prometheus",
-  "version": "2026.6.11-boon.28",
+  "version": "2026.6.11-boon.29",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/diagnostics-prometheus",
-      "version": "2026.6.11-boon.28"
+      "version": "2026.6.11-boon.29"
     }
   }
 }
