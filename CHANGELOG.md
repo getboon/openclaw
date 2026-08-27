@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.26
+
+Fixes a session losing all conversation history whenever a concurrent turn (e.g. a `scheduleSessionTurn` recheck) collided with it, or a gateway restart interrupted it mid-run.
+
+- **#152:** `hasTerminalMainSessionTranscriptNewerThanRegistry` treats a transcript whose mtime is newer than the registry's `updatedAt` as possible external corruption and forces a brand-new session on the next turn, discarding all history. It already exempted `status: "failed"` rows for retry/recovery, but not rows whose `abortedLastRun` flag is set — the exact signal set when a run is interrupted by a concurrent-turn lock conflict or a gateway restart, alongside `main-session-restart-recovery.ts`'s own "I'll pick it up cleanly" promise to the user. That promise wasn't being kept: the very write that raced (or the recovery module's own bookkeeping write) could leave the transcript newer than the registry, silently rotating to a fresh session instead of resuming. Now exempted the same way `"failed"` already is.
+- Base = `2026.6.11-boon.25`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.26` in lockstep. No other code changes; #152 was merged onto `boon` before this release.
+
 ## 2026.6.11-boon.25
 
 Fixes the browser login handoff tool's CDP attach step, which 401'd on every real attempt because the underlying client has no way to send the header boon-core's relay required.
