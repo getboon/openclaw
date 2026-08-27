@@ -24,6 +24,17 @@ export type OpenClawPluginToolContext = {
   agentDir?: string;
   agentId?: string;
   sessionKey?: string;
+  /**
+   * The actual live run session key, when it differs from `sessionKey`.
+   * `sessionKey` may be a sandbox/policy key (e.g. a direct-message peer key)
+   * that was never itself persisted as a transcript session -- correct for
+   * tenant/DM-scoping isolation, but binding a scheduled resume or inter-run
+   * message to it addresses a session that can never be resumed. Plugins that
+   * schedule a durable resume of "this conversation" (e.g. via
+   * `api.session.workflow.scheduleSessionTurn`) should prefer this over
+   * `sessionKey` when present.
+   */
+  runSessionKey?: string;
   /** Ephemeral session UUID - regenerated on /new and /reset. Use for per-conversation isolation. */
   sessionId?: string;
   /**

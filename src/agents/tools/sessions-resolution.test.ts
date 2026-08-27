@@ -403,6 +403,28 @@ describe("resolveSessionReference", () => {
     expect(callGatewayMock).toHaveBeenCalledTimes(2);
   });
 
+  it("resolves current to runSessionKey, not a sandbox requesterInternalKey, once gateway lookups miss", async () => {
+    // requesterInternalKey may be a sandbox/policy key (e.g. a Teams DM
+    // peer-scoped key) that was never itself persisted as a transcript
+    // session -- binding "current" to it addresses a session that can never
+    // be resumed. runSessionKey is the real live run session and must win.
+    callGatewayMock.mockRejectedValueOnce(new Error("gateway timeout")).mockResolvedValueOnce({});
+
+    const result = await resolveSessionReference({
+      sessionKey: "current",
+      alias: "main",
+      mainKey: "main",
+      requesterInternalKey: "agent:main:msteams:default:direct:peer-123",
+      runSessionKey: "agent:main:main",
+      restrictToSpawned: false,
+    });
+    expectResolvedSessionReference(result, {
+      key: "agent:main:main",
+      displayKey: "agent:main:main",
+      resolvedViaSessionId: false,
+    });
+  });
+
   it("skips literal current key lookup when spawned visibility is restricted", async () => {
     const result = await resolveSessionReference({
       sessionKey: "current",

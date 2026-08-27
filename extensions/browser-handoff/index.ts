@@ -10,6 +10,7 @@ import { BrowserHandoffToolSchema } from "./src/schema.js";
 function createBrowserHandoffTool(
   api: OpenClawPluginApi,
   sessionKey: string | undefined,
+  runSessionKey: string | undefined,
 ): AnyAgentTool {
   return {
     label: "Browser Login Handoff",
@@ -26,7 +27,7 @@ function createBrowserHandoffTool(
     parameters: BrowserHandoffToolSchema,
     execute: async (_toolCallId, args) => {
       const { executeBrowserHandoffToolFromArgs } = await import("./src/tool.js");
-      return await executeBrowserHandoffToolFromArgs(api, args, { sessionKey });
+      return await executeBrowserHandoffToolFromArgs(api, args, { sessionKey, runSessionKey });
     },
   };
 }
@@ -38,6 +39,10 @@ export default definePluginEntry({
     "Hand off login/CAPTCHA/2FA on a login-walled site to the customer via a hosted browser session.",
   register(api: OpenClawPluginApi) {
     api.registerTool(((ctx) =>
-      createBrowserHandoffTool(api, ctx.sessionKey)) as OpenClawPluginToolFactory);
+      createBrowserHandoffTool(
+        api,
+        ctx.sessionKey,
+        ctx.runSessionKey,
+      )) as OpenClawPluginToolFactory);
   },
 });

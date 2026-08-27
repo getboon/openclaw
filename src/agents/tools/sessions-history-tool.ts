@@ -185,6 +185,14 @@ function enforceSessionsHistoryHardCap(params: {
 
 export function createSessionsHistoryTool(opts?: {
   agentSessionKey?: string;
+  /**
+   * The actual live run session key. `agentSessionKey` may be a sandbox/
+   * policy key that was never itself persisted as a transcript session --
+   * binding a `sessionKey: "current"` request to it addresses a session that
+   * can never be resumed. Mirrors the same fix already applied to
+   * session_status and the goal tools.
+   */
+  runSessionKey?: string;
   sandboxed?: boolean;
   config?: OpenClawConfig;
   callGateway?: GatewayCaller;
@@ -213,6 +221,7 @@ export function createSessionsHistoryTool(opts?: {
         alias,
         mainKey,
         requesterInternalKey: effectiveRequesterKey,
+        runSessionKey: opts?.runSessionKey,
         restrictToSpawned,
       });
       if (!resolvedSession.ok) {

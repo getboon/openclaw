@@ -357,7 +357,8 @@ type CronToolOptions = {
    * was never itself persisted as a transcript session — binding a `current`
    * cron job to it schedules against a session that can never be resumed.
    * When present, this is the real key to stamp on `sessionTarget: "current"`
-   * jobs instead. Mirrors the session_status/goal-tools fix for #82669/#76708.
+   * jobs instead. Mirrors the same fix already applied to session_status and
+   * the goal tools.
    */
   runSessionKey?: string;
   currentDeliveryContext?: DeliveryContext;

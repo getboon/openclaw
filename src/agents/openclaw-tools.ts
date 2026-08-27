@@ -450,6 +450,7 @@ export function createOpenClawTools(
       : [
           createGatewayTool({
             agentSessionKey: options?.agentSessionKey,
+            runSessionKey: options?.runSessionKey,
             config: options?.config,
           }),
         ]),
@@ -499,6 +500,7 @@ export function createOpenClawTools(
     }),
     createSessionsHistoryTool({
       agentSessionKey: options?.agentSessionKey,
+      runSessionKey: options?.runSessionKey,
       sandboxed: options?.sandboxed,
       config: resolvedConfig,
       callGateway: effectiveCallGateway,

@@ -348,7 +348,7 @@ export function createSessionsSendTool(opts?: {
    * was never itself persisted as a transcript session. When present, this is
    * the real key to report as the sender identity — otherwise a receiving
    * session is told to address a reply to a key nothing can resume. Mirrors the
-   * session_status/goal-tools fix for #82669/#76708.
+   * same fix already applied to session_status and the goal tools.
    */
   runSessionKey?: string;
   agentChannel?: GatewayMessageChannel;
@@ -489,6 +489,7 @@ export function createSessionsSendTool(opts?: {
         alias,
         mainKey,
         requesterInternalKey: effectiveRequesterKey,
+        runSessionKey: opts?.runSessionKey,
         restrictToSpawned,
       });
       if (!resolvedSession.ok) {
