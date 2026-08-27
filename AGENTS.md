@@ -1,3 +1,5 @@
+> **📐 Architecture — read first.** End-to-end Boon Agent architecture (all repos, runtime, provisioning, CI/CD → production data, AWS/infra, security) is documented in Slite: https://getboon.slite.com/app/docs/PzhLIE7iGB5-BZ — start there to see how this repo fits the whole system.
+
 # AGENTS.MD
 
 Telegraph style. Root rules only. Read scoped `AGENTS.md` before subtree work.
