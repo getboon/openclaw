@@ -123,21 +123,27 @@ describe("cron tool", () => {
   async function executeAddAndReadSessionKey(params: {
     callId: string;
     agentSessionKey: string;
+    runSessionKey?: string;
     jobSessionKey?: string;
-  }): Promise<string | undefined> {
-    const tool = createTestCronTool({ agentSessionKey: params.agentSessionKey });
+    sessionTarget?: string;
+    payload?: { kind: string; message?: string; text?: string };
+  }): Promise<{ sessionKey?: string; sessionTarget?: string }> {
+    const tool = createTestCronTool({
+      agentSessionKey: params.agentSessionKey,
+      runSessionKey: params.runSessionKey,
+    });
     await tool.execute(params.callId, {
       action: "add",
       job: {
         name: "wake-up",
         schedule: { at: new Date(123).toISOString() },
         ...(params.jobSessionKey ? { sessionKey: params.jobSessionKey } : {}),
-        payload: { kind: "systemEvent", text: "hello" },
+        ...(params.sessionTarget ? { sessionTarget: params.sessionTarget } : {}),
+        payload: params.payload ?? { kind: "systemEvent", text: "hello" },
       },
     });
     const call = readGatewayCall();
-    const payload = call.params as { sessionKey?: string } | undefined;
-    return payload?.sessionKey;
+    return (call.params as { sessionKey?: string; sessionTarget?: string } | undefined) ?? {};
   }
 
   async function executeAddAndReadAgentId(params: {
@@ -508,6 +514,25 @@ describe("cron tool", () => {
         mode: "next-heartbeat",
         text: "ping",
         sessionKey: "agent:agent-123:telegram:direct:channing",
+        agentId: "agent-123",
+      });
+    });
+
+    it("infers sessionKey from the live run session, not a sandbox agentSessionKey", async () => {
+      // A sandbox/policy agentSessionKey (e.g. a Teams DM peer-scoped key) is
+      // never itself persisted as a transcript session — waking it enqueues a
+      // system event under a key no future turn ever drains. The live run
+      // session must win when present.
+      const tool = createTestCronTool({
+        agentSessionKey: "agent:agent-123:telegram:direct:channing",
+        runSessionKey: "agent:agent-123:main",
+      });
+      await tool.execute("call-wake-run-session-key", { action: "wake", text: "ping" });
+      const params = expectSingleGatewayCallMethod("wake");
+      expect(params).toEqual({
+        mode: "next-heartbeat",
+        text: "ping",
+        sessionKey: "agent:agent-123:main",
         agentId: "agent-123",
       });
     });
@@ -1102,22 +1127,49 @@ describe("cron tool", () => {
     callGatewayMock.mockResolvedValueOnce({ ok: true });
 
     const callerSessionKey = "agent:main:discord:channel:ops";
-    const sessionKey = await executeAddAndReadSessionKey({
+    const { sessionKey } = await executeAddAndReadSessionKey({
       callId: "call-session-key",
       agentSessionKey: callerSessionKey,
     });
     expect(sessionKey).toBe(callerSessionKey);
   });
 
+  it("prefers the live run session over a sandbox agentSessionKey when stamping a missing sessionKey", async () => {
+    callGatewayMock.mockResolvedValueOnce({ ok: true });
+
+    // A sandbox/policy key that was never itself persisted as a transcript
+    // session (e.g. a Teams DM peer-scoped key) must not be the address a
+    // resumable job binds to; the real live run session key must win.
+    const { sessionKey } = await executeAddAndReadSessionKey({
+      callId: "call-run-session-key",
+      agentSessionKey: "agent:main:msteams:default:direct:peer-123",
+      runSessionKey: "agent:main:main",
+    });
+    expect(sessionKey).toBe("agent:main:main");
+  });
+
   it("preserves explicit job.sessionKey on add", async () => {
     callGatewayMock.mockResolvedValueOnce({ ok: true });
 
-    const sessionKey = await executeAddAndReadSessionKey({
+    const { sessionKey } = await executeAddAndReadSessionKey({
       callId: "call-explicit-session-key",
       agentSessionKey: "agent:main:discord:channel:ops",
       jobSessionKey: "agent:main:telegram:group:-100123:topic:99",
     });
     expect(sessionKey).toBe("agent:main:telegram:group:-100123:topic:99");
+  });
+
+  it('resolves sessionTarget: "current" to the live run session, not a sandbox agentSessionKey', async () => {
+    callGatewayMock.mockResolvedValueOnce({ ok: true });
+
+    const { sessionTarget } = await executeAddAndReadSessionKey({
+      callId: "call-current-target",
+      agentSessionKey: "agent:main:msteams:default:direct:peer-123",
+      runSessionKey: "agent:main:main",
+      sessionTarget: "current",
+      payload: { kind: "agentTurn", message: "check status" },
+    });
+    expect(sessionTarget).toBe("session:agent:main:main");
   });
 
   it("does not stamp caller sessionKey when add targets isolated session", async () => {

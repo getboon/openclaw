@@ -44,6 +44,23 @@ describe("openclaw plugin tool context", () => {
     expect(result.context.sessionId).toBe("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
   });
 
+  it("forwards runSessionKey separately from a sandbox agentSessionKey", () => {
+    // agentSessionKey may be a sandbox/policy key that was never itself
+    // persisted as a transcript session; plugins that schedule a durable
+    // resume (e.g. browser-handoff's scheduleSessionTurn) need the real live
+    // run session, not this one, so both must reach the context distinctly.
+    const result = resolveOpenClawPluginToolInputs({
+      options: {
+        config: {} as never,
+        agentSessionKey: "agent:main:msteams:default:direct:peer-123",
+        runSessionKey: "agent:main:main",
+      },
+    });
+
+    expect(result.context.sessionKey).toBe("agent:main:msteams:default:direct:peer-123");
+    expect(result.context.runSessionKey).toBe("agent:main:main");
+  });
+
   it("forwards runtime-owned active model metadata", () => {
     const result = resolveOpenClawPluginToolInputs({
       options: {
