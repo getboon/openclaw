@@ -165,9 +165,17 @@ export function resolveTerminalMainSessionTranscriptRegistryCheck(
   if (!hasTerminalLifecycle) {
     return undefined;
   }
-  if (params.entry.status === "failed") {
-    // Failed rows with a present transcript stay reusable for retry/recovery.
-    // Callers already rotate failed rows when the transcript is missing.
+  if (params.entry.status === "failed" || params.entry.abortedLastRun === true) {
+    // Failed rows, and rows whose last run was aborted (a concurrent-turn lock
+    // conflict, a gateway-restart interruption, etc. — see
+    // main-session-restart-recovery.ts's own "I'll pick it up cleanly" promise),
+    // stay reusable for retry/recovery rather than being treated as possibly
+    // corrupted. Without this, the very write that raced (or the recovery
+    // module's own bookkeeping write) can leave the transcript's mtime newer
+    // than the registry's updatedAt, which this check would otherwise read as
+    // external corruption and force a brand-new session, silently discarding
+    // history the next turn should have continued. Callers already rotate
+    // failed rows when the transcript is missing.
     return undefined;
   }
   // updatedAt is touched after managed transcript appends; endedAt can predate
