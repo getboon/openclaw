@@ -1,8 +1,7 @@
 // Covers diagnostic logging for silent-failure gates in schedulePluginSessionTurn
 // and unschedulePluginSessionTurnsByTag -- these previously returned undefined /
-// a success-shaped result with no signal at all, making a durable-resume feature
-// (e.g. browser-handoff's scheduleSessionTurn) fail with zero observability.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+// a success-shaped result with no signal at all.
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CronServiceContract } from "../cron/service-contract.js";
 
 const mockedLogger = vi.hoisted(() => ({
@@ -17,6 +16,7 @@ vi.mock("../logging/subsystem.js", () => ({
   createSubsystemLogger: () => mockedLogger,
 }));
 
+import { clearPluginHostRuntimeState } from "./host-hook-runtime.js";
 import {
   schedulePluginSessionTurn,
   unschedulePluginSessionTurnsByTag,
@@ -48,6 +48,9 @@ describe("schedulePluginSessionTurn diagnostics", () => {
   beforeEach(() => {
     mockedLogger.warn.mockClear();
   });
+  afterEach(() => {
+    clearPluginHostRuntimeState();
+  });
 
   it("logs a warning when the calling plugin is not bundled", async () => {
     const result = await schedulePluginSessionTurn({
@@ -62,9 +65,9 @@ describe("schedulePluginSessionTurn diagnostics", () => {
     );
   });
 
-  it("logs a warning when sessionKey or message is missing", async () => {
+  it("logs a warning when sessionKey is missing", async () => {
     const result = await schedulePluginSessionTurn({
-      pluginId: "browser-handoff",
+      pluginId: "test-plugin",
       origin: "bundled",
       schedule: { ...BASE_SCHEDULE, sessionKey: "" },
       cron: createStubCron(),
@@ -73,12 +76,35 @@ describe("schedulePluginSessionTurn diagnostics", () => {
     expect(mockedLogger.warn).toHaveBeenCalledWith(expect.stringContaining("missing sessionKey"));
   });
 
-  it("logs a warning when the plugin record is not loaded in the active registry", async () => {
-    // This is the exact gate browser-handoff's real-world silent failures traced
-    // to: shouldCommit() returning false means every call reports "Automatic
-    // resume is not available right now" with no signal anywhere as to why.
+  it("logs a warning when message is missing", async () => {
     const result = await schedulePluginSessionTurn({
-      pluginId: "browser-handoff",
+      pluginId: "test-plugin",
+      origin: "bundled",
+      schedule: { ...BASE_SCHEDULE, message: "" },
+      cron: createStubCron(),
+    });
+    expect(result).toBeUndefined();
+    expect(mockedLogger.warn).toHaveBeenCalledWith(expect.stringContaining("missing message"));
+  });
+
+  it("logs a warning when the schedule cannot be resolved", async () => {
+    const result = await schedulePluginSessionTurn({
+      pluginId: "test-plugin",
+      origin: "bundled",
+      schedule: { ...BASE_SCHEDULE, delayMs: -1 },
+      cron: createStubCron(),
+    });
+    expect(result).toBeUndefined();
+    expect(mockedLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("unresolvable schedule"),
+    );
+  });
+
+  it("logs a warning when the plugin record is not loaded in the active registry", async () => {
+    // shouldCommit is the caller's own liveness check on its plugin record;
+    // this gate fires whenever the caller reports itself no longer loaded.
+    const result = await schedulePluginSessionTurn({
+      pluginId: "test-plugin",
       origin: "bundled",
       schedule: BASE_SCHEDULE,
       shouldCommit: () => false,
@@ -92,7 +118,7 @@ describe("schedulePluginSessionTurn diagnostics", () => {
 
   it("logs a warning when cron.add returns no job id", async () => {
     const result = await schedulePluginSessionTurn({
-      pluginId: "browser-handoff",
+      pluginId: "test-plugin",
       origin: "bundled",
       schedule: BASE_SCHEDULE,
       cron: createStubCron({ add: vi.fn(async () => ({ id: "" }) as never) }),
@@ -105,7 +131,7 @@ describe("schedulePluginSessionTurn diagnostics", () => {
 
   it("does not warn on a successful schedule", async () => {
     const result = await schedulePluginSessionTurn({
-      pluginId: "browser-handoff",
+      pluginId: "test-plugin",
       origin: "bundled",
       schedule: BASE_SCHEDULE,
       cron: createStubCron(),
@@ -118,6 +144,9 @@ describe("schedulePluginSessionTurn diagnostics", () => {
 describe("unschedulePluginSessionTurnsByTag diagnostics", () => {
   beforeEach(() => {
     mockedLogger.warn.mockClear();
+  });
+  afterEach(() => {
+    clearPluginHostRuntimeState();
   });
 
   it("logs a warning when the calling plugin is not bundled", async () => {
