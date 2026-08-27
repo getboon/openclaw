@@ -55,7 +55,7 @@ describe("schedulePluginSessionTurn diagnostics", () => {
   it("logs a warning when the calling plugin is not bundled", async () => {
     const result = await schedulePluginSessionTurn({
       pluginId: "not-bundled-plugin",
-      origin: "external",
+      origin: "global",
       schedule: BASE_SCHEDULE,
       cron: createStubCron(),
     });
@@ -152,7 +152,7 @@ describe("unschedulePluginSessionTurnsByTag diagnostics", () => {
   it("logs a warning when the calling plugin is not bundled", async () => {
     const result = await unschedulePluginSessionTurnsByTag({
       pluginId: "not-bundled-plugin",
-      origin: "external",
+      origin: "global",
       cron: createStubCron(),
       request: { sessionKey: "agent:main:main", tag: "site:example.com" },
     });
