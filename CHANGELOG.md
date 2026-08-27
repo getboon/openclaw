@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.28
+
+Adds diagnostic logging so a durable session-turn schedule/unschedule that silently no-ops is actually observable.
+
+- **#156:** `schedulePluginSessionTurn` and `unschedulePluginSessionTurnsByTag` (the mechanism behind `api.session.workflow.scheduleSessionTurn`, e.g. browser-handoff's durable resume) had several early-return gates -- non-bundled plugin origin, missing `sessionKey`/`message`, an unresolvable schedule, the calling plugin record not being loaded in the active registry, `cron.add` returning no job id -- that silently returned `undefined` / an empty success-shaped result with zero logging. Found live-debugging browser-handoff reporting "Automatic resume is not available right now" on every call with no way to tell which gate was rejecting it. Every gate now logs a warning naming the plugin and the specific reason, matching the logging already present on the other failure paths in that file.
+- Base = `2026.6.11-boon.27`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.28` in lockstep. No other code changes; #156 was merged onto `boon` before this release.
+
 ## 2026.6.11-boon.27
 
 Fixes several tools and the plugin SDK addressing a synthetic sandbox/policy session key instead of the caller's real live session, causing scheduled resumes and inter-session messages to land in a fresh, context-free session instead of the real conversation.
