@@ -342,6 +342,15 @@ async function startAgentRun(params: {
 
 export function createSessionsSendTool(opts?: {
   agentSessionKey?: string;
+  /**
+   * The actual live run session key. `agentSessionKey` may be a sandbox/policy
+   * key (e.g. a direct-message peer key scoped only for permission checks) that
+   * was never itself persisted as a transcript session. When present, this is
+   * the real key to report as the sender identity — otherwise a receiving
+   * session is told to address a reply to a key nothing can resume. Mirrors the
+   * session_status/goal-tools fix for #82669/#76708.
+   */
+  runSessionKey?: string;
   agentChannel?: GatewayMessageChannel;
   sandboxed?: boolean;
   config?: OpenClawConfig;
@@ -555,7 +564,7 @@ export function createSessionsSendTool(opts?: {
         });
       }
 
-      const requesterSessionKey = opts?.agentSessionKey;
+      const requesterSessionKey = opts?.runSessionKey ?? opts?.agentSessionKey;
       const requesterChannel = opts?.agentChannel;
       const sameSessionA2A = requesterSessionKey === resolvedKey;
 
@@ -581,13 +590,13 @@ export function createSessionsSendTool(opts?: {
             : undefined;
 
       const agentMessageContext = buildAgentToAgentMessageContext({
-        requesterSessionKey: opts?.agentSessionKey,
+        requesterSessionKey,
         requesterChannel: opts?.agentChannel,
         targetSessionKey: displayKey,
       });
       const inputProvenance = {
         kind: "inter_session" as const,
-        sourceSessionKey: opts?.agentSessionKey,
+        sourceSessionKey: requesterSessionKey,
         sourceChannel: opts?.agentChannel,
         sourceTool: "sessions_send",
       };
