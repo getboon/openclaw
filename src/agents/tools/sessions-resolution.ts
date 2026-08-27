@@ -406,7 +406,11 @@ export async function resolveSessionReference(params: {
       key: params.sessionKey,
       requesterInternalKey: params.requesterInternalKey,
     }) ?? params.sessionKey.trim();
-  if (rawInput === "current") {
+  // Skip the literal-"current" gateway probe entirely when a definitive live
+  // run session is known: probing could match an unrelated real session or
+  // sessionId that happens to be named "current", pre-empting the correct
+  // runSessionKey answer below with no ambiguity left to resolve for.
+  if (rawInput === "current" && !params.runSessionKey) {
     const resolvedCurrent = await resolveSessionReferenceByKeyOrSessionId({
       raw: rawInput,
       alias: params.alias,

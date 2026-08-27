@@ -404,6 +404,37 @@ describe("browser-handoff tool", () => {
       });
     });
 
+    it("clears both the legacy sandbox sessionKey and the live runSessionKey when they differ", async () => {
+      // A recheck scheduled before runSessionKey started taking priority is
+      // tagged under the legacy sessionKey. Cleanup must reach it too, or a
+      // stale job can outlive this cleanup and overlap the live-session check.
+      requestBrowserLoginHandoffMock.mockResolvedValue({
+        handoffToken: "tok_123",
+        liveViewUrl: "https://live.example/view",
+      });
+      const scheduleSessionTurn = vi.fn().mockResolvedValue({ id: "job_1" });
+      const unscheduleSessionTurnsByTag = vi.fn().mockResolvedValue({ removed: 1, failed: 0 });
+      const api = createApi({ scheduleSessionTurn, unscheduleSessionTurnsByTag });
+      const runSessionKey = "agent:main:main";
+      await executeBrowserHandoffTool(
+        api,
+        { action: "request_login", site: "example.com" },
+        { sessionKey, runSessionKey },
+      );
+
+      expect(unscheduleSessionTurnsByTag).toHaveBeenCalledWith({
+        sessionKey: runSessionKey,
+        tag: exampleComTag,
+      });
+      expect(unscheduleSessionTurnsByTag).toHaveBeenCalledWith({
+        sessionKey,
+        tag: exampleComTag,
+      });
+      expect(scheduleSessionTurn).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionKey: runSessionKey }),
+      );
+    });
+
     it("does not reschedule and clears the schedule tag once the handoff fails", async () => {
       requestBrowserLoginHandoffMock.mockResolvedValue({
         handoffToken: "tok_123",

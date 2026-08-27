@@ -123,11 +123,22 @@ async function clearScheduledRecheck(
   if (!sessionKey) {
     return true;
   }
-  const result = await api.session.workflow.unscheduleSessionTurnsByTag({
-    sessionKey,
-    tag: browserHandoffScheduleTag(site),
-  });
-  return result.failed === 0;
+  // A recheck scheduled before runSessionKey started taking priority over
+  // sessionKey is tagged under the legacy sessionKey. Clear both so a job
+  // from before that transition can't outlive this cleanup and overlap the
+  // newly scheduled live-session check.
+  const legacySessionKey =
+    context.runSessionKey && context.sessionKey && context.sessionKey !== sessionKey
+      ? context.sessionKey
+      : undefined;
+  const tag = browserHandoffScheduleTag(site);
+  const results = await Promise.all([
+    api.session.workflow.unscheduleSessionTurnsByTag({ sessionKey, tag }),
+    ...(legacySessionKey
+      ? [api.session.workflow.unscheduleSessionTurnsByTag({ sessionKey: legacySessionKey, tag })]
+      : []),
+  ]);
+  return results.every((result) => result.failed === 0);
 }
 
 export type BrowserHandoffToolTextResult = {
