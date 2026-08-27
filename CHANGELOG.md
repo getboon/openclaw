@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.27
+
+Fixes several tools and the plugin SDK addressing a synthetic sandbox/policy session key instead of the caller's real live session, causing scheduled resumes and inter-session messages to land in a fresh, context-free session instead of the real conversation.
+
+- **#154:** Under `session.dmScope: "main"` (the default), all direct-message turns to an agent collapse into one shared transcript session, while a separate synthetic per-DM-peer key exists only to scope permission/visibility checks and was never itself persisted as a transcript session. `session_status` and the goal tools already resolved this correctly via a `runSessionKey` parameter; `cron` (`add` with `sessionTarget: "current"`, and `wake`), `sessions_send`/`sessions_history` (`sessionKey: "current"`), and the `gateway` tool's post-restart `continuationMessage` binding did not. Most significantly, the plugin SDK's own `OpenClawPluginToolContext.sessionKey` — what the browser-handoff plugin's durable-resume mechanism (`api.session.workflow.scheduleSessionTurn`) uses to schedule its login-status recheck jobs — had no live-run-session alternative at all, so the exact feature built to fix "agent forgets everything" was itself vulnerable to it. All six now prefer the real live run session for addressing/resumption while leaving policy/visibility checks and delivery-context/channel routing on the sandbox key. A new, purely additive `runSessionKey` field was added to the plugin SDK's tool context; browser-handoff also now clears scheduled rechecks under both the old and new key during the upgrade transition.
+- Base = `2026.6.11-boon.26`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.27` in lockstep. No other code changes; #154 was merged onto `boon` before this release.
+
 ## 2026.6.11-boon.26
 
 Fixes a session losing all conversation history whenever a concurrent turn (e.g. a `scheduleSessionTurn` recheck) collided with it, or a gateway restart interrupted it mid-run.

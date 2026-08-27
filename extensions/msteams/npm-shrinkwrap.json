@@ -1,12 +1,12 @@
 {
   "name": "@openclaw/msteams",
-  "version": "2026.6.11-boon.26",
+  "version": "2026.6.11-boon.27",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/msteams",
-      "version": "2026.6.11-boon.26",
+      "version": "2026.6.11-boon.27",
       "dependencies": {
         "@azure/identity": "4.13.1",
         "@microsoft/teams.api": "2.0.12",
