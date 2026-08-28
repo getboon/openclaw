@@ -200,6 +200,14 @@ export class CodexAppServerEventProjector {
   private readonly toolTrajectoryItemsById = new Map<string, CodexThreadItem>();
   private readonly transcriptToolProgressCallIds = new Set<string>();
   private lastNativeToolError: EmbeddedRunAttemptResult["lastToolError"];
+  // Mirrors the embedded runner's toolFailures accumulator (ENG-18812 review
+  // follow-up): lastNativeToolError is a single slot whose own set/clear
+  // semantics stay untouched below, but a turn with two distinct native-tool
+  // failures — or one whose last call happened to succeed — needs every
+  // unresolved failure retained, not just the most recent, or the step-note
+  // digest built from EmbeddedRunAttemptResult.toolFailures silently falls
+  // back to at most one failure on the Codex path.
+  private readonly toolFailures: NonNullable<EmbeddedRunAttemptResult["toolFailures"]> = [];
   private readonly nativeGeneratedMediaItemIds = new Set<string>();
   private readonly nativeGeneratedMediaUrlsByItemId = new Map<string, string>();
   private readonly diagnosticToolStartedAtByItem = new Map<string, number>();
@@ -422,6 +430,7 @@ export class CodexAppServerEventProjector {
       lastAssistant,
       currentAttemptAssistant,
       ...(this.lastNativeToolError ? { lastToolError: this.lastNativeToolError } : {}),
+      ...(this.toolFailures.length > 0 ? { toolFailures: this.toolFailures } : {}),
       didSendViaMessagingTool: toolTelemetry.didSendViaMessagingTool,
       messagingToolSentTexts: toolTelemetry.messagingToolSentTexts,
       messagingToolSentMediaUrls: toolTelemetry.messagingToolSentMediaUrls,
@@ -484,16 +493,20 @@ export class CodexAppServerEventProjector {
       isError: !params.success,
     });
     if (!params.success && params.terminalType === "blocked") {
-      this.lastNativeToolError = {
+      const summary: NonNullable<EmbeddedRunAttemptResult["lastToolError"]> = {
         toolName: params.tool,
         error: resultText || "codex dynamic tool blocked",
       };
-    } else if (
-      params.success &&
-      this.lastNativeToolError &&
-      !this.lastNativeToolError.mutatingAction
-    ) {
-      this.lastNativeToolError = undefined;
+      this.lastNativeToolError = summary;
+      this.recordToolFailure(summary);
+    } else if (params.success) {
+      // Dynamic tool calls carry no meta/fingerprint identity — match on
+      // tool name only (mirrors the native-item branch's toolName+meta rule
+      // with meta always absent here).
+      this.markMatchingToolFailuresRetried({ toolName: params.tool });
+      if (this.lastNativeToolError && !this.lastNativeToolError.mutatingAction) {
+        this.lastNativeToolError = undefined;
+      }
     }
     if (params.sideEffectEvidence === true) {
       this.sideEffectingDynamicToolCallIds.add(params.callId);
@@ -1256,6 +1269,40 @@ export class CodexAppServerEventProjector {
     });
   }
 
+  /** Appends a failure to the toolFailures accumulator alongside the existing single-slot assignment. */
+  private recordToolFailure(summary: NonNullable<EmbeddedRunAttemptResult["lastToolError"]>): void {
+    this.toolFailures.push(summary);
+  }
+
+  /**
+   * Marks toolFailures entries retired by a successful/recovered call, so a
+   * step already fixed by a later identical call is dropped from the digest
+   * instead of stacking a stale failure next to its own success — the same
+   * matching rule `lastNativeToolError`'s own clear branches use just below
+   * each call site (mutation fingerprint for mutating actions, toolName+meta
+   * otherwise), applied to every unresolved entry instead of only the single
+   * most recent one.
+   */
+  private markMatchingToolFailuresRetried(successfulCall: {
+    toolName: string;
+    meta?: string;
+    actionFingerprint?: string;
+  }): void {
+    for (const failure of this.toolFailures) {
+      if (failure.retried) {
+        continue;
+      }
+      const matches = failure.mutatingAction
+        ? failure.actionFingerprint !== undefined &&
+          successfulCall.actionFingerprint !== undefined &&
+          failure.actionFingerprint === successfulCall.actionFingerprint
+        : failure.toolName === successfulCall.toolName && failure.meta === successfulCall.meta;
+      if (matches) {
+        failure.retried = true;
+      }
+    }
+  }
+
   private recordNativeToolError(params: {
     item: CodexThreadItem;
     name: string;
@@ -1264,6 +1311,16 @@ export class CodexAppServerEventProjector {
   }): void {
     if (!isNonSuccessItemStatus(params.status)) {
       this.markToolMetaOutcome(params.item.id, { errored: false });
+      // Only retire toolFailures entries for the SAME step, independent of
+      // lastNativeToolError's own clear logic just below — an earlier
+      // DIFFERENT failed step must stay reported even though some unrelated
+      // call just succeeded (root cause of ENG-18812 on the embedded-runner
+      // path, mirrored here for parity).
+      this.markMatchingToolFailuresRetried({
+        toolName: params.name,
+        meta: params.meta,
+        actionFingerprint: nativeToolActionFingerprint(params.item),
+      });
       if (!this.lastNativeToolError) {
         return;
       }
@@ -1287,13 +1344,15 @@ export class CodexAppServerEventProjector {
     });
     const error = itemToolError(params.item, params.status, this.toolResultOutputTextByItem);
     const actionFingerprint = nativeToolActionFingerprint(params.item);
-    this.lastNativeToolError = {
+    const summary: NonNullable<EmbeddedRunAttemptResult["lastToolError"]> = {
       toolName: params.name,
       ...(params.meta ? { meta: params.meta } : {}),
       ...(error ? { error } : {}),
       ...(isMutatingNativeToolItem(params.item) ? { mutatingAction: true } : {}),
       ...(actionFingerprint ? { actionFingerprint } : {}),
     };
+    this.lastNativeToolError = summary;
+    this.recordToolFailure(summary);
   }
 
   private recordToolTrajectoryEvent(params: {
@@ -1660,33 +1719,42 @@ export class CodexAppServerEventProjector {
     }
 
     if (!params.recordPromptError) {
-      const firstMissingId =
-        missingTranscriptIds.find((id) => {
-          const name = this.toolTranscriptNamesById.get(id) ?? this.toolTrajectoryNamesById.get(id);
-          return Boolean(name);
-        }) ??
-        missingTrajectoryIds.find((id) => {
-          const name = this.toolTrajectoryNamesById.get(id) ?? this.toolTranscriptNamesById.get(id);
-          return Boolean(name);
-        });
-      if (firstMissingId) {
-        const name =
-          this.toolTranscriptNamesById.get(firstMissingId) ??
-          this.toolTrajectoryNamesById.get(firstMissingId);
-        if (name) {
-          const item = this.toolTrajectoryItemsById.get(firstMissingId);
-          const meta = item
-            ? itemMeta(item, this.toolProgressDetailMode())
-            : this.toolMetas.get(firstMissingId)?.meta;
-          const actionFingerprint = item ? nativeToolActionFingerprint(item) : undefined;
-          this.lastNativeToolError = {
-            toolName: name,
-            ...(meta ? { meta } : {}),
-            error: formatMissingToolResultError({ id: firstMissingId, name }),
-            ...(item && isMutatingNativeToolItem(item) ? { mutatingAction: true } : {}),
-            ...(actionFingerprint ? { actionFingerprint } : {}),
-          };
+      const buildMissingToolFailure = (
+        id: string,
+      ): NonNullable<EmbeddedRunAttemptResult["lastToolError"]> | undefined => {
+        const name = this.toolTranscriptNamesById.get(id) ?? this.toolTrajectoryNamesById.get(id);
+        if (!name) {
+          return undefined;
         }
+        const item = this.toolTrajectoryItemsById.get(id);
+        const meta = item
+          ? itemMeta(item, this.toolProgressDetailMode())
+          : this.toolMetas.get(id)?.meta;
+        const actionFingerprint = item ? nativeToolActionFingerprint(item) : undefined;
+        return {
+          toolName: name,
+          ...(meta ? { meta } : {}),
+          error: formatMissingToolResultError({ id, name }),
+          ...(item && isMutatingNativeToolItem(item) ? { mutatingAction: true } : {}),
+          ...(actionFingerprint ? { actionFingerprint } : {}),
+        };
+      };
+      // Every missing id, not only the first — a turn with two hung/dropped
+      // tool results is exactly the multi-failure shape ENG-18812 is about.
+      // lastNativeToolError below stays scoped to the first id, matching the
+      // existing single-slot contract byte-for-byte.
+      const allMissingIds = new Set([...missingTranscriptIds, ...missingTrajectoryIds]);
+      let firstMissingId: string | undefined;
+      for (const id of allMissingIds) {
+        const summary = buildMissingToolFailure(id);
+        if (!summary) {
+          continue;
+        }
+        firstMissingId ??= id;
+        this.recordToolFailure(summary);
+      }
+      if (firstMissingId) {
+        this.lastNativeToolError = buildMissingToolFailure(firstMissingId);
       }
       return;
     }
