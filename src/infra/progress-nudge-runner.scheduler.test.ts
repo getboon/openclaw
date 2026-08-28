@@ -61,6 +61,9 @@ describe("startProgressNudgeRunner scheduler", () => {
       },
       resolveDeliveryTarget:
         resolveDeliveryTarget as unknown as ProgressNudgeDeps["resolveDeliveryTarget"],
+      // Defaults to "supports edit" so existing anchor/send behavior is
+      // unaffected; the edit-support gate tests below override this directly.
+      channelSupportsEdit: () => true,
       sendMessage: sendMessage as unknown as ProgressNudgeDeps["sendMessage"],
       ...over,
     };
@@ -262,5 +265,68 @@ describe("startProgressNudgeRunner scheduler", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(sendMessage).not.toHaveBeenCalled();
     runner.stop();
+  });
+
+  describe("edit-support gate (ENG-18950)", () => {
+    it("suppresses in-turn nudges entirely on a channel that cannot edit", async () => {
+      // A progress nudge only works as one self-updating line. A channel
+      // without edit support (e.g. anychat-boon-web, which only declares
+      // "send") would otherwise turn every repeat nudge into a brand-new
+      // persisted message — suppress it outright instead.
+      const editMessage = vi.fn().mockResolvedValue(true);
+      const { deps, sendMessage } = makeDeps({
+        channelSupportsEdit: () => false,
+        editMessage,
+      });
+      const runner = startProgressNudgeRunner({ cfg: config({ maxNudges: 3 }), deps });
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(editMessage).not.toHaveBeenCalled();
+      runner.stop();
+    });
+
+    it("still uses the anchor/edit path normally when the channel supports edit", async () => {
+      const editMessage = vi.fn().mockResolvedValue(true);
+      const { deps, sendMessage } = makeDeps({
+        channelSupportsEdit: () => true,
+        editMessage,
+      });
+      const runner = startProgressNudgeRunner({ cfg: config({ maxNudges: 2 }), deps });
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect(editMessage).toHaveBeenCalledTimes(1);
+      runner.stop();
+    });
+
+    it("checks edit support per-channel, using the resolved delivery channel", async () => {
+      const supportsEdit = vi.fn().mockReturnValue(false);
+      const { deps, sendMessage } = makeDeps({ channelSupportsEdit: supportsEdit });
+      const runner = startProgressNudgeRunner({ cfg: config(), deps });
+      await vi.advanceTimersByTimeAsync(46_000);
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(supportsEdit).toHaveBeenCalledWith(expect.objectContaining({ channel: "slack" }));
+      runner.stop();
+    });
+
+    it("still delivers the one-shot terminal failure nudge on a channel that cannot edit", async () => {
+      const { deps, sendMessage, active, emitTerminal } = makeDeps({
+        channelSupportsEdit: () => false,
+      });
+      const runner = startProgressNudgeRunner({ cfg: config(), deps });
+      await vi.advanceTimersByTimeAsync(46_000);
+      expect(sendMessage).not.toHaveBeenCalled();
+
+      active.keys = [];
+      emitTerminal({
+        sessionKey: SESSION,
+        sessionId: "s1",
+        result: { kind: "failed", code: "run_failed" },
+        startedAt: 0,
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      runner.stop();
+    });
   });
 });
