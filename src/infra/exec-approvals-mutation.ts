@@ -1,7 +1,7 @@
 // Serializes internal exec-approvals mutations without expanding the public SDK surface.
 import fs from "node:fs";
 import path from "node:path";
-import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./exec-approvals.js";
+import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./exec-approvals.types.js";
 import { withFileLock } from "./file-lock.js";
 import { assertNoSymlinkParentsSync } from "./fs-safe-advanced.js";
 import { expandHomePrefix, resolveRequiredHomeDir } from "./home-dir.js";

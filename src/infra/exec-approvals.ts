@@ -22,7 +22,15 @@ import {
   type ExecApprovalsMutation,
   type ExecApprovalsMutationStore,
 } from "./exec-approvals-mutation.js";
-import type { ExecAllowlistEntry } from "./exec-approvals.types.js";
+import type {
+  ExecAllowlistEntry,
+  ExecApprovalsAgent,
+  ExecApprovalsDefaults,
+  ExecApprovalsFile,
+  ExecApprovalsSnapshot,
+  ExecAsk,
+  ExecSecurity,
+} from "./exec-approvals.types.js";
 import type { ExecAuthorizationPlan } from "./exec-authorization-plan.js";
 import {
   extractBindableShellWrapperInlineCommand,
@@ -39,12 +47,18 @@ import {
 import { shouldRemoveDeadOwnerOrExpiredLock } from "./stale-lock-file.js";
 export * from "./exec-approvals-analysis.js";
 export * from "./exec-approvals-allowlist.js";
-export type { ExecAllowlistEntry } from "./exec-approvals.types.js";
+export type {
+  ExecAllowlistEntry,
+  ExecApprovalsAgent,
+  ExecApprovalsDefaults,
+  ExecApprovalsFile,
+  ExecApprovalsSnapshot,
+  ExecAsk,
+  ExecSecurity,
+} from "./exec-approvals.types.js";
 
 export type ExecHost = "sandbox" | "gateway" | "node";
 export type ExecTarget = "auto" | ExecHost;
-export type ExecSecurity = "deny" | "allowlist" | "full";
-export type ExecAsk = "off" | "on-miss" | "always";
 export type ExecMode = "deny" | "allowlist" | "ask" | "auto" | "full";
 
 export const EXEC_TARGET_VALUES: readonly ExecTarget[] = ["auto", "sandbox", "gateway", "node"];
@@ -252,35 +266,6 @@ export type ExecApprovalResolved = {
   resolvedBy?: string | null;
   ts: number;
   request?: ExecApprovalRequest["request"];
-};
-
-export type ExecApprovalsDefaults = {
-  security?: ExecSecurity;
-  ask?: ExecAsk;
-  askFallback?: ExecSecurity;
-  autoAllowSkills?: boolean;
-};
-
-export type ExecApprovalsAgent = ExecApprovalsDefaults & {
-  allowlist?: ExecAllowlistEntry[];
-};
-
-export type ExecApprovalsFile = {
-  version: 1;
-  socket?: {
-    path?: string;
-    token?: string;
-  };
-  defaults?: ExecApprovalsDefaults;
-  agents?: Record<string, ExecApprovalsAgent>;
-};
-
-export type ExecApprovalsSnapshot = {
-  path: string;
-  exists: boolean;
-  raw: string | null;
-  file: ExecApprovalsFile;
-  hash: string;
 };
 
 export type ExecApprovalsResolved = {
