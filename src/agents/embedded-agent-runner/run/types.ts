@@ -212,6 +212,8 @@ export type EmbeddedRunAttemptResult = {
   lastAssistant: AssistantMessage | undefined;
   currentAttemptAssistant?: AssistantMessage | undefined;
   lastToolError?: ToolErrorSummary;
+  /** Every errored call this turn, independent of lastToolError's single-slot lifecycle (ENG-18812). */
+  toolFailures?: Array<ToolErrorSummary & { retried?: boolean }>;
   didSendViaMessagingTool: boolean;
   didDeliverSourceReplyViaMessageTool?: boolean;
   didSendDeterministicApprovalPrompt?: boolean;
