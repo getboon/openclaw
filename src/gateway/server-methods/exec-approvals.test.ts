@@ -55,7 +55,7 @@ describe("exec approvals gateway methods", () => {
 
   it("checks the base hash against the fresh snapshot held by the mutation lock", async () => {
     const currentSnapshot = makeSnapshot("current-hash");
-    mocks.withExecApprovalsLock.mockImplementation(async (mutate) => {
+    mocks.withExecApprovalsLock.mockImplementation(async (_store, mutate) => {
       const mutation = await mutate(currentSnapshot);
       return mutation.result;
     });
@@ -85,7 +85,7 @@ describe("exec approvals gateway methods", () => {
 
   it("uses the async mutation lock without synchronously initializing approvals first", async () => {
     const currentSnapshot = makeSnapshot("current-hash");
-    mocks.withExecApprovalsLock.mockImplementation(async (mutate) => {
+    mocks.withExecApprovalsLock.mockImplementation(async (_store, mutate) => {
       const mutation = await mutate(currentSnapshot);
       return mutation.result;
     });

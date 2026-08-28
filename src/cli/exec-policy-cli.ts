@@ -12,12 +12,18 @@ import {
   collectExecPolicyScopeSnapshots,
   type ExecPolicyScopeSnapshot,
 } from "../infra/exec-approvals-effective.js";
-import { withExecApprovalsLock } from "../infra/exec-approvals-mutation.js";
+import {
+  withExecApprovalsLock,
+  type ExecApprovalsMutationStore,
+} from "../infra/exec-approvals-mutation.js";
 import {
   normalizeExecAsk,
   normalizeExecSecurity,
   normalizeExecTarget,
   readExecApprovalsSnapshot,
+  resolveExecApprovalsPath,
+  restoreExecApprovalsSnapshot,
+  saveExecApprovals,
   type ExecApprovalsFile,
   type ExecAsk,
   type ExecSecurity,
@@ -93,6 +99,13 @@ type ExecPolicyShowScope = Omit<
     effective: ExecPolicyShowSecurity;
     source: string;
   };
+};
+
+const execApprovalsMutationStore: ExecApprovalsMutationStore = {
+  resolvePath: resolveExecApprovalsPath,
+  readSnapshot: readExecApprovalsSnapshot,
+  save: saveExecApprovals,
+  restore: restoreExecApprovalsSnapshot,
 };
 
 class ExecPolicyCliError extends Error {
@@ -343,24 +356,27 @@ async function applyLocalExecPolicy(policy: ExecPolicyResolved): Promise<ExecPol
       "Local exec-policy cannot synchronize host=node. Node approvals are fetched from the node at runtime.",
     );
   }
-  const { approvalsSnapshot, writtenApprovalsHash } = await withExecApprovalsLock((snapshot) => {
-    const nextApprovals = applyApprovalsDefaults(snapshot.file, policy);
-    return {
-      kind: "save",
-      file: nextApprovals,
-      result: {
-        approvalsSnapshot: snapshot,
-        writtenApprovalsHash: hashExecApprovalsFile(nextApprovals),
-      },
-    };
-  });
+  const { approvalsSnapshot, writtenApprovalsHash } = await withExecApprovalsLock(
+    execApprovalsMutationStore,
+    (snapshot) => {
+      const nextApprovals = applyApprovalsDefaults(snapshot.file, policy);
+      return {
+        kind: "save",
+        file: nextApprovals,
+        result: {
+          approvalsSnapshot: snapshot,
+          writtenApprovalsHash: hashExecApprovalsFile(nextApprovals),
+        },
+      };
+    },
+  );
   try {
     await replaceConfigFile({
       baseHash: configSnapshot.hash,
       nextConfig,
     });
   } catch (err) {
-    await withExecApprovalsLock((currentApprovalsSnapshot) =>
+    await withExecApprovalsLock(execApprovalsMutationStore, (currentApprovalsSnapshot) =>
       currentApprovalsSnapshot.hash === writtenApprovalsHash
         ? {
             kind: "restore",

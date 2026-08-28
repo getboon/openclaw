@@ -22,6 +22,8 @@ import {
 import {
   ensureExecApprovals,
   readExecApprovalsSnapshot,
+  resolveExecApprovalsPath,
+  restoreExecApprovalsSnapshot,
   saveExecApprovals,
 } from "../infra/exec-approvals.js";
 import { withEnvAsync } from "../test-utils/env.js";
@@ -272,11 +274,19 @@ describe("node host invoke", () => {
         const holderReleasePromise = new Promise<void>((resolve) => {
           releaseHolder = resolve;
         });
-        const holder = withExecApprovalsLock(async () => {
-          holderEntered();
-          await holderReleasePromise;
-          return { kind: "unchanged", result: undefined };
-        });
+        const holder = withExecApprovalsLock(
+          {
+            resolvePath: resolveExecApprovalsPath,
+            readSnapshot: readExecApprovalsSnapshot,
+            save: saveExecApprovals,
+            restore: restoreExecApprovalsSnapshot,
+          },
+          async () => {
+            holderEntered();
+            await holderReleasePromise;
+            return { kind: "unchanged", result: undefined };
+          },
+        );
         await holderEnteredPromise;
 
         const request = vi.fn<GatewayClient["request"]>().mockResolvedValue(null);

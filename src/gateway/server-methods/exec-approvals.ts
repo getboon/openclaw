@@ -11,12 +11,16 @@ import {
 import {
   EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE,
   withExecApprovalsLock,
+  type ExecApprovalsMutationStore,
 } from "../../infra/exec-approvals-mutation.js";
 import {
   ensureExecApprovals,
   mergeExecApprovalsSocketDefaults,
   normalizeExecApprovals,
   readExecApprovalsSnapshot,
+  resolveExecApprovalsPath,
+  restoreExecApprovalsSnapshot,
+  saveExecApprovals,
   type ExecApprovalsFile,
   type ExecApprovalsSnapshot,
 } from "../../infra/exec-approvals.js";
@@ -98,6 +102,13 @@ function toExecApprovalsPayload(snapshot: ExecApprovalsSnapshot) {
   };
 }
 
+const execApprovalsMutationStore: ExecApprovalsMutationStore = {
+  resolvePath: resolveExecApprovalsPath,
+  readSnapshot: readExecApprovalsSnapshot,
+  save: saveExecApprovals,
+  restore: restoreExecApprovalsSnapshot,
+};
+
 async function respondWithExecApprovalsNodePayload<TParams extends { nodeId: string }>(params: {
   method: string;
   rawParams: unknown;
@@ -155,7 +166,7 @@ export const execApprovalsHandlers: GatewayRequestHandlers = {
     }
     let saved: boolean;
     try {
-      saved = await withExecApprovalsLock((snapshot) => {
+      saved = await withExecApprovalsLock(execApprovalsMutationStore, (snapshot) => {
         if (!requireApprovalsBaseHash(params, snapshot, respond)) {
           return { kind: "unchanged", result: false };
         }

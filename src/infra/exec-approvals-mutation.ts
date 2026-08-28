@@ -1,14 +1,7 @@
 // Serializes internal exec-approvals mutations without expanding the public SDK surface.
 import fs from "node:fs";
 import path from "node:path";
-import {
-  readExecApprovalsSnapshot,
-  resolveExecApprovalsPath,
-  restoreExecApprovalsSnapshot,
-  saveExecApprovals,
-  type ExecApprovalsFile,
-  type ExecApprovalsSnapshot,
-} from "./exec-approvals.js";
+import type { ExecApprovalsFile, ExecApprovalsSnapshot } from "./exec-approvals.js";
 import { withFileLock } from "./file-lock.js";
 import { assertNoSymlinkParentsSync } from "./fs-safe-advanced.js";
 import { expandHomePrefix, resolveRequiredHomeDir } from "./home-dir.js";
@@ -17,6 +10,13 @@ export type ExecApprovalsMutation<T> =
   | { kind: "unchanged"; result: T }
   | { kind: "save"; file: ExecApprovalsFile; result: T }
   | { kind: "restore"; snapshot: ExecApprovalsSnapshot; result: T };
+
+export type ExecApprovalsMutationStore = {
+  resolvePath: () => string;
+  readSnapshot: () => ExecApprovalsSnapshot;
+  save: (file: ExecApprovalsFile) => void;
+  restore: (snapshot: ExecApprovalsSnapshot) => void;
+};
 
 const EXEC_APPROVALS_LOCK_TIMEOUT_RETRIES = 100;
 const EXEC_APPROVALS_LOCK_POLL_INTERVAL_MS = 50;
@@ -89,11 +89,12 @@ function isFileLockContentionError(err: unknown): boolean {
 }
 
 export async function withExecApprovalsLock<T>(
+  store: ExecApprovalsMutationStore,
   mutate: (
     snapshot: ExecApprovalsSnapshot,
   ) => ExecApprovalsMutation<T> | Promise<ExecApprovalsMutation<T>>,
 ): Promise<T> {
-  const filePath = resolveExecApprovalsPath();
+  const filePath = store.resolvePath();
   if (hasUnmigratedLegacyExecApprovals(filePath)) {
     throw new Error("Exec approvals migration required before mutation");
   }
@@ -112,12 +113,12 @@ export async function withExecApprovalsLock<T>(
         stale: EXEC_APPROVALS_LOCK_STALE_MS,
       },
       async () => {
-        const snapshot = readExecApprovalsSnapshot();
+        const snapshot = store.readSnapshot();
         const mutation = await mutate(snapshot);
         if (mutation.kind === "save") {
-          saveExecApprovals(mutation.file);
+          store.save(mutation.file);
         } else if (mutation.kind === "restore") {
-          restoreExecApprovalsSnapshot(mutation.snapshot);
+          store.restore(mutation.snapshot);
         }
         return mutation.result;
       },

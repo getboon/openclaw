@@ -13,11 +13,17 @@ import {
   collectExecPolicyScopeSnapshots,
   type ExecPolicyScopeSnapshot,
 } from "../infra/exec-approvals-effective.js";
-import { withExecApprovalsLock } from "../infra/exec-approvals-mutation.js";
+import {
+  withExecApprovalsLock,
+  type ExecApprovalsMutationStore,
+} from "../infra/exec-approvals-mutation.js";
 import {
   mergeExecApprovalsSocketDefaults,
   normalizeExecApprovals,
   readExecApprovalsSnapshot,
+  resolveExecApprovalsPath,
+  restoreExecApprovalsSnapshot,
+  saveExecApprovals,
   type ExecApprovalsAgent,
   type ExecApprovalsFile,
 } from "../infra/exec-approvals.js";
@@ -33,6 +39,13 @@ type ExecApprovalsSnapshot = {
   exists: boolean;
   hash: string;
   file: ExecApprovalsFile;
+};
+
+const execApprovalsMutationStore: ExecApprovalsMutationStore = {
+  resolvePath: resolveExecApprovalsPath,
+  readSnapshot: readExecApprovalsSnapshot,
+  save: saveExecApprovals,
+  restore: restoreExecApprovalsSnapshot,
 };
 
 type ConfigSnapshotLike = {
@@ -508,7 +521,7 @@ async function runAllowlistMutation(
     const autoAllowSkills = parseOptionalBoolean(opts.autoAllowSkills, "--auto-allow-skills");
     if (!opts.gateway && !opts.node) {
       defaultRuntime.log(theme.muted("Writing local approvals."));
-      const saved = await withExecApprovalsLock(async (snapshot) => {
+      const saved = await withExecApprovalsLock(execApprovalsMutationStore, async (snapshot) => {
         const context = buildWritableAllowlistAgentContext({
           snapshot,
           nodeId: null,
@@ -655,7 +668,7 @@ export function registerExecApprovalsCli(program: Command) {
         }
         file.version = 1;
         if (source === "local") {
-          await withExecApprovalsLock((snapshot) => {
+          await withExecApprovalsLock(execApprovalsMutationStore, (snapshot) => {
             if (snapshot.hash !== baseHash) {
               throw new Error("exec approvals changed; reload and retry.");
             }

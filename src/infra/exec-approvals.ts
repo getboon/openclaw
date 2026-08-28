@@ -20,6 +20,7 @@ import {
   ExecApprovalsLockContentionError,
   withExecApprovalsLock,
   type ExecApprovalsMutation,
+  type ExecApprovalsMutationStore,
 } from "./exec-approvals-mutation.js";
 import type { ExecAllowlistEntry } from "./exec-approvals.types.js";
 import type { ExecAuthorizationPlan } from "./exec-authorization-plan.js";
@@ -1912,6 +1913,13 @@ export function resolveAllowAlwaysPersistenceDecision(params: {
   return { kind: "one-shot", reasons: [...reasons] };
 }
 
+const execApprovalsMutationStore: ExecApprovalsMutationStore = {
+  resolvePath: resolveExecApprovalsPath,
+  readSnapshot: readExecApprovalsSnapshot,
+  save: saveExecApprovals,
+  restore: restoreExecApprovalsSnapshot,
+};
+
 export async function persistAllowAlwaysDecision(params: {
   agentId: string | undefined;
   decision: AllowAlwaysPersistenceDecision;
@@ -1920,7 +1928,7 @@ export async function persistAllowAlwaysDecision(params: {
   if (decision.kind === "one-shot") {
     return;
   }
-  await withExecApprovalsLock((snapshot) => {
+  await withExecApprovalsLock(execApprovalsMutationStore, (snapshot) => {
     const file = snapshot.file;
     let changed = false;
     if (decision.kind === "exact-command") {

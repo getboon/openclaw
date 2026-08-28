@@ -162,6 +162,7 @@ const mocks = vi.hoisted(() => {
     })),
     withExecApprovalsLock: vi.fn(
       async (
+        _store: unknown,
         mutate: (snapshot: ExecApprovalsSnapshot) => Promise<ExecApprovalsMutationForTest>,
       ) => {
         const snapshot: ExecApprovalsSnapshot = {
@@ -302,6 +303,7 @@ describe("exec-policy CLI", () => {
     mocks.withExecApprovalsLock.mockReset();
     mocks.withExecApprovalsLock.mockImplementation(
       async (
+        _store: unknown,
         mutate: (snapshot: ExecApprovalsSnapshot) => Promise<ExecApprovalsMutationForTest>,
       ) => {
         const snapshot = createCurrentApprovalsSnapshot("/tmp/exec-approvals.json");
@@ -592,6 +594,7 @@ describe("exec-policy CLI", () => {
     let lockCallCount = 0;
     mocks.withExecApprovalsLock.mockImplementation(
       async (
+        _store: unknown,
         mutate: (snapshot: ExecApprovalsSnapshot) => Promise<ExecApprovalsMutationForTest>,
       ) => {
         lockCallCount += 1;

@@ -8,6 +8,7 @@ import { GatewayClient } from "../gateway/client.js";
 import {
   EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE,
   withExecApprovalsLock,
+  type ExecApprovalsMutationStore,
 } from "../infra/exec-approvals-mutation.js";
 import {
   analyzeArgvCommand,
@@ -15,6 +16,9 @@ import {
   mergeExecApprovalsSocketDefaults,
   normalizeExecApprovals,
   readExecApprovalsSnapshot,
+  resolveExecApprovalsPath,
+  restoreExecApprovalsSnapshot,
+  saveExecApprovals,
   resolveAllowAlwaysPatternCoverage,
   type ExecAsk,
   type ExecApprovalsFile,
@@ -194,6 +198,13 @@ type ExecApprovalsSnapshot = {
   exists: boolean;
   hash: string;
   file: ExecApprovalsFile;
+};
+
+const execApprovalsMutationStore: ExecApprovalsMutationStore = {
+  resolvePath: resolveExecApprovalsPath,
+  readSnapshot: readExecApprovalsSnapshot,
+  save: saveExecApprovals,
+  restore: restoreExecApprovalsSnapshot,
 };
 
 type NodeInvokeRequestPayload = {
@@ -530,7 +541,7 @@ export async function handleInvoke(
       if (!params.file || typeof params.file !== "object") {
         throw new Error("INVALID_REQUEST: exec approvals file required");
       }
-      await withExecApprovalsLock((snapshot) => {
+      await withExecApprovalsLock(execApprovalsMutationStore, (snapshot) => {
         requireExecApprovalsBaseHash(params, snapshot);
         const normalized = normalizeExecApprovals(params.file);
         const next = mergeExecApprovalsSocketDefaults({ normalized, current: snapshot.file });

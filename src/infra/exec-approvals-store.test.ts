@@ -31,6 +31,7 @@ let resolveExecApprovalsDisplayPath: ExecApprovalsModule["resolveExecApprovalsDi
 let resolveExecApprovalsPath: ExecApprovalsModule["resolveExecApprovalsPath"];
 let resolveExecApprovalsSocketPath: ExecApprovalsModule["resolveExecApprovalsSocketPath"];
 let resolveExecApprovalsTranscriptPath: ExecApprovalsModule["resolveExecApprovalsTranscriptPath"];
+let restoreExecApprovalsSnapshot: ExecApprovalsModule["restoreExecApprovalsSnapshot"];
 let saveExecApprovals: ExecApprovalsModule["saveExecApprovals"];
 let withExecApprovalsLock: ExecApprovalsMutationModule["withExecApprovalsLock"];
 
@@ -52,6 +53,7 @@ beforeAll(async () => {
     resolveExecApprovalsPath,
     resolveExecApprovalsSocketPath,
     resolveExecApprovalsTranscriptPath,
+    restoreExecApprovalsSnapshot,
     saveExecApprovals,
   } = await import("./exec-approvals.js"));
   ({ withExecApprovalsLock } = await import("./exec-approvals-mutation.js"));
@@ -83,6 +85,15 @@ function approvalsFilePath(homeDir: string): string {
 
 function stateApprovalsFilePath(stateDir: string): string {
   return path.join(stateDir, "exec-approvals.json");
+}
+
+function createExecApprovalsMutationStore() {
+  return {
+    resolvePath: resolveExecApprovalsPath,
+    readSnapshot: readExecApprovalsSnapshot,
+    save: saveExecApprovals,
+    restore: restoreExecApprovalsSnapshot,
+  };
 }
 
 function readApprovalsFile(homeDir: string): ExecApprovalsFile {
@@ -119,12 +130,26 @@ function expectAllowlistEntryFields(
 }
 
 async function mutateApprovalsInChild(homeDir: string, agentId: string): Promise<void> {
-  const moduleUrl = pathToFileURL(
+  const mutationModuleUrl = pathToFileURL(
     path.join(process.cwd(), "src/infra/exec-approvals-mutation.ts"),
   ).href;
+  const approvalsModuleUrl = pathToFileURL(
+    path.join(process.cwd(), "src/infra/exec-approvals.ts"),
+  ).href;
   const script = `
-    const { withExecApprovalsLock } = await import(${JSON.stringify(moduleUrl)});
-    await withExecApprovalsLock(async (snapshot) => {
+    const { withExecApprovalsLock } = await import(${JSON.stringify(mutationModuleUrl)});
+    const {
+      readExecApprovalsSnapshot,
+      resolveExecApprovalsPath,
+      restoreExecApprovalsSnapshot,
+      saveExecApprovals,
+    } = await import(${JSON.stringify(approvalsModuleUrl)});
+    await withExecApprovalsLock({
+      resolvePath: resolveExecApprovalsPath,
+      readSnapshot: readExecApprovalsSnapshot,
+      save: saveExecApprovals,
+      restore: restoreExecApprovalsSnapshot,
+    }, async (snapshot) => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       return {
         kind: "save",
@@ -198,7 +223,7 @@ describe("exec approvals store helpers", () => {
       firstMutationEntered = resolve;
     });
 
-    const first = withExecApprovalsLock(async (snapshot) => {
+    const first = withExecApprovalsLock(createExecApprovalsMutationStore(), async (snapshot) => {
       firstMutationEntered();
       await firstMutationMayFinish;
       return {
@@ -215,7 +240,7 @@ describe("exec approvals store helpers", () => {
     });
     await firstMutationHasLock;
 
-    const second = withExecApprovalsLock((snapshot) => ({
+    const second = withExecApprovalsLock(createExecApprovalsMutationStore(), (snapshot) => ({
       kind: "save",
       file: {
         ...snapshot.file,
@@ -271,7 +296,7 @@ describe("exec approvals store helpers", () => {
     const releaseMutationPromise = new Promise<void>((resolve) => {
       releaseMutation = resolve;
     });
-    const mutation = withExecApprovalsLock(async () => {
+    const mutation = withExecApprovalsLock(createExecApprovalsMutationStore(), async () => {
       mutationEntered();
       await releaseMutationPromise;
       return { kind: "unchanged", result: undefined };
@@ -354,7 +379,7 @@ describe("exec approvals store helpers", () => {
     const lockPath = `${resolveExecApprovalsPath()}.lock`;
 
     await expect(
-      withExecApprovalsLock(async () => {
+      withExecApprovalsLock(createExecApprovalsMutationStore(), async () => {
         throw new Error("mutation failed");
       }),
     ).rejects.toThrow("mutation failed");

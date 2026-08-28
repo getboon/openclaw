@@ -214,7 +214,7 @@ vi.mock("../infra/exec-approvals-mutation.js", async () => {
   );
   return {
     ...actual,
-    withExecApprovalsLock: vi.fn(async (mutate) => {
+    withExecApprovalsLock: vi.fn(async (_store, mutate) => {
       const snapshot = {
         ...localSnapshot,
         raw: JSON.stringify(localSnapshot.file, null, 2),
@@ -609,7 +609,7 @@ describe("exec approvals CLI", () => {
       agents: { concurrent: {} },
     };
     const withExecApprovalsLock = vi.mocked(execApprovalsMutation.withExecApprovalsLock);
-    withExecApprovalsLock.mockImplementationOnce(async (mutate) => {
+    withExecApprovalsLock.mockImplementationOnce(async (_store, mutate) => {
       localSnapshot.file = structuredClone(concurrentFile);
       const mutation = await mutate({
         ...localSnapshot,
