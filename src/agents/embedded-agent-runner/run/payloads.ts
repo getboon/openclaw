@@ -622,7 +622,8 @@ export function buildEmbeddedRunPayloads(params: {
   // for tool #3's failure). Fall back to the newest non-retried entry in the
   // full-turn list in that case, so today's single-slot behavior stays a
   // strict subset of this one.
-  const toolFailures = params.toolFailures ?? (params.lastToolError ? [params.lastToolError] : []);
+  const toolFailures: Array<ToolErrorSummary & { retried?: boolean }> =
+    params.toolFailures ?? (params.lastToolError ? [params.lastToolError] : []);
   const representativeToolError =
     params.lastToolError ?? toolFailures.findLast((failure) => !failure.retried);
 
