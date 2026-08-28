@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.30
+
+Suppresses repeated in-turn progress nudges on channels that can't edit a sent message, and makes the post-run tool-failure note name every unrecovered failure instead of only the most recent one.
+
+- **#163 (ENG-18950):** the progress-nudge runner is designed to post one nudge and then edit that same message in place for every later nudge, falling back to a new message only when the edit fails. The Boon Web channel (`anychat-boon-web`) never declares `edit` support at all, so every nudge silently fell back to sending a brand-new message and re-anchoring to it -- with the default `maxNudges: 3`, one long-running turn produced three permanently persisted chat bubbles instead of one line updating in place. Channels without edit support (Boon Web, Google Chat, WhatsApp) now suppress in-turn progress nudges outright; channels that already support editing (Slack, Telegram, MS Teams, Discord, Matrix, Feishu) are unaffected, as is the one-shot terminal failure nudge on every channel.
+- **#164 (ENG-18812):** the customer-facing "One step didn't finish" summary tracked only a single-slot `lastToolError`, so a turn with two or more distinct tool failures could only ever describe one, and a turn whose _last_ tool call happened to succeed cleared the slot entirely -- surfacing nothing about an earlier, unrecovered failure. A new `toolFailures[]` list (retained independently of `lastToolError`, which still gates its ~25 other call sites unchanged) feeds `buildToolFailureDigest()`, which names every unrecovered failure (deduped, capped, honest "...and N more") using the existing closed `ToolFailureReasonCode` vocabulary -- never raw command/error text. The Codex app-server event projector gets the same `toolFailures` accumulator for parity with the embedded runner.
+- Base = `2026.6.11-boon.29`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.30` in lockstep. No other code changes; #163 and #164 were merged onto `boon` before this release.
+
 ## 2026.6.11-boon.29
 
 Fixes the actual root cause behind browser-handoff's durable resume silently no-op'ing on every cron-triggered recheck.
