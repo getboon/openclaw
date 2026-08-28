@@ -21,6 +21,7 @@ import {
   type ReplyRunTerminalEvent,
 } from "../auto-reply/reply/reply-run-registry.js";
 import { sendDurableMessageBatch } from "../channels/message/runtime.js";
+import { channelDeclaresMessageAction } from "../channels/plugins/message-action-discovery.js";
 import { dispatchChannelMessageAction } from "../channels/plugins/message-action-dispatch.js";
 import { getRuntimeConfig } from "../config/config.js";
 import { resolveStorePath } from "../config/sessions/paths.js";
@@ -84,6 +85,14 @@ export type ProgressNudgeDeps = {
   subscribeAgentEvents?: (listener: (evt: AgentEventPayload) => void) => () => void;
   subscribeTerminal?: (listener: (evt: ReplyRunTerminalEvent) => void) => () => void;
   resolveDeliveryTarget?: typeof resolveHeartbeatDeliveryTargetWithSessionRoute;
+  /**
+   * Whether the target channel has declared support for editing a sent
+   * message. A progress nudge is designed as one self-updating line; a
+   * channel that cannot edit degrades every repeat nudge into a brand-new
+   * persisted message (ENG-18950 — stacked "Still working…" bubbles on
+   * anychat-boon-web, which only declares the "send" action).
+   */
+  channelSupportsEdit?: (params: { cfg: OpenClawConfig; channel: string }) => boolean;
   sendMessage?: typeof sendDurableMessageBatch;
   editMessage?: (params: {
     cfg: OpenClawConfig;
@@ -181,6 +190,10 @@ export function startProgressNudgeRunner(opts: {
   const subscribeTerminal = deps.subscribeTerminal ?? onReplyRunTerminal;
   const resolveDeliveryTarget =
     deps.resolveDeliveryTarget ?? resolveHeartbeatDeliveryTargetWithSessionRoute;
+  const channelSupportsEdit =
+    deps.channelSupportsEdit ??
+    ((params: { cfg: OpenClawConfig; channel: string }) =>
+      channelDeclaresMessageAction({ cfg: params.cfg, channel: params.channel, action: "edit" }));
   const sendMessage = deps.sendMessage ?? sendDurableMessageBatch;
   const editMessage =
     deps.editMessage ??
@@ -212,6 +225,9 @@ export function startProgressNudgeRunner(opts: {
     nudges: new Map<string, NudgeState>(),
     timer: null as NodeJS.Timeout | null,
     stopped: false,
+    // Channels already logged as edit-unsupported, so the poll loop (every
+    // 5-15s, see PROGRESS_NUDGE_MAX_TICK_MS) doesn't spam the same warning.
+    noEditChannelsLogged: new Set<string>(),
   };
   let overflowWarned = false;
 
@@ -242,12 +258,15 @@ export function startProgressNudgeRunner(opts: {
     return entry;
   };
 
-  const deliverNudge = async (
-    sessionKey: string,
-    text: string,
-    threadIdOverride?: string | number,
-    nudgeState?: NudgeState,
-  ): Promise<void> => {
+  const deliverNudge = async (params: {
+    sessionKey: string;
+    /** "progress" is a repeatable placeholder line; "failure" is one-shot real content. */
+    kind: "progress" | "failure";
+    text: string;
+    threadIdOverride?: string | number;
+    nudgeState?: NudgeState;
+  }): Promise<void> => {
+    const { sessionKey, kind, text, threadIdOverride, nudgeState } = params;
     const agentId = resolveAgentIdFromSessionKey(sessionKey) || resolveDefaultAgentId(state.cfg);
     const entry = loadSessionEntryForKey(state.cfg, agentId, sessionKey);
     const delivery = await resolveDeliveryTarget({
@@ -259,6 +278,25 @@ export function startProgressNudgeRunner(opts: {
     });
     if (delivery.channel === "none" || !delivery.to) {
       log.info("progress-nudge: no deliverable target", { sessionKey, reason: delivery.reason });
+      return;
+    }
+    // A progress nudge only works as a single self-updating line. A channel
+    // that cannot edit turns every repeat into a brand-new persisted message
+    // (ENG-18950) — suppress it entirely rather than let it accumulate.
+    // The one-shot terminal failure nudge is exempt: it is real content, not
+    // a repeated placeholder, and it is the guarantee a failed long run never
+    // ends in silence.
+    if (
+      kind === "progress" &&
+      !channelSupportsEdit({ cfg: state.cfg, channel: delivery.channel })
+    ) {
+      if (!state.noEditChannelsLogged.has(delivery.channel)) {
+        state.noEditChannelsLogged.add(delivery.channel);
+        log.info("progress-nudge: channel cannot edit messages; suppressing in-turn nudges", {
+          sessionKey,
+          channel: delivery.channel,
+        });
+      }
       return;
     }
     // A terminal nudge passes the run's route explicitly (the registry no longer
@@ -307,7 +345,11 @@ export function startProgressNudgeRunner(opts: {
       to: delivery.to,
       accountId: delivery.accountId,
       threadId,
-      payloads: [{ text }],
+      // Marks the placeholder as transient status, not assistant answer
+      // content, so it does not pollute threading/TTS/transcript handling on
+      // channels that DO support editing. The failure nudge carries real
+      // content and is excluded.
+      payloads: [{ text, ...(kind === "progress" ? { isStatusNotice: true } : {}) }],
       session: outboundSession,
     });
     if (result.status === "failed" || result.status === "partial_failed") {
@@ -371,7 +413,12 @@ export function startProgressNudgeRunner(opts: {
     }
     entry.lastNudgeSentAtMs = nowMs;
     entry.nudgeCount += 1;
-    await deliverNudge(sessionKey, renderProgressText(entry.progressText), undefined, entry);
+    await deliverNudge({
+      sessionKey,
+      kind: "progress",
+      text: renderProgressText(entry.progressText),
+      nudgeState: entry,
+    });
   };
 
   const tick = async (): Promise<void> => {
@@ -467,14 +514,18 @@ export function startProgressNudgeRunner(opts: {
       entry.errorNudgeSent = true;
       // Pass the run's route explicitly: the operation is already out of the
       // registry, so a live thread lookup would come back empty.
-      void deliverNudge(evt.sessionKey, renderErrorText(), evt.routeThreadId, entry).catch(
-        (err: unknown) => {
-          log.error("progress-nudge: error-nudge delivery failed", {
-            sessionKey: evt.sessionKey,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        },
-      );
+      void deliverNudge({
+        sessionKey: evt.sessionKey,
+        kind: "failure",
+        text: renderErrorText(),
+        threadIdOverride: evt.routeThreadId,
+        nudgeState: entry,
+      }).catch((err: unknown) => {
+        log.error("progress-nudge: error-nudge delivery failed", {
+          sessionKey: evt.sessionKey,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
   };
 
@@ -540,6 +591,7 @@ export function startProgressNudgeRunner(opts: {
     }
     state.timer = null;
     state.nudges.clear();
+    state.noEditChannelsLogged.clear();
   };
 
   opts.abortSignal?.addEventListener("abort", cleanup, { once: true });

@@ -201,6 +201,8 @@ For channel plugins, the SDK surface is `ChannelMessageActionAdapter.describeMes
 
 When a channel-specific message-tool param carries a media source such as a local path or remote media URL, the plugin should also return `mediaSourceParams` from `describeMessageTool(...)`. Core uses that explicit list to apply sandbox path normalization and outbound media-access hints without hardcoding plugin-owned param names. Prefer action-scoped maps there, not one channel-wide flat list, so a profile-only media param does not get normalized on unrelated actions like `send`.
 
+Declaring `edit` in `describeMessageTool(...).actions` is more than a tool-schema detail: core's proactive "still working" progress nudge (`agents.defaults.progressNudge`) is designed as a single line that gets edited in place as a long-running turn continues, and it only delivers that in-turn nudge to channels that declare `edit`. A channel that omits it is not silently degraded to "one new message per nudge" — core checks declared support first (`channelDeclaresMessageAction`) and suppresses the in-turn nudge outright, logging once per channel. The one-shot nudge sent when a long turn fails is unaffected, since it is real content rather than a repeated placeholder. If your channel can update a previously sent message, declare `edit` and implement `handleAction` for it so your users get the live status line instead of no progress nudges at all.
+
 Core passes runtime scope into that discovery step. Important fields include:
 
 - `accountId`

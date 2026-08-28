@@ -17,6 +17,7 @@ import {
   type ChannelMessageToolDiscoveryAdapter,
 } from "./message-tool-api.js";
 import type {
+  ChannelMessageActionAdapter,
   ChannelMessageActionDiscoveryContext,
   ChannelMessageActionName,
   ChannelMessageToolDiscovery,
@@ -446,6 +447,50 @@ export function channelSupportsMessageCapabilityForChannel(
   capability: ChannelMessageCapability,
 ): boolean {
   return listChannelMessageCapabilitiesForChannel(params).includes(capability);
+}
+
+/**
+ * Returns whether a channel has declared usable support for a message action
+ * (e.g. "edit"). `dispatchChannelMessageAction` degrades an unsupported action
+ * to a silent `null` or a thrown error rather than reporting support up
+ * front, so callers that decide *whether to attempt* an action outside the
+ * message tool (e.g. the progress-nudge runner editing its own anchor) need
+ * this to check first instead of discovering failure via a caught exception.
+ */
+export function channelDeclaresMessageAction(params: {
+  cfg?: OpenClawConfig;
+  channel?: string | null;
+  action: ChannelMessageActionName;
+}): boolean {
+  const channelId = resolveMessageActionDiscoveryChannelId(params.channel);
+  if (!channelId) {
+    return false;
+  }
+  const pluginActions = resolveCurrentChannelMessageToolDiscoveryAdapter(channelId);
+  if (!pluginActions) {
+    return false;
+  }
+  const resolved = resolveMessageActionDiscoveryForPlugin({
+    pluginId: pluginActions.pluginId,
+    actions: pluginActions.actions,
+    context: createMessageActionDiscoveryContext({ cfg: params.cfg, channel: channelId }),
+    includeActions: true,
+  });
+  if (!resolved.actions.includes(params.action)) {
+    return false;
+  }
+  // The lightweight bundled discovery artifact only ever carries
+  // `describeMessageTool` (see `ChannelMessageToolDiscoveryAdapter`), so
+  // `supportsAction` is only present here when a full loaded plugin backed
+  // this lookup. Its absence means "no veto available", not "vetoed" — a
+  // plugin without a live `supportsAction` predicate stands by its declared
+  // action list as-is.
+  const supportsAction = (pluginActions.actions as Partial<ChannelMessageActionAdapter>)
+    .supportsAction;
+  if (typeof supportsAction === "function" && !supportsAction({ action: params.action })) {
+    return false;
+  }
+  return true;
 }
 
 export const testing = {
