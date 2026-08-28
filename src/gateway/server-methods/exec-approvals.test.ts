@@ -17,6 +17,15 @@ vi.mock("../../infra/exec-approvals.js", async () => {
     ...actual,
     ensureExecApprovals: mocks.ensureExecApprovals,
     readExecApprovalsSnapshot: mocks.readExecApprovalsSnapshot,
+  };
+});
+
+vi.mock("../../infra/exec-approvals-mutation.js", async () => {
+  const actual = await vi.importActual<typeof import("../../infra/exec-approvals-mutation.js")>(
+    "../../infra/exec-approvals-mutation.js",
+  );
+  return {
+    ...actual,
     withExecApprovalsLock: mocks.withExecApprovalsLock,
   };
 });

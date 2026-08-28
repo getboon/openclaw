@@ -12,12 +12,12 @@ import {
   collectExecPolicyScopeSnapshots,
   type ExecPolicyScopeSnapshot,
 } from "../infra/exec-approvals-effective.js";
+import { withExecApprovalsLock } from "../infra/exec-approvals-mutation.js";
 import {
   normalizeExecAsk,
   normalizeExecSecurity,
   normalizeExecTarget,
   readExecApprovalsSnapshot,
-  withExecApprovalsLock,
   type ExecApprovalsFile,
   type ExecAsk,
   type ExecSecurity,

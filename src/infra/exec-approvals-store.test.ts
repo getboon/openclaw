@@ -16,6 +16,7 @@ vi.mock("./jsonl-socket.js", () => ({
 import type { ExecApprovalsFile } from "./exec-approvals.js";
 
 type ExecApprovalsModule = typeof import("./exec-approvals.js");
+type ExecApprovalsMutationModule = typeof import("./exec-approvals-mutation.js");
 
 let ensureExecApprovals: ExecApprovalsModule["ensureExecApprovals"];
 let mergeExecApprovalsSocketDefaults: ExecApprovalsModule["mergeExecApprovalsSocketDefaults"];
@@ -31,7 +32,7 @@ let resolveExecApprovalsPath: ExecApprovalsModule["resolveExecApprovalsPath"];
 let resolveExecApprovalsSocketPath: ExecApprovalsModule["resolveExecApprovalsSocketPath"];
 let resolveExecApprovalsTranscriptPath: ExecApprovalsModule["resolveExecApprovalsTranscriptPath"];
 let saveExecApprovals: ExecApprovalsModule["saveExecApprovals"];
-let withExecApprovalsLock: ExecApprovalsModule["withExecApprovalsLock"];
+let withExecApprovalsLock: ExecApprovalsMutationModule["withExecApprovalsLock"];
 
 const tempDirs: string[] = [];
 const testEnvSnapshot = captureEnv(["OPENCLAW_HOME", "OPENCLAW_STATE_DIR"]);
@@ -52,8 +53,8 @@ beforeAll(async () => {
     resolveExecApprovalsSocketPath,
     resolveExecApprovalsTranscriptPath,
     saveExecApprovals,
-    withExecApprovalsLock,
   } = await import("./exec-approvals.js"));
+  ({ withExecApprovalsLock } = await import("./exec-approvals-mutation.js"));
 });
 
 beforeEach(() => {
@@ -118,7 +119,9 @@ function expectAllowlistEntryFields(
 }
 
 async function mutateApprovalsInChild(homeDir: string, agentId: string): Promise<void> {
-  const moduleUrl = pathToFileURL(path.join(process.cwd(), "src/infra/exec-approvals.ts")).href;
+  const moduleUrl = pathToFileURL(
+    path.join(process.cwd(), "src/infra/exec-approvals-mutation.ts"),
+  ).href;
   const script = `
     const { withExecApprovalsLock } = await import(${JSON.stringify(moduleUrl)});
     await withExecApprovalsLock(async (snapshot) => {
@@ -251,6 +254,41 @@ describe("exec approvals store helpers", () => {
       "Exec approvals update is already in progress",
     );
     expect(fs.existsSync(approvalsFilePath(dir))).toBe(false);
+  });
+
+  it("reads non-socket policy while an async mutation owns the approvals lock", async () => {
+    createHomeDir();
+    saveExecApprovals({
+      version: 1,
+      defaults: { security: "allowlist", ask: "on-miss" },
+      agents: {},
+    });
+    let releaseMutation!: () => void;
+    let mutationEntered!: () => void;
+    const mutationEnteredPromise = new Promise<void>((resolve) => {
+      mutationEntered = resolve;
+    });
+    const releaseMutationPromise = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    const mutation = withExecApprovalsLock(async () => {
+      mutationEntered();
+      await releaseMutationPromise;
+      return { kind: "unchanged", result: undefined };
+    });
+    await mutationEnteredPromise;
+
+    const resolved = resolveExecApprovals("main", {
+      security: "allowlist",
+      ask: "on-miss",
+    });
+
+    expect(resolved.agent.security).toBe("allowlist");
+    expect(resolved.agent.ask).toBe("on-miss");
+    expect(resolved.token).toBe("");
+
+    releaseMutation();
+    await mutation;
   });
 
   it("reclaims a dead-owner lock before synchronous socket persistence", () => {

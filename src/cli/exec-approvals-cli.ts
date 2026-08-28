@@ -13,11 +13,11 @@ import {
   collectExecPolicyScopeSnapshots,
   type ExecPolicyScopeSnapshot,
 } from "../infra/exec-approvals-effective.js";
+import { withExecApprovalsLock } from "../infra/exec-approvals-mutation.js";
 import {
   mergeExecApprovalsSocketDefaults,
   normalizeExecApprovals,
   readExecApprovalsSnapshot,
-  withExecApprovalsLock,
   type ExecApprovalsAgent,
   type ExecApprovalsFile,
 } from "../infra/exec-approvals.js";
@@ -418,7 +418,7 @@ function parseOptionalBoolean(value: string | undefined, optionName: string): bo
   if (normalized === "false") {
     return false;
   }
-  exitWithError(`${optionName} must be true or false.`);
+  return exitWithError(`${optionName} must be true or false.`);
 }
 
 function ensureAgent(file: ExecApprovalsFile, agentKey: string): ExecApprovalsAgent {

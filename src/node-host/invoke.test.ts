@@ -6,8 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { GatewayClient } from "../gateway/client.js";
 const withExecApprovalsLockMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../infra/exec-approvals.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../infra/exec-approvals.js")>();
+vi.mock("../infra/exec-approvals-mutation.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../infra/exec-approvals-mutation.js")>();
   withExecApprovalsLockMock.mockImplementation(actual.withExecApprovalsLock);
   return {
     ...actual,
@@ -17,10 +17,12 @@ vi.mock("../infra/exec-approvals.js", async (importOriginal) => {
 
 import {
   EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE,
+  withExecApprovalsLock,
+} from "../infra/exec-approvals-mutation.js";
+import {
   ensureExecApprovals,
   readExecApprovalsSnapshot,
   saveExecApprovals,
-  withExecApprovalsLock,
 } from "../infra/exec-approvals.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import type { SkillBinsProvider } from "./invoke-types.js";
@@ -296,7 +298,9 @@ describe("node host invoke", () => {
           skillBins,
         );
 
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 10);
+        });
         releaseHolder();
         await Promise.all([holder, set]);
 

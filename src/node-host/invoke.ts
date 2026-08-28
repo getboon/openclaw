@@ -6,14 +6,16 @@ import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/st
 import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { GatewayClient } from "../gateway/client.js";
 import {
-  analyzeArgvCommand,
   EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE,
+  withExecApprovalsLock,
+} from "../infra/exec-approvals-mutation.js";
+import {
+  analyzeArgvCommand,
   ensureExecApprovals,
   mergeExecApprovalsSocketDefaults,
   normalizeExecApprovals,
   readExecApprovalsSnapshot,
   resolveAllowAlwaysPatternCoverage,
-  withExecApprovalsLock,
   type ExecAsk,
   type ExecApprovalsFile,
   type ExecApprovalsResolved,

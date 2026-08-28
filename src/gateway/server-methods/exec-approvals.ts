@@ -10,11 +10,13 @@ import {
 } from "../../../packages/gateway-protocol/src/index.js";
 import {
   EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE,
+  withExecApprovalsLock,
+} from "../../infra/exec-approvals-mutation.js";
+import {
   ensureExecApprovals,
   mergeExecApprovalsSocketDefaults,
   normalizeExecApprovals,
   readExecApprovalsSnapshot,
-  withExecApprovalsLock,
   type ExecApprovalsFile,
   type ExecApprovalsSnapshot,
 } from "../../infra/exec-approvals.js";

@@ -5,7 +5,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { Command } from "commander";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as execApprovals from "../infra/exec-approvals.js";
+import * as execApprovalsMutation from "../infra/exec-approvals-mutation.js";
 import type { ExecApprovalsFile } from "../infra/exec-approvals.js";
 import { registerExecApprovalsCli, testing } from "./exec-approvals-cli.js";
 
@@ -205,6 +205,15 @@ vi.mock("../infra/exec-approvals.js", async () => {
   return {
     ...actual,
     readExecApprovalsSnapshot: () => localSnapshot,
+  };
+});
+
+vi.mock("../infra/exec-approvals-mutation.js", async () => {
+  const actual = await vi.importActual<typeof import("../infra/exec-approvals-mutation.js")>(
+    "../infra/exec-approvals-mutation.js",
+  );
+  return {
+    ...actual,
     withExecApprovalsLock: vi.fn(async (mutate) => {
       const snapshot = {
         ...localSnapshot,
@@ -575,7 +584,7 @@ describe("exec approvals CLI", () => {
   });
 
   it("defaults allowlist add to wildcard agent", async () => {
-    const withExecApprovalsLock = vi.mocked(execApprovals.withExecApprovalsLock);
+    const withExecApprovalsLock = vi.mocked(execApprovalsMutation.withExecApprovalsLock);
     withExecApprovalsLock.mockClear();
 
     await runApprovalsCommand(["approvals", "allowlist", "add", "/usr/bin/uname"]);
@@ -599,7 +608,7 @@ describe("exec approvals CLI", () => {
       version: 1,
       agents: { concurrent: {} },
     };
-    const withExecApprovalsLock = vi.mocked(execApprovals.withExecApprovalsLock);
+    const withExecApprovalsLock = vi.mocked(execApprovalsMutation.withExecApprovalsLock);
     withExecApprovalsLock.mockImplementationOnce(async (mutate) => {
       localSnapshot.file = structuredClone(concurrentFile);
       const mutation = await mutate({
@@ -639,7 +648,7 @@ describe("exec approvals CLI", () => {
       },
     };
 
-    const withExecApprovalsLock = vi.mocked(execApprovals.withExecApprovalsLock);
+    const withExecApprovalsLock = vi.mocked(execApprovalsMutation.withExecApprovalsLock);
     withExecApprovalsLock.mockClear();
 
     await runApprovalsCommand(["approvals", "allowlist", "remove", "/usr/bin/uname"]);

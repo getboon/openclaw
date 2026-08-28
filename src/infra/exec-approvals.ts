@@ -16,13 +16,17 @@ import {
   resolveAllowAlwaysPatternEntries,
 } from "./exec-approvals-allowlist.js";
 import type { ExecCommandSegment } from "./exec-approvals-analysis.js";
+import {
+  ExecApprovalsLockContentionError,
+  withExecApprovalsLock,
+  type ExecApprovalsMutation,
+} from "./exec-approvals-mutation.js";
 import type { ExecAllowlistEntry } from "./exec-approvals.types.js";
 import type { ExecAuthorizationPlan } from "./exec-authorization-plan.js";
 import {
   extractBindableShellWrapperInlineCommand,
   isShellWrapperInvocation,
 } from "./exec-wrapper-resolution.js";
-import { withFileLock } from "./file-lock.js";
 import { assertNoSymlinkParentsSync } from "./fs-safe-advanced.js";
 import { expandHomePrefix, resolveHomeRelativePath, resolveRequiredHomeDir } from "./home-dir.js";
 import { requestJsonlSocket } from "./jsonl-socket.js";
@@ -278,11 +282,6 @@ export type ExecApprovalsSnapshot = {
   hash: string;
 };
 
-export type ExecApprovalsMutation<T> =
-  | { kind: "unchanged"; result: T }
-  | { kind: "save"; file: ExecApprovalsFile; result: T }
-  | { kind: "restore"; snapshot: ExecApprovalsSnapshot; result: T };
-
 export type ExecApprovalsResolved = {
   path: string;
   socketPath: string;
@@ -308,20 +307,7 @@ const DEFAULT_AUTO_ALLOW_SKILLS = false;
 const DEFAULT_EXEC_APPROVALS_STATE_DIR = "~/.openclaw";
 const EXEC_APPROVALS_FILE = "exec-approvals.json";
 const EXEC_APPROVALS_SOCKET = "exec-approvals.sock";
-const EXEC_APPROVALS_LOCK_TIMEOUT_RETRIES = 100;
-const EXEC_APPROVALS_LOCK_POLL_INTERVAL_MS = 50;
 const EXEC_APPROVALS_LOCK_STALE_MS = 30_000;
-
-export const EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE = "exec_approvals_lock_contended";
-
-export class ExecApprovalsLockContentionError extends Error {
-  code = EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE;
-
-  constructor() {
-    super("Exec approvals update is already in progress; retry this operation.");
-    this.name = "ExecApprovalsLockContentionError";
-  }
-}
 
 function hashExecApprovalsRaw(raw: string | null): string {
   return crypto
@@ -874,53 +860,6 @@ function assertSafeExecApprovalsLockDestination(filePath: string): string {
   return lockPath;
 }
 
-function isFileLockContentionError(err: unknown): boolean {
-  const code = (err as NodeJS.ErrnoException).code;
-  return code === "file_lock_timeout" || code === "file_lock_stale";
-}
-
-export async function withExecApprovalsLock<T>(
-  mutate: (
-    snapshot: ExecApprovalsSnapshot,
-  ) => ExecApprovalsMutation<T> | Promise<ExecApprovalsMutation<T>>,
-): Promise<T> {
-  const filePath = resolveExecApprovalsPath();
-  if (hasUnmigratedLegacyExecApprovals(filePath)) {
-    throw new Error("Exec approvals migration required before mutation");
-  }
-  assertSafeExecApprovalsLockDestination(filePath);
-  try {
-    return await withFileLock(
-      filePath,
-      {
-        allowReentrant: false,
-        retries: {
-          retries: EXEC_APPROVALS_LOCK_TIMEOUT_RETRIES,
-          factor: 1,
-          minTimeout: EXEC_APPROVALS_LOCK_POLL_INTERVAL_MS,
-          maxTimeout: EXEC_APPROVALS_LOCK_POLL_INTERVAL_MS,
-        },
-        stale: EXEC_APPROVALS_LOCK_STALE_MS,
-      },
-      async () => {
-        const snapshot = readExecApprovalsSnapshot();
-        const mutation = await mutate(snapshot);
-        if (mutation.kind === "save") {
-          saveExecApprovals(mutation.file);
-        } else if (mutation.kind === "restore") {
-          restoreExecApprovalsSnapshot(mutation.snapshot);
-        }
-        return mutation.result;
-      },
-    );
-  } catch (err) {
-    if (isFileLockContentionError(err)) {
-      throw new ExecApprovalsLockContentionError();
-    }
-    throw err;
-  }
-}
-
 type ExecApprovalsSingleAttemptLock = {
   lockPath: string;
   token: string;
@@ -1366,6 +1305,22 @@ export function resolveExecApprovals(
     ) {
       return resolved;
     }
+    try {
+      const ensured = ensureExecApprovals();
+      return resolveExecApprovalsFromFile({
+        file: ensured,
+        agentId,
+        overrides,
+        path: filePath,
+        socketPath: expandHomePrefix(ensured.socket?.path ?? resolveExecApprovalsSocketPath()),
+        token: ensured.socket?.token ?? "",
+      });
+    } catch (err) {
+      if (err instanceof ExecApprovalsLockContentionError) {
+        return resolved;
+      }
+      throw err;
+    }
   }
   const file = ensureExecApprovals();
   return resolveExecApprovalsFromFile({
@@ -1677,13 +1632,12 @@ function recordAllowlistMatchesUseInFile(params: {
       return item;
     }
     changed = true;
-    return {
-      ...item,
+    return Object.assign({}, item, {
       id: item.id ?? crypto.randomUUID(),
       lastUsedAt: Date.now(),
       lastUsedCommand: params.command,
       lastResolvedPath: params.resolvedPath,
-    };
+    });
   });
   if (!changed) {
     return false;
