@@ -86,6 +86,18 @@ export type EmbeddedAgentSubscribeState = {
   itemStartedCount: number;
   itemCompletedCount: number;
   lastToolError?: ToolErrorSummary;
+  /**
+   * Every errored call this turn, not just the most recent. `lastToolError`
+   * stays the single "is a failure still live" gate for the ~25 existing call
+   * sites that depend on its set/clear semantics (incomplete-turn detection,
+   * failure-signal, trajectory export); this list independently owns the
+   * *content* of the step-failure note, so it must survive a later unrelated
+   * tool succeeding — that used to clear `lastToolError` and erase the only
+   * record a failure ever happened (ENG-18812). `retried: true` marks an
+   * entry a later identical call fixed, so the note doesn't shout about a
+   * transient that already recovered (ENG-18917).
+   */
+  toolFailures: Array<ToolErrorSummary & { retried?: boolean }>;
 
   blockReplyBreak: "text_end" | "message_end";
   reasoningMode: ReasoningLevel;
@@ -309,6 +321,7 @@ type ToolHandlerState = Pick<
   | "itemStartedCount"
   | "itemCompletedCount"
   | "lastToolError"
+  | "toolFailures"
   | "pendingMessagingTargets"
   | "pendingMessagingTexts"
   | "pendingMessagingMediaUrls"

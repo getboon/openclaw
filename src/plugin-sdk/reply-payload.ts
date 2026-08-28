@@ -15,12 +15,15 @@ export type { ReplyPayloadTtsSupplement } from "../auto-reply/reply-payload.js";
 export {
   buildTtsSupplementMediaPayload,
   FAST_MODE_AUTO_PROGRESS_KIND,
+  getReplyPayloadToolFailureDigest,
   getReplyPayloadTtsSupplement,
   isFastModeAutoProgressPayload,
   isReplyPayloadNonTerminalToolErrorWarning,
   isReplyPayloadTtsSupplement,
   markReplyPayloadAsTtsSupplement,
 } from "../auto-reply/reply-payload.js";
+export type { ToolFailureDigest, ToolFailureDigestEntry } from "../agents/tool-failure-digest.js";
+export type { ToolFailureReasonCode } from "../agents/tool-error-summary.js";
 
 /** Normalized outbound reply payload accepted by channel send helpers. */
 export type OutboundReplyPayload = {

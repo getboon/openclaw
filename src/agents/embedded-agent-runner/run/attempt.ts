@@ -3692,6 +3692,7 @@ export async function runEmbeddedAttempt(
         didSendViaMessagingTool,
         didSendDeterministicApprovalPrompt,
         getLastToolError,
+        getToolFailures,
         setTerminalLifecycleMeta,
         getUsageTotals,
         getCompactionCount,
@@ -5467,6 +5468,8 @@ export async function runEmbeddedAttempt(
         completedClientToolCalls.length > 0 ? completedClientToolCalls : undefined;
       const didSendDeterministicApprovalPromptNow = didSendDeterministicApprovalPrompt();
       const lastToolError = getLastToolError?.();
+      // Independent of lastToolError's single-slot lifecycle (ENG-18812).
+      const toolFailures = getToolFailures?.();
       const heartbeatToolResponse = getHeartbeatToolResponse();
       const messagingToolSourceReplyPayloads = getMessagingToolSourceReplyPayloads();
       const hasToolMediaBlockReplyNow = hasToolMediaBlockReply();
@@ -5654,6 +5657,7 @@ export async function runEmbeddedAttempt(
         lastAssistant,
         currentAttemptAssistant,
         lastToolError,
+        toolFailures,
         didSendViaMessagingTool: didSendViaMessagingTool(),
         didDeliverSourceReplyViaMessageTool,
         didSendDeterministicApprovalPrompt: didSendDeterministicApprovalPromptNow,

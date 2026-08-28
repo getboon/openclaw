@@ -170,9 +170,21 @@ export class CodexAppServerEventProjector {
     { chars: number; messages: number; truncated: boolean }
   >();
   private readonly toolResultOutputTextByItem = new Map<string, string>();
+  // `errored`/`status` mirror the embedded runner's `toolMetas` shape
+  // (embedded-agent-subscribe.handlers.tools.ts) so the shared reply-payload
+  // builder can classify Codex-path calls too. Left unset until the item's
+  // terminal status is known — every invocation used to read as implicitly
+  // "ok", so the verification counter could never show a Codex-path failure
+  // at all (ENG-18812 follow-up).
   private readonly toolMetas = new Map<
     string,
-    { toolName: string; meta?: string; asyncStarted?: boolean }
+    {
+      toolName: string;
+      meta?: string;
+      asyncStarted?: boolean;
+      errored?: boolean;
+      status?: "blocked";
+    }
   >();
   private readonly terminalPresentationClearedItemIds = new Set<string>();
   private readonly nativeToolOutcomeOrdinals = new Map<string, number>();
@@ -1231,6 +1243,19 @@ export class CodexAppServerEventProjector {
     });
   }
 
+  /** Records the terminal outcome on `toolMetas` alongside the existing single-slot `lastNativeToolError`. */
+  private markToolMetaOutcome(itemId: string, outcome: { errored: boolean; blocked?: true }): void {
+    const existing = this.toolMetas.get(itemId);
+    if (!existing) {
+      return;
+    }
+    this.toolMetas.set(itemId, {
+      ...existing,
+      errored: outcome.errored,
+      ...(outcome.blocked ? { status: "blocked" } : {}),
+    });
+  }
+
   private recordNativeToolError(params: {
     item: CodexThreadItem;
     name: string;
@@ -1238,6 +1263,7 @@ export class CodexAppServerEventProjector {
     status: ReturnType<typeof itemStatus>;
   }): void {
     if (!isNonSuccessItemStatus(params.status)) {
+      this.markToolMetaOutcome(params.item.id, { errored: false });
       if (!this.lastNativeToolError) {
         return;
       }
@@ -1255,6 +1281,10 @@ export class CodexAppServerEventProjector {
       }
       return;
     }
+    this.markToolMetaOutcome(params.item.id, {
+      errored: true,
+      ...(params.status === "blocked" ? { blocked: true } : {}),
+    });
     const error = itemToolError(params.item, params.status, this.toolResultOutputTextByItem);
     const actionFingerprint = nativeToolActionFingerprint(params.item);
     this.lastNativeToolError = {
