@@ -1299,10 +1299,98 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     expectRecordFields(result, {
       delivered: false,
       path: "direct",
-      reason: "visible_reply_missing",
+      reason: "subagent_no_output",
+      error: "completion agent did not produce a visible reply",
+    });
+    // The placeholder "(no output)" is never delivered, but a DM requester gets
+    // one honest notice that the background task did not finish.
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "discord",
+        to: "dm:U123",
+        content: expect.stringContaining("didn't finish"),
+        idempotencyKey: "announce-dm-fallback-empty:no-output-notice",
+      }),
+    );
+  });
+
+  it("classifies a frozen no-output completion on a thread as subagent_no_output", async () => {
+    const callGateway = createGatewayMock({
+      result: {
+        payloads: [],
+      },
+    });
+    const sendMessage = createSendMessageMock();
+
+    const result = await deliverSlackThreadAnnouncement({
+      callGateway,
+      sendMessage,
+      sessionId: "requester-session-4",
+      isActive: false,
+      expectsCompletionMessage: true,
+      directIdempotencyKey: "announce-thread-no-output",
+      internalEvents: [
+        {
+          type: "task_completion",
+          source: "subagent",
+          childSessionKey: "agent:worker:subagent:child",
+          childSessionId: "child-session-id",
+          announceType: "subagent task",
+          taskLabel: "thread completion smoke",
+          status: "error",
+          statusLabel: "failed: all models failed",
+          result: "(no output)",
+          replyInstruction: "Summarize the result.",
+        },
+      ],
+    });
+
+    expectRecordFields(result, {
+      delivered: false,
+      path: "direct",
+      reason: "subagent_no_output",
       error: "completion agent did not produce a visible reply",
     });
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("still reports the no-output give-up when the honest notice itself fails to send", async () => {
+    const callGateway = createGatewayMock({
+      result: {
+        payloads: [],
+      },
+    });
+    const sendMessage = vi.fn(async () => {
+      throw new Error("channel unavailable");
+    }) as unknown as typeof runtimeSendMessage;
+
+    const result = await deliverDiscordDirectMessageCompletion({
+      callGateway,
+      sendMessage,
+      internalEvents: [
+        {
+          type: "task_completion",
+          source: "subagent",
+          childSessionKey: "agent:worker:subagent:child",
+          childSessionId: "child-session-id",
+          announceType: "subagent task",
+          taskLabel: "direct completion smoke",
+          status: "error",
+          statusLabel: "failed: all models failed",
+          result: "(no output)",
+          replyInstruction: "Summarize the result.",
+        },
+      ],
+    });
+
+    expectRecordFields(result, {
+      delivered: false,
+      path: "direct",
+      reason: "subagent_no_output",
+      error: "completion agent did not produce a visible reply",
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 
   it("directly delivers unprefixed direct targets recognized by the channel grammar", async () => {

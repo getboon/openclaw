@@ -1030,6 +1030,58 @@ async function deliverTextCompletionDirect(params: {
   }
 }
 
+// When a subagent completion is frozen with no output, delivery permanently
+// fails. Rather than leave a direct requester with pure silence, send one honest
+// notice. Scoped to true DMs (the same targets that already accept a raw text
+// fallback); threaded conversations deliver through the requester-agent handoff,
+// so raw-sending there is intentionally avoided. Best-effort: a failed notice
+// never changes the give-up outcome its caller returns.
+async function notifySubagentNoOutputGiveUp(params: {
+  cfg: OpenClawConfig;
+  requesterSessionKey: string;
+  directIdempotencyKey: string;
+  deliveryTarget: {
+    deliver: boolean;
+    channel?: string;
+    to?: string;
+    accountId?: string;
+    threadId?: string;
+  };
+}): Promise<void> {
+  if (
+    !params.deliveryTarget.deliver ||
+    !params.deliveryTarget.channel ||
+    !params.deliveryTarget.to ||
+    !isDirectMessageDeliveryTarget(params.deliveryTarget, params.requesterSessionKey)
+  ) {
+    return;
+  }
+  const agentId = resolveAgentIdFromSessionKey(params.requesterSessionKey);
+  const idempotencyKey = `${params.directIdempotencyKey}:no-output-notice`;
+  try {
+    await subagentAnnounceDeliveryDeps.sendMessage({
+      cfg: params.cfg,
+      channel: params.deliveryTarget.channel,
+      to: params.deliveryTarget.to,
+      accountId: params.deliveryTarget.accountId,
+      threadId: params.deliveryTarget.threadId,
+      requesterSessionKey: params.requesterSessionKey,
+      agentId,
+      content: "A background task I started didn't finish, so I don't have a result to share.",
+      idempotencyKey,
+      mirror: {
+        sessionKey: params.requesterSessionKey,
+        agentId,
+        idempotencyKey,
+      },
+    });
+  } catch (err) {
+    defaultRuntime.log(
+      `[warn] subagent no-output honest notice failed: ${summarizeDeliveryError(err)}`,
+    );
+  }
+}
+
 function resolveGeneratedMediaDirectFallbackUrls(params: {
   expectedMediaUrls: readonly string[];
   announceResponse?: unknown;
@@ -1612,10 +1664,16 @@ async function sendSubagentAnnounceDirectly(params: {
         return textDelivery;
       }
       if (hasFailedSubagentNoOutputCompletion(params.internalEvents)) {
+        await notifySubagentNoOutputGiveUp({
+          cfg,
+          requesterSessionKey: canonicalRequesterSessionKey,
+          directIdempotencyKey: params.directIdempotencyKey,
+          deliveryTarget,
+        });
         return {
           delivered: false,
           path: "direct",
-          reason: "visible_reply_missing",
+          reason: "subagent_no_output",
           error: "completion agent did not produce a visible reply",
         };
       }
@@ -1627,10 +1685,16 @@ async function sendSubagentAnnounceDirectly(params: {
       !hasIntentionalSilentGatewayAgentPayload(directAnnounceResponse)
     ) {
       if (hasFailedSubagentNoOutputCompletion(params.internalEvents)) {
+        await notifySubagentNoOutputGiveUp({
+          cfg,
+          requesterSessionKey: canonicalRequesterSessionKey,
+          directIdempotencyKey: params.directIdempotencyKey,
+          deliveryTarget,
+        });
         return {
           delivered: false,
           path: "direct",
-          reason: "visible_reply_missing",
+          reason: "subagent_no_output",
           error: "completion agent did not produce a visible reply",
         };
       }

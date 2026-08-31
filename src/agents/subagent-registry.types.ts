@@ -81,7 +81,8 @@ export type SubagentCompletionDeliveryState = {
     | "parent_run_ended"
     | "sink_unavailable"
     | "dedupe"
-    | "waiting_for_requester_turn";
+    | "waiting_for_requester_turn"
+    | "subagent_no_output";
 };
 
 export type SubagentRunRecord = {

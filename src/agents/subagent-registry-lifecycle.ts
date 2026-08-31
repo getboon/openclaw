@@ -1075,6 +1075,12 @@ export function createSubagentRegistryLifecycleController(params: {
           if (delivery.path === "none") {
             ensureDeliveryState(entry).lastDropReason = "sink_unavailable";
           }
+          // A frozen not-ok/"(no output)" completion is immutable; record it so
+          // the deferred-cleanup decision gives up after this single attempt
+          // instead of scheduling futile retries.
+          if (delivery.reason === "subagent_no_output") {
+            ensureDeliveryState(entry).lastDropReason = "subagent_no_output";
+          }
           latestDeliveryError = formatAnnounceDeliveryError(delivery);
           if (ensureDeliveryState(entry).lastError !== latestDeliveryError) {
             ensureDeliveryState(entry).lastError = latestDeliveryError;
