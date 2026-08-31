@@ -394,7 +394,9 @@ describe("server-runtime-services", () => {
 
 function createLog() {
   return {
-    child: vi.fn(() => ({
+    // Typed label param so `mock.calls` entries are `[string]`; the recovery
+    // helpers below look children up by their label argument.
+    child: vi.fn((_label: string) => ({
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),

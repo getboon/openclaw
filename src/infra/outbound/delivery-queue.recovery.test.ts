@@ -35,8 +35,9 @@ vi.mock("../crash-recovery-notice.js", () => ({
 // getGlobalHookRunner is likewise statically imported by the recovery module.
 // Preserve the module's other exports so unrelated consumers keep working.
 const hookRunnerMock = vi.hoisted(() => ({
-  hasHooks: vi.fn(() => false),
-  runDeliveryRecoveryExhausted: vi.fn(async () => undefined),
+  hasHooks: vi.fn((_hookName: string) => false),
+  // Typed params so `mock.calls[0]` is a 2-tuple the assertion below can read.
+  runDeliveryRecoveryExhausted: vi.fn(async (_event: unknown, _ctx: unknown) => undefined),
 }));
 const getGlobalHookRunnerMock = vi.hoisted(() => vi.fn(() => hookRunnerMock));
 
