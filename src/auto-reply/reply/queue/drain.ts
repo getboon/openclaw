@@ -4,6 +4,7 @@ import { runAgentHarnessBeforeMessageWriteHook } from "../../../agents/harness/h
 import { normalizeChatType } from "../../../channels/chat-type.js";
 import { resolveStorePath } from "../../../config/sessions.js";
 import { loadSessionEntry } from "../../../config/sessions/session-accessor.js";
+import { deleteFollowupReplaysForQueueKey } from "../../../infra/followup-delivery-queue-storage.js";
 // Drains queued follow-up runs while preserving route and session identity.
 import {
   channelRouteCompactKey,
@@ -822,6 +823,15 @@ export function scheduleFollowupDrain(
         if (FOLLOWUP_QUEUES.get(key) === queue) {
           FOLLOWUP_QUEUES.delete(key);
           clearFollowupDrainCallback(key);
+          // Every item that was in this queue has now been executed, dropped,
+          // or summarized — clear its crash-recovery records so a future
+          // startup does not send a stale "you may have missed a message"
+          // notice for work that already finished.
+          void deleteFollowupReplaysForQueueKey(key).catch((err: unknown) => {
+            defaultRuntime.error?.(
+              `failed to clear persisted followup replays for ${key}: ${String(err)}`,
+            );
+          });
         }
       } else {
         scheduleFollowupDrain(key, effectiveRunFollowup);
