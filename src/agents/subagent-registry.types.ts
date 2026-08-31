@@ -65,7 +65,7 @@ export type SubagentCompletionDeliveryState = {
   steeringLeasedAt?: number;
   steeringInjectedAt?: number;
   suspendedAt?: number;
-  suspendedReason?: "retry-limit" | "expiry";
+  suspendedReason?: "retry-limit" | "expiry" | "subagent_no_output";
   discardedAt?: number;
   discardReason?: "expired" | "pressure-pruned";
   discardedPayloadSummary?: {

@@ -580,7 +580,7 @@ export function createSubagentRegistryLifecycleController(params: {
   const suspendPendingFinalDelivery = (args: {
     runId: string;
     entry: SubagentRunRecord;
-    reason: "retry-limit" | "expiry";
+    reason: "retry-limit" | "expiry" | "subagent_no_output";
     error?: string;
   }) => {
     markPendingFinalDelivery({
