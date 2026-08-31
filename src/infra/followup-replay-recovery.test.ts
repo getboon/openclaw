@@ -52,6 +52,20 @@ describe("recoverPendingFollowupReplays", () => {
     expect(pending[0]).toMatchObject({ retryCount: 1 });
   });
 
+  it("defers remaining records without notifying once the time budget is exhausted", async () => {
+    enqueueFollowupReplay({ queueKey: "k1", prompt: "hi", channel: "telegram", to: "123" }, tmpDir);
+    const result = await recoverPendingFollowupReplays({
+      cfg,
+      log,
+      stateDir: tmpDir,
+      maxRecoveryMs: 0,
+    });
+    expect(result).toEqual({ notified: 0, retained: 0 });
+    expect(sendCrashRecoveryNotice).not.toHaveBeenCalled();
+    // The record is left pending for the next startup, not dropped.
+    expect(await loadPendingFollowupReplays(tmpDir)).toHaveLength(1);
+  });
+
   it("gives up and deletes the record once retries are exhausted", async () => {
     const id = enqueueFollowupReplay(
       { queueKey: "k1", prompt: "hi", channel: "telegram", to: "123" },

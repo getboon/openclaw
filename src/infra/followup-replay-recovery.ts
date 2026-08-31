@@ -22,10 +22,16 @@ const FOLLOWUP_RECOVERY_NOTICE_TEXT =
 // across repeated restarts if the channel stays undeliverable.
 const MAX_FOLLOWUP_NOTICE_RETRIES = 5;
 
+// Wall-clock budget mirroring recoverPendingDeliveries' maxRecoveryMs: a large
+// backlog must not send an unbounded burst of sequential notices at startup.
+// Remaining records stay pending and are picked up on the next startup.
+const DEFAULT_MAX_RECOVERY_MS = 60_000;
+
 export async function recoverPendingFollowupReplays(opts: {
   cfg: OpenClawConfig;
   log: FollowupRecoveryLogger;
   stateDir?: string;
+  maxRecoveryMs?: number;
 }): Promise<{ notified: number; retained: number }> {
   const pending = await loadPendingFollowupReplays(opts.stateDir);
   if (pending.length === 0) {
@@ -33,9 +39,21 @@ export async function recoverPendingFollowupReplays(opts: {
   }
   opts.log.info(`Found ${pending.length} pending followup replay record(s) — recovering`);
 
+  const budgetMs =
+    typeof opts.maxRecoveryMs === "number" && Number.isFinite(opts.maxRecoveryMs)
+      ? Math.max(0, opts.maxRecoveryMs)
+      : DEFAULT_MAX_RECOVERY_MS;
+  const deadline = Date.now() + budgetMs;
+
   let notified = 0;
   let retained = 0;
   for (const entry of pending) {
+    if (Date.now() >= deadline) {
+      opts.log.warn(
+        "Followup recovery time budget exceeded — remaining records deferred to next startup",
+      );
+      break;
+    }
     if (entry.retryCount >= MAX_FOLLOWUP_NOTICE_RETRIES) {
       await deleteFollowupReplay(entry.id, opts.stateDir);
       opts.log.warn(`Followup replay ${entry.id}: exceeded max notice retries, giving up`);

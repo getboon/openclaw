@@ -7,7 +7,7 @@ import { closeOpenClawStateDatabase } from "../../../state/openclaw-state-db.js"
 import { createQueueTestRun } from "../queue.test-helpers.js";
 import { scheduleFollowupDrain } from "./drain.js";
 import { enqueueFollowupRun } from "./enqueue.js";
-import { FOLLOWUP_QUEUES } from "./state.js";
+import { clearFollowupQueue, FOLLOWUP_QUEUES } from "./state.js";
 import type { QueueSettings } from "./types.js";
 
 // Each test gets its own OPENCLAW_STATE_DIR so the production write path
@@ -74,6 +74,19 @@ describe("followup replay persistence wiring", () => {
     // The drain's cleanup (map delete + persisted-record delete) runs in the
     // finally block of a fire-and-forget IIFE after the run callback resolves,
     // so poll until the record is gone rather than assuming a fixed delay.
+    await expect
+      .poll(async () => (await loadPendingFollowupReplays()).length, { timeout: 2000 })
+      .toBe(0);
+  });
+
+  it("clears persisted records when the queue is explicitly cleared", async () => {
+    const run = createQueueTestRun({ prompt: "hello", messageId: "m3" });
+    enqueueFollowupRun(key, run, settings, "message-id", undefined, false);
+    expect(await loadPendingFollowupReplays()).toHaveLength(1);
+
+    clearFollowupQueue(key);
+
+    // clearFollowupQueue fire-and-forgets the persisted-record delete.
     await expect
       .poll(async () => (await loadPendingFollowupReplays()).length, { timeout: 2000 })
       .toBe(0);

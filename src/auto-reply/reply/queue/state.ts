@@ -1,5 +1,7 @@
 // Tracks queue state for active, pending, and recently deduped reply runs.
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { deleteFollowupReplaysForQueueKey } from "../../../infra/followup-delivery-queue-storage.js";
+import { defaultRuntime } from "../../../runtime.js";
 import { resolveGlobalMap } from "../../../shared/global-singleton.js";
 import { applyQueueRuntimeSettings } from "../../../utils/queue-helpers.js";
 import {
@@ -126,6 +128,14 @@ export function clearFollowupQueue(key: string): number {
   queue.lastRun = undefined;
   queue.lastEnqueuedAt = 0;
   FOLLOWUP_QUEUES.delete(cleaned);
+  // Drop the crash-recovery records too: these items were intentionally
+  // cleared (e.g. /reset), so a future startup must not send a stale
+  // "you may have missed a message" notice for them.
+  void deleteFollowupReplaysForQueueKey(cleaned).catch((err: unknown) => {
+    defaultRuntime.error?.(
+      `failed to clear persisted followup replays for ${cleaned}: ${String(err)}`,
+    );
+  });
   return cleared;
 }
 
