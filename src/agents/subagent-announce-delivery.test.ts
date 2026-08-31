@@ -1315,6 +1315,51 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     );
   });
 
+  it("classifies the partial-flush tool-calls placeholder as subagent_no_output", async () => {
+    // Crash shape observed live (ENG-19092 E2E): the child persisted a tool
+    // call but no visible text before the process died, so the announce event
+    // carries the synthetic "N tool call(s) made without visible output."
+    // summary instead of "(no output)". Both are frozen-empty.
+    const callGateway = createGatewayMock({
+      result: {
+        payloads: [],
+      },
+    });
+    const sendMessage = createSendMessageMock();
+
+    const result = await deliverDiscordDirectMessageCompletion({
+      callGateway,
+      sendMessage,
+      internalEvents: [
+        {
+          type: "task_completion",
+          source: "subagent",
+          childSessionKey: "agent:worker:subagent:child",
+          childSessionId: "child-session-id",
+          announceType: "subagent task",
+          taskLabel: "direct completion smoke",
+          status: "error",
+          statusLabel: "failed: subagent run lost active execution context",
+          result: "1 tool call(s) made without visible output.",
+          replyInstruction: "Summarize the result.",
+        },
+      ],
+    });
+
+    expectRecordFields(result, {
+      delivered: false,
+      path: "direct",
+      reason: "subagent_no_output",
+      error: "completion agent did not produce a visible reply",
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("didn't finish"),
+      }),
+    );
+  });
+
   it("classifies a frozen no-output completion on a thread as subagent_no_output", async () => {
     const callGateway = createGatewayMock({
       result: {

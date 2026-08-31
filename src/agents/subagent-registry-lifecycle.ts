@@ -621,7 +621,7 @@ export function createSubagentRegistryLifecycleController(params: {
   const finalizeResumedAnnounceGiveUp = async (giveUpParams: {
     runId: string;
     entry: SubagentRunRecord;
-    reason: "retry-limit" | "expiry";
+    reason: "retry-limit" | "expiry" | "subagent_no_output";
   }) => {
     if (shouldSuspendPendingFinalDelivery(giveUpParams.entry)) {
       suspendPendingFinalDelivery({

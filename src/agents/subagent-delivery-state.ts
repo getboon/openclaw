@@ -27,7 +27,7 @@ export type LegacySubagentRunRecord = SubagentRunRecord & {
   pendingFinalDeliveryLastError?: string | null;
   pendingFinalDeliveryPayload?: PendingFinalDeliveryPayload;
   deliverySuspendedAt?: number;
-  deliverySuspendedReason?: "retry-limit" | "expiry";
+  deliverySuspendedReason?: "retry-limit" | "expiry" | "subagent_no_output";
   deliveryDiscardedAt?: number;
   deliveryDiscardReason?: "expired" | "pressure-pruned";
   deliveryDiscardedPayloadSummary?: SubagentCompletionDeliveryState["discardedPayloadSummary"];

@@ -74,6 +74,7 @@ import {
   type SubagentAnnounceDeliveryResult,
 } from "./subagent-announce-dispatch.js";
 import type { DeliveryContext } from "./subagent-announce-origin.js";
+import { isSyntheticNoOutputResult } from "./subagent-announce-output.js";
 import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
 import { resolveRequesterStoreKey } from "./subagent-requester-store-key.js";
 import type { SpawnSubagentMode } from "./subagent-spawn.types.js";
@@ -970,7 +971,11 @@ function hasFailedSubagentNoOutputCompletion(events: readonly AgentInternalEvent
         event.type === "task_completion" &&
         event.source === "subagent" &&
         event.status !== "ok" &&
-        event.result.trim() === "(no output)",
+        // Both synthetic shapes count: the "(no output)" fallback (zero-flush
+        // crash — no child session on disk) and the "N tool call(s) made
+        // without visible output." summary (partial-flush crash — the child
+        // persisted tool calls but no visible text before the process died).
+        isSyntheticNoOutputResult(event.result),
     ) === true
   );
 }
