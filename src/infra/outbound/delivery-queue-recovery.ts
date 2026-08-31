@@ -9,6 +9,8 @@ import type {
   ChannelMessageUnknownSendReconciliationResult,
 } from "../../channels/message/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { fireAndForgetHook } from "../../hooks/fire-and-forget.js";
+import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { sendCrashRecoveryNotice } from "../crash-recovery-notice.js";
 import {
   claimRecoveryEntry as claimSharedRecoveryEntry,
@@ -363,6 +365,30 @@ async function notifyDeliveryRecoveryExhausted(params: {
   });
   if (!sent) {
     params.log.warn(`Delivery entry ${entry.id}: could not send crash-recovery notice`);
+  }
+
+  // Surface the give-up to observers (e.g. the sentry-monitor plugin) so an
+  // abandoned crash-ambiguous send is engineer-visible, not journald-only.
+  const hookRunner = getGlobalHookRunner();
+  if (hookRunner?.hasHooks("delivery_recovery_exhausted")) {
+    fireAndForgetHook(
+      hookRunner.runDeliveryRecoveryExhausted(
+        {
+          queueName: "outbound",
+          deliveryId: entry.id,
+          channel: entry.channel,
+          to: entry.to,
+          accountId: entry.accountId,
+          sessionKey: entry.session?.key,
+          retryCount: entry.retryCount,
+          recoveryState: entry.recoveryState,
+          error: params.errMsg,
+        },
+        { config: params.cfg },
+      ),
+      "delivery-queue-recovery: delivery_recovery_exhausted hook failed",
+      (message) => params.log.warn(message),
+    );
   }
 }
 

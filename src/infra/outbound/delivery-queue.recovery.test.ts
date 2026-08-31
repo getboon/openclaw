@@ -32,6 +32,19 @@ vi.mock("../crash-recovery-notice.js", () => ({
   sendCrashRecoveryNotice: sendCrashRecoveryNoticeMock,
 }));
 
+// getGlobalHookRunner is likewise statically imported by the recovery module.
+// Preserve the module's other exports so unrelated consumers keep working.
+const hookRunnerMock = vi.hoisted(() => ({
+  hasHooks: vi.fn(() => false),
+  runDeliveryRecoveryExhausted: vi.fn(async () => undefined),
+}));
+const getGlobalHookRunnerMock = vi.hoisted(() => vi.fn(() => hookRunnerMock));
+
+vi.mock("../../plugins/hook-runner-global.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../plugins/hook-runner-global.js")>();
+  return { ...actual, getGlobalHookRunner: getGlobalHookRunnerMock };
+});
+
 function mockCallArg(mock: { mock: { calls: unknown[][] } }, index = 0): unknown {
   const call = mock.mock.calls[index];
   if (!call) {
@@ -62,6 +75,9 @@ describe("delivery-queue recovery", () => {
   beforeEach(() => {
     resolveOutboundChannelMessageAdapterMock.mockReset();
     sendCrashRecoveryNoticeMock.mockReset().mockResolvedValue(true);
+    hookRunnerMock.hasHooks.mockReset().mockReturnValue(false);
+    hookRunnerMock.runDeliveryRecoveryExhausted.mockReset().mockResolvedValue(undefined);
+    getGlobalHookRunnerMock.mockReset().mockReturnValue(hookRunnerMock);
   });
 
   const enqueueCrashRecoveryEntries = async () => {
@@ -219,6 +235,53 @@ describe("delivery-queue recovery", () => {
       target: { channel?: string; to?: string };
     };
     expect(arg.target).toMatchObject({ channel: "demo-channel-a", to: "+1" });
+  });
+
+  it("fires the delivery_recovery_exhausted hook when a listener is registered", async () => {
+    hookRunnerMock.hasHooks.mockReturnValue(true);
+    const id = await enqueueDelivery(
+      { channel: "demo-channel-a", to: "+1", payloads: [{ text: "maybe sent" }] },
+      tmpDir(),
+    );
+    setQueuedEntryState(tmpDir(), id, {
+      retryCount: 0,
+      platformSendStartedAt: Date.now(),
+      recoveryState: "send_attempt_started",
+    });
+
+    const deliver = vi.fn().mockResolvedValue([]);
+    await runRecovery({ deliver });
+
+    expect(hookRunnerMock.hasHooks).toHaveBeenCalledWith("delivery_recovery_exhausted");
+    expect(hookRunnerMock.runDeliveryRecoveryExhausted).toHaveBeenCalledOnce();
+    const [event, ctx] = hookRunnerMock.runDeliveryRecoveryExhausted.mock.calls[0] as [
+      { queueName: string; channel?: string; to?: string; recoveryState?: string },
+      { config: unknown },
+    ];
+    expect(event).toMatchObject({
+      queueName: "outbound",
+      channel: "demo-channel-a",
+      to: "+1",
+      recoveryState: "send_attempt_started",
+    });
+    expect(ctx).toMatchObject({ config: expect.anything() });
+  });
+
+  it("does not fire the hook when no listener is registered", async () => {
+    hookRunnerMock.hasHooks.mockReturnValue(false);
+    const id = await enqueueDelivery(
+      { channel: "demo-channel-a", to: "+1", payloads: [{ text: "maybe sent" }] },
+      tmpDir(),
+    );
+    setQueuedEntryState(tmpDir(), id, {
+      retryCount: 0,
+      platformSendStartedAt: Date.now(),
+      recoveryState: "send_attempt_started",
+    });
+
+    await runRecovery({ deliver: vi.fn().mockResolvedValue([]) });
+
+    expect(hookRunnerMock.runDeliveryRecoveryExhausted).not.toHaveBeenCalled();
   });
 
   it("replays started entries only after adapter proves they were not sent", async () => {
