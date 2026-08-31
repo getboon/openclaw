@@ -23,6 +23,7 @@ const HOOK_NAMES = [
   "agent_end",
   "after_tool_call",
   "message_sent",
+  "delivery_recovery_exhausted",
   "subagent_ended",
   "cron_changed",
   "session_end",
@@ -80,7 +81,7 @@ describe("registerSentryMonitor", () => {
     expect(registerRuntimeLifecycle).not.toHaveBeenCalled();
   });
 
-  it("activates from a plugin-config dsn: inits Sentry and registers all seven hooks plus flush", () => {
+  it("activates from a plugin-config dsn: inits Sentry and registers all eight hooks plus flush", () => {
     const { api, on, registerRuntimeLifecycle, info } = makeApi({
       dsn: "https://abc@o1.ingest.sentry.io/1",
     });
@@ -172,6 +173,18 @@ describe("registerSentryMonitor", () => {
     expect(Sentry.captureMessage).toHaveBeenCalledOnce();
     fire("agent_end", { messages: [], success: true });
     expect(Sentry.captureException).toHaveBeenCalledOnce(); // healthy turn is ignored
+    fire("delivery_recovery_exhausted", {
+      queueName: "outbound",
+      deliveryId: "d1",
+      channel: "telegram",
+      to: "123",
+      retryCount: 5,
+      recoveryState: "send_attempt_started",
+      error:
+        "delivery state is send_attempt_started; refusing blind replay without adapter reconciliation",
+    });
+    // An abandoned crash-ambiguous send always reports (never null).
+    expect(Sentry.captureException).toHaveBeenCalledTimes(2);
   });
 
   it("flushes Sentry with a 2s timeout on cleanup", async () => {

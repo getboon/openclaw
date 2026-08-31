@@ -5,6 +5,7 @@ import {
   buildAfterToolCallCapture,
   buildAgentEndCapture,
   buildCronChangedCapture,
+  buildDeliveryRecoveryExhaustedCapture,
   buildMessageSentCapture,
   buildModelCallEndedCapture,
   buildSessionEndCapture,
@@ -124,6 +125,11 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
   api.on("message_sent", (event) => {
     safe(api.logger, PLUGIN_ID, "message_sent", () => {
       dispatchCapture(Sentry, buildMessageSentCapture(event, hostname));
+    });
+  });
+  api.on("delivery_recovery_exhausted", (event) => {
+    safe(api.logger, PLUGIN_ID, "delivery_recovery_exhausted", () => {
+      dispatchCapture(Sentry, buildDeliveryRecoveryExhaustedCapture(event, hostname));
     });
   });
   api.on("subagent_ended", (event) => {
