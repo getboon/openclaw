@@ -1681,6 +1681,56 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     },
   );
 
+  it("classifies a frozen no-output completion as subagent_no_output on the session-only (no deliverable target) path", async () => {
+    // ENG-19092 E2E: a crash-recovered subagent whose requester session has no
+    // channel origin lands in the session-only handoff branch
+    // (shouldDeliverAgentFinal=false). The fail-fast classification must
+    // engage there too, not just on the deliverable branches.
+    const dispatchGatewayMethodInProcess = createInProcessGatewayMock({
+      result: { payloads: [] },
+    });
+    testing.setDepsForTest({
+      dispatchGatewayMethodInProcess,
+      getRequesterSessionActivity: () => ({
+        sessionId: "requester-session-local",
+        isActive: false,
+      }),
+      getRuntimeConfig: () => ({}) as never,
+    });
+
+    const result = await deliverSubagentAnnouncement({
+      requesterSessionKey: "agent:main:local-session",
+      targetRequesterSessionKey: "agent:main:local-session",
+      triggerMessage: "child done",
+      steerMessage: "child done",
+      requesterIsSubagent: false,
+      expectsCompletionMessage: true,
+      bestEffortDeliver: true,
+      directIdempotencyKey: "announce-local-no-output",
+      internalEvents: [
+        {
+          type: "task_completion",
+          source: "subagent",
+          childSessionKey: "agent:main:subagent:child",
+          childSessionId: "child-session-id",
+          announceType: "subagent task",
+          taskLabel: "session-only no-output",
+          status: "error",
+          statusLabel: "failed: subagent run lost active execution context",
+          result: "1 tool call(s) made without visible output.",
+          replyInstruction: "Summarize the result.",
+        },
+      ],
+    });
+
+    expectRecordFields(result, {
+      delivered: false,
+      path: "direct",
+      reason: "subagent_no_output",
+      error: "completion agent did not produce a visible reply",
+    });
+  });
+
   it("accepts non-subagent session-only completion handoff when the in-process agent intentionally replies NO_REPLY", async () => {
     const dispatchGatewayMethodInProcess = createInProcessGatewayMock({
       result: {

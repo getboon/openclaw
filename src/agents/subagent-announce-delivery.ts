@@ -1738,6 +1738,26 @@ async function sendSubagentAnnounceDirectly(params: {
       !hasCompletionSideEffect &&
       !acceptsIntentionalSilentCompletion
     ) {
+      // This no-deliverable-target branch is also reachable for a frozen
+      // no-output completion (e.g. the requester session has no channel
+      // origin, so shouldDeliverAgentFinal is false). Classify it the same
+      // way as the deliverable branches above so the fail-fast engages on
+      // every path — retrying an immutable empty completion is futile
+      // regardless of where delivery would have gone.
+      if (hasFailedSubagentNoOutputCompletion(params.internalEvents)) {
+        await notifySubagentNoOutputGiveUp({
+          cfg,
+          requesterSessionKey: canonicalRequesterSessionKey,
+          directIdempotencyKey: params.directIdempotencyKey,
+          deliveryTarget,
+        });
+        return {
+          delivered: false,
+          path: "direct",
+          reason: "subagent_no_output",
+          error: "completion agent did not produce a visible reply",
+        };
+      }
       return {
         delivered: false,
         path: "direct",
