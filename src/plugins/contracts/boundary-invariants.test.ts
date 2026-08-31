@@ -39,6 +39,7 @@ const BUNDLED_TYPED_HOOK_REGISTRATION_GUARDS = {
     "after_tool_call",
     "agent_end",
     "cron_changed",
+    "delivery_recovery_exhausted",
     "message_sent",
     "model_call_ended",
     "session_end",
