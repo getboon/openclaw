@@ -24,6 +24,14 @@ vi.mock("./channel-resolution.js", () => ({
   resolveOutboundChannelMessageAdapter: resolveOutboundChannelMessageAdapterMock,
 }));
 
+// sendCrashRecoveryNotice is statically imported by delivery-queue-recovery.ts,
+// so it must be hoisted-mocked here (a dynamic vi.doMock would be too late).
+const sendCrashRecoveryNoticeMock = vi.hoisted(() => vi.fn(async () => true));
+
+vi.mock("../crash-recovery-notice.js", () => ({
+  sendCrashRecoveryNotice: sendCrashRecoveryNoticeMock,
+}));
+
 function mockCallArg(mock: { mock: { calls: unknown[][] } }, index = 0): unknown {
   const call = mock.mock.calls[index];
   if (!call) {
@@ -53,6 +61,7 @@ describe("delivery-queue recovery", () => {
 
   beforeEach(() => {
     resolveOutboundChannelMessageAdapterMock.mockReset();
+    sendCrashRecoveryNoticeMock.mockReset().mockResolvedValue(true);
   });
 
   const enqueueCrashRecoveryEntries = async () => {
@@ -187,6 +196,29 @@ describe("delivery-queue recovery", () => {
     expect(await loadPendingDeliveries(tmpDir())).toHaveLength(0);
     expect(readOutboundQueueStatus(tmpDir(), id)).toBe("failed");
     expectMockMessageContaining(log.warn, "refusing blind replay without adapter reconciliation");
+  });
+
+  it("sends a crash-recovery notice when an unresolved crash-ambiguous entry is given up on", async () => {
+    const id = await enqueueDelivery(
+      { channel: "demo-channel-a", to: "+1", payloads: [{ text: "maybe sent" }] },
+      tmpDir(),
+    );
+    setQueuedEntryState(tmpDir(), id, {
+      retryCount: 0,
+      platformSendStartedAt: Date.now(),
+      recoveryState: "send_attempt_started",
+    });
+
+    // No adapter reconciliation configured (mock returns undefined), so the
+    // entry hits the unresolved, non-retryable give-up branch.
+    const deliver = vi.fn().mockResolvedValue([]);
+    await runRecovery({ deliver });
+
+    expect(sendCrashRecoveryNoticeMock).toHaveBeenCalledOnce();
+    const arg = mockCallArg(sendCrashRecoveryNoticeMock) as {
+      target: { channel?: string; to?: string };
+    };
+    expect(arg.target).toMatchObject({ channel: "demo-channel-a", to: "+1" });
   });
 
   it("replays started entries only after adapter proves they were not sent", async () => {
