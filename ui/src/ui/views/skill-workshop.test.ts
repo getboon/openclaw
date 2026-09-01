@@ -110,7 +110,7 @@ describe("renderSkillWorkshop", () => {
     ]);
     expect(container.querySelector(".sw-body-card strong")?.textContent).toBe("Output:");
 
-    const bodyText = container.querySelector(".sw-body-card")!.textContent!;
+    const bodyText = container.querySelector(".sw-body-card")?.textContent ?? "";
     expect(bodyText.indexOf("TLDR")).toBeLessThan(bodyText.indexOf("Output:"));
     expect(bodyText.indexOf("Output:")).toBeLessThan(bodyText.indexOf("Instructions"));
   });
