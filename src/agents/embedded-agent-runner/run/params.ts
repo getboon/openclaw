@@ -89,6 +89,12 @@ export type RunEmbeddedAgentParams = {
   senderE164?: string | null;
   /** Originating channel/platform (slack, msteams, boon-web, …) for usage attribution. */
   senderSource?: string | null;
+  /**
+   * Gateway-audience OBO (ENG-19116) from MsgContext.OboToken. Threaded to the
+   * model call and emitted as x-boon-gateway-obo-token (ENG-19115) for the gateway to
+   * verify and skip metering internal-test traffic. Opaque; forwarded verbatim.
+   */
+  oboToken?: string | null;
   /** Trusted sender identity bit for command/channel-action auth. */
   senderIsOwner?: boolean;
   /** Device-scoped operator session allowed to review approvals initiated by this run. */

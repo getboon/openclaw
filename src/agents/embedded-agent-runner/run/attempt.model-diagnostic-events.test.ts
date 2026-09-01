@@ -855,6 +855,19 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(threadOnly).not.toHaveProperty("x-boon-user-id");
   });
 
+  it("emits x-boon-gateway-obo-token from oboToken and omits it when absent", async () => {
+    // ENG-19115 — the gateway-audience OBO (set on MsgContext.OboToken by
+    // anychat-boon-web, ENG-19116) rides to x-boon-gateway-obo-token so the
+    // gateway can verify it and skip metering internal-test traffic. The header
+    // name is pinned by the gateway verifier (boon-llm-gateway obo.go); mirrors
+    // x-boon-user-id.
+    const withObo = await boonHeadersFor({ oboToken: "eyJ.gateway-aud.tok" });
+    expect(withObo["x-boon-gateway-obo-token"]).toBe("eyJ.gateway-aud.tok");
+
+    const withoutObo = await boonHeadersFor({ senderId: "U9" });
+    expect(withoutObo).not.toHaveProperty("x-boon-gateway-obo-token");
+  });
+
   it("strips control characters from header values and omits all-control values", async () => {
     const headers = await boonHeadersFor({
       senderId: "U1",
