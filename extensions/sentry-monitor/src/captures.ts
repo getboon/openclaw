@@ -9,6 +9,7 @@ import type {
   PluginHookAfterToolCallEvent,
   PluginHookAgentEndEvent,
   PluginHookCronChangedEvent,
+  PluginHookDeliveryRecoveryExhaustedEvent,
   PluginHookMessageSentEvent,
   PluginHookModelCallEndedEvent,
   PluginHookSessionEndEvent,
@@ -271,6 +272,36 @@ export function buildCronChangedCapture(
       delivery_error: event.deliveryError,
       model: event.model,
       provider: event.provider,
+    },
+  };
+}
+
+export function buildDeliveryRecoveryExhaustedCapture(
+  event: PluginHookDeliveryRecoveryExhaustedEvent,
+  host: string,
+): SentryCapture | null {
+  return {
+    kind: "exception",
+    message: event.error,
+    tags: pruneTags({
+      hook: "delivery_recovery_exhausted",
+      host,
+      queue: event.queueName,
+      channel: event.channel,
+      recovery_state: event.recoveryState,
+    }),
+    fingerprint: fingerprintOf(
+      "delivery_recovery_exhausted",
+      event.queueName,
+      event.channel,
+      event.recoveryState,
+    ),
+    extra: {
+      delivery_id: event.deliveryId,
+      to: event.to,
+      account_id: event.accountId,
+      session_key: event.sessionKey,
+      retry_count: event.retryCount,
     },
   };
 }

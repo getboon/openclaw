@@ -30,6 +30,7 @@ const hoisted = vi.hoisted(() => {
     loadModelPricingCacheModule: vi.fn(),
     isVitestRuntimeEnv: vi.fn(() => false),
     recoverPendingDeliveries: vi.fn(async () => undefined),
+    recoverPendingFollowupReplays: vi.fn(async () => ({ notified: 0, retained: 0 })),
     recoverPendingRestartContinuationDeliveries: vi.fn(async () => undefined),
     deliverOutboundPayloads: vi.fn(),
   };
@@ -58,6 +59,10 @@ vi.mock("../infra/outbound/deliver.js", () => ({
 
 vi.mock("../infra/outbound/delivery-queue.js", () => ({
   recoverPendingDeliveries: hoisted.recoverPendingDeliveries,
+}));
+
+vi.mock("../infra/followup-replay-recovery.js", () => ({
+  recoverPendingFollowupReplays: hoisted.recoverPendingFollowupReplays,
 }));
 
 vi.mock("./server-restart-sentinel.js", () => ({
@@ -101,6 +106,7 @@ describe("server-runtime-services", () => {
     hoisted.loadModelPricingCacheModule.mockClear();
     hoisted.isVitestRuntimeEnv.mockReset().mockReturnValue(false);
     hoisted.recoverPendingDeliveries.mockClear();
+    hoisted.recoverPendingFollowupReplays.mockClear();
     hoisted.recoverPendingRestartContinuationDeliveries.mockClear();
     hoisted.deliverOutboundPayloads.mockClear();
   });
@@ -143,6 +149,7 @@ describe("server-runtime-services", () => {
     expect(hoisted.startGatewayModelPricingRefresh).not.toHaveBeenCalled();
     expect(hoisted.startHeartbeatRunner).not.toHaveBeenCalled();
     expect(hoisted.recoverPendingDeliveries).not.toHaveBeenCalled();
+    expect(hoisted.recoverPendingFollowupReplays).not.toHaveBeenCalled();
 
     services.heartbeatRunner.stop();
     expect(hoisted.heartbeatRunner.stop).not.toHaveBeenCalled();
@@ -199,17 +206,27 @@ describe("server-runtime-services", () => {
     expect(hoisted.sessionMaintenanceSweepRunner.updateConfig).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1_250);
     await vi.dynamicImportSettled();
-    expect(log.child).toHaveBeenNthCalledWith(1, "delivery-recovery");
-    expect(log.child).toHaveBeenNthCalledWith(2, "session-delivery-recovery");
-    const deliveryLog = log.child.mock.results[0]?.value;
-    const sessionDeliveryLog = log.child.mock.results[1]?.value;
-    if (!deliveryLog || !sessionDeliveryLog) {
+    // Outbound and followup recovery both fire immediately; their dynamic
+    // imports can settle in either order, so match log children by label
+    // rather than by call index. Session recovery is timer-delayed.
+    const childByLabel = (label: string) => {
+      const idx = log.child.mock.calls.findIndex((call) => call[0] === label);
+      return idx >= 0 ? log.child.mock.results[idx]?.value : undefined;
+    };
+    const deliveryLog = childByLabel("delivery-recovery");
+    const followupLog = childByLabel("followup-recovery");
+    const sessionDeliveryLog = childByLabel("session-delivery-recovery");
+    if (!deliveryLog || !followupLog || !sessionDeliveryLog) {
       throw new Error("Expected delivery recovery log children");
     }
     expect(hoisted.recoverPendingDeliveries).toHaveBeenCalledWith({
       deliver: hoisted.deliverOutboundPayloads,
       cfg: {},
       log: deliveryLog,
+    });
+    expect(hoisted.recoverPendingFollowupReplays).toHaveBeenCalledWith({
+      cfg: {},
+      log: followupLog,
     });
     expect(hoisted.recoverPendingRestartContinuationDeliveries).toHaveBeenCalledWith({
       deps: {},
@@ -377,7 +394,9 @@ describe("server-runtime-services", () => {
 
 function createLog() {
   return {
-    child: vi.fn(() => ({
+    // Typed label param so `mock.calls` entries are `[string]`; the recovery
+    // helpers below look children up by their label argument.
+    child: vi.fn((_label: string) => ({
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),

@@ -2,6 +2,7 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { normalizeChatType } from "../../../channels/chat-type.js";
 import { resolveGlobalDedupeCache } from "../../../infra/dedupe.js";
+import { enqueueFollowupReplay } from "../../../infra/followup-delivery-queue-storage.js";
 import { channelRouteDedupeKey } from "../../../plugin-sdk/channel-route.js";
 import { applyQueueDropPolicy, shouldSkipQueueItem } from "../../../utils/queue-helpers.js";
 import {
@@ -170,6 +171,23 @@ export function enqueueFollowupRun(
 
   queue.items.push(run);
   markFollowupRunEnqueued(run);
+  // Persist a minimal, serializable replay record so a crash or restart before
+  // this item drains cannot silently lose it. Cleared once the queue drains
+  // (see scheduleFollowupDrain). NOT the FollowupRun object — that carries a
+  // live AbortSignal, callback hooks, and the full resolved config.
+  enqueueFollowupReplay({
+    queueKey: key,
+    sessionKey: run.run.sessionKey ?? run.run.sessionId,
+    messageId: run.messageId,
+    prompt: run.transcriptPrompt ?? run.prompt,
+    channel: run.originatingChannel,
+    to: run.originatingTo,
+    accountId: run.originatingAccountId,
+    threadId: run.originatingThreadId,
+    chatType: run.originatingChatType,
+    replyToId: run.originatingReplyToId,
+    replyToMode: run.originatingReplyToMode,
+  });
   if (recentMessageIdKey) {
     RECENT_QUEUE_MESSAGE_IDS.check(recentMessageIdKey);
   }

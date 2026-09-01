@@ -131,6 +131,7 @@ observation-only.
 - **`message_sending`** — rewrite outbound content or cancel delivery
 - **`reply_payload_sending`** — mutate or cancel normalized reply payloads before delivery
 - `message_sent` — observe outbound delivery success or failure
+- `delivery_recovery_exhausted` — observe a crash-ambiguous send that delivery-recovery gave up on without replaying
 - **`before_dispatch`** - inspect or rewrite an outbound dispatch before channel handoff
 - **`reply_dispatch`** - participate in the final reply-dispatch pipeline
 
@@ -467,6 +468,11 @@ Use message hooks for channel-level routing and delivery policy:
 - `reply_payload_sending`: rewrite normalized `ReplyPayload` objects (including
   `presentation`, `delivery`, media refs, and text) or return `{ cancel: true }`.
 - `message_sent`: observe final success or failure.
+- `delivery_recovery_exhausted`: observe a delivery whose platform-send state
+  was ambiguous after a crash (`recoveryState: "send_attempt_started" |
+"unknown_after_send"`) and could not be safely reconciled or replayed. Fires
+  once, when delivery-recovery gives up and moves the entry to failed.
+  Observation-only.
 
 For audio-only TTS replies, `content` may contain the hidden spoken transcript
 even when the channel payload has no visible text/caption. Rewriting that
