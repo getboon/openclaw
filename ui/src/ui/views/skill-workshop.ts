@@ -849,6 +849,15 @@ type ProposalBodySection = {
 
 function extractTodayProposalPreview(body: string): TodayProposalPreview | null {
   const sections = splitProposalBodySections(body);
+  const tldr = findProposalSection(sections, ["tldr"]);
+  const tldrItems = tldr ? extractTopLevelListItems(tldr.lines) : [];
+  if (tldrItems.length > 0) {
+    return {
+      heading: "What the agent will do",
+      items: tldrItems.slice(0, TODAY_PREVIEW_MAX_ITEMS),
+    };
+  }
+
   const workflow = findProposalSection(sections, [
     "workflow",
     "procedure",
@@ -967,6 +976,7 @@ function renderProposalBody(body: string) {
   const out: unknown[] = [];
   let para: string[] = [];
   let list: string[] = [];
+  let listType: "ordered" | "unordered" | null = null;
   let inCode = false;
   let codeBuf: string[] = [];
 
@@ -979,13 +989,30 @@ function renderProposalBody(body: string) {
   const flushList = () => {
     if (list.length) {
       const items = list;
-      out.push(html`
-        <ol>
-          ${items.map((line) => html`<li>${renderInline(line)}</li>`)}
-        </ol>
-      `);
+      out.push(
+        listType === "unordered"
+          ? html`
+              <ul>
+                ${items.map((line) => html`<li>${renderInline(line)}</li>`)}
+              </ul>
+            `
+          : html`
+              <ol>
+                ${items.map((line) => html`<li>${renderInline(line)}</li>`)}
+              </ol>
+            `,
+      );
       list = [];
+      listType = null;
     }
+  };
+  const appendListItem = (type: "ordered" | "unordered", item: string) => {
+    flushPara();
+    if (listType && listType !== type) {
+      flushList();
+    }
+    listType = type;
+    list.push(item);
   };
 
   for (const raw of lines) {
@@ -1025,8 +1052,12 @@ function renderProposalBody(body: string) {
     }
     const olMatch = /^\d+\.\s+(.+)/.exec(line);
     if (olMatch) {
-      flushPara();
-      list.push(olMatch[1]);
+      appendListItem("ordered", olMatch[1]);
+      continue;
+    }
+    const ulMatch = /^[-*]\s+(.+)/.exec(line);
+    if (ulMatch) {
+      appendListItem("unordered", ulMatch[1]);
       continue;
     }
     para.push(line);

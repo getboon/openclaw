@@ -73,6 +73,33 @@ vi.mock("../agents/agent-scope.js", () => ({
 }));
 
 describe("skills workshop cli", () => {
+  const withTldr = (content: string) => {
+    const normalized = content.trim();
+    const firstLineEnd = normalized.indexOf("\n");
+    const title = normalized.slice(0, firstLineEnd === -1 ? undefined : firstLineEnd);
+    const instructions = normalized
+      .slice(firstLineEnd === -1 ? normalized.length : firstLineEnd)
+      .trim();
+    return `${title}
+
+## TLDR
+
+This skill follows a reusable workflow from request to verified result.
+
+When you run this, the agent will:
+
+- Confirm the request and required context.
+- Follow the documented workflow in order.
+- Check the result before returning it.
+
+**Output:** A completed and verified result for the requested workflow.
+
+## Instructions
+
+${instructions}
+`;
+  };
+
   const createProgram = () => {
     const program = new Command();
     program.exitOverride();
@@ -117,7 +144,7 @@ describe("skills workshop cli", () => {
     await fs.mkdir(path.join(draftPath, "references"), { recursive: true });
     await fs.writeFile(
       path.join(draftPath, "PROPOSAL.md"),
-      "# Paris Weather\n\nCheck current weather before advice.\n",
+      withTldr("# Paris Weather\n\nCheck current weather before advice."),
       "utf8",
     );
     await fs.writeFile(
@@ -152,7 +179,7 @@ describe("skills workshop cli", () => {
     const revisedPath = path.join(mocks.workspaceDir, "revised-proposal.md");
     await fs.writeFile(
       revisedPath,
-      "# Paris Weather\n\nCheck current weather and alerts before advice.\n",
+      withTldr("# Paris Weather\n\nCheck current weather and alerts before advice."),
       "utf8",
     );
     await runCommand([
@@ -183,7 +210,7 @@ describe("skills workshop cli", () => {
   it("scopes list and inspect to the selected workspace", async () => {
     const firstWorkspaceDir = mocks.workspaceDir;
     const draftPath = path.join(firstWorkspaceDir, "proposal-draft.md");
-    await fs.writeFile(draftPath, "# First CLI Skill\n", "utf8");
+    await fs.writeFile(draftPath, withTldr("# First CLI Skill"), "utf8");
 
     await runCommand([
       "skills",

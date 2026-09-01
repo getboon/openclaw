@@ -742,6 +742,10 @@ describe("buildAgentSystemPrompt", () => {
     );
     expect(withTool).toContain("keep `description` under 160 bytes");
     expect(withTool).toContain("`proposal_content` within the configured body limit");
+    expect(withTool).toContain("Start every `proposal_content` body with `## TLDR`");
+    expect(withTool).toContain("When you run this, the agent will:");
+    expect(withTool).toContain("3-6 plain-English journey bullets");
+    expect(withTool).toContain("`**Output:**`");
     expect(withTool).toContain(
       "Use `action=list` or `action=inspect` only for pending proposal discovery/inspection. Do not use filesystem search for proposal discovery.",
     );
