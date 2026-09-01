@@ -51,7 +51,7 @@ Each entry lists the package, distribution route, and description.
 
 ## Core npm package
 
-59 plugins
+61 plugins
 
 - **[admin-http-rpc](/plugins/reference/admin-http-rpc)** (`@openclaw/admin-http-rpc`) - included in OpenClaw. OpenClaw admin HTTP RPC endpoint.
 
@@ -64,6 +64,8 @@ Each entry lists the package, distribution route, and description.
 - **[bonjour](/plugins/reference/bonjour)** (`@openclaw/bonjour`) - included in OpenClaw. Advertise the local OpenClaw gateway over Bonjour/mDNS.
 
 - **[browser](/plugins/reference/browser)** (`@openclaw/browser-plugin`) - included in OpenClaw. Adds agent-callable tools.
+
+- **[browser-handoff](/plugins/reference/browser-handoff)** (`@openclaw/browser-handoff-plugin`) - included in OpenClaw. Adds agent-callable tools.
 
 - **[byteplus](/plugins/reference/byteplus)** (`@openclaw/byteplus-provider`) - included in OpenClaw. Adds BytePlus, BytePlus Plan model provider support to OpenClaw.
 
@@ -142,6 +144,8 @@ Each entry lists the package, distribution route, and description.
 - **[runway](/plugins/reference/runway)** (`@openclaw/runway-provider`) - included in OpenClaw. Adds video generation provider support.
 
 - **[senseaudio](/plugins/reference/senseaudio)** (`@openclaw/senseaudio-provider`) - included in OpenClaw. Adds media understanding provider support.
+
+- **[sentry-monitor](/plugins/reference/sentry-monitor)** (`@openclaw/sentry-monitor`) - included in OpenClaw. Forward error-bearing OpenClaw lifecycle events to Sentry (model calls, agent turns, tool calls, message deliveries, subagents, cron runs, abnormal session ends) plus node-level uncaught exceptions / unhandled rejections.
 
 - **[sglang](/plugins/reference/sglang)** (`@openclaw/sglang-provider`) - included in OpenClaw. Adds SGLang model provider support to OpenClaw.
 
