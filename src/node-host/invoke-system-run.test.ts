@@ -32,9 +32,20 @@ import { buildSystemRunApprovalPlan } from "./invoke-system-run-plan.js";
 import { handleSystemRunInvoke } from "./invoke-system-run.js";
 import type { HandleSystemRunInvokeOptions } from "./invoke-system-run.js";
 
+const persistAllowAlwaysDecisionMock = vi.hoisted(() => vi.fn());
+
 vi.mock("../logger.js", () => ({
   logWarn: vi.fn(),
 }));
+
+vi.mock("../infra/exec-approvals.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../infra/exec-approvals.js")>();
+  persistAllowAlwaysDecisionMock.mockImplementation(actual.persistAllowAlwaysDecision);
+  return {
+    ...actual,
+    persistAllowAlwaysDecision: persistAllowAlwaysDecisionMock,
+  };
+});
 
 type MockedRunCommand = Mock<HandleSystemRunInvokeOptions["runCommand"]>;
 type MockedRunViaMacAppExecHost = Mock<HandleSystemRunInvokeOptions["runViaMacAppExecHost"]>;
@@ -77,6 +88,7 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     process.env.OPENCLAW_HOME = sharedOpenClawHome;
     fs.rmSync(resolveExecApprovalsPath(), { force: true });
     clearRuntimeConfigSnapshot();
+    persistAllowAlwaysDecisionMock.mockClear();
   });
 
   afterEach(() => {
@@ -561,6 +573,31 @@ describe("handleSystemRunInvoke mac app exec host routing", () => {
     ]);
     expect(shellWrapperCall.request?.rawCommand).toBe(
       '/bin/sh -lc "$0 \\"$1\\"" /usr/bin/touch /tmp/marker',
+    );
+  });
+
+  it("fails closed when allow-always persistence cannot complete", async () => {
+    persistAllowAlwaysDecisionMock.mockRejectedValueOnce(
+      new Error("Exec approvals update is already in progress; retry this operation."),
+    );
+
+    const { runCommand, sendInvokeResult, sendNodeEvent } = await runSystemInvoke({
+      preferMacAppExecHost: false,
+      security: "allowlist",
+      ask: "on-miss",
+      approvalDecision: "allow-always",
+      approved: true,
+    });
+
+    expect(runCommand).not.toHaveBeenCalled();
+    expectInvokeErrorMessage(sendInvokeResult, {
+      message: "SYSTEM_RUN_DENIED: allow-always approval could not be saved; retry the request",
+      exact: true,
+    });
+    expect(sendNodeEvent).toHaveBeenCalledWith(
+      {},
+      "exec.denied",
+      expect.objectContaining({ reason: "approval-persistence-failed" }),
     );
   });
 

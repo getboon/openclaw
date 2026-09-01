@@ -6,13 +6,20 @@ import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/st
 import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { GatewayClient } from "../gateway/client.js";
 import {
+  EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE,
+  withExecApprovalsLock,
+  type ExecApprovalsMutationStore,
+} from "../infra/exec-approvals-mutation.js";
+import {
   analyzeArgvCommand,
   ensureExecApprovals,
   mergeExecApprovalsSocketDefaults,
   normalizeExecApprovals,
   readExecApprovalsSnapshot,
-  resolveAllowAlwaysPatternCoverage,
+  resolveExecApprovalsPath,
+  restoreExecApprovalsSnapshot,
   saveExecApprovals,
+  resolveAllowAlwaysPatternCoverage,
   type ExecAsk,
   type ExecApprovalsFile,
   type ExecApprovalsResolved,
@@ -191,6 +198,13 @@ type ExecApprovalsSnapshot = {
   exists: boolean;
   hash: string;
   file: ExecApprovalsFile;
+};
+
+const execApprovalsMutationStore: ExecApprovalsMutationStore = {
+  resolvePath: resolveExecApprovalsPath,
+  readSnapshot: readExecApprovalsSnapshot,
+  save: saveExecApprovals,
+  restore: restoreExecApprovalsSnapshot,
 };
 
 type NodeInvokeRequestPayload = {
@@ -527,12 +541,12 @@ export async function handleInvoke(
       if (!params.file || typeof params.file !== "object") {
         throw new Error("INVALID_REQUEST: exec approvals file required");
       }
-      ensureExecApprovals();
-      const snapshot = readExecApprovalsSnapshot();
-      requireExecApprovalsBaseHash(params, snapshot);
-      const normalized = normalizeExecApprovals(params.file);
-      const next = mergeExecApprovalsSocketDefaults({ normalized, current: snapshot.file });
-      saveExecApprovals(next);
+      await withExecApprovalsLock(execApprovalsMutationStore, (snapshot) => {
+        requireExecApprovalsBaseHash(params, snapshot);
+        const normalized = normalizeExecApprovals(params.file);
+        const next = mergeExecApprovalsSocketDefaults({ normalized, current: snapshot.file });
+        return { kind: "save", file: next, result: undefined };
+      });
       const nextSnapshot = readExecApprovalsSnapshot();
       const payload: ExecApprovalsSnapshot = {
         path: nextSnapshot.path,
@@ -542,6 +556,15 @@ export async function handleInvoke(
       };
       await sendJsonPayloadResult(client, frame, payload);
     } catch (err) {
+      if ((err as { code?: unknown }).code === EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE) {
+        await sendErrorResult(
+          client,
+          frame,
+          "UNAVAILABLE",
+          "exec approvals update is already in progress; retry this operation.",
+        );
+        return;
+      }
       await sendInvalidRequestResult(client, frame, err);
     }
     return;

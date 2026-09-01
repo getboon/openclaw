@@ -76,6 +76,7 @@ type SystemRunInvokeResult = {
 type SystemRunDeniedReason =
   | "security=deny"
   | "approval-required"
+  | "approval-persistence-failed"
   | "allowlist-miss"
   | "execution-plan-miss"
   | "companion-unavailable"
@@ -838,24 +839,30 @@ async function executeSystemRunPhase(
   }
 
   if (phase.policy.approvalDecision === "allow-always") {
-    persistAllowAlwaysDecision({
-      approvals: phase.approvals.file,
-      agentId: phase.agentId,
-      decision: resolveAllowAlwaysPersistenceDecision({
-        segments: phase.segments,
-        cwd: phase.cwd,
-        env: phase.env,
-        platform: process.platform,
-        commandText: phase.commandText,
-        strictInlineEval: phase.strictInlineEval,
-        authorizationPlan: phase.authorizationPlan,
-        runtimePayload: phase.inlineEvalHit !== null,
-      }),
-    });
+    try {
+      await persistAllowAlwaysDecision({
+        agentId: phase.agentId,
+        decision: resolveAllowAlwaysPersistenceDecision({
+          segments: phase.segments,
+          cwd: phase.cwd,
+          env: phase.env,
+          platform: process.platform,
+          commandText: phase.commandText,
+          strictInlineEval: phase.strictInlineEval,
+          authorizationPlan: phase.authorizationPlan,
+          runtimePayload: phase.inlineEvalHit !== null,
+        }),
+      });
+    } catch {
+      await sendSystemRunDenied(opts, phase.execution, {
+        reason: "approval-persistence-failed",
+        message: "SYSTEM_RUN_DENIED: allow-always approval could not be saved; retry the request",
+      });
+      return;
+    }
   }
 
   recordAllowlistMatchesUse({
-    approvals: phase.approvals.file,
     agentId: phase.agentId,
     matches: phase.allowlistMatches,
     command: phase.commandText,

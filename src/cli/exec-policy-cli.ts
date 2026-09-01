@@ -13,10 +13,15 @@ import {
   type ExecPolicyScopeSnapshot,
 } from "../infra/exec-approvals-effective.js";
 import {
+  withExecApprovalsLock,
+  type ExecApprovalsMutationStore,
+} from "../infra/exec-approvals-mutation.js";
+import {
   normalizeExecAsk,
   normalizeExecSecurity,
   normalizeExecTarget,
   readExecApprovalsSnapshot,
+  resolveExecApprovalsPath,
   restoreExecApprovalsSnapshot,
   saveExecApprovals,
   type ExecApprovalsFile,
@@ -94,6 +99,13 @@ type ExecPolicyShowScope = Omit<
     effective: ExecPolicyShowSecurity;
     source: string;
   };
+};
+
+const execApprovalsMutationStore: ExecApprovalsMutationStore = {
+  resolvePath: resolveExecApprovalsPath,
+  readSnapshot: readExecApprovalsSnapshot,
+  save: saveExecApprovals,
+  restore: restoreExecApprovalsSnapshot,
 };
 
 class ExecPolicyCliError extends Error {
@@ -344,21 +356,35 @@ async function applyLocalExecPolicy(policy: ExecPolicyResolved): Promise<ExecPol
       "Local exec-policy cannot synchronize host=node. Node approvals are fetched from the node at runtime.",
     );
   }
-  const approvalsSnapshot = readExecApprovalsSnapshot();
-  const nextApprovals = applyApprovalsDefaults(approvalsSnapshot.file, policy);
-  const writtenApprovalsHash = hashExecApprovalsFile(nextApprovals);
-  saveExecApprovals(nextApprovals);
+  const { approvalsSnapshot, writtenApprovalsHash } = await withExecApprovalsLock(
+    execApprovalsMutationStore,
+    (snapshot) => {
+      const nextApprovals = applyApprovalsDefaults(snapshot.file, policy);
+      return {
+        kind: "save",
+        file: nextApprovals,
+        result: {
+          approvalsSnapshot: snapshot,
+          writtenApprovalsHash: hashExecApprovalsFile(nextApprovals),
+        },
+      };
+    },
+  );
   try {
     await replaceConfigFile({
       baseHash: configSnapshot.hash,
       nextConfig,
     });
   } catch (err) {
-    const currentApprovalsSnapshot = readExecApprovalsSnapshot();
-    if (currentApprovalsSnapshot.hash !== writtenApprovalsHash) {
-      throw err;
-    }
-    restoreExecApprovalsSnapshot(approvalsSnapshot);
+    await withExecApprovalsLock(execApprovalsMutationStore, (currentApprovalsSnapshot) =>
+      currentApprovalsSnapshot.hash === writtenApprovalsHash
+        ? {
+            kind: "restore",
+            snapshot: approvalsSnapshot,
+            result: undefined,
+          }
+        : { kind: "unchanged", result: undefined },
+    );
     throw err;
   }
   return await buildLocalExecPolicyShowPayload();

@@ -1,5 +1,6 @@
 // File lock helpers serialize plugin writes that share a filesystem-backed state file.
 import "../infra/fs-safe-defaults.js";
+import fs from "node:fs/promises";
 import {
   acquireFileLock as acquireFsSafeFileLock,
   drainFileLockManagerForTest,
@@ -10,6 +11,8 @@ import { getProcessStartTime } from "../shared/pid-alive.js";
 
 /** Retry and stale-recovery policy for acquiring a filesystem lock. */
 export type FileLockOptions = {
+  /** Whether the same process may nest acquisitions for the same target path. */
+  allowReentrant?: boolean;
   /** Retry policy used while waiting for another process or re-entrant holder to release. */
   retries: {
     retries: number;
@@ -59,6 +62,16 @@ async function shouldReclaimPluginLock(params: {
   staleMs: number;
   nowMs: number;
 }): Promise<boolean> {
+  if (params.payload === null) {
+    // A crash can leave the exclusive sidecar created but its payload unwritten.
+    // Only reclaim that incomplete lock after the full stale window has elapsed.
+    try {
+      const stat = await fs.stat(params.lockPath);
+      return params.nowMs - stat.mtimeMs > params.staleMs;
+    } catch {
+      return false;
+    }
+  }
   return shouldRemoveDeadOwnerOrExpiredLock({
     payload: params.payload,
     staleMs: params.staleMs,
@@ -92,7 +105,7 @@ export async function drainFileLockStateForTest(): Promise<void> {
   await drainFileLockManagerForTest(FILE_LOCK_MANAGER_KEY, FILE_LOCK_MANAGER_KEY);
 }
 
-/** Acquire a re-entrant process-local file lock backed by a `.lock` sidecar file. */
+/** Acquire a process-local file lock backed by a `.lock` sidecar file. */
 export async function acquireFileLock(
   filePath: string,
   options: FileLockOptions,
@@ -103,7 +116,7 @@ export async function acquireFileLock(
       staleMs: options.stale,
       retry: options.retries,
       staleRecovery: "remove-if-unchanged",
-      allowReentrant: true,
+      allowReentrant: options.allowReentrant ?? true,
       payload: () => {
         const payload: Record<string, unknown> = {
           pid: process.pid,
@@ -117,9 +130,11 @@ export async function acquireFileLock(
       },
       shouldReclaim: shouldReclaimPluginLock,
       shouldRemoveStaleLock: (snapshot) =>
-        shouldRemoveDeadOwnerOrExpiredLock({
+        shouldReclaimPluginLock({
+          lockPath: snapshot.lockPath,
           payload: snapshot.payload,
           staleMs: options.stale,
+          nowMs: Date.now(),
         }),
     });
     return { lockPath: lock.lockPath, release: lock.release };

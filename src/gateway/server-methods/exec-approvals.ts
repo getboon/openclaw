@@ -9,10 +9,17 @@ import {
   validateExecApprovalsSetParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import {
+  EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE,
+  withExecApprovalsLock,
+  type ExecApprovalsMutationStore,
+} from "../../infra/exec-approvals-mutation.js";
+import {
   ensureExecApprovals,
   mergeExecApprovalsSocketDefaults,
   normalizeExecApprovals,
   readExecApprovalsSnapshot,
+  resolveExecApprovalsPath,
+  restoreExecApprovalsSnapshot,
   saveExecApprovals,
   type ExecApprovalsFile,
   type ExecApprovalsSnapshot,
@@ -25,6 +32,9 @@ import {
 } from "./nodes.helpers.js";
 import type { GatewayRequestContext, GatewayRequestHandlers, RespondFn } from "./types.js";
 import { assertValidParams, type Validator } from "./validation.js";
+
+const EXEC_APPROVALS_LOCK_RETRY_MESSAGE =
+  "exec approvals update is already in progress; retry this operation.";
 
 function requireApprovalsBaseHash(
   params: unknown,
@@ -92,6 +102,13 @@ function toExecApprovalsPayload(snapshot: ExecApprovalsSnapshot) {
   };
 }
 
+const execApprovalsMutationStore: ExecApprovalsMutationStore = {
+  resolvePath: resolveExecApprovalsPath,
+  readSnapshot: readExecApprovalsSnapshot,
+  save: saveExecApprovals,
+  restore: restoreExecApprovalsSnapshot,
+};
+
 async function respondWithExecApprovalsNodePayload<TParams extends { nodeId: string }>(params: {
   method: string;
   rawParams: unknown;
@@ -134,13 +151,8 @@ export const execApprovalsHandlers: GatewayRequestHandlers = {
     const snapshot = readExecApprovalsSnapshot();
     respond(true, toExecApprovalsPayload(snapshot), undefined);
   },
-  "exec.approvals.set": ({ params, respond }) => {
+  "exec.approvals.set": async ({ params, respond }) => {
     if (!assertValidParams(params, validateExecApprovalsSetParams, "exec.approvals.set", respond)) {
-      return;
-    }
-    ensureExecApprovals();
-    const snapshot = readExecApprovalsSnapshot();
-    if (!requireApprovalsBaseHash(params, snapshot, respond)) {
       return;
     }
     const incoming = (params as { file?: unknown }).file;
@@ -152,9 +164,32 @@ export const execApprovalsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const normalized = normalizeExecApprovals(incoming as ExecApprovalsFile);
-    const next = mergeExecApprovalsSocketDefaults({ normalized, current: snapshot.file });
-    saveExecApprovals(next);
+    let saved: boolean;
+    try {
+      saved = await withExecApprovalsLock(execApprovalsMutationStore, (snapshot) => {
+        if (!requireApprovalsBaseHash(params, snapshot, respond)) {
+          return { kind: "unchanged", result: false };
+        }
+        const normalized = normalizeExecApprovals(incoming as ExecApprovalsFile);
+        const next = mergeExecApprovalsSocketDefaults({ normalized, current: snapshot.file });
+        return { kind: "save", file: next, result: true };
+      });
+    } catch (err) {
+      if ((err as { code?: unknown }).code !== EXEC_APPROVALS_LOCK_CONTENTION_ERROR_CODE) {
+        throw err;
+      }
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.UNAVAILABLE, EXEC_APPROVALS_LOCK_RETRY_MESSAGE, {
+          retryable: true,
+        }),
+      );
+      return;
+    }
+    if (!saved) {
+      return;
+    }
     const nextSnapshot = readExecApprovalsSnapshot();
     respond(true, toExecApprovalsPayload(nextSnapshot), undefined);
   },
