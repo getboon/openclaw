@@ -65,7 +65,7 @@ export type SubagentCompletionDeliveryState = {
   steeringLeasedAt?: number;
   steeringInjectedAt?: number;
   suspendedAt?: number;
-  suspendedReason?: "retry-limit" | "expiry";
+  suspendedReason?: "retry-limit" | "expiry" | "subagent_no_output";
   discardedAt?: number;
   discardReason?: "expired" | "pressure-pruned";
   discardedPayloadSummary?: {
@@ -81,7 +81,8 @@ export type SubagentCompletionDeliveryState = {
     | "parent_run_ended"
     | "sink_unavailable"
     | "dedupe"
-    | "waiting_for_requester_turn";
+    | "waiting_for_requester_turn"
+    | "subagent_no_output";
 };
 
 export type SubagentRunRecord = {

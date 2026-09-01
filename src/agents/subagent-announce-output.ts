@@ -183,6 +183,29 @@ function summarizeSubagentOutputHistory(messages: Array<unknown>): SubagentOutpu
   return snapshot;
 }
 
+function formatToolCallsWithoutOutput(count: number): string {
+  return `${count} tool call(s) made without visible output.`;
+}
+
+const TOOL_CALLS_WITHOUT_OUTPUT_RE = /^\d+ tool call\(s\) made without visible output\.$/;
+
+/**
+ * True when a subagent completion result is a synthetic no-output placeholder
+ * rather than real child output: the `"(no output)"` fallback (zero-flush
+ * crash — no child session on disk) or the tool-calls summary produced by
+ * `selectSubagentOutputText` when the child transcript has tool calls but no
+ * visible assistant text (partial-flush crash). Announce delivery uses this to
+ * classify a failed completion as frozen-empty (`subagent_no_output`): both
+ * shapes are immutable, so retrying the announce can never produce content.
+ */
+export function isSyntheticNoOutputResult(text: string | undefined): boolean {
+  if (typeof text !== "string") {
+    return true;
+  }
+  const trimmed = text.trim();
+  return trimmed === "" || trimmed === "(no output)" || TOOL_CALLS_WITHOUT_OUTPUT_RE.test(trimmed);
+}
+
 function selectSubagentOutputText(snapshot: SubagentOutputSnapshot): string | undefined {
   if (snapshot.waitingForContinuation) {
     return undefined;
@@ -194,7 +217,7 @@ function selectSubagentOutputText(snapshot: SubagentOutputSnapshot): string | un
     return snapshot.latestAssistantText;
   }
   if (snapshot.latestToolCallCount && snapshot.latestToolCallCount > 0) {
-    return `${snapshot.latestToolCallCount} tool call(s) made without visible output.`;
+    return formatToolCallsWithoutOutput(snapshot.latestToolCallCount);
   }
   return undefined;
 }

@@ -1299,10 +1299,143 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     expectRecordFields(result, {
       delivered: false,
       path: "direct",
-      reason: "visible_reply_missing",
+      reason: "subagent_no_output",
+      error: "completion agent did not produce a visible reply",
+    });
+    // The placeholder "(no output)" is never delivered, but a DM requester gets
+    // one honest notice that the background task did not finish.
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "discord",
+        to: "dm:U123",
+        content: expect.stringContaining("didn't finish"),
+        idempotencyKey: "announce-dm-fallback-empty:no-output-notice",
+      }),
+    );
+  });
+
+  it("classifies the partial-flush tool-calls placeholder as subagent_no_output", async () => {
+    // Crash shape observed live (ENG-19092 E2E): the child persisted a tool
+    // call but no visible text before the process died, so the announce event
+    // carries the synthetic "N tool call(s) made without visible output."
+    // summary instead of "(no output)". Both are frozen-empty.
+    const callGateway = createGatewayMock({
+      result: {
+        payloads: [],
+      },
+    });
+    const sendMessage = createSendMessageMock();
+
+    const result = await deliverDiscordDirectMessageCompletion({
+      callGateway,
+      sendMessage,
+      internalEvents: [
+        {
+          type: "task_completion",
+          source: "subagent",
+          childSessionKey: "agent:worker:subagent:child",
+          childSessionId: "child-session-id",
+          announceType: "subagent task",
+          taskLabel: "direct completion smoke",
+          status: "error",
+          statusLabel: "failed: subagent run lost active execution context",
+          result: "1 tool call(s) made without visible output.",
+          replyInstruction: "Summarize the result.",
+        },
+      ],
+    });
+
+    expectRecordFields(result, {
+      delivered: false,
+      path: "direct",
+      reason: "subagent_no_output",
+      error: "completion agent did not produce a visible reply",
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("didn't finish"),
+      }),
+    );
+  });
+
+  it("classifies a frozen no-output completion on a thread as subagent_no_output", async () => {
+    const callGateway = createGatewayMock({
+      result: {
+        payloads: [],
+      },
+    });
+    const sendMessage = createSendMessageMock();
+
+    const result = await deliverSlackThreadAnnouncement({
+      callGateway,
+      sendMessage,
+      sessionId: "requester-session-4",
+      isActive: false,
+      expectsCompletionMessage: true,
+      directIdempotencyKey: "announce-thread-no-output",
+      internalEvents: [
+        {
+          type: "task_completion",
+          source: "subagent",
+          childSessionKey: "agent:worker:subagent:child",
+          childSessionId: "child-session-id",
+          announceType: "subagent task",
+          taskLabel: "thread completion smoke",
+          status: "error",
+          statusLabel: "failed: all models failed",
+          result: "(no output)",
+          replyInstruction: "Summarize the result.",
+        },
+      ],
+    });
+
+    expectRecordFields(result, {
+      delivered: false,
+      path: "direct",
+      reason: "subagent_no_output",
       error: "completion agent did not produce a visible reply",
     });
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("still reports the no-output give-up when the honest notice itself fails to send", async () => {
+    const callGateway = createGatewayMock({
+      result: {
+        payloads: [],
+      },
+    });
+    const sendMessage = vi.fn(async () => {
+      throw new Error("channel unavailable");
+    }) as unknown as typeof runtimeSendMessage;
+
+    const result = await deliverDiscordDirectMessageCompletion({
+      callGateway,
+      sendMessage,
+      internalEvents: [
+        {
+          type: "task_completion",
+          source: "subagent",
+          childSessionKey: "agent:worker:subagent:child",
+          childSessionId: "child-session-id",
+          announceType: "subagent task",
+          taskLabel: "direct completion smoke",
+          status: "error",
+          statusLabel: "failed: all models failed",
+          result: "(no output)",
+          replyInstruction: "Summarize the result.",
+        },
+      ],
+    });
+
+    expectRecordFields(result, {
+      delivered: false,
+      path: "direct",
+      reason: "subagent_no_output",
+      error: "completion agent did not produce a visible reply",
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 
   it("directly delivers unprefixed direct targets recognized by the channel grammar", async () => {
@@ -1547,6 +1680,56 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       });
     },
   );
+
+  it("classifies a frozen no-output completion as subagent_no_output on the session-only (no deliverable target) path", async () => {
+    // ENG-19092 E2E: a crash-recovered subagent whose requester session has no
+    // channel origin lands in the session-only handoff branch
+    // (shouldDeliverAgentFinal=false). The fail-fast classification must
+    // engage there too, not just on the deliverable branches.
+    const dispatchGatewayMethodInProcess = createInProcessGatewayMock({
+      result: { payloads: [] },
+    });
+    testing.setDepsForTest({
+      dispatchGatewayMethodInProcess,
+      getRequesterSessionActivity: () => ({
+        sessionId: "requester-session-local",
+        isActive: false,
+      }),
+      getRuntimeConfig: () => ({}) as never,
+    });
+
+    const result = await deliverSubagentAnnouncement({
+      requesterSessionKey: "agent:main:local-session",
+      targetRequesterSessionKey: "agent:main:local-session",
+      triggerMessage: "child done",
+      steerMessage: "child done",
+      requesterIsSubagent: false,
+      expectsCompletionMessage: true,
+      bestEffortDeliver: true,
+      directIdempotencyKey: "announce-local-no-output",
+      internalEvents: [
+        {
+          type: "task_completion",
+          source: "subagent",
+          childSessionKey: "agent:main:subagent:child",
+          childSessionId: "child-session-id",
+          announceType: "subagent task",
+          taskLabel: "session-only no-output",
+          status: "error",
+          statusLabel: "failed: subagent run lost active execution context",
+          result: "1 tool call(s) made without visible output.",
+          replyInstruction: "Summarize the result.",
+        },
+      ],
+    });
+
+    expectRecordFields(result, {
+      delivered: false,
+      path: "direct",
+      reason: "subagent_no_output",
+      error: "completion agent did not produce a visible reply",
+    });
+  });
 
   it("accepts non-subagent session-only completion handoff when the in-process agent intentionally replies NO_REPLY", async () => {
     const dispatchGatewayMethodInProcess = createInProcessGatewayMock({
