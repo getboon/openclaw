@@ -80,6 +80,7 @@ import { inferToolMetaFromArgs } from "./embedded-agent-utils.js";
 import { parseExecApprovalResultText } from "./exec-approval-result.js";
 import type { AgentEvent } from "./runtime/index.js";
 import { isBenignHousekeepingShellCommand } from "./tool-display-exec-shell.js";
+import type { ToolErrorSummary } from "./tool-error-summary.js";
 import { buildToolMutationState, isSameToolMutationAction } from "./tool-mutation.js";
 import { normalizeToolName } from "./tool-policy.js";
 import { readToolResultDetails } from "./tool-result-error.js";
@@ -1113,6 +1114,38 @@ export function handleToolExecutionUpdate(
   }
 }
 
+/**
+ * Marks `toolFailures` entries retired by a successful call, so a step
+ * already fixed by a later identical call is dropped from the step-failure
+ * digest instead of stacking a stale failure next to its own success
+ * (ENG-18917 — the detector must not shout about a transient that already
+ * recovered). Matches on the mutation identity for mutating failures (the
+ * same fingerprint/file-target rule `lastToolError` already uses), or on
+ * toolName+meta for everything else — a different `meta` is a different
+ * step and stays reported even though this call succeeded (ENG-18812).
+ */
+function markMatchingToolFailuresRetried(
+  toolFailures: Array<ToolErrorSummary & { retried?: boolean }>,
+  successfulCall: {
+    toolName: string;
+    meta?: string;
+    actionFingerprint?: string;
+    fileTarget?: ToolErrorSummary["fileTarget"];
+  },
+): void {
+  for (const failure of toolFailures) {
+    if (failure.retried) {
+      continue;
+    }
+    const matches = failure.mutatingAction
+      ? isSameToolMutationAction(failure, successfulCall)
+      : failure.toolName === successfulCall.toolName && failure.meta === successfulCall.meta;
+    if (matches) {
+      failure.retried = true;
+    }
+  }
+}
+
 /** Handles a tool-execution result and commits replay, media, hook, and error state. */
 export async function handleToolExecutionEnd(
   ctx: ToolHandlerContext,
@@ -1206,7 +1239,7 @@ export async function handleToolExecutionEnd(
       isExecToolName(toolName) &&
       typeof startArgs.command === "string" &&
       isBenignHousekeepingShellCommand(startArgs.command);
-    ctx.state.lastToolError = {
+    const toolErrorSummary: ToolErrorSummary = {
       toolName,
       meta,
       ...(errorCode ? { errorCode } : {}),
@@ -1218,21 +1251,40 @@ export async function handleToolExecutionEnd(
       fileTarget: attemptedMutatingAction ? callSummary.fileTarget : undefined,
       ...(benignHousekeepingError ? { benignHousekeepingError: true } : {}),
     };
-  } else if (ctx.state.lastToolError) {
-    // Keep unresolved mutating failures until the same action succeeds.
-    if (ctx.state.lastToolError.mutatingAction) {
-      if (
-        isSameToolMutationAction(ctx.state.lastToolError, {
-          toolName,
-          meta,
-          actionFingerprint: callSummary?.actionFingerprint,
-          fileTarget: callSummary?.fileTarget,
-        })
-      ) {
+    ctx.state.lastToolError = toolErrorSummary;
+    // Independent of lastToolError's single-slot lifecycle (ENG-18812): this
+    // list must retain every unresolved failure for the turn so the
+    // step-failure note can name all of them, not just the most recent one.
+    ctx.state.toolFailures.push(toolErrorSummary);
+  } else {
+    // A successful call only retires toolFailures entries for the SAME step
+    // (matched below), independent of lastToolError's own clear logic right
+    // after — an earlier DIFFERENT failed step must stay reported even though
+    // some unrelated call just succeeded (root cause of ENG-18812: the old
+    // single-slot `lastToolError` was cleared by any later non-mutating
+    // success, silently erasing the only record a prior step had failed).
+    markMatchingToolFailuresRetried(ctx.state.toolFailures, {
+      toolName,
+      meta,
+      actionFingerprint: callSummary?.actionFingerprint,
+      fileTarget: callSummary?.fileTarget,
+    });
+    if (ctx.state.lastToolError) {
+      // Keep unresolved mutating failures until the same action succeeds.
+      if (ctx.state.lastToolError.mutatingAction) {
+        if (
+          isSameToolMutationAction(ctx.state.lastToolError, {
+            toolName,
+            meta,
+            actionFingerprint: callSummary?.actionFingerprint,
+            fileTarget: callSummary?.fileTarget,
+          })
+        ) {
+          ctx.state.lastToolError = undefined;
+        }
+      } else {
         ctx.state.lastToolError = undefined;
       }
-    } else {
-      ctx.state.lastToolError = undefined;
     }
   }
   if (asyncStarted) {

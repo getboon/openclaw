@@ -847,6 +847,36 @@ describe("sessions_send gating", () => {
     ]);
   });
 
+  it("reports the live run session, not a sandbox agentSessionKey, as inter-session provenance", async () => {
+    // A sandbox/policy key (e.g. a Teams DM peer-scoped key) is never itself
+    // persisted as a transcript session. If it leaks into inputProvenance the
+    // receiving session is told to address follow-ups to a key nothing can
+    // resume — this reproduced the "agent forgets everything" bug live.
+    const sandboxKey = "agent:main:msteams:default:direct:peer-123";
+    const tool = createSessionsSendTool({
+      agentSessionKey: sandboxKey,
+      runSessionKey: MAIN_AGENT_SESSION_KEY,
+      agentChannel: MAIN_AGENT_CHANNEL,
+    });
+
+    // Self-send (target == the caller's own sandbox key), matching the live
+    // reproduction where the agent messages its own DM thread.
+    await tool.execute("call-provenance", {
+      sessionKey: sandboxKey,
+      message: "hi",
+      timeoutSeconds: 0,
+    });
+
+    const agentCall = callGatewayMock.mock.calls.find(
+      (call) => (call[0] as { method?: string })?.method === "agent",
+    );
+    const params = requireRecord(agentCall?.[0], "agent gateway call").params as
+      | Record<string, unknown>
+      | undefined;
+    const inputProvenance = requireRecord(params?.inputProvenance, "inputProvenance");
+    expect(inputProvenance.sourceSessionKey).toBe(MAIN_AGENT_SESSION_KEY);
+  });
+
   it("does not disclose a resolved session key when sessionId access is denied", async () => {
     const tool = createSessionsSendTool({
       agentSessionKey: MAIN_AGENT_SESSION_KEY,

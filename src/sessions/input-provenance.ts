@@ -103,6 +103,18 @@ export function shouldPreserveUserFacingSessionStateForInputProvenance(value: un
   return sourceTool ? USER_FACING_SESSION_STATE_PRESERVING_SOURCE_TOOLS.has(sourceTool) : false;
 }
 
+// A subagent-announce delivery run relays a completion into the requester
+// session. Its NO_REPLY final is a failed/empty announce, not a customer turn,
+// so the transcript guard suppresses it. Identified by the inter-session
+// announce provenance these runs already carry.
+export function isSubagentAnnounceInputProvenance(value: unknown): boolean {
+  const provenance = normalizeInputProvenance(value);
+  return (
+    provenance?.kind === "inter_session" &&
+    normalizeOptionalString(provenance.sourceTool)?.toLowerCase() === "subagent_announce"
+  );
+}
+
 export function hasInterSessionUserProvenance(
   message: { role?: unknown; provenance?: unknown } | undefined,
 ): boolean {

@@ -71,7 +71,10 @@ import {
 } from "../../../plugins/provider-runtime.js";
 import { getPluginToolMeta } from "../../../plugins/tools.js";
 import { isSubagentSessionKey } from "../../../routing/session-key.js";
-import { annotateInterSessionPromptText } from "../../../sessions/input-provenance.js";
+import {
+  annotateInterSessionPromptText,
+  isSubagentAnnounceInputProvenance,
+} from "../../../sessions/input-provenance.js";
 import { isTranscriptOnlyOpenClawAssistantMessage } from "../../../shared/transcript-only-openclaw-assistant.js";
 import {
   resolveExplicitSkillForRun,
@@ -2225,6 +2228,13 @@ export async function runEmbeddedAttempt(
         suppressTranscriptOnlyAssistantPersistence:
           params.suppressTranscriptOnlyAssistantPersistence,
         suppressAssistantErrorPersistence: params.suppressAssistantErrorPersistence,
+        // Subagent-announce delivery runs relay a completion; a NO_REPLY final on
+        // such a run is a failed/empty announce, not a customer turn. Suppress it
+        // so retried/failed announces cannot persist silent turns the model later
+        // mimics. Normal customer turns never carry this provenance.
+        suppressSilentAssistantFinalPersistence: isSubagentAnnounceInputProvenance(
+          params.inputProvenance,
+        ),
         // Capture the on-disk fingerprint immediately BEFORE pi's append so the
         // controller can register the append as an owned write keyed on the real
         // pre-append state (not the controller's stale fenceFingerprint). This is
@@ -3693,6 +3703,7 @@ export async function runEmbeddedAttempt(
         didSendViaMessagingTool,
         didSendDeterministicApprovalPrompt,
         getLastToolError,
+        getToolFailures,
         setTerminalLifecycleMeta,
         getUsageTotals,
         getCompactionCount,
@@ -5468,6 +5479,8 @@ export async function runEmbeddedAttempt(
         completedClientToolCalls.length > 0 ? completedClientToolCalls : undefined;
       const didSendDeterministicApprovalPromptNow = didSendDeterministicApprovalPrompt();
       const lastToolError = getLastToolError?.();
+      // Independent of lastToolError's single-slot lifecycle (ENG-18812).
+      const toolFailures = getToolFailures?.();
       const heartbeatToolResponse = getHeartbeatToolResponse();
       const messagingToolSourceReplyPayloads = getMessagingToolSourceReplyPayloads();
       const hasToolMediaBlockReplyNow = hasToolMediaBlockReply();
@@ -5655,6 +5668,7 @@ export async function runEmbeddedAttempt(
         lastAssistant,
         currentAttemptAssistant,
         lastToolError,
+        toolFailures,
         didSendViaMessagingTool: didSendViaMessagingTool(),
         didDeliverSourceReplyViaMessageTool,
         didSendDeterministicApprovalPrompt: didSendDeterministicApprovalPromptNow,

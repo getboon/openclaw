@@ -50,6 +50,9 @@ describe("startProgressNudgeRunner concurrency", () => {
         return () => {};
       },
       subscribeTerminal: () => () => {},
+      // Not under test here; default to "supports edit" (see
+      // progress-nudge-runner.scheduler.test.ts for the edit-support gate).
+      channelSupportsEdit: () => true,
       resolveDeliveryTarget: vi
         .fn()
         .mockImplementation(async (p: { currentSessionKey: string }) => ({

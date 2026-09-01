@@ -43,27 +43,21 @@ import {
   extractAssistantVisibleText,
 } from "../../embedded-agent-utils.js";
 import {
-  classifyToolFailureReason,
   isExecLikeToolName,
+  shouldSurfaceToolFailure,
   type ToolErrorSummary,
 } from "../../tool-error-summary.js";
-import { isLikelyMutatingToolName } from "../../tool-mutation.js";
+import {
+  buildToolFailureDigest,
+  type ToolFailureDigest,
+  type ToolFailureDigestEntry,
+} from "../../tool-failure-digest.js";
 
 type ToolMetaEntry = { toolName: string; meta?: string; errored?: boolean };
 type ToolErrorWarningPolicy = {
   showWarning: boolean;
   includeDetails: boolean;
 };
-
-const RECOVERABLE_TOOL_ERROR_KEYWORDS = [
-  "required",
-  "missing",
-  "invalid",
-  "must be",
-  "must have",
-  "needs",
-  "requires",
-] as const;
 
 const MUTATING_FAILURE_ACTION_PATTERN =
   "(?:write|edit|update|save|create|delete|remove|modify|change|apply|patch|move|rename|send|reply|message|run|execute|execution|command|script|shell|bash|exec|tool|action|operation)";
@@ -86,11 +80,6 @@ const MUTATING_FAILURE_ERROR_WHILE_ACTION_PATTERN = new RegExp(
 );
 const DID_NOT_FAIL_PATTERN = /\b(?:did not|didn't)\s+fail\b/u;
 const NEGATED_FAILURE_PATTERN = /\b(?:no|not|without)\s+(?:failures?|errors?)\b/u;
-
-function isRecoverableToolError(error: string | undefined): boolean {
-  const errorLower = normalizeOptionalLowercaseString(error) ?? "";
-  return RECOVERABLE_TOOL_ERROR_KEYWORDS.some((keyword) => errorLower.includes(keyword));
-}
 
 function hasExplicitMutatingToolFailureAcknowledgement(text: string): boolean {
   const normalizedText = normalizeTextForComparison(text);
@@ -171,50 +160,62 @@ function isRecoverableExecClassToolName(toolName: string): boolean {
   return RECOVERABLE_EXEC_CLASS_TOOL_NAMES.has(normalizeOptionalLowercaseString(toolName) ?? "");
 }
 
+/** Renders one digest entry as `tool — reason` (`tool` alone when unclassified), with a `×N` suffix for repeats. */
+function formatToolFailureDigestEntry(entry: ToolFailureDigestEntry): string {
+  const reason = entry.reasonText ? ` — ${entry.reasonText}` : "";
+  const repeatSuffix = entry.count > 1 ? ` (×${entry.count})` : "";
+  return `${entry.toolName}${reason}${repeatSuffix}`;
+}
+
 /**
- * Intermediate-status copy for a NON-TERMINAL tool failure: a recovered
- * command-execution error on a turn that still produced a real reply. A
+ * Intermediate-status copy for NON-TERMINAL tool failures: recovered
+ * command-execution errors on a turn that still produced a real reply. A
  * terminal "⚠️ <tool> failed" banner is the over-eager lie Mona flagged (#53):
  * it reads as a hard failure while work actually continued. Middleware
  * (post-processing) failures never reach this builder — they are suppressed
  * upstream in `resolveToolErrorWarningPolicy` because "output unavailable"
  * is not evidence the step itself failed.
  *
- * Names the step (redacted action summary) and the classified reason, plus
+ * Names EVERY unrecovered failed step (ENG-18812 — previously only the most
+ * recent failure's identity was tracked, so a turn with two distinct
+ * failures could only ever describe one) with its classified reason, plus
  * what it means for the reply already delivered, so a user can tell whether
  * their output is trustworthy instead of only hearing "a step didn't
  * complete, but I kept going."
  */
 function buildNonTerminalToolStatusText(params: {
-  completedToolCount: number;
-  totalToolCount: number;
-  actionSummary: string;
-  reasonText?: string;
-  /** Operator-only raw error text appended when verbose (includeDetails). */
+  digest: ToolFailureDigest;
+  /** Operator-only raw error text for the representative failure, appended when verbose (includeDetails). */
   detailSuffix?: string;
 }): string {
-  // At least one step (the current lastToolError) didn't finish even when
-  // toolMetas has no other entries to derive a count from (e.g. legacy
-  // callers with an empty toolMetas array).
-  const didNotFinishCount = Math.max(1, params.totalToolCount - params.completedToolCount);
+  const { digest } = params;
+  // At least one step didn't finish even when toolMetas has no other entries
+  // to derive a count from (e.g. legacy callers with an empty toolMetas array).
+  const didNotFinishCount = Math.max(1, digest.totalToolCount - digest.completedToolCount);
   const isMultiple = didNotFinishCount > 1;
   const header = isMultiple ? `${didNotFinishCount} steps didn't finish` : "One step didn't finish";
-  // Only the most recent failure's identity/reason is tracked (lastToolError
-  // is a single slot), so when multiple steps failed the label and closing
-  // guidance say so explicitly rather than implying "Step:" is the full list.
-  const stepLabel = isMultiple ? "Most recent step" : "Step";
+  // The digest can legitimately name fewer failures than `didNotFinishCount`
+  // implies — a caller that doesn't track the full-turn `toolFailures` list
+  // (the Codex path, or a test that hand-builds a single `lastToolError`)
+  // still reports an accurate toolMetas-derived count. Treat that gap the
+  // same as the cap-based omission below rather than silently implying the
+  // named list is complete (the exact swallow this note exists to fix).
+  const namedFailureCount =
+    digest.failures.reduce((sum, entry) => sum + entry.count, 0) + digest.omittedCount;
+  const unaccountedCount = Math.max(0, didNotFinishCount - namedFailureCount);
+  const totalOmitted = digest.omittedCount + unaccountedCount;
+  const stepLabel = digest.failures.length > 1 || totalOmitted > 0 ? "Steps" : "Step";
   const steps =
-    params.completedToolCount > 0
-      ? ` (${params.completedToolCount} of ${params.totalToolCount} steps completed)`
+    digest.completedToolCount > 0
+      ? ` (${digest.completedToolCount} of ${digest.totalToolCount} steps completed)`
       : "";
-  const reason = params.reasonText ? ` — ${params.reasonText}` : "";
+  const list = digest.failures.map(formatToolFailureDigestEntry).join("; ");
+  const omitted = totalOmitted > 0 ? `; …and ${totalOmitted} more` : "";
   const detail = params.detailSuffix ? `: ${params.detailSuffix}` : "";
   const closing = isMultiple
     ? "The reply above may be missing what those steps produced. Ask me to redo them if something looks off."
     : "The reply above may be missing what that step produced. Ask me to redo that step if something looks off.";
-  return (
-    `↻ ${header}${steps}.\n${stepLabel}: ${params.actionSummary}${reason}${detail}\n` + closing
-  );
+  return `↻ ${header}${steps}.\n${stepLabel}: ${list}${omitted}${detail}\n` + closing;
 }
 
 /**
@@ -234,7 +235,6 @@ function resolveToolErrorWarningPolicy(params: {
   sessionKey: string;
   verboseLevel?: VerboseLevel;
 }): ToolErrorWarningPolicy {
-  const normalizedToolName = normalizeOptionalLowercaseString(params.lastToolError.toolName) ?? "";
   let toolErrorWarningOverride: boolean | undefined;
   let dynamicToolErrorWarningsDisabled = false;
   if (typeof params.suppressToolErrorWarnings === "function") {
@@ -248,62 +248,19 @@ function resolveToolErrorWarningPolicy(params: {
     verboseLevel: dynamicToolErrorWarningsDisabled ? "off" : params.verboseLevel,
   });
   const suppressToolErrorWarnings = toolErrorWarningOverride === true;
-  if (suppressToolErrorWarnings) {
-    return { showWarning: false, includeDetails };
-  }
-  // sessions_send timeouts and errors are transient inter-session communication
-  // issues — the message may still have been delivered. Suppress warnings to
-  // prevent raw error text from leaking into the chat surface (#23989).
-  if (normalizedToolName === "sessions_send") {
-    return { showWarning: false, includeDetails };
-  }
-  if (params.suppressToolErrors) {
-    return { showWarning: false, includeDetails };
-  }
-  // ENG-16868: a sessions_spawn that errored-then-recovered still delivers a
-  // complete answer — its output quality equals a first-try success, and the
-  // transient retry is backstage plumbing. Suppress the warning WHEN a real
-  // reply was delivered; a genuine failure (no reply) still surfaces honestly.
-  // An existing user-facing error reply also suppresses the badge (matches the
-  // mutating branch it replaces; avoids stacked error lines). Must precede the
-  // mutating branch below: sessions_spawn is a mutating tool, and that branch
-  // ignores hasUserFacingReply, so a recovered spawn would otherwise emit a
-  // false "failed" badge. Must also follow the suppressToolErrors global gate so
-  // the operator config still wins. Like exec/bash/process, a recovered error is
-  // treated as non-terminal because the deliverable is the answer, not the spawn
-  // call; here we fully suppress (no continuation note) since a recovered spawn's
-  // retry adds no user value.
-  if (normalizedToolName === "sessions_spawn") {
-    return {
-      showWarning: !params.hasUserFacingReply && !params.hasUserFacingErrorReply,
-      includeDetails,
-    };
-  }
-  // A middleware (post-processing) failure means the tool's result couldn't
-  // be sanitized — not that the tool itself failed
-  // (buildMiddlewareFailureResult, tool-result-middleware.ts:423). The
-  // underlying outcome is genuinely unknown, so "a step didn't complete" is a
-  // stronger claim than the evidence supports. Suppress entirely when a reply
-  // was delivered, same as the sessions_spawn precedent above; a genuine
-  // failure (no reply) still surfaces honestly. Must precede the mutating
-  // branch below, which ignores hasUserFacingReply and would otherwise force
-  // a false "failed" badge for message/write middleware errors.
-  if (params.lastToolError.middlewareError === true) {
-    return { showWarning: !params.hasUserFacingReply, includeDetails };
-  }
-  const isMutatingToolError =
-    params.lastToolError.mutatingAction ?? isLikelyMutatingToolName(params.lastToolError.toolName);
-  if (isMutatingToolError) {
-    return {
-      showWarning: !params.hasUserFacingErrorReply && !params.hasUserFacingFailureAcknowledgement,
-      includeDetails,
-    };
-  }
-  if (isExecLikeToolName(params.lastToolError.toolName) && !includeDetails) {
+  // These two are turn-wide overrides, not per-failure decisions — they must
+  // win before any failure-shape check runs, and the digest builder applies
+  // them the same way (as a single upfront gate) for the same reason.
+  if (suppressToolErrorWarnings || params.suppressToolErrors) {
     return { showWarning: false, includeDetails };
   }
   return {
-    showWarning: !params.hasUserFacingReply && !isRecoverableToolError(params.lastToolError.error),
+    showWarning: shouldSurfaceToolFailure(params.lastToolError, {
+      hasUserFacingReply: params.hasUserFacingReply,
+      hasUserFacingErrorReply: params.hasUserFacingErrorReply,
+      hasUserFacingFailureAcknowledgement: params.hasUserFacingFailureAcknowledgement,
+      includeDetails,
+    }),
     includeDetails,
   };
 }
@@ -321,6 +278,8 @@ export function buildEmbeddedRunPayloads(params: {
   lastAssistant: AssistantMessage | undefined;
   currentAssistant?: AssistantMessage | null;
   lastToolError?: ToolErrorSummary;
+  /** Every errored call this turn, independent of lastToolError's single-slot lifecycle (ENG-18812). */
+  toolFailures?: Array<ToolErrorSummary & { retried?: boolean }>;
   config?: OpenClawConfig;
   isCronTrigger?: boolean;
   isHeartbeatTrigger?: boolean;
@@ -363,6 +322,8 @@ export function buildEmbeddedRunPayloads(params: {
     interactive?: ReplyPayload["interactive"];
     channelData?: Record<string, unknown>;
     nonTerminalToolErrorWarning?: boolean;
+    /** Every unrecovered failed step behind a non-terminal note, for channels that render their own copy (ENG-18812). */
+    toolFailureDigest?: ToolFailureDigest;
     /**
      * A run-level or tool-failure notice must reach the user even when
      * `message_tool_only` would otherwise suppress plain assistant prose —
@@ -654,9 +615,21 @@ export function buildEmbeddedRunPayloads(params: {
     }
   }
 
-  if (params.lastToolError) {
+  // The most recent UNRESOLVED failure. `lastToolError` is the live single
+  // slot when set; a later unrelated success can clear it while an earlier
+  // DIFFERENT step's failure is still unresolved (ENG-18812's purest form —
+  // tool #3 fails, tool #25 succeeds, and pre-fix nothing was ever surfaced
+  // for tool #3's failure). Fall back to the newest non-retried entry in the
+  // full-turn list in that case, so today's single-slot behavior stays a
+  // strict subset of this one.
+  const toolFailures: Array<ToolErrorSummary & { retried?: boolean }> =
+    params.toolFailures ?? (params.lastToolError ? [params.lastToolError] : []);
+  const representativeToolError =
+    params.lastToolError ?? toolFailures.findLast((failure) => !failure.retried);
+
+  if (representativeToolError) {
     const warningPolicy = resolveToolErrorWarningPolicy({
-      lastToolError: params.lastToolError,
+      lastToolError: representativeToolError,
       hasUserFacingReply: hasUserFacingAssistantReply,
       hasUserFacingErrorReply,
       hasUserFacingFailureAcknowledgement,
@@ -672,52 +645,65 @@ export function buildEmbeddedRunPayloads(params: {
     // Otherwise, keep the previous behavior and only surface non-recoverable failures when no reply exists.
     if (warningPolicy.showWarning) {
       const toolSummary = formatToolAggregate(
-        params.lastToolError.toolName,
-        params.lastToolError.meta ? [params.lastToolError.meta] : undefined,
+        representativeToolError.toolName,
+        representativeToolError.meta ? [representativeToolError.meta] : undefined,
         { markdown: useMarkdown },
       );
+      // Every OTHER unrecovered failure this turn that the same policy would
+      // also surface — `shouldSurfaceToolFailure` (shared with
+      // `resolveToolErrorWarningPolicy` above) decides each entry under the
+      // identical context, so this can never disagree with `showWarning`
+      // about the representative failure itself (ENG-18812).
+      const digest = buildToolFailureDigest({
+        toolFailures,
+        toolMetas: params.toolMetas,
+        surfaceContext: {
+          hasUserFacingReply: hasUserFacingAssistantReply,
+          hasUserFacingErrorReply,
+          hasUserFacingFailureAcknowledgement,
+          includeDetails: warningPolicy.includeDetails,
+        },
+      });
       // The same non-terminal decision used for the payload metadata below —
       // computed up front so the visible text can be reframed too, not just the
       // metadata flag. Middleware failures never reach here as non-terminal:
       // `resolveToolErrorWarningPolicy` only lets one through when no reply was
-      // delivered, so it stays a genuine terminal failure below.
+      // delivered, so it stays a genuine terminal failure below. Requiring a
+      // non-empty digest keeps this flag and the emitted text in lockstep —
+      // the representative failure always yields a non-empty digest (it is
+      // always a `toolFailures` member and always passes the same predicate
+      // that just proved `showWarning`), so this is a defensive tie, not a
+      // separate rule.
       const isNonTerminalWarning =
         hasUserFacingAssistantReply &&
-        isRecoverableExecClassToolName(params.lastToolError.toolName);
+        isRecoverableExecClassToolName(representativeToolError.toolName) &&
+        digest !== undefined;
       // ENG-16318: when a real answer was delivered and the exec command that
       // errored was entirely benign housekeeping (e.g. `mkdir … && find /` that
       // hit permission-denied noise), append nothing — not even the "↻ kept
       // going" note. A correct triage should not carry a tangential failure
       // marker. Commands that also ran real work still keep the note (below).
+      // Keyed on the representative failure only — a turn with an EARLIER
+      // non-benign failure alongside a benign most-recent one still suppresses
+      // today, matching pre-digest behavior; broadening this to the whole
+      // digest is a follow-up, not part of this fix.
       const suppressBenignHousekeepingNote =
-        isNonTerminalWarning && params.lastToolError.benignHousekeepingError === true;
+        isNonTerminalWarning && representativeToolError.benignHousekeepingError === true;
       const errorSuffix =
-        warningPolicy.includeDetails && params.lastToolError.error
-          ? `: ${params.lastToolError.error}`
+        warningPolicy.includeDetails && representativeToolError.error
+          ? `: ${representativeToolError.error}`
           : "";
-      // toolMetas includes every call (pushed unconditionally), each tagged
-      // with an `errored` flag. Count only the tools that actually completed —
-      // this stays accurate when MORE THAN ONE call errored in the turn, unlike
-      // a blanket `length - 1` that assumes a single failure (cubic P2 + review
-      // follow-up). Fall back to `length - 1` only for legacy entries with no
-      // `errored` flag set (single-failure assumption).
-      const hasErroredFlags = params.toolMetas.some((meta) => meta.errored !== undefined);
-      const completedToolCount = hasErroredFlags
-        ? params.toolMetas.filter((meta) => !meta.errored).length
-        : Math.max(0, params.toolMetas.length - 1);
-      const warningText = isNonTerminalWarning
-        ? buildNonTerminalToolStatusText({
-            completedToolCount,
-            totalToolCount: params.toolMetas.length,
-            actionSummary: toolSummary,
-            // Fixed, user-safe classification of why the step failed — never
-            // the raw error text, which may contain shell output, paths, or
-            // provider error bodies.
-            reasonText: classifyToolFailureReason(params.lastToolError)?.text,
-            // Operators (verbose) additionally keep the raw error text.
-            detailSuffix: warningPolicy.includeDetails ? params.lastToolError.error : undefined,
-          })
-        : `⚠️ ${toolSummary} failed${errorSuffix}`;
+      const warningText =
+        isNonTerminalWarning && digest
+          ? buildNonTerminalToolStatusText({
+              digest,
+              // Operators (verbose) additionally keep the representative
+              // failure's raw error text.
+              detailSuffix: warningPolicy.includeDetails
+                ? representativeToolError.error
+                : undefined,
+            })
+          : `⚠️ ${toolSummary} failed${errorSuffix}`;
       const normalizedWarning = normalizeTextForComparison(warningText);
       const duplicateWarning = normalizedWarning
         ? replyItems.some((item) => {
@@ -733,6 +719,7 @@ export function buildEmbeddedRunPayloads(params: {
           text: warningText,
           isError: true,
           nonTerminalToolErrorWarning: isNonTerminalWarning,
+          ...(isNonTerminalWarning && digest ? { toolFailureDigest: digest } : {}),
           // Retry applies to both branches: the non-terminal reframe (a step
           // didn't finish but a reply landed) and the terminal badge (a
           // mutating send/write failed outright — e.g. the message tool
@@ -776,6 +763,7 @@ export function buildEmbeddedRunPayloads(params: {
       if (item.nonTerminalToolErrorWarning) {
         setReplyPayloadMetadata(payload, {
           nonTerminalToolErrorWarning: true,
+          ...(item.toolFailureDigest ? { toolFailureDigest: item.toolFailureDigest } : {}),
         });
       }
       if (item.deliverDespiteSourceSuppression) {

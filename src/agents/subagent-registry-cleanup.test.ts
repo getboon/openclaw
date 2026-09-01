@@ -95,4 +95,29 @@ describe("resolveDeferredCleanupDecision", () => {
 
     expect(decision).toEqual({ kind: "retry", retryCount: 2, resumeDelayMs: 2_000 });
   });
+
+  it("gives up after one attempt when the completion is a frozen no-output result", () => {
+    const decision = resolveDecision({
+      entry: makeEntry({
+        expectsCompletionMessage: true,
+        delivery: { status: "pending", attemptCount: 0, lastDropReason: "subagent_no_output" },
+      }),
+      activeDescendantRuns: 0,
+    });
+
+    expect(decision).toEqual({ kind: "give-up", reason: "subagent_no_output", retryCount: 1 });
+  });
+
+  it("keeps retrying when the drop reason is a transient sink failure, not no-output", () => {
+    const decision = resolveDecision({
+      entry: makeEntry({
+        expectsCompletionMessage: true,
+        delivery: { status: "pending", attemptCount: 1, lastDropReason: "sink_unavailable" },
+      }),
+      activeDescendantRuns: 0,
+      resolveAnnounceRetryDelayMs: (retryCount) => retryCount * 1_000,
+    });
+
+    expect(decision).toEqual({ kind: "retry", retryCount: 2, resumeDelayMs: 2_000 });
+  });
 });

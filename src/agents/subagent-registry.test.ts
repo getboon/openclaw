@@ -1245,6 +1245,55 @@ describe("subagent registry seam flow", () => {
     expect(mocks.runSubagentAnnounceFlow).toHaveBeenCalledTimes(1);
   });
 
+  it("gives up without re-announcing when a restored entry already recorded subagent_no_output", async () => {
+    // ENG-19092: a frozen no-output completion is immutable. If a gateway
+    // restart lands between the attempt that recorded the drop reason and the
+    // deferred-cleanup decision, resume must give up instead of burning the
+    // remaining retry budget with announce re-runs.
+    const createdAt = Date.parse("2026-03-24T11:50:00Z");
+    mocks.restoreSubagentRunsFromDisk.mockImplementation(((params: {
+      runs: Map<string, unknown>;
+      mergeOnly?: boolean;
+    }) => {
+      params.runs.set("run-resumed-no-output", {
+        runId: "run-resumed-no-output",
+        childSessionKey: "agent:main:subagent:child",
+        requesterSessionKey: "agent:main:main",
+        requesterDisplayKey: "main",
+        task: "frozen no-output resume",
+        cleanup: "keep",
+        createdAt,
+        startedAt: createdAt,
+        sessionStartedAt: createdAt,
+        endedAt: createdAt + 30_000,
+        endedReason: "error",
+        expectsCompletionMessage: true,
+        outcome: {
+          status: "error",
+          error: "subagent run lost active execution context",
+        },
+        delivery: {
+          status: "pending",
+          attemptCount: 1,
+          lastAttemptAt: createdAt + 40_000,
+          lastDropReason: "subagent_no_output",
+          lastError: "completion agent did not produce a visible reply",
+        },
+      });
+      return 1;
+    }) as never);
+
+    mod.initSubagentRegistry();
+
+    await waitForFast(() => {
+      const entry = mod
+        .listSubagentRunsForRequester("agent:main:main")
+        .find((run) => run.runId === "run-resumed-no-output");
+      expect(entry?.delivery?.status).toBe("failed");
+    });
+    expect(mocks.runSubagentAnnounceFlow).not.toHaveBeenCalled();
+  });
+
   it("prefers explicit run timeout over late restored agent.wait success", async () => {
     const startedAt = Date.parse("2026-03-24T11:59:00Z");
     vi.setSystemTime(startedAt + 61_000);

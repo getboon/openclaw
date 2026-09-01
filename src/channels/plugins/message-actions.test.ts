@@ -10,6 +10,7 @@ import {
 } from "../../test-utils/channel-plugins.js";
 import {
   testing,
+  channelDeclaresMessageAction,
   channelSupportsMessageCapability,
   channelSupportsMessageCapabilityForChannel,
   listCrossChannelSchemaSupportedMessageActions,
@@ -446,5 +447,88 @@ describe("message action capability checks", () => {
 
     expect(listChannelMessageCapabilities({} as OpenClawConfig)).toStrictEqual([]);
     expect(errorSpy).toHaveBeenCalledTimes(1);
+  });
+
+  describe("channelDeclaresMessageAction", () => {
+    it("returns true when the action is declared and unvetoed", () => {
+      const editPlugin: ChannelPlugin = {
+        ...createChannelTestPluginBase({
+          id: "demo-edit",
+          label: "Demo Edit",
+          capabilities: { chatTypes: ["direct", "group"] },
+          config: { listAccountIds: () => ["default"] },
+        }),
+        actions: {
+          describeMessageTool: () => ({ actions: ["send", "edit"] }),
+        },
+      };
+      setActivePluginRegistry(
+        createTestRegistry([{ pluginId: "demo-edit", source: "test", plugin: editPlugin }]),
+      );
+
+      expect(
+        channelDeclaresMessageAction({
+          cfg: {} as OpenClawConfig,
+          channel: "demo-edit",
+          action: "edit",
+        }),
+      ).toBe(true);
+    });
+
+    it("returns false when a live supportsAction veto overrides a declared action", () => {
+      const vetoingPlugin: ChannelPlugin = {
+        ...createChannelTestPluginBase({
+          id: "demo-veto",
+          label: "Demo Veto",
+          capabilities: { chatTypes: ["direct", "group"] },
+          config: { listAccountIds: () => ["default"] },
+        }),
+        actions: {
+          describeMessageTool: () => ({ actions: ["send", "edit"] }),
+          // Mirrors a real-world plugin (e.g. googlechat) whose declared
+          // actions and live handleAction support have drifted apart.
+          supportsAction: ({ action }) => action !== "edit",
+        },
+      };
+      setActivePluginRegistry(
+        createTestRegistry([{ pluginId: "demo-veto", source: "test", plugin: vetoingPlugin }]),
+      );
+
+      expect(
+        channelDeclaresMessageAction({
+          cfg: {} as OpenClawConfig,
+          channel: "demo-veto",
+          action: "edit",
+        }),
+      ).toBe(false);
+    });
+
+    it("returns false when the action is not in the declared list", () => {
+      // buttonsPlugin only declares "send" (see createMessageActionsPlugin above).
+      activateMessageActionTestRegistry();
+
+      expect(
+        channelDeclaresMessageAction({
+          cfg: {} as OpenClawConfig,
+          channel: "demo-buttons",
+          action: "edit",
+        }),
+      ).toBe(false);
+    });
+
+    it("returns false when no plugin/adapter is resolvable for the channel", () => {
+      setActivePluginRegistry(emptyRegistry);
+
+      expect(
+        channelDeclaresMessageAction({
+          cfg: {} as OpenClawConfig,
+          channel: "unregistered-channel",
+          action: "edit",
+        }),
+      ).toBe(false);
+      expect(channelDeclaresMessageAction({ cfg: {} as OpenClawConfig, action: "edit" })).toBe(
+        false,
+      );
+    });
   });
 });

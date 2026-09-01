@@ -403,6 +403,50 @@ describe("resolveSessionReference", () => {
     expect(callGatewayMock).toHaveBeenCalledTimes(2);
   });
 
+  it("resolves current to runSessionKey without probing the gateway at all", async () => {
+    // requesterInternalKey may be a sandbox/policy key (e.g. a Teams DM
+    // peer-scoped key) that was never itself persisted as a transcript
+    // session -- binding "current" to it addresses a session that can never
+    // be resumed. runSessionKey is the real live run session and must win.
+    const result = await resolveSessionReference({
+      sessionKey: "current",
+      alias: "main",
+      mainKey: "main",
+      requesterInternalKey: "agent:main:msteams:default:direct:peer-123",
+      runSessionKey: "agent:main:main",
+      restrictToSpawned: false,
+    });
+    expectResolvedSessionReference(result, {
+      key: "agent:main:main",
+      displayKey: "agent:main:main",
+      resolvedViaSessionId: false,
+    });
+    expect(callGatewayMock).not.toHaveBeenCalled();
+  });
+
+  it("does not let an unrelated real session literally named current pre-empt runSessionKey", async () => {
+    // If a gateway session or sessionId genuinely named "current" exists, the
+    // literal-current probe would otherwise resolve to it before runSessionKey
+    // is ever considered. Skipping the probe whenever runSessionKey is known
+    // means there is no gateway call left that could match such a session.
+    callGatewayMock.mockResolvedValueOnce({ key: "current" });
+
+    const result = await resolveSessionReference({
+      sessionKey: "current",
+      alias: "main",
+      mainKey: "main",
+      requesterInternalKey: "agent:main:msteams:default:direct:peer-123",
+      runSessionKey: "agent:main:main",
+      restrictToSpawned: false,
+    });
+    expectResolvedSessionReference(result, {
+      key: "agent:main:main",
+      displayKey: "agent:main:main",
+      resolvedViaSessionId: false,
+    });
+    expect(callGatewayMock).not.toHaveBeenCalled();
+  });
+
   it("skips literal current key lookup when spawned visibility is restricted", async () => {
     const result = await resolveSessionReference({
       sessionKey: "current",

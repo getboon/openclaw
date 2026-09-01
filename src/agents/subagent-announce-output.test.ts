@@ -6,6 +6,7 @@ import {
   applySubagentWaitOutcome,
   buildCompactAnnounceStatsLine,
   buildChildCompletionFindings,
+  isSyntheticNoOutputResult,
   readSubagentOutput,
 } from "./subagent-announce-output.js";
 
@@ -414,5 +415,30 @@ describe("applySubagentWaitOutcome", () => {
       endedAt: 150,
       elapsedMs: 50,
     });
+  });
+});
+
+describe("isSyntheticNoOutputResult", () => {
+  it("matches the zero-flush fallback and empty results", () => {
+    expect(isSyntheticNoOutputResult("(no output)")).toBe(true);
+    expect(isSyntheticNoOutputResult("  (no output)  ")).toBe(true);
+    expect(isSyntheticNoOutputResult("")).toBe(true);
+    expect(isSyntheticNoOutputResult("   ")).toBe(true);
+    expect(isSyntheticNoOutputResult(undefined)).toBe(true);
+  });
+
+  it("matches the partial-flush tool-calls placeholder for any count", () => {
+    // Drift guard: these literals must stay in sync with
+    // selectSubagentOutputText's formatToolCallsWithoutOutput output.
+    expect(isSyntheticNoOutputResult("1 tool call(s) made without visible output.")).toBe(true);
+    expect(isSyntheticNoOutputResult("37 tool call(s) made without visible output.")).toBe(true);
+  });
+
+  it("does not match real child output", () => {
+    expect(isSyntheticNoOutputResult("DONE-MARKER-OK")).toBe(false);
+    expect(
+      isSyntheticNoOutputResult("2 tool call(s) made without visible output. Then I found X."),
+    ).toBe(false);
+    expect(isSyntheticNoOutputResult("(no output) but here is context")).toBe(false);
   });
 });

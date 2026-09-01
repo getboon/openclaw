@@ -3585,6 +3585,7 @@ async function runEmbeddedAgentInternal(
             lastAssistant: attempt.lastAssistant,
             currentAssistant: currentAttemptAssistant ?? null,
             lastToolError: attempt.lastToolError,
+            toolFailures: attempt.toolFailures,
             config: params.config,
             isCronTrigger: params.trigger === "cron",
             isHeartbeatTrigger: params.trigger === "heartbeat",

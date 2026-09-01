@@ -638,6 +638,22 @@ function resumeSubagentRun(runId: string) {
     });
     return;
   }
+  // A frozen not-ok/"(no output)" completion is immutable — retrying the
+  // announce can never produce different content. The deferred-cleanup
+  // decision gives up after the attempt that recorded this drop reason; if a
+  // gateway restart lands between that attempt and the decision, resume must
+  // reach the same verdict instead of re-running the announce.
+  if (
+    getDeliveryAttemptCount(entry) > 0 &&
+    entry.delivery?.lastDropReason === "subagent_no_output"
+  ) {
+    void finalizeResumedAnnounceGiveUp({
+      runId,
+      entry,
+      reason: "subagent_no_output",
+    });
+    return;
+  }
   if (
     entry.expectsCompletionMessage !== true &&
     typeof entry.endedAt === "number" &&
