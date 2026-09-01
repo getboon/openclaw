@@ -119,6 +119,90 @@ describe("startProgressNudgeRunner scheduler", () => {
     runner.stop();
   });
 
+  it("uses generic copy for raw command item progress", async () => {
+    const { deps, sendMessage, emitAgentEvent } = makeDeps();
+    const runner = startProgressNudgeRunner({ cfg: config(), deps });
+    const command =
+      "pdf-tools page-text ~/.boon-agent/workspace/scratch/waseca_98099/E5.10.pdf --pages=1 2>&1 | head -100";
+    emitAgentEvent({
+      runId: "r1",
+      seq: 1,
+      stream: "item",
+      ts: 0,
+      data: {
+        kind: "command",
+        title: `command ${command}`,
+        progressText: "raw command output",
+      },
+      sessionKey: SESSION,
+    });
+
+    await vi.advanceTimersByTimeAsync(46_000);
+    const text = sendMessage.mock.calls[0][0].payloads[0].text;
+    expect(text).toBe("Still working on your request…");
+    expect(text).not.toContain("pdf-tools");
+    expect(text).not.toContain("~/.boon-agent");
+    expect(text).not.toContain("2>&1");
+    expect(text).not.toContain("| head");
+    expect(text).not.toContain("--pages=");
+    runner.stop();
+  });
+
+  it("uses safe command metadata instead of raw command progress", async () => {
+    const { deps, sendMessage, emitAgentEvent } = makeDeps();
+    const runner = startProgressNudgeRunner({ cfg: config(), deps });
+    emitAgentEvent({
+      runId: "r1",
+      seq: 1,
+      stream: "item",
+      ts: 0,
+      data: {
+        kind: "command",
+        title: "command pdf-tools page-text ~/.boon-agent/workspace/file.pdf",
+        meta: "extracting text from E5.10.pdf",
+        progressText: "raw command output",
+      },
+      sessionKey: SESSION,
+    });
+
+    await vi.advanceTimersByTimeAsync(46_000);
+    expect(sendMessage.mock.calls[0][0].payloads[0].text).toBe(
+      "Still working on extracting text from E5.10.pdf…",
+    );
+    runner.stop();
+  });
+
+  it("keeps safe progress when a later raw command candidate is rejected", async () => {
+    const { deps, sendMessage, emitAgentEvent } = makeDeps();
+    const runner = startProgressNudgeRunner({ cfg: config(), deps });
+    emitAgentEvent({
+      runId: "r1",
+      seq: 1,
+      stream: "item",
+      ts: 0,
+      data: { kind: "command", meta: "extracting text from E5.10.pdf" },
+      sessionKey: SESSION,
+    });
+    emitAgentEvent({
+      runId: "r1",
+      seq: 2,
+      stream: "item",
+      ts: 0,
+      data: {
+        kind: "command",
+        title: "command pdf-tools page-text ~/.boon-agent/workspace/file.pdf",
+        progressText: "raw command output | details",
+      },
+      sessionKey: SESSION,
+    });
+
+    await vi.advanceTimersByTimeAsync(46_000);
+    expect(sendMessage.mock.calls[0][0].payloads[0].text).toBe(
+      "Still working on extracting text from E5.10.pdf…",
+    );
+    runner.stop();
+  });
+
   it("respects the interval cap between nudges", async () => {
     const editMessage = vi.fn().mockResolvedValue(true);
     const { deps, sendMessage } = makeDeps({ editMessage });
