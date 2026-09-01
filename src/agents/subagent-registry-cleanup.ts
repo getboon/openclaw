@@ -17,7 +17,7 @@ type DeferredCleanupDecision =
     }
   | {
       kind: "give-up";
-      reason: "retry-limit" | "expiry";
+      reason: "retry-limit" | "expiry" | "subagent_no_output";
       retryCount?: number;
     }
   | {
@@ -60,6 +60,13 @@ export function resolveDeferredCleanupDecision(params: {
   }
 
   const retryCount = getDeliveryAttemptCount(params.entry) + 1;
+  // A frozen not-ok/"(no output)" completion is immutable: retrying the announce
+  // cannot produce different content, and each retry only re-runs the announce
+  // agent (which persists another silent turn). Give up after the single attempt
+  // that recorded this drop reason instead of burning the full retry budget.
+  if (params.entry.delivery?.lastDropReason === "subagent_no_output") {
+    return { kind: "give-up", reason: "subagent_no_output", retryCount };
+  }
   const expiryExceeded = isCompletionMessageFlow
     ? completionHardExpiryExceeded
     : endedAgo > params.announceExpiryMs;

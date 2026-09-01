@@ -74,7 +74,10 @@ function formatAnnounceGiveUpLogField(value: string): string {
 }
 
 /** Logs a sanitized final give-up line for failed subagent announce delivery. */
-export function logAnnounceGiveUp(entry: SubagentRunRecord, reason: "retry-limit" | "expiry") {
+export function logAnnounceGiveUp(
+  entry: SubagentRunRecord,
+  reason: "retry-limit" | "expiry" | "subagent_no_output",
+) {
   const retryCount = getDeliveryAttemptCount(entry);
   const endedAgoMs =
     typeof entry.endedAt === "number" ? Math.max(0, Date.now() - entry.endedAt) : undefined;

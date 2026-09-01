@@ -754,6 +754,95 @@ describe("installSessionToolResultGuard", () => {
     expect(JSON.stringify(persisted[0])).toContain("call_1");
   });
 
+  it("suppresses a bare silent-token final when requested", () => {
+    const sm = SessionManager.inMemory();
+    installSessionToolResultGuard(sm, {
+      suppressSilentAssistantFinalPersistence: true,
+    });
+
+    sm.appendMessage(
+      asAppendMessage({ role: "assistant", content: "NO_REPLY", timestamp: Date.now() }),
+    );
+
+    expect(getPersistedMessages(sm)).toHaveLength(0);
+  });
+
+  it("suppresses a repeated-token silent final when requested", () => {
+    const sm = SessionManager.inMemory();
+    installSessionToolResultGuard(sm, {
+      suppressSilentAssistantFinalPersistence: true,
+    });
+
+    sm.appendMessage(
+      asAppendMessage({ role: "assistant", content: "NO_REPLY NO_REPLY", timestamp: Date.now() }),
+    );
+
+    expect(getPersistedMessages(sm)).toHaveLength(0);
+  });
+
+  it("persists a final that only mentions the silent token inside real content", () => {
+    const sm = SessionManager.inMemory();
+    installSessionToolResultGuard(sm, {
+      suppressSilentAssistantFinalPersistence: true,
+    });
+
+    // The dispatcher would strip the token and still send "😄", so this is a
+    // visible reply, not intentional silence — it must persist.
+    sm.appendMessage(
+      asAppendMessage({ role: "assistant", content: "😄 NO_REPLY", timestamp: Date.now() }),
+    );
+
+    expect(getPersistedMessages(sm)).toHaveLength(1);
+  });
+
+  it("still persists a silent-token final that also carries image content", () => {
+    const sm = SessionManager.inMemory();
+    installSessionToolResultGuard(sm, {
+      suppressSilentAssistantFinalPersistence: true,
+    });
+
+    sm.appendMessage(
+      asAppendMessage({
+        role: "assistant",
+        content: [
+          { type: "text", text: "NO_REPLY" },
+          { type: "image", data: "base64==", mimeType: "image/png" },
+        ],
+        timestamp: Date.now(),
+      }),
+    );
+
+    expect(getPersistedMessages(sm)).toHaveLength(1);
+  });
+
+  it("still persists a real-text final when silent suppression is on", () => {
+    const sm = SessionManager.inMemory();
+    installSessionToolResultGuard(sm, {
+      suppressSilentAssistantFinalPersistence: true,
+    });
+
+    sm.appendMessage(
+      asAppendMessage({
+        role: "assistant",
+        content: "Here is your answer.",
+        timestamp: Date.now(),
+      }),
+    );
+
+    expect(getPersistedMessages(sm)).toHaveLength(1);
+  });
+
+  it("does not suppress a silent-token final when the flag is off", () => {
+    const sm = SessionManager.inMemory();
+    installSessionToolResultGuard(sm);
+
+    sm.appendMessage(
+      asAppendMessage({ role: "assistant", content: "NO_REPLY", timestamp: Date.now() }),
+    );
+
+    expect(getPersistedMessages(sm)).toHaveLength(1);
+  });
+
   // When an assistant message with toolCalls is aborted, no synthetic toolResult
   // should be created. Creating synthetic results for aborted/incomplete tool calls
   // causes API 400 errors: "unexpected tool_use_id found in tool_result blocks".
