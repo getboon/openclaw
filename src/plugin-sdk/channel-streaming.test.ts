@@ -413,8 +413,8 @@ describe("channel-streaming", () => {
     expect(progressLine.kind).toBe("tool");
     expect(progressLine.icon).toBe("✍️");
     expect(progressLine.label).toBe("Write");
-    expect(progressLine.detail).toBe("to /tmp/demo/index.html");
-    expect(progressLine.text).toBe("✍️ Write: to /tmp/demo/index.html");
+    expect(progressLine.detail).toBe("to index.html");
+    expect(progressLine.text).toBe("✍️ Write: to index.html");
     expect(progressLine.toolName).toBe("write");
     expect(
       formatChannelProgressDraftLine({
@@ -422,7 +422,7 @@ describe("channel-streaming", () => {
         name: "write",
         args: { path: "/tmp/demo/index.html" },
       }),
-    ).toBe("✍️ Write: to /tmp/demo/index.html");
+    ).toBe("✍️ Write: to index.html");
     expect(
       formatChannelProgressDraftLine({
         event: "item",
@@ -430,7 +430,7 @@ describe("channel-streaming", () => {
         name: "write",
         meta: "/tmp/demo/style.css",
       }),
-    ).toBe("✍️ Write: /tmp/demo/style.css");
+    ).toBe("✍️ Write: style.css");
     expect(
       formatChannelProgressDraftLine({
         event: "item",
@@ -461,7 +461,7 @@ describe("channel-streaming", () => {
         name: "bash",
         args: { command: "sed -n '1,80p' extensions/discord/src/draft-stream.ts" },
       }),
-    ).toBe("🛠️ print lines 1-80 from extensions/discord/src/draft-stream.ts");
+    ).toBe("🛠️ print lines 1-80 from draft-stream.ts");
     expect(
       formatChannelProgressDraftLine({
         event: "tool",
@@ -524,6 +524,167 @@ describe("channel-streaming", () => {
         progressText: "Reading the code path",
       }),
     ).toBe("Reading the code path");
+  });
+
+  it("redacts explain-mode path tokens but preserves URLs and raw details", () => {
+    const commandLine = buildChannelProgressDraftLine({
+      event: "tool",
+      name: "exec",
+      args: { command: "cat /etc/passwd | sed -n 1p" },
+    });
+    const itemLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "command",
+      name: "exec",
+      meta: "show ~/.boon-agent/workspace/scratch/waseca_98099/E5.10.pdf",
+    });
+    const urlLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "tool",
+      name: "web_fetch",
+      meta: "fetch https://example.com/a/b",
+    });
+    const rawLine = buildChannelProgressDraftLine(
+      {
+        event: "tool",
+        name: "exec",
+        args: { command: "cat /etc/passwd | sed -n 1p" },
+      },
+      { detailMode: "raw" },
+    );
+
+    expect(commandLine?.text).toContain("passwd");
+    expect(commandLine?.text).not.toContain("/");
+    expect(itemLine?.text).toContain("E5.10.pdf");
+    expect(itemLine?.text).not.toContain("/");
+    expect(itemLine?.text).not.toContain("~");
+    expect(urlLine?.text).toContain("https://example.com/a/b");
+    expect(rawLine?.text).toContain("/etc/passwd");
+    expect(
+      buildChannelProgressDraftLine({
+        event: "tool",
+        name: "exec",
+        args: { command: "cat /etc/passwd" },
+      }),
+    ).toBeUndefined();
+  });
+
+  it("redacts filesystem paths without corrupting ordinary slash text", () => {
+    const fractionLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "preamble",
+      progressText: "Checking 1/2 inch conduit",
+    });
+    const textLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "preamble",
+      progressText: "and/or 2026/09/01",
+    });
+    const homeLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "command",
+      name: "exec",
+      meta: "show ~/.boon-agent/workspace/scratch/waseca_98099/E5.10.pdf",
+    });
+    const windowsLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "command",
+      name: "exec",
+      meta: String.raw`read C:\Users\agent\secret.txt`,
+    });
+    const uncLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "command",
+      name: "exec",
+      meta: String.raw`read \\share\team\doc.pdf`,
+    });
+    const relativeLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "command",
+      name: "exec",
+      meta: "read src/agents/tool-display.ts",
+    });
+    const urlLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "tool",
+      name: "web_fetch",
+      meta: "fetch https://example.com/a/b",
+    });
+    const rawLine = buildChannelProgressDraftLine(
+      {
+        event: "item",
+        itemKind: "command",
+        name: "exec",
+        meta: "read /Users/agent/secret.txt",
+      },
+      { detailMode: "raw" },
+    );
+
+    expect(fractionLine?.text).toBe("Checking 1/2 inch conduit");
+    expect(textLine?.text).toBe("and/or 2026/09/01");
+    expect(homeLine?.text).toContain("show E5.10.pdf");
+    expect(windowsLine?.text).toContain("read secret.txt");
+    expect(uncLine?.text).toContain("read doc.pdf");
+    expect(relativeLine?.text).toContain("read tool-display.ts");
+    expect(urlLine?.text).toContain("https://example.com/a/b");
+    expect(rawLine?.text).toContain("read /Users/agent/secret.txt");
+  });
+
+  it("handles punctuation and allowlisted prose without losing paths", () => {
+    const punctuationLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "preamble",
+      progressText: "Due 2026/09/01.",
+    });
+    const fractionLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "preamble",
+      progressText: "1/2.",
+    });
+    const extensionLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "command",
+      name: "exec",
+      meta: "read data/secret.txt.",
+    });
+    const etcLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "command",
+      name: "exec",
+      meta: "etc/passwd",
+    });
+    const secretsLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "command",
+      name: "exec",
+      meta: "secrets/password",
+    });
+    const proseAllowlistLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "preamble",
+      progressText: "and/or w/o Y/N yes/no n/a I/O a/c 24/7 on/off in/out true/false",
+    });
+    const relativePathsLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "preamble",
+      progressText: "etc/ssh usr/bin var/log tmp/foo",
+    });
+    const longSlashLine = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "preamble",
+      progressText: "input/output",
+    });
+
+    expect(punctuationLine?.text).toBe("Due 2026/09/01.");
+    expect(fractionLine?.text).toBe("1/2.");
+    expect(extensionLine?.text).toContain("read secret.txt.");
+    expect(etcLine?.text).toContain("passwd");
+    expect(secretsLine?.text).toContain("password");
+    expect(proseAllowlistLine?.text).toBe(
+      "and/or w/o Y/N yes/no n/a I/O a/c 24/7 on/off in/out true/false",
+    );
+    expect(relativePathsLine?.text).toBe("ssh bin log foo");
+    expect(longSlashLine?.text).toBe("output");
   });
 
   it("updates keyed progress lines in place", () => {

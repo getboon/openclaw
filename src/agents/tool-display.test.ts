@@ -4,9 +4,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { resolveToolSearchCodeDisplayTarget } from "./tool-display-common.js";
+import { TOOL_DISPLAY_CONFIG } from "./tool-display-config.js";
 import { resolveExecDetail } from "./tool-display-exec.js";
 import { formatToolDetail, formatToolSummary, resolveToolDisplay } from "./tool-display.js";
-import { TOOL_DISPLAY_CONFIG } from "./tool-display-config.js";
 
 describe("tool display details", () => {
   it("summarizes tool-search code targets from described tool ids", () => {
@@ -208,6 +208,41 @@ describe("tool display details", () => {
     expect(detail).toBe("print lines 1-80 from extensions/discord/src/draft-stream.ts");
   });
 
+  it("summarizes Boon PDF commands without exposing shell arguments in explain mode", () => {
+    const command =
+      "pdf-tools page-text ~/.boon-agent/workspace/scratch/waseca_98099/E5.10.pdf --pages=1 2>&1 | head -100";
+    expect(resolveExecDetail({ command }, { detailMode: "explain" })).toBe(
+      "extracting text from E5.10.pdf",
+    );
+  });
+
+  it("uses a safe summary when a Boon command appears in any pipeline stage", () => {
+    expect(
+      resolveExecDetail({ command: "echo data | boon-specs attach" }, { detailMode: "explain" }),
+    ).toBe("reviewing the specifications");
+  });
+
+  it("retains compact raw commands outside explain mode", () => {
+    const command =
+      "pdf-tools page-text ~/.boon-agent/workspace/scratch/waseca_98099/E5.10.pdf --pages=1 2>&1 | head -100";
+    for (const options of [{ detailMode: "raw" as const }, undefined]) {
+      expect(resolveExecDetail({ command }, options)).toContain("pdf-tools page-text");
+    }
+  });
+
+  it("uses a generic explain-mode summary for unknown commands", () => {
+    const detail = resolveExecDetail(
+      { command: "unknown-tool inspect ~/workspace 2>&1 | head -100" },
+      { detailMode: "explain" },
+    );
+    expect(detail).toBe("run command");
+    expect(detail).not.toContain("~/");
+    expect(detail).not.toContain("/home/");
+    expect(detail).not.toContain("2>&1");
+    expect(detail).not.toContain("|");
+    expect(detail).not.toContain("`");
+  });
+
   it("moves cd path to context suffix and appends raw command", () => {
     const detail = formatToolDetail(
       resolveToolDisplay({
@@ -263,7 +298,7 @@ describe("tool display details", () => {
           detailMode: "explain",
         }),
       ),
-    ).toBe("command -v discrawl");
+    ).toBe("run command");
   });
 
   it("omits bash and exec names from compact tool summaries", () => {

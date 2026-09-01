@@ -244,7 +244,10 @@ describe("createCliToolSummaryTracker", () => {
     await tracker.noteToolEvent(resultEvent);
     expect(deliver).toHaveBeenCalledTimes(1);
     const payload = deliver.mock.calls[0]?.[0] as { text: string; isError?: boolean };
-    expect(payload.text).toContain("date -u");
+    // ENG-18810: explain-mode summaries of unrecognized commands render the
+    // generic label instead of the raw command line.
+    expect(payload.text).toContain("run command");
+    expect(payload.text).not.toContain("date -u");
     expect(payload.text).not.toContain("Wed Jun 10 2026");
     expect(payload.isError).toBeUndefined();
   });

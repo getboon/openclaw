@@ -222,7 +222,10 @@ describe("subscribeEmbeddedAgentSession", () => {
     expect(onToolResult).toHaveBeenCalledTimes(1);
     const summary = toolResultPayloadAt(onToolResult, 0);
     expect(summary?.text).toContain("pty");
-    expect(summary?.text).toContain("claude");
+    // ENG-18810: explain-mode summaries of unrecognized commands render the
+    // generic label instead of the raw command line.
+    expect(summary?.text).toContain("run command");
+    expect(summary?.text).not.toContain("claude");
 
     toolHarness.emit({
       type: "tool_execution_end",

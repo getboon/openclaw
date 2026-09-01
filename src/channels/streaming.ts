@@ -301,6 +301,69 @@ function compactStrings(values: readonly (string | undefined | null)[]): string[
   return values.map((value) => value?.replace(/\s+/g, " ").trim()).filter(Boolean) as string[];
 }
 
+const CHANNEL_PROGRESS_SLASH_PROSE_ALLOWLIST = new Set([
+  "and/or",
+  "w/o",
+  "y/n",
+  "yes/no",
+  "n/a",
+  "i/o",
+  "a/c",
+  "24/7",
+  "on/off",
+  "in/out",
+  "true/false",
+]);
+
+function redactChannelProgressDetail(
+  text: string | undefined,
+  detailMode: "explain" | "raw" | undefined,
+): string | undefined {
+  if (!text || detailMode === "raw") {
+    return text;
+  }
+  return text
+    .split(/\s+/)
+    .map((token) => {
+      if (!token || token.includes("://")) {
+        return token;
+      }
+      const leading = token.match(/^[.,:;!?'"()[\]]+/)?.[0] ?? "";
+      const trailing = token.match(/[.,:;!?'"()[\]]+$/)?.[0] ?? "";
+      const core = token.slice(leading.length, token.length - trailing.length);
+      if (!core) {
+        return token;
+      }
+      const pathToken = core.startsWith("~") ? core.slice(1) : core;
+      const slashSegments = core.split("/");
+      const numericSlashToken = slashSegments.every((segment) => /^\d+$/.test(segment));
+      const slashCount = core.match(/\//g)?.length ?? 0;
+      const hasExtension = /\.[A-Za-z0-9]+$/.test(core);
+      const slashProseAllowlist =
+        slashCount === 1 && CHANNEL_PROGRESS_SLASH_PROSE_ALLOWLIST.has(core.toLowerCase());
+      const slashPath =
+        core.includes("/") &&
+        !numericSlashToken &&
+        (slashCount >= 2 || hasExtension || core.endsWith("/") || !slashProseAllowlist);
+      const pathLike =
+        core.startsWith("/") ||
+        core.startsWith("~") ||
+        core.startsWith("./") ||
+        core.startsWith("../") ||
+        /^[A-Za-z]:[\\/]/.test(core) ||
+        core.startsWith("\\\\") ||
+        /\\[A-Za-z0-9_.-]/.test(core) ||
+        slashPath;
+      if (!pathLike) {
+        return token;
+      }
+      const basename = pathToken.split(/[\\/]/).findLast((segment) => segment.length > 0) ?? "";
+      return `${leading}${basename}${trailing}`;
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
 function inferToolMeta(
   name: string | undefined,
   args: Record<string, unknown> | undefined,
@@ -309,7 +372,10 @@ function inferToolMeta(
   if (!name || !args) {
     return undefined;
   }
-  return formatToolDetail(resolveToolDisplay({ name, args, detailMode }));
+  return redactChannelProgressDetail(
+    formatToolDetail(resolveToolDisplay({ name, args, detailMode })),
+    detailMode,
+  );
 }
 
 function buildNamedProgressLine(
@@ -567,12 +633,16 @@ export function buildChannelProgressDraftLine(
     }
     case "item": {
       const name = input.name ?? itemKindToToolName(input.itemKind);
-      const meta =
+      // Known gap (ENG-18810): extension item handlers do not forward detailMode,
+      // so channel item previews redact paths even when toolProgressDetail is raw.
+      const meta = redactChannelProgressDetail(
         input.meta ??
-        input.summary ??
-        (options?.commandText === "status" && isCommandProgressItem(input)
-          ? undefined
-          : input.progressText);
+          input.summary ??
+          (options?.commandText === "status" && isCommandProgressItem(input)
+            ? undefined
+            : input.progressText),
+        options?.detailMode,
+      );
       if (isEmptyReasoningProgressItem(input, meta)) {
         return undefined;
       }

@@ -11,6 +11,7 @@
 // control flow — it observes the registry, so it can never leak a timer onto
 // the abort/restart paths.
 import { resolveDefaultAgentId } from "../agents/agent-scope.js";
+import { BOON_EXEC_BINARIES } from "../agents/tool-display-exec-boon.js";
 import { replaceGenericExternalRunFailureText } from "../auto-reply/reply/agent-runner-failure-copy.js";
 import {
   listActiveReplyRunSessionKeys,
@@ -132,15 +133,56 @@ function resolveProgressNudgeConfig(cfg: OpenClawConfig): ResolvedProgressNudgeC
 const PROGRESS_NUDGE_MAX_TICK_MS = 15_000;
 const PROGRESS_NUDGE_MIN_TICK_MS = 5_000;
 const PROGRESS_NUDGE_ANCHOR_RETENTION_MS = 10 * 60_000;
+const NUDGE_PROGRESS_BANNED_SUBSTRINGS = [
+  "|",
+  "2>&1",
+  "`",
+  "~/",
+  "/home/",
+  "$(",
+  "&&",
+  ";",
+  " > ",
+  ">>",
+  "<(",
+  ...BOON_EXEC_BINARIES,
+  "openclaw",
+  ".boon-agent",
+];
+const NUDGE_PROGRESS_GENERIC_PHRASES = new Set([
+  "run command",
+  "bash command",
+  "exec command",
+  "command run command",
+]);
+
+export function sanitizeNudgeProgressText(text: string | undefined): string | undefined {
+  const trimmed = text?.trim();
+  if (!trimmed || trimmed.includes("\n") || trimmed.length > 140) {
+    return undefined;
+  }
+  const normalized = trimmed.toLowerCase();
+  if (
+    NUDGE_PROGRESS_BANNED_SUBSTRINGS.some((substring) => normalized.includes(substring)) ||
+    NUDGE_PROGRESS_GENERIC_PHRASES.has(normalized)
+  ) {
+    return undefined;
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9 .,:'()&_!?-]*$/.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
 function resolveTickMs(resolved: ResolvedProgressNudgeConfig): number {
   const bound = Math.min(resolved.thresholdMs, resolved.intervalMs, PROGRESS_NUDGE_MAX_TICK_MS);
   return Math.max(PROGRESS_NUDGE_MIN_TICK_MS, bound);
 }
 
 function renderProgressText(progressText: string | undefined): string {
-  const trimmed = progressText?.trim();
-  if (trimmed) {
-    return `Still working on ${trimmed}…`;
+  const sanitized = sanitizeNudgeProgressText(progressText);
+  if (sanitized) {
+    return `Still working on ${sanitized}…`;
   }
   return "Still working on your request…";
 }
@@ -545,15 +587,14 @@ export function startProgressNudgeRunner(opts: {
     if (activeSessionId && runSessionId && activeSessionId !== runSessionId) {
       return;
     }
-    const progressText = evt.data?.progressText;
-    const title = evt.data?.title;
-    const text =
-      typeof progressText === "string"
-        ? progressText
-        : typeof title === "string"
-          ? title
-          : undefined;
-    if (!text?.trim()) {
+    const kind = evt.data?.kind;
+    const progressText =
+      typeof evt.data?.progressText === "string" ? evt.data.progressText : undefined;
+    const meta = typeof evt.data?.meta === "string" ? evt.data.meta : undefined;
+    const title = typeof evt.data?.title === "string" ? evt.data.title : undefined;
+    const candidate = kind === "command" ? meta : (progressText ?? meta ?? title);
+    const text = sanitizeNudgeProgressText(candidate);
+    if (text === undefined) {
       return;
     }
     getOrCreateNudgeState(evt.sessionKey).progressText = text;
