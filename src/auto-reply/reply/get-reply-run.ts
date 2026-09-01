@@ -1332,6 +1332,9 @@ export async function runPreparedReply(
         normalizeOptionalString(sessionCtx.GroupSubject),
       groupSpace: normalizeOptionalString(sessionCtx.GroupSpace),
       senderId: normalizeOptionalString(sessionCtx.SenderId),
+      // Gateway-audience OBO (ENG-19116) → x-boon-obo-token on the model call
+      // (ENG-19115). Rides the same seam as SenderId; absent on non-web surfaces.
+      oboToken: normalizeOptionalString(sessionCtx.OboToken),
       channelContext: ctx.ChannelContext ?? sessionCtx.ChannelContext,
       senderName: normalizeOptionalString(sessionCtx.SenderName),
       // Originating platform (slack/msteams/boon-web/…) for usage attribution.
