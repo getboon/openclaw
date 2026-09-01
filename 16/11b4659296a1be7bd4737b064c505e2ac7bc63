@@ -1,0 +1,30 @@
+src/agents/embedded-agent-runner/run/attempt.ts
+  s_9df158d9bbb710::t_81e441c7106757 3198
+src/auto-reply/templating.ts
+  s_9df158d9bbb710::t_87f9d737e84db1 289
+src/auto-reply/reply/get-reply-run.ts
+  s_9df158d9bbb710::t_8cb444f622a989 1335
+src/agents/embedded-agent-runner/run/attempt.model-diagnostic-events.ts
+  s_9df158d9bbb710::t_8984bfbe12f5d0 124-128
+  s_9df158d9bbb710::t_e04084bac639fd 51-53
+src/agents/embedded-agent-runner/run/attempt.model-diagnostic-events.test.ts
+  s_9df158d9bbb710::t_a6e8b717f9d9a8 858,860-863,865,868
+src/agents/embedded-agent-runner/run/params.ts
+  s_9df158d9bbb710::t_e27d75745215f9 94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "1611b4659296a1be7bd4737b064c505e2ac7bc63",
+  "prompts": {},
+  "sessions": {
+    "s_9df158d9bbb710": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9e26c7c2-a67e-4f7b-9850-0b4e3f93fe95",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
