@@ -15,11 +15,14 @@ function contributionFor(modelId: string, config?: OpenClawConfig) {
 }
 
 describe("anthropic resolveSystemPromptContribution", () => {
-  it("supplies the concise, guided-choice overlay for Claude models", () => {
+  it("supplies the concise confirm-before-act overlay for Claude models", () => {
     const contribution = contributionFor(CLAUDE_MODEL);
-    expect(contribution?.sectionOverrides?.interaction_style).toContain("A, B, or C");
+    expect(contribution?.sectionOverrides?.interaction_style).toContain(
+      "two or more plausible interpretations",
+    );
+    expect(contribution?.sectionOverrides?.interaction_style).toContain("deterministic: true");
     expect(contribution?.sectionOverrides?.interaction_style).toContain("shortest reply");
-    expect(contribution?.stablePrefix).toContain("concise");
+    expect(contribution?.stablePrefix).toContain("<confirmation_before_action>");
   });
 
   it("returns nothing for non-Claude models", () => {
