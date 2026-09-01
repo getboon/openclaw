@@ -70,6 +70,9 @@ describe("skill research auto-capture", () => {
     });
     const proposal = await inspectSkillProposal(proposals.proposals[0].id, { workspaceDir });
     expect(proposal?.content).toContain("status: proposal");
+    expect(proposal?.content).toContain("## TLDR");
+    expect(proposal?.content).toContain("When you run this, the agent will:");
+    expect(proposal?.content).toContain("**Output:**");
     expect(proposal?.content).toContain("always check CI before final response");
   });
 
@@ -176,6 +179,20 @@ describe("skill research auto-capture", () => {
         "---",
         "",
         "# GitHub PR Workflow",
+        "",
+        "## TLDR",
+        "",
+        "This skill provides an existing workflow for GitHub PR work.",
+        "",
+        "When you run this, the agent will:",
+        "",
+        "- Review the pull request requirements.",
+        "- Follow the existing review checklist.",
+        "- Verify the result before returning it.",
+        "",
+        "**Output:** A reviewed pull request that follows the existing checklist.",
+        "",
+        "## Workflow",
         "",
         "- Preserve this original review checklist.",
         "",

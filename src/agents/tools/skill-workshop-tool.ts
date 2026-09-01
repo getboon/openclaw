@@ -95,7 +95,7 @@ const SkillWorkshopToolSchema = Type.Object(
     proposal_content: Type.Optional(
       Type.String({
         description:
-          "Full proposed procedure markdown for action=create, action=update, or action=revise. It will be stored as PROPOSAL.md. Keep under configured skills.workshop.maxSkillBytes; default max is 40000 bytes.",
+          "Full proposed procedure markdown for action=create, action=update, or action=revise. Start with ## TLDR after the optional title, then one plain-English summary sentence, the exact line 'When you run this, the agent will:', 3-6 plain-English journey bullets, and a final **Output:** deliverable line before detailed instructions. Keep tool names, schemas, and implementation jargon out of the TLDR. It will be stored as PROPOSAL.md. Keep under configured skills.workshop.maxSkillBytes; default max is 40000 bytes.",
       }),
     ),
     support_files: Type.Optional(
