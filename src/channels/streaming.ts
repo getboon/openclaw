@@ -633,8 +633,8 @@ export function buildChannelProgressDraftLine(
     }
     case "item": {
       const name = input.name ?? itemKindToToolName(input.itemKind);
-      // eslint-disable-next-line no-warning-comments -- tracks missing extension detail mode forwarding
-      // TODO(ENG-18810): extension item handlers do not forward detailMode; channel item previews redact paths even when toolProgressDetail is raw.
+      // Known gap (ENG-18810): extension item handlers do not forward detailMode,
+      // so channel item previews redact paths even when toolProgressDetail is raw.
       const meta = redactChannelProgressDetail(
         input.meta ??
           input.summary ??
