@@ -3195,7 +3195,7 @@ export async function runEmbeddedAttempt(
           ...(params.sessionKey && { sessionKey: params.sessionKey }),
           ...(params.sessionId && { sessionId: params.sessionId }),
           ...(params.senderId && { senderId: params.senderId }),
-          // Gateway-audience OBO → x-boon-obo-token (ENG-19115). Omit-when-absent.
+          // Gateway-audience OBO → x-boon-gateway-obo-token (ENG-19115). Omit-when-absent.
           ...(params.oboToken && { oboToken: params.oboToken }),
           ...(params.senderName && { senderName: params.senderName }),
           ...(params.senderSource && { senderSource: params.senderSource }),

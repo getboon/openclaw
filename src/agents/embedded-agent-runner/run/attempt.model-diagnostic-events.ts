@@ -48,8 +48,9 @@ type ModelCallDiagnosticContext = {
   threadId?: string;
   // Gateway-audience OBO (set on MsgContext.OboToken by anychat-boon-web,
   // ENG-19116) carrying boon-core's signed internal_test claim. Emitted as
-  // x-boon-obo-token for the gateway to verify and skip metering internal-test
-  // traffic (ENG-19117). Opaque token — forwarded verbatim, never logged.
+  // x-boon-gateway-obo-token for the gateway to verify and skip metering
+  // internal-test traffic (ENG-19117). Opaque token — forwarded verbatim,
+  // never logged.
   oboToken?: string;
   provider: string;
   model: string;
@@ -120,7 +121,11 @@ const BOON_THREAD_HEADER_NAME = "x-boon-thread-id";
 // The gateway-audience OBO token (ENG-19115). boon-core mints it, anychat-boon-web
 // puts it on MsgContext.OboToken (ENG-19116); the gateway verifies it fail-closed
 // (ENG-19117) to skip metering internal-test traffic. Omitted when absent.
-const BOON_OBO_HEADER_NAME = "x-boon-obo-token";
+// Name pinned by the gateway verifier (boon-llm-gateway middleware/obo.go
+// `OboHeader = "X-Boon-Gateway-Obo-Token"`); lowercase here — Go net/http
+// canonicalizes on read. A mismatch would fail-open (traffic metered), so this
+// must stay in lockstep with that constant.
+const BOON_OBO_HEADER_NAME = "x-boon-gateway-obo-token";
 type ModelCallStreamOptions = Parameters<StreamFn>[2];
 
 function utf8JsonByteLength(value: unknown): number | undefined {

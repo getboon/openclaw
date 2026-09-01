@@ -91,7 +91,7 @@ export type RunEmbeddedAgentParams = {
   senderSource?: string | null;
   /**
    * Gateway-audience OBO (ENG-19116) from MsgContext.OboToken. Threaded to the
-   * model call and emitted as x-boon-obo-token (ENG-19115) for the gateway to
+   * model call and emitted as x-boon-gateway-obo-token (ENG-19115) for the gateway to
    * verify and skip metering internal-test traffic. Opaque; forwarded verbatim.
    */
   oboToken?: string | null;
