@@ -1032,12 +1032,26 @@ async function loadWebMediaInternal(
   }
 
   // Local path
+  // Cap the read so an oversized file is refused from its stat instead of being
+  // materialized first. Same shape as the remote fetchCap above: when images are
+  // optimized the payload may legitimately exceed maxBytes and get compressed down.
+  const localReadCap =
+    maxBytes === undefined
+      ? undefined
+      : optimizeImages
+        ? Math.max(maxBytes, maxBytesForKind("document"))
+        : maxBytes;
   let data: Buffer;
   if (readFileOverride) {
     data = await readFileOverride(mediaUrl);
   } else {
     try {
-      data = (await readLocalFileSafely({ filePath: mediaUrl })).buffer;
+      data = (
+        await readLocalFileSafely({
+          filePath: mediaUrl,
+          ...(localReadCap === undefined ? {} : { maxBytes: localReadCap }),
+        })
+      ).buffer;
     } catch (err) {
       if (err instanceof FsSafeError) {
         if (err.code === "not-found") {
@@ -1049,6 +1063,13 @@ async function loadWebMediaInternal(
           throw new LocalMediaAccessError(
             "not-file",
             `Local media path is not a file: ${mediaUrl}`,
+            { cause: err },
+          );
+        }
+        if (err.code === "too-large") {
+          throw new LocalMediaAccessError(
+            "too-large",
+            `Local media file too large: ${mediaUrl} (${err.message})`,
             { cause: err },
           );
         }

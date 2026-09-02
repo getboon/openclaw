@@ -64,6 +64,58 @@ const DEFAULT_MAX_PAGES = 20;
 const PDF_MIN_TEXT_CHARS = 200;
 const PDF_MAX_PIXELS = 4_000_000;
 
+/**
+ * Largest base64 payload we will inline into ONE native-provider request, per provider.
+ *
+ * Three things this has to get right, each of which an earlier per-file raw-byte constant
+ * got wrong:
+ *
+ * 1. These are caps on the *encoded* request, not on the file. base64 inflates 4/3, so the
+ *    raw budget is 3/4 of the number here.
+ * 2. Every PDF in the call goes into a SINGLE request — `pdf-native-providers.ts` builds one
+ *    content array and one JSON body — so the budget is the SUM across pdfs, not each one.
+ *    With DEFAULT_MAX_PDFS = 10 a per-file check is an order of magnitude too permissive.
+ * 3. The cap is provider-specific, and the provider varies per fallback attempt, so this
+ *    cannot be hoisted out of the `run` callback.
+ *
+ * Anything over routes through local extraction instead, whose cost is bounded by
+ * pdfMaxPages rather than by file size. Above 384MB raw the encode is not merely wasteful
+ * but impossible: V8 caps a string at 0x1fffffe8 (512MB) chars.
+ *
+ * anthropic 32MB is Anthropic's documented Messages request cap. google 20MB is Gemini's
+ * documented inline-request limit and is NOT verified against a live 413; it is also the
+ * default for any future native provider, being the tighter of the two.
+ */
+const NATIVE_INLINE_REQUEST_CAP_BYTES: Record<string, number> = {
+  anthropic: 32 * 1024 * 1024,
+  google: 20 * 1024 * 1024,
+};
+const NATIVE_INLINE_REQUEST_CAP_DEFAULT_BYTES = 20 * 1024 * 1024;
+
+/** Whether every PDF in this call, base64-encoded into one request, fits the provider's cap. */
+function canInlineNativePdfs(provider: string, pdfs: Array<{ buffer: Buffer }>): boolean {
+  const rawBytes = pdfs.reduce((total, p) => total + p.buffer.byteLength, 0);
+  const encodedBytes = Math.ceil(rawBytes / 3) * 4;
+  const cap = NATIVE_INLINE_REQUEST_CAP_BYTES[provider] ?? NATIVE_INLINE_REQUEST_CAP_DEFAULT_BYTES;
+  return encodedBytes <= cap;
+}
+
+/**
+ * Hard ceiling on accepted PDF bytes, applied on top of pdfMaxBytesMb.
+ *
+ * PDFium runs in a WASM heap capped at 2GiB, and FPDF_LoadMemDocument copies the whole file
+ * into it, so the file and its per-page working set have to share those 2GiB. Measured on
+ * real bid sets: a 328MB set needs ~270MB of working set on top of the copy, while a 1.34GB
+ * set loads but aborts mid-extraction with "Cannot enlarge memory, requested 2147487744
+ * bytes, but the limit is 2147483648". 768MB leaves ~1.2GB of headroom, roughly 2x the worst
+ * working set observed.
+ *
+ * ponytail: one global ceiling. Split it per tier if trial (1GB container) and paid (uncapped
+ * EC2) need different answers -- note peak RSS runs ~2x file size, so the trial ceiling is
+ * container RAM, not this.
+ */
+const PDF_MAX_BYTES_CEILING = 768 * 1024 * 1024;
+
 export const PdfToolSchema = Type.Object({
   prompt: Type.Optional(Type.String()),
   pdf: Type.Optional(Type.String({ description: "One PDF path/URL." })),
@@ -145,7 +197,7 @@ async function runPdfPrompt(params: {
   pdfModelConfig: ImageModelConfig;
   modelOverride?: string;
   prompt: string;
-  pdfBuffers: Array<{ base64: string; filename: string }>;
+  pdfs: Array<{ buffer: Buffer; filename: string }>;
   password?: string;
   pageNumbers?: number[];
   getExtractions: () => Promise<PdfExtractedContent[]>;
@@ -183,7 +235,10 @@ async function runPdfPrompt(params: {
         authStorage,
       });
 
-      if (providerSupportsNativePdf(provider)) {
+      // Evaluated per attempt: the cap is provider-specific and the provider varies down
+      // the fallback chain. Over it, the native branch is skipped entirely and this same
+      // run falls through to extraction below, so the base64 is never built.
+      if (providerSupportsNativePdf(provider) && canInlineNativePdfs(provider, params.pdfs)) {
         if (params.password) {
           throw new Error(
             `password is not supported with native PDF providers (${provider}/${modelId}). Remove password, or use a non-native model for encrypted PDFs.`,
@@ -195,8 +250,8 @@ async function runPdfPrompt(params: {
           );
         }
 
-        const pdfs = params.pdfBuffers.map((p) => ({
-          base64: p.base64,
+        const pdfs = params.pdfs.map((p) => ({
+          base64: p.buffer.toString("base64"),
           filename: p.filename,
         }));
 
@@ -361,7 +416,7 @@ export function createPdfTool(options?: {
           minExclusive: true,
           message: "maxBytesMb must be greater than 0",
         }) ?? configuredMaxBytesMb;
-      const maxBytes = Math.floor(maxBytesMb * 1024 * 1024);
+      const maxBytes = Math.min(Math.floor(maxBytesMb * 1024 * 1024), PDF_MAX_BYTES_CEILING);
 
       // Parse page range
       const pagesRaw = normalizeOptionalString(record.pages);
@@ -390,7 +445,6 @@ export function createPdfTool(options?: {
 
       // MARK: - Load each PDF
       const loadedPdfs: Array<{
-        base64: string;
         buffer: Buffer;
         filename: string;
         resolvedPath: string;
@@ -451,7 +505,7 @@ export function createPdfTool(options?: {
           ? await loadWebMediaRaw(resolvedPathInfo.resolved, {
               maxBytes,
               sandboxValidated: true,
-              readFile: createSandboxBridgeReadFile({ sandbox: sandboxConfig }),
+              readFile: createSandboxBridgeReadFile({ sandbox: sandboxConfig, maxBytes }),
             })
           : await loadWebMediaRaw(resolvedPathInfo.resolved, {
               maxBytes,
@@ -468,7 +522,6 @@ export function createPdfTool(options?: {
           }
         }
 
-        const base64 = media.buffer.toString("base64");
         const filename =
           media.fileName ??
           (isHttpUrl
@@ -476,7 +529,6 @@ export function createPdfTool(options?: {
             : "document.pdf");
 
         loadedPdfs.push({
-          base64,
           buffer: media.buffer,
           filename,
           resolvedPath: resolvedPathInfo.resolved,
@@ -512,7 +564,7 @@ export function createPdfTool(options?: {
         pdfModelConfig,
         modelOverride,
         prompt: promptRaw,
-        pdfBuffers: loadedPdfs.map((p) => ({ base64: p.base64, filename: p.filename })),
+        pdfs: loadedPdfs.map((p) => ({ buffer: p.buffer, filename: p.filename })),
         ...(password ? { password } : {}),
         pageNumbers,
         getExtractions,

@@ -61,7 +61,8 @@ async function extractPdfContent(
   const engine = await loadPdfEngine();
   const pdf = await openPdfDocument({
     engine,
-    input: new Uint8Array(request.buffer),
+    // Buffer already is a Uint8Array; re-wrapping it copies the whole file and doubles peak memory.
+    input: request.buffer,
     ...(request.password ? { password: request.password } : {}),
   });
   try {
