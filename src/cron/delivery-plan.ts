@@ -198,7 +198,7 @@ function normalizeFailureMode(value: unknown): "announce" | "webhook" | undefine
 
 /** Resolves job-level failure notification routing layered over global defaults. */
 export function resolveFailureDestination(
-  job: CronJob,
+  job: Pick<CronJob, "delivery">,
   globalConfig?: CronFailureDestinationConfig,
 ): CronFailureDeliveryPlan | null {
   const delivery = job.delivery;

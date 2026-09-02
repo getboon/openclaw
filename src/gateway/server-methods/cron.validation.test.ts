@@ -631,6 +631,125 @@ describe("cron method validation", () => {
     });
   });
 
+  it("rejects an explicit failure destination with no recipient basis on an isolated job", async () => {
+    setRuntimeConfig(telegramConfig());
+
+    const { context, respond } = await invokeCronAdd(
+      agentTurnCronParams({
+        name: "unresolvable failure destination",
+        delivery: {
+          mode: "announce",
+          channel: "telegram",
+          to: "telegram:123",
+          failureDestination: { mode: "announce" },
+        },
+      }),
+    );
+
+    expect(context.cron.add).not.toHaveBeenCalled();
+    expectResponseError(respond, {
+      code: "INVALID_REQUEST",
+      messageIncludes: "delivery.failureDestination has no recipient basis",
+    });
+  });
+
+  it("accepts an explicit failure destination with no recipient basis when the job carries its own session", async () => {
+    setRuntimeConfig(telegramConfig());
+
+    const { context, respond } = await invokeCronAdd(
+      agentTurnCronParams({
+        name: "session-bound failure destination",
+        sessionTarget: "main",
+        delivery: {
+          mode: "announce",
+          channel: "telegram",
+          to: "telegram:123",
+          failureDestination: { mode: "announce" },
+        },
+      }),
+    );
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expectCronSuccess(respond);
+  });
+
+  it("does not reject an isolated job that only inherits the global failure destination default", async () => {
+    setRuntimeConfig({
+      ...telegramConfig(),
+      cron: { failureDestination: { mode: "announce" } },
+    } as OpenClawConfig);
+
+    const { context, respond } = await invokeCronAdd(
+      agentTurnCronParams({
+        name: "inherited global failure destination",
+        delivery: { mode: "announce", channel: "telegram", to: "telegram:123" },
+      }),
+    );
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expectCronSuccess(respond);
+  });
+
+  it("rejects an update that sets an explicit failure destination with no recipient basis on an isolated job", async () => {
+    const { context, respond } = await invokeCronUpdateDelivery(
+      { failureDestination: { mode: "announce" } },
+      createCronJob({
+        delivery: { mode: "announce", channel: "telegram", to: "telegram:123" },
+      }),
+    );
+
+    expect(context.cron.update).not.toHaveBeenCalled();
+    expectResponseError(respond, {
+      code: "INVALID_REQUEST",
+      messageIncludes: "delivery.failureDestination has no recipient basis",
+    });
+  });
+
+  it("rejects a sessionTarget-only update that would orphan an existing failure destination override", async () => {
+    const currentJob = createCronJob({
+      sessionTarget: "session:abc",
+      sessionKey: "abc",
+      delivery: {
+        mode: "announce",
+        channel: "telegram",
+        to: "telegram:123",
+        failureDestination: { mode: "announce" },
+      },
+    });
+
+    const { context, respond } = await invokeCronUpdate(
+      { id: "cron-1", patch: { sessionTarget: "isolated" } },
+      currentJob,
+    );
+
+    expect(context.cron.update).not.toHaveBeenCalled();
+    expectResponseError(respond, {
+      code: "INVALID_REQUEST",
+      messageIncludes: "delivery.failureDestination has no recipient basis",
+    });
+  });
+
+  it("accepts a sessionTarget-only update that keeps an existing failure destination resolvable", async () => {
+    const currentJob = createCronJob({
+      sessionTarget: "session:abc",
+      sessionKey: "abc",
+      delivery: {
+        mode: "announce",
+        channel: "telegram",
+        to: "telegram:123",
+        failureDestination: { mode: "announce" },
+      },
+    });
+
+    const { context, respond } = await invokeCronUpdate(
+      { id: "cron-1", patch: { name: "renamed job" } },
+      currentJob,
+    );
+
+    expect(context.cron.update).toHaveBeenCalled();
+    expectCronSuccess(respond);
+  });
+
   it("rejects announce targets prefixed for a different explicit delivery channel", async () => {
     setRuntimeConfig(telegramSlackConfig());
 
