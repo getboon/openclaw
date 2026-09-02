@@ -166,6 +166,10 @@ const ERROR_PATTERNS = {
     // this matcher the thrown error classifies as unclassified, which
     // blocks failover instead of walking the configured fallback chain.
     /\bstream ended before message_?stop\b/i,
+    // Shape B (ENG-19233): message_stop/messageStop arrived but a content
+    // block was left open — same dropped-turn failure mode as the matcher
+    // above, just discovered after the terminator instead of before it.
+    /\bstream ended with an unclosed content block\b/i,
     /\bstop reason:\s*(?:abort|error|malformed_response|network_error)\b/i,
     /\breason:\s*(?:abort|error|malformed_response|network_error)\b/i,
     /\bunhandled stop reason:\s*(?:abort|error|malformed_response|network_error)\b/i,
