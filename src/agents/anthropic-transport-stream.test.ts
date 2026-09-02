@@ -894,6 +894,105 @@ describe("anthropic transport stream", () => {
     expect(result.content).toEqual([{ type: "text", text: "no" }]);
   });
 
+  // Shape B (ENG-19233): message_stop DOES arrive, but a content block
+  // opened via content_block_start was never closed with a matching
+  // content_block_stop. The prior fix only checked sawMessageStop, so this
+  // was accepted as a successful "toolUse" turn with no actual tool call in
+  // content — a self-contradictory persisted message that can permanently
+  // poison a session.
+  it("throws when message_stop arrives with an unclosed content block", async () => {
+    guardedFetchMock.mockResolvedValueOnce(
+      createSseResponse([
+        {
+          type: "message_start",
+          message: { id: "msg_1", usage: { input_tokens: 8, output_tokens: 0 } },
+        },
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "tool_use", id: "tool_1", name: "send_message", input: {} },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: '{"to":"chan' },
+        },
+        // No content_block_stop for index 0 — the block is left open.
+        {
+          type: "message_delta",
+          delta: { stop_reason: "tool_use" },
+          usage: { input_tokens: 8, output_tokens: 1 },
+        },
+        { type: "message_stop" },
+      ]),
+    );
+    const model = makeAnthropicTransportModel();
+    const result = await runTransportStream(
+      model,
+      { messages: [{ role: "user", content: "hello" }] } as AnthropicStreamContext,
+      { apiKey: "sk-ant-api" } as AnthropicStreamOptions,
+    );
+
+    expect(result.stopReason).toBe("error");
+    expect(result.errorMessage).toBe("Anthropic stream ended with an unclosed content block");
+  });
+
+  // Regression guard: blockIndexes is a Map keyed by wire index, so a
+  // duplicate content_block_start reusing an index (no content_block_stop
+  // in between) overwrites the map entry pointing at the first block. If
+  // the finalization check only inspects blockIndexes instead of scanning
+  // output.content directly, closing the second block via a single
+  // content_block_stop clears the map to size 0 and the first, genuinely
+  // unclosed block goes undetected.
+  it("throws when a duplicate content_block_start orphans an earlier block", async () => {
+    guardedFetchMock.mockResolvedValueOnce(
+      createSseResponse([
+        {
+          type: "message_start",
+          message: { id: "msg_1", usage: { input_tokens: 8, output_tokens: 0 } },
+        },
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "tool_use", id: "tool_1", name: "first_call", input: {} },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: '{"a":1' },
+        },
+        // Duplicate content_block_start for the same index, no
+        // content_block_stop for the first block in between.
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "tool_use", id: "tool_2", name: "second_call", input: {} },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: '{"b":2}' },
+        },
+        { type: "content_block_stop", index: 0 },
+        {
+          type: "message_delta",
+          delta: { stop_reason: "tool_use" },
+          usage: { input_tokens: 8, output_tokens: 1 },
+        },
+        { type: "message_stop" },
+      ]),
+    );
+    const model = makeAnthropicTransportModel();
+    const result = await runTransportStream(
+      model,
+      { messages: [{ role: "user", content: "hello" }] } as AnthropicStreamContext,
+      { apiKey: "sk-ant-api" } as AnthropicStreamOptions,
+    );
+
+    expect(result.stopReason).toBe("error");
+    expect(result.errorMessage).toBe("Anthropic stream ended with an unclosed content block");
+  });
+
   it("preserves unsafe integer Anthropic tool-use input deltas", async () => {
     guardedFetchMock.mockResolvedValueOnce(
       createSseResponse([

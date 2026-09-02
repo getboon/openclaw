@@ -483,6 +483,7 @@ describe("Bedrock messageStop enforcement", () => {
             delta: { text: "no" },
           },
         },
+        { contentBlockStop: { contentBlockIndex: 0 } },
         { messageStop: { stopReason: "end_turn" } },
       ]),
     } as never);
@@ -491,6 +492,39 @@ describe("Bedrock messageStop enforcement", () => {
     const result = await stream.result();
 
     expect(result.stopReason).toBe("stop");
+  });
+
+  // Shape B (ENG-19233): messageStop DOES arrive, but a content block
+  // opened via contentBlockStart was never closed with a matching
+  // contentBlockStop. The messageStop-only check above accepted this as a
+  // successful "toolUse" turn with no actual tool call in content.
+  it("throws when messageStop arrives with an unclosed content block", async () => {
+    vi.spyOn(BedrockRuntimeClient.prototype, "send").mockResolvedValue({
+      $metadata: { httpStatusCode: 200 },
+      stream: streamEvents([
+        { messageStart: { role: ConversationRole.ASSISTANT } },
+        {
+          contentBlockStart: {
+            contentBlockIndex: 0,
+            start: { toolUse: { toolUseId: "tool_1", name: "send_message" } },
+          },
+        },
+        {
+          contentBlockDelta: {
+            contentBlockIndex: 0,
+            delta: { toolUse: { input: '{"to":"chan' } },
+          },
+        },
+        // No contentBlockStop for index 0 — the block is left open.
+        { messageStop: { stopReason: "tool_use" } },
+      ]),
+    } as never);
+
+    const stream = streamSimpleBedrock(bedrockModel({}), context());
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    expect(result.errorMessage).toContain("unclosed content block");
   });
 });
 
