@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.32
+
+Makes the agent ask one short clarifying question before acting on a materially ambiguous request, instead of picking an interpretation or inventing missing skill inputs.
+
+- **#175 (ENG-18699):** the concise interaction overlay explicitly told Claude-backed agents to act on the most likely intent, so an ambiguous submittal, bid-to-budget, or HCSS request could commit to an interpretation — or invent a missing required skill input — before the user had confirmed anything material, making those flows unpredictable and occasionally sending an action or artifact down the wrong path. The overlay is replaced with a confirm-before-act contract in `src/agents/concise-interaction-overlay.ts`: a materially ambiguous request stops for exactly one concise numbered clarification; a `deterministic: true` skill never defaults a missing required input; a `deterministic: false` skill may proceed only under a clearly labeled assumption; a fully specified request continues immediately with no added confirmation step; and repeated choices keep stable ordering and source labels so a user answering "2" twice gets the same thing twice. Verified with 10 focused Vitest assertions plus live Anthropic Opus 4.8 QA across all seven submittal / bid-to-budget / HCSS steps, including repeat-order stability and resume-after-selection. Duplicate: ENG-18756.
+- Base = `2026.6.11-boon.31`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.32` in lockstep. No other code changes; #175 was merged onto `boon` before this release.
+
 ## 2026.6.11-boon.31
 
 Persists crash-safe recovery for the announce/subagent path and the followup-message pipeline (ENG-18999 Arguijo incident follow-up), and stops raw shell commands from leaking into customer-facing progress copy.
