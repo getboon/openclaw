@@ -208,15 +208,27 @@ export async function schedulePluginSessionTurn(params: {
   ownerRegistry?: PluginRegistry;
 }): Promise<PluginSessionSchedulerJobHandle | undefined> {
   if (params.origin !== "bundled") {
+    log.warn(
+      `plugin session turn scheduling failed (pluginId=${params.pluginId}): only bundled plugins may schedule durable session turns (origin=${params.origin ?? "unknown"})`,
+    );
     return undefined;
   }
   const sessionKey = normalizeOptionalString(params.schedule.sessionKey);
   const message = normalizeOptionalString(params.schedule.message);
   if (!sessionKey || !message) {
+    log.warn(
+      `plugin session turn scheduling failed (pluginId=${params.pluginId}): missing ${!sessionKey ? "sessionKey" : "message"}`,
+    );
     return undefined;
   }
   const cronSchedule = resolveSchedule(params.schedule);
   if (!cronSchedule) {
+    log.warn(
+      `plugin session turn scheduling failed (${formatScheduleLogContext({
+        pluginId: params.pluginId,
+        sessionKey,
+      })}): unresolvable schedule`,
+    );
     return undefined;
   }
   const rawDeliveryMode = (params.schedule as { deliveryMode?: unknown }).deliveryMode;
@@ -255,6 +267,13 @@ export async function schedulePluginSessionTurn(params: {
   }
   const cronDeliveryMode = deliveryMode ?? "announce";
   if (params.shouldCommit && !params.shouldCommit()) {
+    log.warn(
+      `plugin session turn scheduling failed (${formatScheduleLogContext({
+        pluginId: params.pluginId,
+        sessionKey,
+        ...(scheduleName ? { name: scheduleName } : {}),
+      })}): plugin record is not loaded in the active registry`,
+    );
     return undefined;
   }
   if (!params.cron) {
@@ -306,6 +325,13 @@ export async function schedulePluginSessionTurn(params: {
   }
   const jobId = result.id;
   if (!jobId) {
+    log.warn(
+      `plugin session turn scheduling failed (${formatScheduleLogContext({
+        pluginId: params.pluginId,
+        sessionKey,
+        name: cronJobName,
+      })}): cron.add returned no job id`,
+    );
     return undefined;
   }
   if (params.shouldCommit && !params.shouldCommit()) {
@@ -360,6 +386,9 @@ export async function unschedulePluginSessionTurnsByTag(params: {
   request: PluginSessionTurnUnscheduleByTagParams;
 }): Promise<PluginSessionTurnUnscheduleByTagResult> {
   if (params.origin !== "bundled") {
+    log.warn(
+      `plugin session turn untag failed (pluginId=${params.pluginId}): only bundled plugins may manage durable session turns (origin=${params.origin ?? "unknown"})`,
+    );
     return { removed: 0, failed: 0 };
   }
   const sessionKey = normalizeOptionalString(params.request.sessionKey);

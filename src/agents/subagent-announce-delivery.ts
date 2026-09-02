@@ -74,6 +74,7 @@ import {
   type SubagentAnnounceDeliveryResult,
 } from "./subagent-announce-dispatch.js";
 import type { DeliveryContext } from "./subagent-announce-origin.js";
+import { isSyntheticNoOutputResult } from "./subagent-announce-output.js";
 import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
 import { resolveRequesterStoreKey } from "./subagent-requester-store-key.js";
 import type { SpawnSubagentMode } from "./subagent-spawn.types.js";
@@ -976,7 +977,11 @@ function hasFailedSubagentNoOutputCompletion(events: readonly AgentInternalEvent
         event.type === "task_completion" &&
         event.source === "subagent" &&
         event.status !== "ok" &&
-        event.result.trim() === "(no output)",
+        // Both synthetic shapes count: the "(no output)" fallback (zero-flush
+        // crash — no child session on disk) and the "N tool call(s) made
+        // without visible output." summary (partial-flush crash — the child
+        // persisted tool calls but no visible text before the process died).
+        isSyntheticNoOutputResult(event.result),
     ) === true
   );
 }
@@ -1033,6 +1038,58 @@ async function deliverTextCompletionDirect(params: {
       path: "direct",
       error: `text completion direct delivery failed: ${summarizeDeliveryError(err)}`,
     };
+  }
+}
+
+// When a subagent completion is frozen with no output, delivery permanently
+// fails. Rather than leave a direct requester with pure silence, send one honest
+// notice. Scoped to true DMs (the same targets that already accept a raw text
+// fallback); threaded conversations deliver through the requester-agent handoff,
+// so raw-sending there is intentionally avoided. Best-effort: a failed notice
+// never changes the give-up outcome its caller returns.
+async function notifySubagentNoOutputGiveUp(params: {
+  cfg: OpenClawConfig;
+  requesterSessionKey: string;
+  directIdempotencyKey: string;
+  deliveryTarget: {
+    deliver: boolean;
+    channel?: string;
+    to?: string;
+    accountId?: string;
+    threadId?: string;
+  };
+}): Promise<void> {
+  if (
+    !params.deliveryTarget.deliver ||
+    !params.deliveryTarget.channel ||
+    !params.deliveryTarget.to ||
+    !isDirectMessageDeliveryTarget(params.deliveryTarget, params.requesterSessionKey)
+  ) {
+    return;
+  }
+  const agentId = resolveAgentIdFromSessionKey(params.requesterSessionKey);
+  const idempotencyKey = `${params.directIdempotencyKey}:no-output-notice`;
+  try {
+    await subagentAnnounceDeliveryDeps.sendMessage({
+      cfg: params.cfg,
+      channel: params.deliveryTarget.channel,
+      to: params.deliveryTarget.to,
+      accountId: params.deliveryTarget.accountId,
+      threadId: params.deliveryTarget.threadId,
+      requesterSessionKey: params.requesterSessionKey,
+      agentId,
+      content: "A background task I started didn't finish, so I don't have a result to share.",
+      idempotencyKey,
+      mirror: {
+        sessionKey: params.requesterSessionKey,
+        agentId,
+        idempotencyKey,
+      },
+    });
+  } catch (err) {
+    defaultRuntime.log(
+      `[warn] subagent no-output honest notice failed: ${summarizeDeliveryError(err)}`,
+    );
   }
 }
 
@@ -1618,10 +1675,16 @@ async function sendSubagentAnnounceDirectly(params: {
         return textDelivery;
       }
       if (hasFailedSubagentNoOutputCompletion(params.internalEvents)) {
+        await notifySubagentNoOutputGiveUp({
+          cfg,
+          requesterSessionKey: canonicalRequesterSessionKey,
+          directIdempotencyKey: params.directIdempotencyKey,
+          deliveryTarget,
+        });
         return {
           delivered: false,
           path: "direct",
-          reason: "visible_reply_missing",
+          reason: "subagent_no_output",
           error: "completion agent did not produce a visible reply",
         };
       }
@@ -1633,10 +1696,16 @@ async function sendSubagentAnnounceDirectly(params: {
       !hasIntentionalSilentGatewayAgentPayload(directAnnounceResponse)
     ) {
       if (hasFailedSubagentNoOutputCompletion(params.internalEvents)) {
+        await notifySubagentNoOutputGiveUp({
+          cfg,
+          requesterSessionKey: canonicalRequesterSessionKey,
+          directIdempotencyKey: params.directIdempotencyKey,
+          deliveryTarget,
+        });
         return {
           delivered: false,
           path: "direct",
-          reason: "visible_reply_missing",
+          reason: "subagent_no_output",
           error: "completion agent did not produce a visible reply",
         };
       }
@@ -1675,6 +1744,26 @@ async function sendSubagentAnnounceDirectly(params: {
       !hasCompletionSideEffect &&
       !acceptsIntentionalSilentCompletion
     ) {
+      // This no-deliverable-target branch is also reachable for a frozen
+      // no-output completion (e.g. the requester session has no channel
+      // origin, so shouldDeliverAgentFinal is false). Classify it the same
+      // way as the deliverable branches above so the fail-fast engages on
+      // every path — retrying an immutable empty completion is futile
+      // regardless of where delivery would have gone.
+      if (hasFailedSubagentNoOutputCompletion(params.internalEvents)) {
+        await notifySubagentNoOutputGiveUp({
+          cfg,
+          requesterSessionKey: canonicalRequesterSessionKey,
+          directIdempotencyKey: params.directIdempotencyKey,
+          deliveryTarget,
+        });
+        return {
+          delivered: false,
+          path: "direct",
+          reason: "subagent_no_output",
+          error: "completion agent did not produce a visible reply",
+        };
+      }
       return {
         delivered: false,
         path: "direct",

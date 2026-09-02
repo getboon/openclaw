@@ -4,6 +4,7 @@
  * focus on the field under test.
  */
 import { createEmbeddedRunReplayState } from "./embedded-agent-runner/replay-state.js";
+import type { ToolErrorSummary } from "./tool-error-summary.js";
 
 /** Build the minimal mutable state object expected by tool handler tests. */
 export function createBaseToolHandlerState() {
@@ -17,6 +18,7 @@ export function createBaseToolHandlerState() {
     itemStartedCount: 0,
     itemCompletedCount: 0,
     lastToolError: undefined,
+    toolFailures: [] as Array<ToolErrorSummary & { retried?: boolean }>,
     pendingMessagingTexts: new Map<string, string>(),
     pendingMessagingTargets: new Map<string, unknown>(),
     pendingMessagingMediaUrls: new Map<string, string[]>(),

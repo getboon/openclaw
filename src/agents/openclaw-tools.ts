@@ -422,6 +422,7 @@ export function createOpenClawTools(
           nodesTool,
           createCronTool({
             agentSessionKey: options?.agentSessionKey,
+            runSessionKey: options?.runSessionKey,
             currentDeliveryContext: {
               channel: options?.agentChannel,
               to: options?.currentChannelId ?? options?.agentTo,
@@ -449,6 +450,7 @@ export function createOpenClawTools(
       : [
           createGatewayTool({
             agentSessionKey: options?.agentSessionKey,
+            runSessionKey: options?.runSessionKey,
             config: options?.config,
           }),
         ]),
@@ -498,6 +500,7 @@ export function createOpenClawTools(
     }),
     createSessionsHistoryTool({
       agentSessionKey: options?.agentSessionKey,
+      runSessionKey: options?.runSessionKey,
       sandboxed: options?.sandboxed,
       config: resolvedConfig,
       callGateway: effectiveCallGateway,
@@ -507,6 +510,7 @@ export function createOpenClawTools(
       : [
           createSessionsSendTool({
             agentSessionKey: options?.agentSessionKey,
+            runSessionKey: options?.runSessionKey,
             agentChannel: options?.agentChannel,
             sandboxed: options?.sandboxed,
             config: resolvedConfig,

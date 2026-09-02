@@ -351,6 +351,16 @@ export function createCronToolSchema(): TSchema {
 
 type CronToolOptions = {
   agentSessionKey?: string;
+  /**
+   * The actual live run session key. `agentSessionKey` may be a sandbox/policy
+   * key (e.g. a direct-message peer key used only to scope permissions) that
+   * was never itself persisted as a transcript session — binding a `current`
+   * cron job to it schedules against a session that can never be resumed.
+   * When present, this is the real key to stamp on `sessionTarget: "current"`
+   * jobs instead. Mirrors the same fix already applied to session_status and
+   * the goal tools.
+   */
+  runSessionKey?: string;
   currentDeliveryContext?: DeliveryContext;
   /**
    * Effective tool surface visible to the caller that created or edited a cron job.
@@ -951,14 +961,21 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
           assertCronDeliveryInputNonBlankFields(canonicalJob.delivery);
           const job =
             normalizeCronJobCreate(canonicalJob, {
-              sessionContext: { sessionKey: opts?.agentSessionKey },
+              // sessionTarget: "current" resolves against this key at creation time
+              // (resolveCronCurrentSessionTarget) — prefer the live run session over a
+              // sandbox/policy agentSessionKey so it binds to a resumable transcript.
+              sessionContext: { sessionKey: opts?.runSessionKey ?? opts?.agentSessionKey },
             }) ?? canonicalJob;
           capCronAgentTurnJobToolsAllow(job, opts?.creatorToolAllowlist);
           const cfg = getRuntimeConfig();
           if (job && typeof job === "object") {
             const { mainKey, alias } = resolveMainSessionAlias(cfg);
-            const resolvedSessionKey = opts?.agentSessionKey
-              ? resolveInternalSessionKey({ key: opts.agentSessionKey, alias, mainKey })
+            // Prefer the live run session over a sandbox/policy agentSessionKey so a
+            // `current`-bound job resumes the real conversation, not an address that
+            // was never itself persisted as a transcript session (see CronToolOptions).
+            const callerSessionKeyForBinding = opts?.runSessionKey ?? opts?.agentSessionKey;
+            const resolvedSessionKey = callerSessionKeyForBinding
+              ? resolveInternalSessionKey({ key: callerSessionKeyForBinding, alias, mainKey })
               : undefined;
             if (!("agentId" in job) || (job as { agentId?: unknown }).agentId === undefined) {
               const agentId = opts?.agentSessionKey
@@ -1155,8 +1172,13 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
           const { mainKey, alias } = resolveMainSessionAlias(cfg);
           const explicitSessionKey = readStringParam(params, "sessionKey");
           const explicitAgentId = readStringParam(params, "agentId");
-          const inferredSessionKey = opts?.agentSessionKey
-            ? resolveInternalSessionKey({ key: opts.agentSessionKey, alias, mainKey })
+          // Prefer the live run session over a sandbox/policy agentSessionKey
+          // (see CronToolOptions.runSessionKey) so the wake lands on a session
+          // that actually gets drained, not an address that was never itself
+          // persisted as a transcript session.
+          const callerSessionKeyForWake = opts?.runSessionKey ?? opts?.agentSessionKey;
+          const inferredSessionKey = callerSessionKeyForWake
+            ? resolveInternalSessionKey({ key: callerSessionKeyForWake, alias, mainKey })
             : undefined;
           const inferredAgentId = opts?.agentSessionKey
             ? resolveSessionAgentId({ sessionKey: opts.agentSessionKey, config: cfg })

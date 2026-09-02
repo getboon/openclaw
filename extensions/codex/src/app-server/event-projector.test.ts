@@ -925,8 +925,12 @@ describe("CodexAppServerEventProjector", () => {
 
     expect(result.aborted).toBe(false);
     expect(result.assistantTexts).toEqual([]);
+    // ENG-18810: explain-mode's generic branch returns the fixed "run command"
+    // copy instead of the compacted raw command line (which would leak cwd/pipe
+    // internals into customer-facing surfaces), so this no-visible-answer-guard
+    // case no longer surfaces "workspace" in the meta text.
     expect(result.toolMetas).toEqual([
-      expect.objectContaining({ toolName: "bash", meta: expect.stringContaining("workspace") }),
+      expect.objectContaining({ toolName: "bash", meta: "run command" }),
     ]);
   });
 
@@ -3082,6 +3086,98 @@ describe("CodexAppServerEventProjector", () => {
     expect(projector.buildResult(buildEmptyToolTelemetry()).lastToolError).toBeUndefined();
   });
 
+  // ENG-18812 review follow-up (gandalfboon): the Codex path only tracked a
+  // single-slot lastNativeToolError, so a turn with two distinct failures —
+  // or one whose last call happened to succeed — described at most one
+  // failure to the digest-building reply builder, same swallow the embedded
+  // runner had before this fix.
+  it("records EVERY unrecovered dynamic-tool failure in a turn, not just the most recent", async () => {
+    const projector = await createProjector();
+
+    projector.recordDynamicToolResult({
+      callId: "call-cron-blocked",
+      tool: "cron",
+      success: false,
+      terminalType: "blocked",
+      contentItems: [{ type: "inputText", text: "blocked by policy" }],
+    });
+    projector.recordDynamicToolResult({
+      callId: "call-web-fetch-blocked",
+      tool: "web_fetch",
+      success: false,
+      terminalType: "blocked",
+      contentItems: [{ type: "inputText", text: "blocked by network policy" }],
+    });
+
+    const result = projector.buildResult(buildEmptyToolTelemetry());
+    expect(result.lastToolError).toEqual({
+      toolName: "web_fetch",
+      error: "blocked by network policy",
+    });
+    expect(result.toolFailures).toEqual([
+      { toolName: "cron", error: "blocked by policy" },
+      { toolName: "web_fetch", error: "blocked by network policy" },
+    ]);
+  });
+
+  it("keeps an earlier unrecovered failure in toolFailures even when the turn's LAST call succeeds", async () => {
+    // The exact ENG-18812 shape: tool #1 fails, tool #2 (a different tool)
+    // succeeds — lastNativeToolError clears (unchanged, existing contract),
+    // but the digest still needs to know tool #1 broke.
+    const projector = await createProjector();
+
+    projector.recordDynamicToolResult({
+      callId: "call-cron-blocked",
+      tool: "cron",
+      success: false,
+      terminalType: "blocked",
+      contentItems: [{ type: "inputText", text: "blocked by policy" }],
+    });
+    projector.recordDynamicToolResult({
+      callId: "call-web-fetch-ok",
+      tool: "web_fetch",
+      success: true,
+      terminalType: "completed",
+      contentItems: [{ type: "inputText", text: "fetch ok" }],
+    });
+
+    const result = projector.buildResult(buildEmptyToolTelemetry());
+    expect(result.lastToolError).toBeUndefined();
+    expect(result.toolFailures).toEqual([{ toolName: "cron", error: "blocked by policy" }]);
+  });
+
+  it("marks a toolFailures entry retired when the same tool later recovers, without dropping an unrelated one", async () => {
+    const projector = await createProjector();
+
+    projector.recordDynamicToolResult({
+      callId: "call-cron-blocked-1",
+      tool: "cron",
+      success: false,
+      terminalType: "blocked",
+      contentItems: [{ type: "inputText", text: "blocked by policy" }],
+    });
+    projector.recordDynamicToolResult({
+      callId: "call-web-fetch-blocked",
+      tool: "web_fetch",
+      success: false,
+      terminalType: "blocked",
+      contentItems: [{ type: "inputText", text: "blocked by network policy" }],
+    });
+    projector.recordDynamicToolResult({
+      callId: "call-cron-recovered",
+      tool: "cron",
+      success: true,
+      terminalType: "completed",
+      contentItems: [{ type: "inputText", text: "cron ok" }],
+    });
+
+    const result = projector.buildResult(buildEmptyToolTelemetry());
+    expect(result.toolFailures).toEqual([
+      { toolName: "cron", error: "blocked by policy", retried: true },
+      { toolName: "web_fetch", error: "blocked by network policy" },
+    ]);
+  });
+
   it.each([
     {
       command: "/bin/zsh -lc 'rg -n TODO src'",
@@ -3417,7 +3513,11 @@ describe("CodexAppServerEventProjector", () => {
     const toolProgressText = onToolResult.mock.calls
       .map(([payload]) => (payload as { text?: string }).text ?? "")
       .join("\n");
-    expect(toolProgressText).toContain("log_activity.sh");
+    // ENG-18810: explain-mode's generic branch returns the fixed "run command"
+    // copy instead of leaking the raw script path/name into customer-facing
+    // progress text -- the leak this test's own name warns against.
+    expect(toolProgressText).toContain("run command");
+    expect(toolProgressText).not.toContain("log_activity.sh");
 
     const result = projector.buildResult(buildEmptyToolTelemetry());
     expect(result.messagesSnapshot.some((message) => message.role === "toolResult")).toBe(true);

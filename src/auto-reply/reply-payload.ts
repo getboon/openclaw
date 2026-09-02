@@ -1,3 +1,4 @@
+import type { ToolFailureDigest } from "../agents/tool-failure-digest.js";
 /** Reply payload contracts and metadata helpers shared by dispatch and channel renderers. */
 import type { ReplyToMode } from "../config/types.base.js";
 import type {
@@ -234,6 +235,14 @@ export type ReplyPayloadMetadata = {
   beforeAgentRunBlocked?: boolean;
   /** Warning synthesized from an observed tool error after the run produced assistant output. */
   nonTerminalToolErrorWarning?: boolean;
+  /**
+   * Every unrecovered failed step behind a `nonTerminalToolErrorWarning`,
+   * classified into a closed, user-safe reason (never raw error text, which
+   * may embed a shell command or file path). Lets a channel plugin compose
+   * its own leak-safe notice instead of discarding the warning outright
+   * (ENG-18812) — never a substitute for the plugin's own redaction policy.
+   */
+  toolFailureDigest?: ToolFailureDigest;
 };
 
 const replyPayloadMetadata = new WeakMap<object, ReplyPayloadMetadata>();
@@ -256,6 +265,11 @@ export function getReplyPayloadMetadata(payload: object): ReplyPayloadMetadata |
 /** Returns true when a payload is the synthesized warning for a non-terminal tool error. */
 export function isReplyPayloadNonTerminalToolErrorWarning(payload: object): boolean {
   return getReplyPayloadMetadata(payload)?.nonTerminalToolErrorWarning === true;
+}
+
+/** Reads the per-failure digest attached to a non-terminal tool-error warning payload, if any. */
+export function getReplyPayloadToolFailureDigest(payload: object): ToolFailureDigest | undefined {
+  return getReplyPayloadMetadata(payload)?.toolFailureDigest;
 }
 
 /** Copies internal payload metadata when cloning or transforming payload objects. */

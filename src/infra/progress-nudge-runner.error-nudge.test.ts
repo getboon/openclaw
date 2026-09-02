@@ -50,6 +50,10 @@ describe("startProgressNudgeRunner error nudge", () => {
       },
       resolveDeliveryTarget:
         resolveDeliveryTarget as unknown as ProgressNudgeDeps["resolveDeliveryTarget"],
+      // Not under test here (see progress-nudge-runner.scheduler.test.ts for
+      // the edit-support gate); default to "supports edit" so the terminal
+      // failure-nudge path is unaffected by it.
+      channelSupportsEdit: () => true,
       sendMessage: sendMessage as unknown as ProgressNudgeDeps["sendMessage"],
     };
     return {

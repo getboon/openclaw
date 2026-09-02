@@ -1155,6 +1155,12 @@ describe("buildEmbeddedRunPayloads", () => {
     // toolMetas carries an `errored` flag per call, so the count must be the
     // number of non-errored tools (1), not toolMetas.length - 1 (which assumes
     // a single failure and would wrongly say 2).
+    //
+    // This test only supplies the legacy single `lastToolError` (not the full
+    // `toolFailures` list a real turn now collects — ENG-18812), so the
+    // digest can only name ONE of the two failures toolMetas implies. It must
+    // say so ("…and 1 more") rather than silently presenting "Step:" as if it
+    // were the complete list — the exact swallow being fixed.
     const payloads = buildPayloads({
       assistantTexts: ["Here's the summary you asked for."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -1178,11 +1184,13 @@ describe("buildEmbeddedRunPayloads", () => {
     // Header pluralizes with the count of steps that didn't finish (2), not a
     // hardcoded singular "One step" regardless of how many actually failed.
     expect(warning?.text).toContain("2 steps didn't finish");
-    // The label and closing guidance stay plural-consistent with the header
-    // instead of naming a single "Step:" while multiple steps failed.
-    expect(warning?.text).toContain("Most recent step:");
+    // Named failure (from the single lastToolError this test provides) plus
+    // an honest "…and 1 more" for the second toolMetas-implied failure the
+    // digest was never told about.
+    expect(warning?.text).toContain("Steps:");
+    expect(warning?.text).toContain("process");
+    expect(warning?.text).toContain("…and 1 more");
     expect(warning?.text).toMatch(/redo them/i);
-    expect(warning?.text).not.toMatch(/\bStep:/);
     expect(warning?.text).not.toMatch(/redo that step/i);
   });
 
@@ -1203,17 +1211,22 @@ describe("buildEmbeddedRunPayloads", () => {
     });
   });
 
-  it("reframes a recovered bg-process non-zero exit as a named, classified intermediate status", () => {
+  it("reframes a recovered bg-process non-zero exit as a classified intermediate status", () => {
     // The gandalf `salty-shore` case: a backgrounded process session exits
     // non-zero, the agent RECOVERS (produces a real final reply), the turn
     // succeeds — yet core rendered "⚠️ 🧰 Process: salty-shore failed", giving the
     // user the wrong intuition ("the agent broke"). A recovered exec/bash/process
-    // error on a successful turn is non-terminal — but this supersedes the
-    // earlier choice to hide the process identity here: the terminal "⚠️ failed"
-    // path already names it (see the no-reply regression guard below), so
-    // hiding it only in the recovered case was an inconsistency, not a
-    // deliberate redaction. Naming which process recovered is exactly what the
-    // reported bug asked for.
+    // error on a successful turn is non-terminal.
+    //
+    // ENG-18812: the note now enumerates EVERY unrecovered failure in the
+    // turn, not just this one — which means it can no longer safely include
+    // each failure's redacted `meta` (a per-tool action label like a shell
+    // flag or a process nickname): a leak-safety guarantee that must hold
+    // across an unbounded list can't rely on per-tool redaction heuristics
+    // the way the old single-failure note could. Tool name + classified
+    // reason only, matching the fix's confirmed scope. The process's own
+    // identity ("salty-shore") is intentionally no longer named here — a
+    // narrower but leak-safe regression from PR #115's single-failure copy.
     const payloads = buildPayloads({
       assistantTexts: ["Here's the honest status while the draft work runs."],
       lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
@@ -1235,7 +1248,8 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning).toBeDefined();
     expect(warning?.text).not.toContain("⚠️");
     expect(warning?.text).not.toContain("failed");
-    expect(warning?.text).toContain("salty-shore");
+    expect(warning?.text).not.toContain("salty-shore");
+    expect(warning?.text).toContain("process");
     expect(warning?.text).toContain("exited with an error");
   });
 

@@ -283,6 +283,13 @@ export type MsgContext = {
   OwnerAllowFrom?: Array<string | number>;
   SenderName?: string;
   SenderId?: string;
+  /**
+   * Gateway-audience OBO (ENG-19116): a boon-core-signed token carrying the
+   * internal_test claim, set by the anychat-boon-web plugin. Threaded to the
+   * model call as the x-boon-gateway-obo-token header (ENG-19115) for the gateway to
+   * verify and skip metering internal-test traffic. Absent on other surfaces.
+   */
+  OboToken?: string;
   SenderUsername?: string;
   SenderTag?: string;
   SenderE164?: string;

@@ -5,6 +5,7 @@
  */
 import { asOptionalObjectRecord as asRecord } from "@openclaw/normalization-core/record-coerce";
 import { redactToolPayloadText } from "../logging/redact.js";
+import { summarizeBoonExecCommand } from "./tool-display-exec-boon.js";
 import {
   binaryName,
   firstPositional,
@@ -288,13 +289,26 @@ function summarizeKnownExec(words: string[]): string {
 
 function summarizePipeline(stage: string): string {
   const pipeline = splitTopLevelPipes(stage);
+  const summarizeStage = (fragment: string): { text: string; boon: boolean } => {
+    const words = trimLeadingEnv(splitShellWords(fragment));
+    const boonSummary = summarizeBoonExecCommand(words);
+    return boonSummary
+      ? { text: boonSummary, boon: true }
+      : { text: summarizeKnownExec(words), boon: false };
+  };
+
   if (pipeline.length > 1) {
-    const first = summarizeKnownExec(trimLeadingEnv(splitShellWords(pipeline[0])));
-    const last = summarizeKnownExec(trimLeadingEnv(splitShellWords(pipeline[pipeline.length - 1])));
+    const stages = pipeline.map(summarizeStage);
+    const firstBoonStage = stages.find((candidate) => candidate.boon);
+    if (firstBoonStage) {
+      return firstBoonStage.text;
+    }
+    const first = stages[0];
+    const last = stages.at(-1)!;
     const extra = pipeline.length > 2 ? ` (+${pipeline.length - 2} steps)` : "";
-    return `${first} -> ${last}${extra}`;
+    return `${first.text} -> ${last.text}${extra}`;
   }
-  return summarizeKnownExec(trimLeadingEnv(splitShellWords(stage)));
+  return summarizeStage(stage).text;
 }
 
 type ExecSummary = {
@@ -483,6 +497,9 @@ export function resolveExecDetail(
   const nodeFragment = nodeName ? ` · node: ${nodeName}` : "";
 
   if (result?.allGeneric !== false && isGenericSummary(summary)) {
+    if (options?.detailMode === "explain") {
+      return "run command";
+    }
     const base = cwdSuffix ? `${compact} ${cwdSuffix}` : compact;
     return `${base}${nodeFragment}`;
   }

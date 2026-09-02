@@ -176,6 +176,7 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
     itemStartedCount: 0,
     itemCompletedCount: 0,
     lastToolError: undefined,
+    toolFailures: [],
     blockReplyBreak: params.blockReplyBreak ?? "text_end",
     reasoningMode,
     includeReasoning: reasoningMode === "on" && canShowReasoning,
@@ -1217,6 +1218,7 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
     state.itemStartedCount = 0;
     state.itemCompletedCount = 0;
     state.lastToolError = undefined;
+    state.toolFailures.length = 0;
     messagingToolSentTexts.length = 0;
     messagingToolSentTextsNormalized.length = 0;
     messagingToolSentTargets.length = 0;
@@ -1428,6 +1430,9 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
       }),
     didSendDeterministicApprovalPrompt: () => state.deterministicApprovalPromptSent,
     getLastToolError: () => (state.lastToolError ? { ...state.lastToolError } : undefined),
+    // ENG-18812: independent of lastToolError's single-slot lifecycle so a
+    // later unrelated success can't erase the record that a step failed.
+    getToolFailures: () => state.toolFailures.map((entry) => ({ ...entry })),
     getUsageTotals,
     getCompactionCount: () => compactionCount,
     getLastCompactionTokensAfter: () => state.lastCompactionTokensAfter,

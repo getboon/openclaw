@@ -29,9 +29,16 @@ export type BrowserHandoffToolParams = {
  * what lets this tool schedule a durable resume; when it's unavailable (e.g.
  * a bare unit-test call), scheduling is skipped rather than failing, since
  * the tool's own text guidance already gives a model a manual fallback path.
+ *
+ * `sessionKey` may be a sandbox/policy key that was never itself persisted as
+ * a transcript session (e.g. a direct-message peer key under a config that
+ * collapses DMs to one shared main session) -- scheduling a resume against it
+ * binds to a session that can never be resumed. `runSessionKey`, when present,
+ * is the actual live run session and takes priority for scheduling.
  */
 export type BrowserHandoffToolContext = {
   sessionKey?: string;
+  runSessionKey?: string;
 };
 
 // Recheck backoff: fast at first (a human might finish a plain login in
@@ -72,7 +79,7 @@ async function scheduleRecheck(
   context: BrowserHandoffToolContext,
   params: { site: string; delayMs: number },
 ): Promise<boolean> {
-  const sessionKey = context.sessionKey;
+  const sessionKey = context.runSessionKey ?? context.sessionKey;
   if (!sessionKey) {
     return false;
   }
@@ -112,15 +119,26 @@ async function clearScheduledRecheck(
   context: BrowserHandoffToolContext,
   site: string,
 ): Promise<boolean> {
-  const sessionKey = context.sessionKey;
+  const sessionKey = context.runSessionKey ?? context.sessionKey;
   if (!sessionKey) {
     return true;
   }
-  const result = await api.session.workflow.unscheduleSessionTurnsByTag({
-    sessionKey,
-    tag: browserHandoffScheduleTag(site),
-  });
-  return result.failed === 0;
+  // A recheck scheduled before runSessionKey started taking priority over
+  // sessionKey is tagged under the legacy sessionKey. Clear both so a job
+  // from before that transition can't outlive this cleanup and overlap the
+  // newly scheduled live-session check.
+  const legacySessionKey =
+    context.runSessionKey && context.sessionKey && context.sessionKey !== sessionKey
+      ? context.sessionKey
+      : undefined;
+  const tag = browserHandoffScheduleTag(site);
+  const results = await Promise.all([
+    api.session.workflow.unscheduleSessionTurnsByTag({ sessionKey, tag }),
+    ...(legacySessionKey
+      ? [api.session.workflow.unscheduleSessionTurnsByTag({ sessionKey: legacySessionKey, tag })]
+      : []),
+  ]);
+  return results.every((result) => result.failed === 0);
 }
 
 export type BrowserHandoffToolTextResult = {
@@ -266,6 +284,27 @@ async function handleStatus(
   );
 }
 
+/**
+ * The remote-CDP profile mechanism (Playwright's `connectOverCDP`) only ever
+ * derives auth from URL-embedded credentials, which become HTTP Basic auth —
+ * it has no way to attach a custom `Bearer` header. boon-core's
+ * `AgentBearerAuthentication` accepts the same token via `Basic
+ * base64(token:)`, so embedding it as URL userinfo (empty password) lets this
+ * one token authenticate through a client that structurally can't send a
+ * header. The resulting profile config is redacted via `redactCdpUrl`
+ * wherever it's displayed or logged.
+ */
+function withBearerAsBasicAuth(cdpUrl: string, apiKey: string): string {
+  const url = new URL(cdpUrl);
+  // The username setter doesn't escape a literal "%" — left as-is, a key
+  // like "ab%41cd" would decode back as "abAcd" (a different, wrong value)
+  // instead of throwing, since "%41" alone is a valid escape. Escaping "%"
+  // to "%25" first guarantees one decode round-trips to the original key.
+  url.username = apiKey.replaceAll("%", "%25");
+  url.password = "";
+  return url.toString();
+}
+
 async function handleAttach(
   api: OpenClawPluginApi,
   params: BrowserHandoffToolParams,
@@ -294,7 +333,7 @@ async function handleAttach(
 
   const registration = await registerRemoteCdpBrowserProfile({
     name: record.profileName,
-    cdpUrl: result.cdpUrl,
+    cdpUrl: withBearerAsBasicAuth(result.cdpUrl, apiKey),
   });
   if (!registration.ok) {
     return textResult(

@@ -6,6 +6,14 @@
 import { resolveIntegerOption } from "@openclaw/normalization-core/number-coercion";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
+  isSilentReplyPayloadText,
+  isSilentReplyText,
+  SILENT_REPLY_TOKEN,
+  startsWithSilentToken,
+  stripLeadingSilentToken,
+  stripSilentToken,
+} from "../auto-reply/tokens.js";
+import {
   boundedJsonUtf8Bytes,
   firstEnumerableOwnKeys,
   jsonUtf8BytesOrInfinity,
@@ -598,6 +606,57 @@ function isTranscriptOnlyOpenClawAssistantMessage(message: AgentMessage): boolea
   return isTranscriptOnlyOpenClawAssistantModel(provider, model);
 }
 
+// Mirrors the dispatcher's own silent-skip classification (normalize-reply.ts):
+// exact, leading, and glued NO_REPLY forms all count, but a final that also
+// carries media is never silent and must still persist. Kept as a narrow local
+// check against the shared token primitives so it cannot drift from what the
+// dispatcher treats as intentional silence, without importing the heavy
+// dispatch-from-config module into this hot persistence path.
+function isSilentAssistantFinalMessage(message: AgentMessage): boolean {
+  const content = (message as { content?: unknown }).content;
+  if (
+    Array.isArray(content) &&
+    content.some(
+      (block) =>
+        Boolean(block) &&
+        typeof block === "object" &&
+        (block as { type?: unknown }).type === "image",
+    )
+  ) {
+    return false;
+  }
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .filter(
+              (block): block is { type: "text"; text: string } =>
+                Boolean(block) &&
+                typeof block === "object" &&
+                (block as { type?: unknown }).type === "text" &&
+                typeof (block as { text?: unknown }).text === "string",
+            )
+            .map((block) => block.text)
+            .join("")
+        : "";
+  if (!text.trim()) {
+    return false;
+  }
+  if (isSilentReplyPayloadText(text, SILENT_REPLY_TOKEN)) {
+    return true;
+  }
+  if (isSilentReplyText(text, SILENT_REPLY_TOKEN)) {
+    return false;
+  }
+  const hasLeadingSilentToken = startsWithSilentToken(text, SILENT_REPLY_TOKEN);
+  if (!hasLeadingSilentToken && !text.toLowerCase().includes(SILENT_REPLY_TOKEN.toLowerCase())) {
+    return false;
+  }
+  const stripped = hasLeadingSilentToken ? stripLeadingSilentToken(text, SILENT_REPLY_TOKEN) : text;
+  return stripSilentToken(stripped, SILENT_REPLY_TOKEN).trim() === "";
+}
+
 export function installSessionToolResultGuard(
   sessionManager: SessionManager,
   opts?: {
@@ -641,6 +700,13 @@ export function installSessionToolResultGuard(
     suppressNextUserMessagePersistence?: boolean;
     suppressTranscriptOnlyAssistantPersistence?: boolean;
     suppressAssistantErrorPersistence?: boolean;
+    /**
+     * Skip persisting an assistant final whose only content is the silent reply
+     * token (NO_REPLY). Set on subagent-announce runs so retried/failed announce
+     * turns cannot poison the requester transcript with silent turns the model
+     * later mimics. A silent token alongside media still persists.
+     */
+    suppressSilentAssistantFinalPersistence?: boolean;
     onUserMessagePersisted?: (
       message: Extract<AgentMessage, { role: "user" }>,
     ) => void | Promise<void>;
@@ -916,6 +982,14 @@ export function installSessionToolResultGuard(
       finalRole === "assistant" &&
       opts?.suppressAssistantErrorPersistence === true &&
       (finalMessage as { stopReason?: string }).stopReason === "error"
+    ) {
+      return undefined;
+    }
+    if (
+      finalRole === "assistant" &&
+      toolCalls.length === 0 &&
+      opts?.suppressSilentAssistantFinalPersistence === true &&
+      isSilentAssistantFinalMessage(finalMessage)
     ) {
       return undefined;
     }

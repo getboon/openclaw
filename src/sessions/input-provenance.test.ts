@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   annotateInterSessionPromptText,
   isAgentMediatedCompletionSourceTool,
+  isSubagentAnnounceInputProvenance,
   shouldPreserveUserFacingSessionStateForInputProvenance,
   stripInterSessionPromptPrefixForDisplay,
 } from "./input-provenance.js";
@@ -127,5 +128,39 @@ describe("shouldPreserveUserFacingSessionStateForInputProvenance", () => {
         sourceTool: "sessions_send",
       }),
     ).toBe(false);
+  });
+});
+
+describe("isSubagentAnnounceInputProvenance", () => {
+  it("matches inter-session subagent-announce handoffs", () => {
+    expect(
+      isSubagentAnnounceInputProvenance({
+        kind: "inter_session",
+        sourceTool: "subagent_announce",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not match other inter-session source tools", () => {
+    expect(
+      isSubagentAnnounceInputProvenance({
+        kind: "inter_session",
+        sourceTool: "sessions_send",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not match subagent-announce from a non-inter-session kind", () => {
+    expect(
+      isSubagentAnnounceInputProvenance({
+        kind: "external_user",
+        sourceTool: "subagent_announce",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not match missing or malformed provenance", () => {
+    expect(isSubagentAnnounceInputProvenance(undefined)).toBe(false);
+    expect(isSubagentAnnounceInputProvenance({ kind: "inter_session" })).toBe(false);
   });
 });

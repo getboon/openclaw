@@ -58,6 +58,7 @@ import type {
   PluginHeartbeatPromptContributionResult,
   PluginHookBeforeAgentRunEvent,
   PluginHookCronChangedEvent,
+  PluginHookDeliveryRecoveryExhaustedEvent,
   PluginHookGatewayCronDeliveryStatus,
   PluginHookGatewayCronJobState,
   PluginHookGatewayCronRunStatus,
@@ -154,6 +155,7 @@ export type {
   PluginHookSubagentSpawnedEvent,
   PluginHookSubagentEndedEvent,
   PluginHookCronChangedEvent,
+  PluginHookDeliveryRecoveryExhaustedEvent,
   PluginHookGatewayCronDeliveryStatus,
   PluginHookGatewayCronJobState,
   PluginHookGatewayCronRunStatus,
@@ -1560,6 +1562,18 @@ export function createHookRunner(
     return runVoidHook("cron_changed", event, ctx);
   }
 
+  /**
+   * Run delivery_recovery_exhausted hook when outbound delivery-recovery gives
+   * up on a crash-ambiguous send it cannot safely replay.
+   * Runs in parallel (fire-and-forget).
+   */
+  async function runDeliveryRecoveryExhausted(
+    event: PluginHookDeliveryRecoveryExhaustedEvent,
+    ctx: PluginHookGatewayContext,
+  ): Promise<void> {
+    return runVoidHook("delivery_recovery_exhausted", event, ctx);
+  }
+
   // =========================================================================
   // Skill Install Hooks
   // =========================================================================
@@ -1671,6 +1685,7 @@ export function createHookRunner(
     runGatewayStop,
     runHeartbeatPromptContribution,
     runCronChanged,
+    runDeliveryRecoveryExhausted,
     // Install hooks
     runBeforeInstall,
     runResolveExecEnv,

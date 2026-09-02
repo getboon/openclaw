@@ -9,6 +9,9 @@ import type {
   ChannelMessageUnknownSendReconciliationResult,
 } from "../../channels/message/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { fireAndForgetHook } from "../../hooks/fire-and-forget.js";
+import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
+import { sendCrashRecoveryNotice } from "../crash-recovery-notice.js";
 import {
   claimRecoveryEntry as claimSharedRecoveryEntry,
   computeBackoffMs,
@@ -339,6 +342,56 @@ export function isPermanentDeliveryError(error: string): boolean {
   return PERMANENT_ERROR_PATTERNS.some((re) => re.test(error));
 }
 
+// A crash-ambiguous send (platform-send state unknown after a crash) that
+// cannot be reconciled or safely replayed is abandoned. Instead of failing
+// silently, tell the recipient their last reply may not have arrived.
+async function notifyDeliveryRecoveryExhausted(params: {
+  entry: QueuedDelivery;
+  cfg: OpenClawConfig;
+  errMsg: string;
+  log: RecoveryLogger;
+}): Promise<void> {
+  const { entry } = params;
+  const sent = await sendCrashRecoveryNotice({
+    cfg: params.cfg,
+    text: "My last reply to you may not have gone through — please let me know if you didn't receive it.",
+    target: {
+      channel: entry.channel,
+      to: entry.to,
+      accountId: entry.accountId,
+      threadId: entry.threadId ?? undefined,
+      sessionKey: entry.session?.key,
+    },
+  });
+  if (!sent) {
+    params.log.warn(`Delivery entry ${entry.id}: could not send crash-recovery notice`);
+  }
+
+  // Surface the give-up to observers (e.g. the sentry-monitor plugin) so an
+  // abandoned crash-ambiguous send is engineer-visible, not journald-only.
+  const hookRunner = getGlobalHookRunner();
+  if (hookRunner?.hasHooks("delivery_recovery_exhausted")) {
+    fireAndForgetHook(
+      hookRunner.runDeliveryRecoveryExhausted(
+        {
+          queueName: "outbound",
+          deliveryId: entry.id,
+          channel: entry.channel,
+          to: entry.to,
+          accountId: entry.accountId,
+          sessionKey: entry.session?.key,
+          retryCount: entry.retryCount,
+          recoveryState: entry.recoveryState,
+          error: params.errMsg,
+        },
+        { config: params.cfg },
+      ),
+      "delivery-queue-recovery: delivery_recovery_exhausted hook failed",
+      (message) => params.log.warn(message),
+    );
+  }
+}
+
 async function drainQueuedEntry(opts: {
   entry: QueuedDelivery;
   cfg: OpenClawConfig;
@@ -414,6 +467,7 @@ async function drainQueuedEntry(opts: {
       }
       try {
         await moveToFailed(entry.id, opts.stateDir);
+        await notifyDeliveryRecoveryExhausted({ entry, cfg: opts.cfg, errMsg, log: opts.log });
         return "moved-to-failed";
       } catch (moveErr) {
         if (getErrnoCode(moveErr) === "ENOENT") {

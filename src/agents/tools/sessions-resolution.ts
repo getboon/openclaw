@@ -389,6 +389,16 @@ export async function resolveSessionReference(params: {
   alias: string;
   mainKey: string;
   requesterInternalKey?: string;
+  /**
+   * The actual live run session key. `requesterInternalKey` may be a
+   * sandbox/policy key (e.g. a direct-message peer key) that was never
+   * itself persisted as a transcript session -- correct for the spawned-
+   * ownership visibility filter below, but binding a `"current"` target to
+   * it addresses a session that can never be resumed. When present, this
+   * takes priority for `"current"` resolution only. Mirrors the
+   * session_status fix for the same invariant.
+   */
+  runSessionKey?: string;
   restrictToSpawned: boolean;
 }): Promise<SessionReferenceResolution> {
   const rawInput =
@@ -396,7 +406,11 @@ export async function resolveSessionReference(params: {
       key: params.sessionKey,
       requesterInternalKey: params.requesterInternalKey,
     }) ?? params.sessionKey.trim();
-  if (rawInput === "current") {
+  // Skip the literal-"current" gateway probe entirely when a definitive live
+  // run session is known: probing could match an unrelated real session or
+  // sessionId that happens to be named "current", pre-empting the correct
+  // runSessionKey answer below with no ambiguity left to resolve for.
+  if (rawInput === "current" && !params.runSessionKey) {
     const resolvedCurrent = await resolveSessionReferenceByKeyOrSessionId({
       raw: rawInput,
       alias: params.alias,
@@ -412,8 +426,8 @@ export async function resolveSessionReference(params: {
       return resolvedCurrent;
     }
   }
-  const raw =
-    rawInput === "current" && params.requesterInternalKey ? params.requesterInternalKey : rawInput;
+  const currentTargetKey = params.runSessionKey ?? params.requesterInternalKey;
+  const raw = rawInput === "current" && currentTargetKey ? currentTargetKey : rawInput;
   if (shouldResolveSessionIdInput(raw)) {
     const resolvedByGateway = await resolveSessionReferenceByKeyOrSessionId({
       raw,

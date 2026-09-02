@@ -11,6 +11,7 @@ export type SubagentAnnounceDeliveryFailureReason =
   | "generated_media_missing"
   | "message_tool_delivery_missing"
   | "requester_abandoned"
+  | "subagent_no_output"
   | "visible_reply_missing";
 
 type SubagentAnnounceSteerOutcome =

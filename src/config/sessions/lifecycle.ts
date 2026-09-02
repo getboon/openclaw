@@ -165,9 +165,10 @@ export function resolveTerminalMainSessionTranscriptRegistryCheck(
   if (!hasTerminalLifecycle) {
     return undefined;
   }
-  if (params.entry.status === "failed") {
-    // Failed rows with a present transcript stay reusable for retry/recovery.
-    // Callers already rotate failed rows when the transcript is missing.
+  if (params.entry.status === "failed" || params.entry.abortedLastRun === true) {
+    // Failed rows, and rows whose last run was aborted (lock conflict, restart
+    // interruption) stay reusable for retry/recovery rather than being treated
+    // as possibly corrupted, which would force a brand-new session and drop history.
     return undefined;
   }
   // updatedAt is touched after managed transcript appends; endedAt can predate

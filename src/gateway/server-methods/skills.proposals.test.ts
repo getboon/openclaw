@@ -68,6 +68,33 @@ function callHandler(method: string, params: Record<string, unknown>) {
   return callGatewayHandler(skillsHandlers, method, params);
 }
 
+function withTldr(content: string): string {
+  const normalized = content.trim();
+  const firstLineEnd = normalized.indexOf("\n");
+  const title = normalized.slice(0, firstLineEnd === -1 ? undefined : firstLineEnd);
+  const instructions = normalized
+    .slice(firstLineEnd === -1 ? normalized.length : firstLineEnd)
+    .trim();
+  return `${title}
+
+## TLDR
+
+This skill follows a reusable workflow from request to verified result.
+
+When you run this, the agent will:
+
+- Confirm the request and required context.
+- Follow the documented workflow in order.
+- Check the result before returning it.
+
+**Output:** A completed and verified result for the requested workflow.
+
+## Instructions
+
+${instructions}
+`;
+}
+
 describe("skills proposal gateway handlers", () => {
   beforeEach(async () => {
     testState = await createOpenClawTestState({
@@ -91,7 +118,7 @@ describe("skills proposal gateway handlers", () => {
     const create = await callHandler("skills.proposals.create", {
       name: "Weather Planner",
       description: "Plan around current weather",
-      content: "# Weather Planner\n\nCheck weather before outdoor recommendations.\n",
+      content: withTldr("# Weather Planner\n\nCheck weather before outdoor recommendations."),
       supportFiles: [
         {
           path: "references/weather.md",
@@ -133,7 +160,7 @@ describe("skills proposal gateway handlers", () => {
     const revise = await callHandler("skills.proposals.revise", {
       proposalId: created.record.id,
       description: "Plan with current weather",
-      content: "# Weather Planner\n\nUse current weather and alerts.\n",
+      content: withTldr("# Weather Planner\n\nUse current weather and alerts."),
     });
     expect(revise.ok).toBe(true);
     expect(
@@ -163,7 +190,7 @@ describe("skills proposal gateway handlers", () => {
     const first = await callHandler("skills.proposals.create", {
       name: "First Gateway Skill",
       description: "First workspace proposal",
-      content: "# First\n",
+      content: withTldr("# First"),
     });
     expect(first.ok).toBe(true);
     const firstCreated = first.response as { record: { id: string } };
@@ -173,7 +200,7 @@ describe("skills proposal gateway handlers", () => {
     const second = await callHandler("skills.proposals.create", {
       name: "Second Gateway Skill",
       description: "Second workspace proposal",
-      content: "# Second\n",
+      content: withTldr("# Second"),
     });
     expect(second.ok).toBe(true);
     const secondCreated = second.response as { record: { id: string } };
@@ -214,7 +241,7 @@ describe("skills proposal gateway handlers", () => {
     const create = await callHandler("skills.proposals.create", {
       name: "Support File Sampler",
       description: "Samples support files",
-      content: "# Support File Sampler\n\nSample support files.\n",
+      content: withTldr("# Support File Sampler\n\nSample support files."),
     });
     expect(create.ok).toBe(true);
     const created = create.response as { record: { id: string } };
@@ -260,7 +287,7 @@ describe("skills proposal gateway handlers", () => {
     const create = await callHandler("skills.proposals.create", {
       name: "Applied Sampler",
       description: "Already applied proposal",
-      content: "# Applied Sampler\n\nSample support files.\n",
+      content: withTldr("# Applied Sampler\n\nSample support files."),
     });
     expect(create.ok).toBe(true);
     const created = create.response as { record: { id: string } };

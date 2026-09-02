@@ -447,6 +447,17 @@ const GatewayToolSchema = Type.Object({
 
 export function createGatewayTool(opts?: {
   agentSessionKey?: string;
+  /**
+   * The actual live run session key. `agentSessionKey` may be a sandbox/policy
+   * key (e.g. a direct-message peer key) that was never itself persisted as a
+   * transcript session -- fine for delivery-context/channel routing (which the
+   * policy key encodes and the live key does not), but binding a post-restart
+   * `continuationMessage` to it makes the continuation dispatch into a fresh,
+   * disconnected session instead of resuming the real one. When present, this
+   * is the key to bind the continuation to. Mirrors the same fix already
+   * applied to session_status and the goal tools.
+   */
+  runSessionKey?: string;
   config?: OpenClawConfig;
 }): AnyAgentTool {
   return {
@@ -469,19 +480,24 @@ export function createGatewayTool(opts?: {
         const reason = normalizeOptionalString(params.reason)?.slice(0, 200);
         const note = normalizeOptionalString(params.note);
         const continuationMessage = normalizeOptionalString(params.continuationMessage);
-        // Extract channel + threadId for routing after restart.
-        // Uses generic :thread: parsing plus plugin-owned session grammars.
+        // Extract channel + threadId for routing after restart. Uses generic
+        // :thread: parsing plus plugin-owned session grammars -- this needs
+        // the policy key's channel encoding, so it stays on `sessionKey`.
         const { deliveryContext, threadId } = extractDeliveryInfo(sessionKey);
+        // The continuation dispatch resumes an actual persisted session by this
+        // key (see server-restart-sentinel.ts's loadSessionEntry); prefer the
+        // live run session over the policy key so it binds to a resumable one.
+        const continuationSessionKey = normalizeOptionalString(opts?.runSessionKey) ?? sessionKey;
         const payload: RestartSentinelPayload = {
           kind: "restart",
           status: "ok",
           ts: Date.now(),
-          sessionKey,
+          sessionKey: continuationSessionKey,
           deliveryContext,
           threadId,
           message: note ?? reason ?? null,
           continuation: buildRestartSuccessContinuation({
-            sessionKey,
+            sessionKey: continuationSessionKey,
             continuationMessage,
           }),
           doctorHint: formatDoctorNonInteractiveHint(),

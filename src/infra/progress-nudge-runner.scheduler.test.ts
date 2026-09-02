@@ -61,6 +61,9 @@ describe("startProgressNudgeRunner scheduler", () => {
       },
       resolveDeliveryTarget:
         resolveDeliveryTarget as unknown as ProgressNudgeDeps["resolveDeliveryTarget"],
+      // Defaults to "supports edit" so existing anchor/send behavior is
+      // unaffected; the edit-support gate tests below override this directly.
+      channelSupportsEdit: () => true,
       sendMessage: sendMessage as unknown as ProgressNudgeDeps["sendMessage"],
       ...over,
     };
@@ -113,6 +116,90 @@ describe("startProgressNudgeRunner scheduler", () => {
     await vi.advanceTimersByTimeAsync(46_000);
     expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(sendMessage.mock.calls[0][0].payloads[0].text).toContain("your 40 pages");
+    runner.stop();
+  });
+
+  it("uses generic copy for raw command item progress", async () => {
+    const { deps, sendMessage, emitAgentEvent } = makeDeps();
+    const runner = startProgressNudgeRunner({ cfg: config(), deps });
+    const command =
+      "pdf-tools page-text ~/.boon-agent/workspace/scratch/waseca_98099/E5.10.pdf --pages=1 2>&1 | head -100";
+    emitAgentEvent({
+      runId: "r1",
+      seq: 1,
+      stream: "item",
+      ts: 0,
+      data: {
+        kind: "command",
+        title: `command ${command}`,
+        progressText: "raw command output",
+      },
+      sessionKey: SESSION,
+    });
+
+    await vi.advanceTimersByTimeAsync(46_000);
+    const text = sendMessage.mock.calls[0][0].payloads[0].text;
+    expect(text).toBe("Still working on your request…");
+    expect(text).not.toContain("pdf-tools");
+    expect(text).not.toContain("~/.boon-agent");
+    expect(text).not.toContain("2>&1");
+    expect(text).not.toContain("| head");
+    expect(text).not.toContain("--pages=");
+    runner.stop();
+  });
+
+  it("uses safe command metadata instead of raw command progress", async () => {
+    const { deps, sendMessage, emitAgentEvent } = makeDeps();
+    const runner = startProgressNudgeRunner({ cfg: config(), deps });
+    emitAgentEvent({
+      runId: "r1",
+      seq: 1,
+      stream: "item",
+      ts: 0,
+      data: {
+        kind: "command",
+        title: "command pdf-tools page-text ~/.boon-agent/workspace/file.pdf",
+        meta: "extracting text from E5.10.pdf",
+        progressText: "raw command output",
+      },
+      sessionKey: SESSION,
+    });
+
+    await vi.advanceTimersByTimeAsync(46_000);
+    expect(sendMessage.mock.calls[0][0].payloads[0].text).toBe(
+      "Still working on extracting text from E5.10.pdf…",
+    );
+    runner.stop();
+  });
+
+  it("keeps safe progress when a later raw command candidate is rejected", async () => {
+    const { deps, sendMessage, emitAgentEvent } = makeDeps();
+    const runner = startProgressNudgeRunner({ cfg: config(), deps });
+    emitAgentEvent({
+      runId: "r1",
+      seq: 1,
+      stream: "item",
+      ts: 0,
+      data: { kind: "command", meta: "extracting text from E5.10.pdf" },
+      sessionKey: SESSION,
+    });
+    emitAgentEvent({
+      runId: "r1",
+      seq: 2,
+      stream: "item",
+      ts: 0,
+      data: {
+        kind: "command",
+        title: "command pdf-tools page-text ~/.boon-agent/workspace/file.pdf",
+        progressText: "raw command output | details",
+      },
+      sessionKey: SESSION,
+    });
+
+    await vi.advanceTimersByTimeAsync(46_000);
+    expect(sendMessage.mock.calls[0][0].payloads[0].text).toBe(
+      "Still working on extracting text from E5.10.pdf…",
+    );
     runner.stop();
   });
 
@@ -262,5 +349,68 @@ describe("startProgressNudgeRunner scheduler", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(sendMessage).not.toHaveBeenCalled();
     runner.stop();
+  });
+
+  describe("edit-support gate (ENG-18950)", () => {
+    it("suppresses in-turn nudges entirely on a channel that cannot edit", async () => {
+      // A progress nudge only works as one self-updating line. A channel
+      // without edit support (e.g. anychat-boon-web, which only declares
+      // "send") would otherwise turn every repeat nudge into a brand-new
+      // persisted message — suppress it outright instead.
+      const editMessage = vi.fn().mockResolvedValue(true);
+      const { deps, sendMessage } = makeDeps({
+        channelSupportsEdit: () => false,
+        editMessage,
+      });
+      const runner = startProgressNudgeRunner({ cfg: config({ maxNudges: 3 }), deps });
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(editMessage).not.toHaveBeenCalled();
+      runner.stop();
+    });
+
+    it("still uses the anchor/edit path normally when the channel supports edit", async () => {
+      const editMessage = vi.fn().mockResolvedValue(true);
+      const { deps, sendMessage } = makeDeps({
+        channelSupportsEdit: () => true,
+        editMessage,
+      });
+      const runner = startProgressNudgeRunner({ cfg: config({ maxNudges: 2 }), deps });
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect(editMessage).toHaveBeenCalledTimes(1);
+      runner.stop();
+    });
+
+    it("checks edit support per-channel, using the resolved delivery channel", async () => {
+      const supportsEdit = vi.fn().mockReturnValue(false);
+      const { deps, sendMessage } = makeDeps({ channelSupportsEdit: supportsEdit });
+      const runner = startProgressNudgeRunner({ cfg: config(), deps });
+      await vi.advanceTimersByTimeAsync(46_000);
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(supportsEdit).toHaveBeenCalledWith(expect.objectContaining({ channel: "slack" }));
+      runner.stop();
+    });
+
+    it("still delivers the one-shot terminal failure nudge on a channel that cannot edit", async () => {
+      const { deps, sendMessage, active, emitTerminal } = makeDeps({
+        channelSupportsEdit: () => false,
+      });
+      const runner = startProgressNudgeRunner({ cfg: config(), deps });
+      await vi.advanceTimersByTimeAsync(46_000);
+      expect(sendMessage).not.toHaveBeenCalled();
+
+      active.keys = [];
+      emitTerminal({
+        sessionKey: SESSION,
+        sessionId: "s1",
+        result: { kind: "failed", code: "run_failed" },
+        startedAt: 0,
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      runner.stop();
+    });
   });
 });
