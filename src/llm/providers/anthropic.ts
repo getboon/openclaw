@@ -19,6 +19,7 @@ import {
   splitSystemPromptCacheBoundary,
   stripSystemPromptCacheBoundary,
 } from "../../agents/system-prompt-cache-boundary.js";
+import { isProvisioningSmokeHeaderName } from "../../agents/transport-stream-shared.js";
 import {
   omitFoundryBearerCredentialHeaders,
   usesFoundryBearerAuth,
@@ -259,17 +260,30 @@ export function mergeAnthropicHeaders(
   return merged;
 }
 
+// Mirrors transport-stream-shared.ts's preserveProvisioningSmokeSessionHeader
+// (reasserting every X-Boon-Session-ID / X-Boon-Provisioning-Smoke-* header
+// together, not just the session id — see that file's comment for why a
+// single-header reassertion isn't enough). Kept as a separate implementation
+// here, not a shared import, because this file's headers are
+// Record<string, string | null> (Anthropic's client uses a null value to
+// mean "omit this header", e.g. the cloudflare branch's `Authorization:
+// null`) while the shared version is `Record<string, string>` only; only the
+// header-name predicate itself has no type dependency and is imported.
 function preserveProvisioningSmokeSessionHeader(
   headers: Record<string, string | null>,
   modelHeaders: Record<string, string> | undefined,
 ): Record<string, string | null> {
-  const smokeSessionHeader = Object.entries(modelHeaders ?? {}).find(
+  const hasSmokeSession = Object.entries(modelHeaders ?? {}).some(
     ([key, value]) =>
       key.toLowerCase() === "x-boon-session-id" && value.startsWith("provisioning-smoke-"),
   );
-  return smokeSessionHeader
-    ? mergeAnthropicHeaders(headers, { [smokeSessionHeader[0]]: smokeSessionHeader[1] })
-    : headers;
+  if (!hasSmokeSession) {
+    return headers;
+  }
+  const smokeHeaders = Object.fromEntries(
+    Object.entries(modelHeaders ?? {}).filter(([key]) => isProvisioningSmokeHeaderName(key)),
+  );
+  return mergeAnthropicHeaders(headers, smokeHeaders);
 }
 
 function mergeAnthropicHeadersPreservingSmokeSession(
@@ -949,8 +963,8 @@ function createClient(
           Authorization: null,
           ...(betaFeatures.length > 0 ? { "anthropic-beta": betaFeatures.join(",") } : {}),
         },
-        optionsHeaders,
         model.headers,
+        optionsHeaders,
       ),
     });
 
@@ -971,9 +985,9 @@ function createClient(
           "anthropic-dangerous-direct-browser-access": "true",
           ...(betaFeatures.length > 0 ? { "anthropic-beta": betaFeatures.join(",") } : {}),
         },
+        model.headers,
         dynamicHeaders,
         optionsHeaders,
-        model.headers,
       ),
     });
 
@@ -993,9 +1007,9 @@ function createClient(
           "anthropic-dangerous-direct-browser-access": "true",
           ...(betaFeatures.length > 0 ? { "anthropic-beta": betaFeatures.join(",") } : {}),
         },
+        omitFoundryBearerCredentialHeaders(model.headers),
         dynamicHeaders,
         optionsHeaders,
-        omitFoundryBearerCredentialHeaders(model.headers),
       ),
     });
 
@@ -1018,8 +1032,8 @@ function createClient(
           "user-agent": `claude-cli/${claudeCodeVersion}`,
           "x-app": "cli",
         },
-        optionsHeaders,
         model.headers,
+        optionsHeaders,
       ),
     });
 
@@ -1044,8 +1058,8 @@ function createClient(
         ...(betaFeatures.length > 0 ? { "anthropic-beta": betaFeatures.join(",") } : {}),
       },
       sessionAffinityHeaders,
-      optionsHeaders,
       model.headers,
+      optionsHeaders,
     ),
   });
 

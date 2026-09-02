@@ -674,7 +674,7 @@ export class ModelRegistry {
       );
 
       const headers = preserveProvisioningSmokeSessionHeader(
-        mergeTransportHeaders(modelHeaders, providerHeaders, model.headers),
+        mergeTransportHeaders(model.headers, providerHeaders, modelHeaders),
         model.headers,
       );
 

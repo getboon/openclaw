@@ -58,6 +58,40 @@ describe("transport stream shared helpers", () => {
     expect(mergeTransportHeaders(undefined, undefined)).toBeUndefined();
   });
 
+  it("collapses a generic header name across mixed casing, not just Boon-specific names", () => {
+    // Every existing case-collapse test elsewhere in this suite uses
+    // X-Boon-Session-ID variants. Prove the mechanism itself is generic by
+    // exercising it with an arbitrary header name and cross-casing collision
+    // (not merely the same casing appearing twice, which line 46's test above
+    // already covers).
+    expect(
+      mergeTransportHeaders({ "X-Custom-Header": "one" }, { "x-custom-header": "two" }),
+    ).toEqual({ "x-custom-header": "two" });
+  });
+
+  it("reasserts the run-id and capability headers together with the session id, not just the session id alone", () => {
+    // The Gateway needs all three provisioning-smoke headers to identify and
+    // refund a turn. A stale/incomplete upstream header set (e.g. a resolved
+    // auth response that predates this turn's smoke capability) must not
+    // silently drop the run-id/capability headers while the session id
+    // alone survives -- that looks like the smoke session is intact but
+    // breaks refund attribution.
+    expect(
+      preserveProvisioningSmokeSessionHeader(
+        { "x-boon-session-id": "stale-ordinary-session" },
+        {
+          "X-Boon-Session-ID": "provisioning-smoke-run",
+          "X-Boon-Provisioning-Smoke-Run-ID": "run-123",
+          "X-Boon-Provisioning-Smoke-Capability": "signed-token",
+        },
+      ),
+    ).toEqual({
+      "X-Boon-Session-ID": "provisioning-smoke-run",
+      "X-Boon-Provisioning-Smoke-Run-ID": "run-123",
+      "X-Boon-Provisioning-Smoke-Capability": "signed-token",
+    });
+  });
+
   it("preserves only signed smoke sessions over later runtime attribution", () => {
     expect(
       preserveProvisioningSmokeSessionHeader(
