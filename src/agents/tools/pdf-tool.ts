@@ -65,16 +65,40 @@ const PDF_MIN_TEXT_CHARS = 200;
 const PDF_MAX_PIXELS = 4_000_000;
 
 /**
- * Largest PDF we base64-inline into a native-provider request.
+ * Largest base64 payload we will inline into ONE native-provider request, per provider.
  *
- * Anthropic's Messages API caps a request at 32MB, so anything bigger is rejected upstream
- * anyway. Skipping the encode keeps two file-sized strings off the heap (the base64 itself
- * plus the JSON request body that embeds it) and routes the PDF through local extraction,
- * whose cost is bounded by pdfMaxPages instead of by file size. Above 384MB the encode is
- * not merely wasteful but impossible: base64 inflates 4/3 and V8 caps a string at
- * 0x1fffffe8 (512MB) chars.
+ * Three things this has to get right, each of which an earlier per-file raw-byte constant
+ * got wrong:
+ *
+ * 1. These are caps on the *encoded* request, not on the file. base64 inflates 4/3, so the
+ *    raw budget is 3/4 of the number here.
+ * 2. Every PDF in the call goes into a SINGLE request — `pdf-native-providers.ts` builds one
+ *    content array and one JSON body — so the budget is the SUM across pdfs, not each one.
+ *    With DEFAULT_MAX_PDFS = 10 a per-file check is an order of magnitude too permissive.
+ * 3. The cap is provider-specific, and the provider varies per fallback attempt, so this
+ *    cannot be hoisted out of the `run` callback.
+ *
+ * Anything over routes through local extraction instead, whose cost is bounded by
+ * pdfMaxPages rather than by file size. Above 384MB raw the encode is not merely wasteful
+ * but impossible: V8 caps a string at 0x1fffffe8 (512MB) chars.
+ *
+ * anthropic 32MB is Anthropic's documented Messages request cap. google 20MB is Gemini's
+ * documented inline-request limit and is NOT verified against a live 413; it is also the
+ * default for any future native provider, being the tighter of the two.
  */
-const PDF_NATIVE_INLINE_MAX_BYTES = 32 * 1024 * 1024;
+const NATIVE_INLINE_REQUEST_CAP_BYTES: Record<string, number> = {
+  anthropic: 32 * 1024 * 1024,
+  google: 20 * 1024 * 1024,
+};
+const NATIVE_INLINE_REQUEST_CAP_DEFAULT_BYTES = 20 * 1024 * 1024;
+
+/** Whether every PDF in this call, base64-encoded into one request, fits the provider's cap. */
+function canInlineNativePdfs(provider: string, pdfs: Array<{ buffer: Buffer }>): boolean {
+  const rawBytes = pdfs.reduce((total, p) => total + p.buffer.byteLength, 0);
+  const encodedBytes = Math.ceil(rawBytes / 3) * 4;
+  const cap = NATIVE_INLINE_REQUEST_CAP_BYTES[provider] ?? NATIVE_INLINE_REQUEST_CAP_DEFAULT_BYTES;
+  return encodedBytes <= cap;
+}
 
 /**
  * Hard ceiling on accepted PDF bytes, applied on top of pdfMaxBytesMb.
@@ -199,12 +223,6 @@ async function runPdfPrompt(params: {
     return extractionCache;
   };
 
-  // Anything past the inline cap skips the native path entirely and falls through to
-  // extraction below, so the base64 is never built for it.
-  const canInlineNative = params.pdfs.every(
-    (p) => p.buffer.byteLength <= PDF_NATIVE_INLINE_MAX_BYTES,
-  );
-
   const result = await runWithImageModelFallback({
     cfg: effectiveCfg,
     modelOverride: params.modelOverride,
@@ -217,7 +235,10 @@ async function runPdfPrompt(params: {
         authStorage,
       });
 
-      if (providerSupportsNativePdf(provider) && canInlineNative) {
+      // Evaluated per attempt: the cap is provider-specific and the provider varies down
+      // the fallback chain. Over it, the native branch is skipped entirely and this same
+      // run falls through to extraction below, so the base64 is never built.
+      if (providerSupportsNativePdf(provider) && canInlineNativePdfs(provider, params.pdfs)) {
         if (params.password) {
           throw new Error(
             `password is not supported with native PDF providers (${provider}/${modelId}). Remove password, or use a non-native model for encrypted PDFs.`,

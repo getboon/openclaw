@@ -392,10 +392,50 @@ describe("createPdfTool", () => {
 
       // No allocation proportional to the file: nothing base64-encodes the PDF bytes.
       const encodedFileSized = toStringSpy.mock.calls.some((args, index) => {
-        const target = toStringSpy.mock.instances[index] as Buffer | undefined;
+        // contexts, not instances: vitest documents `instances` as receivers from `new`,
+        // and this needs the `this` of each call.
+        const target = toStringSpy.mock.contexts[index] as Buffer | undefined;
         return args[0] === "base64" && (target?.byteLength ?? 0) > 64 * 1024 * 1024;
       });
       expect(encodedFileSized).toBe(false);
+    });
+  });
+
+  it("skips native inline when several PDFs each fit the cap but their one request does not", async () => {
+    // All PDFs in a call share ONE provider request, so the budget is their combined
+    // encoded size. 3 x 12MiB raw = 36MiB -> 48MiB base64, over anthropic's 32MB request
+    // cap, while every individual file is far under it. A per-file check passes this and
+    // builds a 48MiB string; the aggregate check must not.
+    const perFile = Buffer.allocUnsafe(12 * 1024 * 1024);
+    await withTempPdfAgentDir(async (agentDir) => {
+      const { loadSpy } = await stubPdfToolInfra(agentDir, { provider: "anthropic" });
+      loadSpy.mockResolvedValue({
+        kind: "document",
+        buffer: perFile,
+        contentType: "application/pdf",
+        fileName: "sheet.pdf",
+      } as never);
+      const nativeSpy = vi.spyOn(pdfNativeProviders, "anthropicAnalyzePdf");
+      const extractSpy = vi
+        .spyOn(pdfExtractModule, "extractPdfContent")
+        .mockResolvedValue({ text: "Sheet index", images: [] });
+      completeMock.mockResolvedValue({
+        stopReason: "stop",
+        content: [{ type: "text", text: "combined summary" }],
+      } as never);
+
+      const cfg = withPdfModel(ANTHROPIC_PDF_MODEL);
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+
+      const result = await tool.execute("t1", {
+        prompt: "list the sheets",
+        pdfs: ["/tmp/a.pdf", "/tmp/b.pdf", "/tmp/c.pdf"],
+      });
+
+      expect(result.content).toEqual([{ type: "text", text: "combined summary" }]);
+      expectFields(result.details, { native: false });
+      expect(nativeSpy).not.toHaveBeenCalled();
+      expect(extractSpy).toHaveBeenCalledTimes(3);
     });
   });
 
