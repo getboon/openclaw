@@ -56,6 +56,18 @@ describe("mime detection", () => {
       partPath: "/ppt/presentation.xml",
       expected: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     },
+    {
+      name: "detects macro-enabled xlsm from buffer",
+      mainMime: "application/vnd.ms-excel.sheet.macroEnabled",
+      partPath: "/xl/workbook.xml",
+      expected: "application/vnd.ms-excel.sheet.macroenabled.12",
+    },
+    {
+      name: "detects macro-enabled docm from buffer",
+      mainMime: "application/vnd.ms-word.document.macroEnabled",
+      partPath: "/word/document.xml",
+      expected: "application/vnd.ms-word.document.macroenabled.12",
+    },
   ] as const)("$name", async ({ mainMime, partPath, expected }) => {
     await expectDetectedMime({
       input: {
@@ -200,6 +212,16 @@ describe("mimeTypeFromFilePath", () => {
     { filePath: "config.yml", expected: "application/yaml" },
     { filePath: "config.yaml", expected: "application/yaml" },
     { filePath: "page.xml", expected: "text/xml" },
+    { filePath: "book.xlsm", expected: "application/vnd.ms-excel.sheet.macroenabled.12" },
+    { filePath: "book.xltm", expected: "application/vnd.ms-excel.template.macroenabled.12" },
+    { filePath: "doc.docm", expected: "application/vnd.ms-word.document.macroenabled.12" },
+    { filePath: "doc.dotm", expected: "application/vnd.ms-word.template.macroenabled.12" },
+    {
+      filePath: "deck.pptm",
+      expected: "application/vnd.ms-powerpoint.presentation.macroenabled.12",
+    },
+    { filePath: "deck.potm", expected: "application/vnd.ms-powerpoint.template.macroenabled.12" },
+    { filePath: "deck.ppsm", expected: "application/vnd.ms-powerpoint.slideshow.macroenabled.12" },
     { filePath: "unknown.bin", expected: undefined },
   ] as const)("maps $filePath", ({ filePath, expected }) => {
     expect(mimeTypeFromFilePath(filePath)).toBe(expected);
@@ -245,6 +267,9 @@ describe("extensionForMime", () => {
     { mime: "text/xml", expected: ".xml" },
     { mime: "text/css", expected: ".css" },
     { mime: "application/xml", expected: ".xml" },
+    { mime: "application/vnd.ms-excel.sheet.macroenabled.12", expected: ".xlsm" },
+    { mime: "application/vnd.ms-word.document.macroenabled.12", expected: ".docm" },
+    { mime: "application/vnd.ms-powerpoint.presentation.macroenabled.12", expected: ".pptm" },
     { mime: "IMAGE/JPEG", expected: ".jpg" },
     { mime: "Audio/X-M4A", expected: ".m4a" },
     { mime: "Video/QuickTime", expected: ".mov" },
