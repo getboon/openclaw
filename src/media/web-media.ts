@@ -150,6 +150,15 @@ const HOST_READ_ALLOWED_DOCUMENT_MIMES = new Set([
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  // Macro-enabled OOXML documents are ordinary Office files to customers, and
+  // file-type still verifies the package bytes before these MIMEs are returned.
+  "application/vnd.ms-excel.sheet.macroenabled.12",
+  "application/vnd.ms-excel.template.macroenabled.12",
+  "application/vnd.ms-word.document.macroenabled.12",
+  "application/vnd.ms-word.template.macroenabled.12",
+  "application/vnd.ms-powerpoint.presentation.macroenabled.12",
+  "application/vnd.ms-powerpoint.template.macroenabled.12",
+  "application/vnd.ms-powerpoint.slideshow.macroenabled.12",
   "application/gzip",
   "application/x-7z-compressed",
   "application/x-tar",
