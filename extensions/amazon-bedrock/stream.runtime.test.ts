@@ -526,6 +526,59 @@ describe("Bedrock messageStop enforcement", () => {
     expect(result.stopReason).toBe("error");
     expect(result.errorMessage).toContain("unclosed content block");
   });
+
+  // Regression guard: handleContentBlockStop resolves via
+  // blocks.findIndex(b => b.index === contentBlockIndex), which always
+  // matches the FIRST block pushed for a given index. So a duplicate
+  // contentBlockStart reusing an index closes the first (original) block
+  // when contentBlockStop arrives, leaving the second (duplicate) block
+  // orphaned with its `index` still set — the opposite direction from
+  // Anthropic's Map-based tracking, where the duplicate start overwrites
+  // the map entry and orphans the first block instead. Either direction,
+  // scanning `blocks` directly (rather than trusting a side-table) still
+  // detects the leftover open block.
+  it("throws when a duplicate contentBlockStart orphans the duplicate block", async () => {
+    vi.spyOn(BedrockRuntimeClient.prototype, "send").mockResolvedValue({
+      $metadata: { httpStatusCode: 200 },
+      stream: streamEvents([
+        { messageStart: { role: ConversationRole.ASSISTANT } },
+        {
+          contentBlockStart: {
+            contentBlockIndex: 0,
+            start: { toolUse: { toolUseId: "tool_1", name: "first_call" } },
+          },
+        },
+        {
+          contentBlockDelta: {
+            contentBlockIndex: 0,
+            delta: { toolUse: { input: '{"a":1' } },
+          },
+        },
+        // Duplicate contentBlockStart for the same index, no
+        // contentBlockStop for the first block in between.
+        {
+          contentBlockStart: {
+            contentBlockIndex: 0,
+            start: { toolUse: { toolUseId: "tool_2", name: "second_call" } },
+          },
+        },
+        {
+          contentBlockDelta: {
+            contentBlockIndex: 0,
+            delta: { toolUse: { input: '{"b":2}' } },
+          },
+        },
+        { contentBlockStop: { contentBlockIndex: 0 } },
+        { messageStop: { stopReason: "tool_use" } },
+      ]),
+    } as never);
+
+    const stream = streamSimpleBedrock(bedrockModel({}), context());
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe("error");
+    expect(result.errorMessage).toContain("unclosed content block");
+  });
 });
 
 describe("Bedrock canonical Claude aliases", () => {

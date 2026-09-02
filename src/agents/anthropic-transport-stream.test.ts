@@ -776,6 +776,66 @@ describe("anthropic transport stream", () => {
     },
   );
 
+  // Regression guard: a refusal can legitimately cut a stream off mid-block
+  // (no content_block_stop for the block being written when the refusal
+  // fires). The unclosed-content-block check must not shadow the more
+  // specific refusal error in that case.
+  it("surfaces the refusal message even when it leaves a content block open", async () => {
+    guardedFetchMock.mockResolvedValueOnce(
+      createSseResponse([
+        {
+          type: "message_start",
+          message: { id: "msg_refusal", usage: { input_tokens: 3, output_tokens: 0 } },
+        },
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "text", text: "" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "discard this partial output" },
+        },
+        // No content_block_stop for index 0 — the refusal cuts it off mid-block.
+        {
+          type: "message_delta",
+          delta: {
+            stop_reason: "refusal",
+            stop_details: {
+              type: "refusal",
+              category: "bio",
+              explanation: "This request is not allowed.",
+            },
+          },
+          usage: { input_tokens: 3, output_tokens: 2 },
+        },
+        { type: "message_stop" },
+      ]),
+    );
+
+    const streamFn = createAnthropicMessagesTransportStreamFn();
+    const stream = await Promise.resolve(
+      streamFn(
+        makeAnthropicTransportModel({ id: "claude-fable-5", name: "Claude Fable 5" }),
+        { messages: [{ role: "user", content: "hello" }] } as AnthropicStreamContext,
+        { apiKey: "sk-ant-api" } as AnthropicStreamOptions,
+      ),
+    );
+    const eventTypes: string[] = [];
+    for await (const event of stream as AsyncIterable<{ type: string }>) {
+      eventTypes.push(event.type);
+    }
+    const result = await stream.result();
+
+    expect(eventTypes).toEqual(["error"]);
+    expect(result.stopReason).toBe("error");
+    expect(result.content).toEqual([]);
+    expect(result.errorMessage).toBe(
+      "Anthropic refusal (category: bio): This request is not allowed.",
+    );
+  });
+
   it("discards buffered Fable output when the transport ends before terminal status", async () => {
     guardedFetchMock.mockResolvedValueOnce(
       createSseResponse([
