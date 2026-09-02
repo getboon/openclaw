@@ -330,6 +330,75 @@ describe("createPdfTool", () => {
     });
   });
 
+  it("clamps a configured pdfMaxBytesMb down to the engine ceiling", async () => {
+    // The fleet configures 1024MB, which PDFium's 2GiB WASM heap cannot honor.
+    await withTempPdfAgentDir(async (agentDir) => {
+      const { loadSpy } = await stubPdfToolInfra(agentDir, { provider: "anthropic" });
+      vi.spyOn(pdfNativeProviders, "anthropicAnalyzePdf").mockResolvedValue("native summary");
+      const cfg = {
+        agents: { defaults: { pdfModel: { primary: ANTHROPIC_PDF_MODEL }, pdfMaxBytesMb: 1024 } },
+      } as OpenClawConfig;
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+
+      await tool.execute("t1", { prompt: "summarize", pdf: "/tmp/doc.pdf" });
+
+      const [, loadOptions] = firstMockCall(loadSpy, "loadWebMediaRaw");
+      expectFields(loadOptions, { maxBytes: 768 * 1024 * 1024 });
+    });
+  });
+
+  it("processes a PDF past the V8 base64 ceiling without encoding it", async () => {
+    // 385MiB is over the hard 384MB limit: base64 inflates 4/3 and V8 caps a string at
+    // 0x1fffffe8 chars, so any toString("base64") on this buffer throws rather than
+    // merely wasting memory. allocUnsafe leaves the pages untouched, so the fixture is
+    // cheap unless something actually reads it.
+    const oversized = Buffer.allocUnsafe(385 * 1024 * 1024);
+    await withTempPdfAgentDir(async (agentDir) => {
+      const { loadSpy } = await stubPdfToolInfra(agentDir, { provider: "anthropic" });
+      loadSpy.mockResolvedValue({
+        kind: "document",
+        buffer: oversized,
+        contentType: "application/pdf",
+        fileName: "compiled-bid-set.pdf",
+      } as never);
+      const nativeSpy = vi.spyOn(pdfNativeProviders, "anthropicAnalyzePdf");
+      const extractSpy = vi
+        .spyOn(pdfExtractModule, "extractPdfContent")
+        .mockResolvedValue({ text: "Sheet index", images: [] });
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "bid set summary" }],
+      } as never);
+      const toStringSpy = vi.spyOn(Buffer.prototype, "toString");
+
+      const cfg = {
+        agents: {
+          defaults: { pdfModel: { primary: ANTHROPIC_PDF_MODEL }, pdfMaxBytesMb: 512 },
+        },
+      } as OpenClawConfig;
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+
+      const result = await tool.execute("t1", {
+        prompt: "list the sheets",
+        pdf: "/tmp/compiled-bid-set.pdf",
+      });
+
+      // Native inline is skipped, so the run completes through local extraction.
+      expect(result.content).toEqual([{ type: "text", text: "bid set summary" }]);
+      expectFields(result.details, { native: false });
+      expect(nativeSpy).not.toHaveBeenCalled();
+      expect(extractSpy).toHaveBeenCalledTimes(1);
+
+      // No allocation proportional to the file: nothing base64-encodes the PDF bytes.
+      const encodedFileSized = toStringSpy.mock.calls.some((args, index) => {
+        const target = toStringSpy.mock.instances[index] as Buffer | undefined;
+        return args[0] === "base64" && (target?.byteLength ?? 0) > 64 * 1024 * 1024;
+      });
+      expect(encodedFileSized).toBe(false);
+    });
+  });
+
   it("respects fsPolicy.workspaceOnly for non-sandbox pdf paths", async () => {
     await withTempPdfAgentDir(async (agentDir) => {
       const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-pdf-ws-"));

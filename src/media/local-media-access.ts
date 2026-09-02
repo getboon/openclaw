@@ -16,7 +16,8 @@ export type LocalMediaAccessErrorCode =
   | "unsafe-bypass"
   | "not-found"
   | "invalid-path"
-  | "not-file";
+  | "not-file"
+  | "too-large";
 
 /** Error raised when a local media path escapes the configured allowlist. */
 export class LocalMediaAccessError extends Error {

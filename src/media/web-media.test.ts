@@ -472,6 +472,54 @@ describe("loadWebMedia", () => {
     ).rejects.toThrow(/dimensions exceed model image limits/i);
   });
 
+  // Sparse file so a post-materialization cap would have to allocate 640MB to fail,
+  // which is what the external-memory assertion below catches. Sparse truncate is a
+  // no-op on NTFS, where the fixture would cost real disk.
+  it.skipIf(process.platform === "win32")(
+    "refuses an oversized local file from its stat, before the bytes are materialized",
+    async () => {
+      const sparseFile = path.join(fixtureRoot, "oversized.pdf");
+      const sparseBytes = 640 * 1024 * 1024;
+      const handle = await fs.open(sparseFile, "w");
+      try {
+        await handle.truncate(sparseBytes);
+      } finally {
+        await handle.close();
+      }
+
+      const externalBefore = process.memoryUsage().external;
+      const error = await loadWebMediaRaw(sparseFile, {
+        maxBytes: 1024 * 1024,
+        localRoots: [fixtureRoot],
+      }).then(
+        () => undefined,
+        (err: unknown) => err,
+      );
+      const externalGrowth = process.memoryUsage().external - externalBefore;
+
+      expect(externalGrowth).toBeLessThan(sparseBytes / 2);
+      expect(String(error)).toMatch(
+        new RegExp(`too large:.*oversized\\.pdf.*limit of ${1024 * 1024} bytes`),
+      );
+      await fs.rm(sparseFile, { force: true });
+    },
+  );
+
+  it("keeps optimized image reads above maxBytes so compression can still fit them", async () => {
+    // maxBytes is the post-compression cap for images, so the read cap has to stay
+    // above it or oversized-but-compressible images would be refused unread.
+    const sourcePng = createLargeColorBlockPng(1600);
+    const largeImage = path.join(fixtureRoot, "read-cap-optimized.png");
+    await fs.writeFile(largeImage, sourcePng);
+    const result = await loadWebMedia(largeImage, {
+      maxBytes: 1024,
+      localRoots: [fixtureRoot],
+      imageCompression: { quality: "high", models: [{ maxSidePx: 32, preferredSidePx: 32 }] },
+    });
+    expect(result.kind).toBe("image");
+    expect(result.buffer.length).toBeLessThanOrEqual(1024);
+  });
+
   it("applies model image maxBytes to the effective image cap", async () => {
     await expect(
       loadWebMediaRaw(tinyPngFile, {
