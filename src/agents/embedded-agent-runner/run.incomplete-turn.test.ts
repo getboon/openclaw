@@ -1,5 +1,6 @@
 // Coverage for incomplete-turn safety, retry instructions, and liveness states.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { RETRY_NUDGE_TEXT } from "../../auto-reply/reply/commands-retry.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import {
   hasCommittedMessagingToolDeliveryEvidence,
@@ -8,6 +9,7 @@ import {
 import { makeAttemptResult } from "./run.overflow-compaction.fixture.js";
 import {
   loadRunOverflowCompactionHarness,
+  mockedBuildEmbeddedRunPayloads,
   mockedClassifyFailoverReason,
   mockedGlobalHookRunner,
   mockedIsFailoverAssistantError,
@@ -40,6 +42,14 @@ import {
 import type { EmbeddedRunAttemptResult } from "./run/types.js";
 
 let runEmbeddedAgent: typeof import("./run.js").runEmbeddedAgent;
+// `run.js` is dynamically re-imported after `vi.resetModules()` inside
+// `loadRunOverflowCompactionHarness()`, so its transitive `reply-payload.js`
+// (and the payload-metadata WeakMap it owns) is a *different module instance*
+// than one imported statically at the top of this file. Import it the same
+// way, post-reset, or `setReplyPayloadMetadata` here and
+// `isReplyPayloadNonTerminalToolErrorWarning` inside `run.ts` read from two
+// disjoint WeakMaps.
+let setReplyPayloadMetadata: typeof import("../../auto-reply/reply-payload.js").setReplyPayloadMetadata;
 
 function resolveIncompleteTurnPayloadText(
   params: Omit<Parameters<typeof resolveIncompleteTurnPayloadTextCore>[0], "externalAbort"> & {
@@ -54,6 +64,7 @@ function resolveIncompleteTurnPayloadText(
 describe("runEmbeddedAgent incomplete-turn safety", () => {
   beforeAll(async () => {
     ({ runEmbeddedAgent } = await loadRunOverflowCompactionHarness());
+    ({ setReplyPayloadMetadata } = await import("../../auto-reply/reply-payload.js"));
   });
 
   beforeEach(() => {
@@ -1534,6 +1545,51 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
         timedOut: true,
       }),
     ).toBe(false);
+  });
+
+  it("silently retries a full turn when payloads carry a non-terminal tool-error warning (ENG-18893)", async () => {
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(makeAttemptResult({}));
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(makeAttemptResult({}));
+    mockedBuildEmbeddedRunPayloads.mockReturnValueOnce([
+      setReplyPayloadMetadata(
+        { text: "2 steps didn't finish (6 of 8 steps completed): exec — not found." },
+        { nonTerminalToolErrorWarning: true },
+      ),
+    ]);
+    mockedBuildEmbeddedRunPayloads.mockReturnValueOnce([{ text: "All done." }]);
+
+    const result = await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      runId: "run-unfinished-steps-auto-retry",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
+    expect(runAttemptCall(1).prompt).toContain(RETRY_NUDGE_TEXT);
+    expectWarnMessageWith("unfinished steps detected");
+    expect(result.payloads).toEqual([{ text: "All done." }]);
+  });
+
+  it("falls through to the user-visible note once the unfinished-steps retry budget is exhausted (ENG-18893)", async () => {
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt.mockResolvedValue(makeAttemptResult({}));
+    mockedBuildEmbeddedRunPayloads.mockReturnValue([
+      setReplyPayloadMetadata(
+        { text: "2 steps didn't finish (6 of 8 steps completed): exec — not found." },
+        { nonTerminalToolErrorWarning: true },
+      ),
+    ]);
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      runId: "run-unfinished-steps-budget-exhausted",
+    });
+
+    // 1 initial attempt + 2 silent retries (the bound) = 3 total, then it stops
+    // retrying and lets the note through unchanged.
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(3);
+    expect(runAttemptCall(1).prompt).toContain(RETRY_NUDGE_TEXT);
+    expect(runAttemptCall(2).prompt).toContain(RETRY_NUDGE_TEXT);
   });
 
   it("detects tool-use terminal turn with pre-tool text as incomplete (#76477)", () => {
