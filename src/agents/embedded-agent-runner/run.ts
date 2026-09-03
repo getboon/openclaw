@@ -44,6 +44,7 @@ import type { CommandQueueEnqueueOptions } from "../../process/command-queue.typ
 import { createAgentHarnessTaskRuntimeScope } from "../../tasks/agent-harness-task-runtime-scope.js";
 import { resolveUserPath } from "../../utils.js";
 import { isMarkdownCapableMessageChannel } from "../../utils/message-channel.js";
+import { hasAcceptedSessionSpawn } from "../accepted-session-spawn.js";
 import {
   retireSessionMcpRuntime,
   retireSessionMcpRuntimeForSessionKey,
@@ -3919,7 +3920,10 @@ async function runEmbeddedAgentInternal(
               hasNonTerminalToolErrorWarning: (payloadsWithToolMedia ?? []).some((payload) =>
                 isReplyPayloadNonTerminalToolErrorWarning(payload),
               ),
-              hadPotentialSideEffects: accumulatedReplayState.hadPotentialSideEffects,
+              hasCommittedMutation:
+                hasMessagingToolDeliveryEvidence(attempt) ||
+                hasAcceptedSessionSpawn(attempt.acceptedSessionSpawns) ||
+                (attempt.successfulCronAdds ?? 0) > 0,
               retryAttempts: unfinishedStepsRetryAttempts,
               maxRetryAttempts: MAX_UNFINISHED_STEPS_RETRY_ATTEMPTS,
             })

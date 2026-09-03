@@ -1494,7 +1494,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
       externalAbort: false,
       timedOut: false,
       hasNonTerminalToolErrorWarning: true,
-      hadPotentialSideEffects: false,
+      hasCommittedMutation: false,
       maxRetryAttempts: 2,
     };
     expect(shouldRetryUnfinishedSteps({ ...base, retryAttempts: 0 })).toBe(true);
@@ -1510,7 +1510,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
         externalAbort: false,
         timedOut: false,
         hasNonTerminalToolErrorWarning: false,
-        hadPotentialSideEffects: false,
+        hasCommittedMutation: false,
         retryAttempts: 0,
         maxRetryAttempts: 2,
       }),
@@ -1520,7 +1520,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
   it("never retries unfinished steps for an aborted, externally aborted, or timed-out attempt", () => {
     const withWarning = {
       hasNonTerminalToolErrorWarning: true,
-      hadPotentialSideEffects: false,
+      hasCommittedMutation: false,
       retryAttempts: 0,
       maxRetryAttempts: 2,
     };
@@ -1559,7 +1559,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
         externalAbort: false,
         timedOut: false,
         hasNonTerminalToolErrorWarning: true,
-        hadPotentialSideEffects: true,
+        hasCommittedMutation: true,
         retryAttempts: 0,
         maxRetryAttempts: 2,
       }),
@@ -1567,8 +1567,17 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
   });
 
   it("silently retries a full turn when payloads carry a non-terminal tool-error warning (ENG-18893)", async () => {
+    // toolMetas includes a real `exec` call on purpose: exec is never in
+    // UNCONDITIONALLY_REPLAY_SAFE_TOOL_NAMES (tool-replay-safety.ts), so
+    // omitting it here would hide a regression where the retry gate
+    // accidentally keys off the broad `hadPotentialSideEffects`/`replaySafe`
+    // signal instead of the narrower committed-mutation one — that broad
+    // signal is unconditionally true whenever `exec` was called at all,
+    // which is every single case this retry exists to handle.
     mockedClassifyFailoverReason.mockReturnValue(null);
-    mockedRunEmbeddedAttempt.mockResolvedValueOnce(makeAttemptResult({}));
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({ toolMetas: [{ toolName: "exec" }] }),
+    );
     mockedRunEmbeddedAttempt.mockResolvedValueOnce(makeAttemptResult({}));
     mockedBuildEmbeddedRunPayloads.mockReturnValueOnce([
       setReplyPayloadMetadata(
@@ -1591,7 +1600,9 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
 
   it("falls through to the user-visible note once the unfinished-steps retry budget is exhausted (ENG-18893)", async () => {
     mockedClassifyFailoverReason.mockReturnValue(null);
-    mockedRunEmbeddedAttempt.mockResolvedValue(makeAttemptResult({}));
+    mockedRunEmbeddedAttempt.mockResolvedValue(
+      makeAttemptResult({ toolMetas: [{ toolName: "exec" }] }),
+    );
     mockedBuildEmbeddedRunPayloads.mockReturnValue([
       setReplyPayloadMetadata(
         { text: "2 steps didn't finish (6 of 8 steps completed): exec — not found." },
