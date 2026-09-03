@@ -378,10 +378,21 @@ export function shouldRetryUnfinishedSteps(params: {
   externalAbort: boolean;
   timedOut: boolean;
   hasNonTerminalToolErrorWarning: boolean;
+  /**
+   * Mirrors every sibling retry-safety check in this file (and the adjacent
+   * compaction-continuation gate in run.ts): re-prompting with "redo it" after
+   * a messaging/cron/session_spawn mutation already landed risks the model
+   * replaying that mutation, with no human in the loop to catch the duplicate
+   * (unlike a manual Retry click).
+   */
+  hadPotentialSideEffects: boolean;
   retryAttempts: number;
   maxRetryAttempts: number;
 }): boolean {
   if (params.aborted || params.externalAbort || params.timedOut) {
+    return false;
+  }
+  if (params.hadPotentialSideEffects) {
     return false;
   }
   if (!params.hasNonTerminalToolErrorWarning) {

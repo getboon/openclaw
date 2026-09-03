@@ -1494,6 +1494,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
       externalAbort: false,
       timedOut: false,
       hasNonTerminalToolErrorWarning: true,
+      hadPotentialSideEffects: false,
       maxRetryAttempts: 2,
     };
     expect(shouldRetryUnfinishedSteps({ ...base, retryAttempts: 0 })).toBe(true);
@@ -1509,6 +1510,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
         externalAbort: false,
         timedOut: false,
         hasNonTerminalToolErrorWarning: false,
+        hadPotentialSideEffects: false,
         retryAttempts: 0,
         maxRetryAttempts: 2,
       }),
@@ -1518,6 +1520,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
   it("never retries unfinished steps for an aborted, externally aborted, or timed-out attempt", () => {
     const withWarning = {
       hasNonTerminalToolErrorWarning: true,
+      hadPotentialSideEffects: false,
       retryAttempts: 0,
       maxRetryAttempts: 2,
     };
@@ -1543,6 +1546,22 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
         aborted: false,
         externalAbort: false,
         timedOut: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("never retries unfinished steps once the attempt had potential side effects (messaging/cron/session_spawn)", () => {
+    // Re-prompting "redo it" after a mutation already landed risks the model
+    // replaying that mutation with no human in the loop to catch a duplicate.
+    expect(
+      shouldRetryUnfinishedSteps({
+        aborted: false,
+        externalAbort: false,
+        timedOut: false,
+        hasNonTerminalToolErrorWarning: true,
+        hadPotentialSideEffects: true,
+        retryAttempts: 0,
+        maxRetryAttempts: 2,
       }),
     ).toBe(false);
   });
@@ -1590,6 +1609,30 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(3);
     expect(runAttemptCall(1).prompt).toContain(RETRY_NUDGE_TEXT);
     expect(runAttemptCall(2).prompt).toContain(RETRY_NUDGE_TEXT);
+  });
+
+  it("never auto-retries unfinished steps after a messaging-tool send already landed (ENG-18893)", async () => {
+    // Re-prompting "redo it" after a real send already happened risks the
+    // model replaying that send — no human is in the loop to catch the
+    // duplicate the way a manual Retry click would.
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({ didSendViaMessagingTool: true }),
+    );
+    mockedBuildEmbeddedRunPayloads.mockReturnValueOnce([
+      setReplyPayloadMetadata(
+        { text: "2 steps didn't finish (6 of 8 steps completed): exec — not found." },
+        { nonTerminalToolErrorWarning: true },
+      ),
+    ]);
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      runId: "run-unfinished-steps-side-effects-no-retry",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
+    expectNoWarnMessageWith("unfinished steps detected");
   });
 
   it("detects tool-use terminal turn with pre-tool text as incomplete (#76477)", () => {
