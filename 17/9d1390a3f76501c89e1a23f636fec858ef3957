@@ -1,0 +1,21 @@
+package.json
+  s_9df158d9bbb710::t_236eaec92991a4 3
+extensions/matrix/CHANGELOG.md
+  s_9df158d9bbb710::t_7c60df14f7f2af 3-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "179d1390a3f76501c89e1a23f636fec858ef3957",
+  "prompts": {},
+  "sessions": {
+    "s_9df158d9bbb710": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9e26c7c2-a67e-4f7b-9850-0b4e3f93fe95",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
