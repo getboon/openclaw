@@ -5,7 +5,12 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { sanitizeForLog } from "../../../packages/terminal-core/src/ansi.js";
-import { FAST_MODE_AUTO_PROGRESS_KIND, type ReplyPayload } from "../../auto-reply/reply-payload.js";
+import {
+  FAST_MODE_AUTO_PROGRESS_KIND,
+  isReplyPayloadNonTerminalToolErrorWarning,
+  type ReplyPayload,
+} from "../../auto-reply/reply-payload.js";
+import { RETRY_NUDGE_TEXT } from "../../auto-reply/reply/commands-retry.js";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
 import { SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import { getRuntimeConfigSnapshot } from "../../config/config.js";
@@ -221,6 +226,7 @@ import {
   resolveRunLivenessState,
   shouldRetryMissingAssistantTurn,
   shouldRetrySilentErrorAssistantTurn,
+  shouldRetryUnfinishedSteps,
   shouldTreatEmptyAssistantReplyAsSilent,
 } from "./run/incomplete-turn.js";
 import type { RunEmbeddedAgentParams } from "./run/params.js";
@@ -1584,6 +1590,9 @@ async function runEmbeddedAgentInternal(
 
       const MAX_TIMEOUT_COMPACTION_ATTEMPTS = 2;
       const MAX_OVERFLOW_COMPACTION_ATTEMPTS = 3;
+      // ENG-18893: matches booneval's own proven nudge cap (agent-regression
+      // scenarios' `nudge.max: 2`) so prod and eval retry the same amount.
+      const MAX_UNFINISHED_STEPS_RETRY_ATTEMPTS = 2;
       const MAX_RUN_LOOP_ITERATIONS = resolveMaxRunRetryIterations(
         profileCandidates.length,
         params.config,
@@ -1605,6 +1614,7 @@ async function runEmbeddedAgentInternal(
       let reasoningOnlyRetryAttempts = 0;
       let emptyResponseRetryAttempts = 0;
       let compactionContinuationRetryAttempts = 0;
+      let unfinishedStepsRetryAttempts = 0;
       let beforeAgentFinalizeRevisionAttempts = 0;
       let sameModelIdleTimeoutRetries = 0;
       // Cost-runaway breaker for #76293. State lives at the run-loop level
@@ -1656,6 +1666,7 @@ async function runEmbeddedAgentInternal(
       let reasoningOnlyRetryInstruction: string | null = null;
       let emptyResponseRetryInstruction: string | null = null;
       let compactionContinuationRetryInstruction: string | null = null;
+      let unfinishedStepsRetryInstruction: string | null = null;
       let nextAttemptPromptOverride: string | null = null;
       let rateLimitProfileRotations = 0;
       let timeoutCompactionAttempts = 0;
@@ -1960,6 +1971,7 @@ async function runEmbeddedAgentInternal(
             reasoningOnlyRetryInstruction,
             emptyResponseRetryInstruction,
             compactionContinuationRetryInstruction,
+            unfinishedStepsRetryInstruction,
           ].filter(
             (value): value is string => typeof value === "string" && value.trim().length > 0,
           );
@@ -3890,6 +3902,27 @@ async function runEmbeddedAgentInternal(
             continue;
           }
           compactionContinuationRetryInstruction = null;
+          unfinishedStepsRetryInstruction = null;
+          if (
+            shouldRetryUnfinishedSteps({
+              aborted,
+              externalAbort,
+              timedOut,
+              hasNonTerminalToolErrorWarning: (payloadsWithToolMedia ?? []).some((payload) =>
+                isReplyPayloadNonTerminalToolErrorWarning(payload),
+              ),
+              retryAttempts: unfinishedStepsRetryAttempts,
+              maxRetryAttempts: MAX_UNFINISHED_STEPS_RETRY_ATTEMPTS,
+            })
+          ) {
+            unfinishedStepsRetryAttempts += 1;
+            unfinishedStepsRetryInstruction = RETRY_NUDGE_TEXT;
+            log.warn(
+              `unfinished steps detected: runId=${params.runId} sessionId=${params.sessionId} ` +
+                `provider=${activeErrorContext.provider}/${activeErrorContext.model} — retrying ${unfinishedStepsRetryAttempts}/${MAX_UNFINISHED_STEPS_RETRY_ATTEMPTS} with continuation nudge`,
+            );
+            continue;
+          }
           if (reasoningOnlyRetriesExhausted && !finalAssistantVisibleText) {
             log.warn(
               `reasoning-only retries exhausted: runId=${params.runId} sessionId=${params.sessionId} ` +
@@ -4071,6 +4104,7 @@ async function runEmbeddedAgentInternal(
             reasoningOnlyRetryInstruction = null;
             emptyResponseRetryInstruction = null;
             compactionContinuationRetryInstruction = null;
+            unfinishedStepsRetryInstruction = null;
             log.warn(
               `before_agent_finalize requested one more pass: ` +
                 `runId=${params.runId} sessionId=${params.sessionId} ` +
