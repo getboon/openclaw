@@ -32,7 +32,15 @@ function createGatewayContext(cfg: Record<string, unknown>): GatewayRequestConte
 function createPluginScope(context: GatewayRequestContext): PluginRuntimeGatewayRequestScope {
   return {
     context,
-    client: { connect: { scopes: [] } },
+    client: {
+      connect: {
+        role: "operator",
+        scopes: [],
+        client: { id: "cli", version: "test", platform: "linux", mode: "cli" },
+        minProtocol: 1,
+        maxProtocol: 1,
+      },
+    },
     isWebchatConnect: () => false,
   };
 }
