@@ -1488,7 +1488,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     ).toBe(false);
   });
 
-  it("retries unfinished steps silently up to the bound, then stops (ENG-18893)", () => {
+  it("retries unfinished steps silently up to the bound, then stops", () => {
     const base = {
       aborted: false,
       externalAbort: false,
@@ -1566,7 +1566,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     ).toBe(false);
   });
 
-  it("silently retries a full turn when payloads carry a non-terminal tool-error warning (ENG-18893)", async () => {
+  it("silently retries a full turn when payloads carry a non-terminal tool-error warning", async () => {
     // toolMetas includes a real `exec` call on purpose: exec is never in
     // UNCONDITIONALLY_REPLAY_SAFE_TOOL_NAMES (tool-replay-safety.ts), so
     // omitting it here would hide a regression where the retry gate
@@ -1598,7 +1598,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     expect(result.payloads).toEqual([{ text: "All done." }]);
   });
 
-  it("falls through to the user-visible note once the unfinished-steps retry budget is exhausted (ENG-18893)", async () => {
+  it("falls through to the user-visible note once the unfinished-steps retry budget is exhausted", async () => {
     mockedClassifyFailoverReason.mockReturnValue(null);
     mockedRunEmbeddedAttempt.mockResolvedValue(
       makeAttemptResult({ toolMetas: [{ toolName: "exec" }] }),
@@ -1622,7 +1622,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     expect(runAttemptCall(2).prompt).toContain(RETRY_NUDGE_TEXT);
   });
 
-  it("never auto-retries unfinished steps after a messaging-tool send already landed (ENG-18893)", async () => {
+  it("never auto-retries unfinished steps after a messaging-tool send already landed", async () => {
     // Re-prompting "redo it" after a real send already happened risks the
     // model replaying that send — no human is in the loop to catch the
     // duplicate the way a manual Retry click would.
@@ -1646,7 +1646,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     expectNoWarnMessageWith("unfinished steps detected");
   });
 
-  it("never auto-retries unfinished steps after a session spawn was accepted (ENG-18893)", async () => {
+  it("never auto-retries unfinished steps after a session spawn was accepted", async () => {
     // Same duplication risk as a messaging-tool send: re-prompting "redo it"
     // could make the model spawn a second child session for the same request.
     mockedClassifyFailoverReason.mockReturnValue(null);
@@ -1673,7 +1673,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     expectNoWarnMessageWith("unfinished steps detected");
   });
 
-  it("never auto-retries unfinished steps after a cron job was added (ENG-18893)", async () => {
+  it("never auto-retries unfinished steps after a cron job was added", async () => {
     // Same duplication risk: re-prompting "redo it" could make the model add
     // a second cron job for the same request.
     mockedClassifyFailoverReason.mockReturnValue(null);
