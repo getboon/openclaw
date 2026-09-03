@@ -71,12 +71,52 @@ export function mergeTransportHeaders(
   ...headerSources: Array<Record<string, string> | undefined>
 ): Record<string, string> | undefined {
   const merged: Record<string, string> = {};
+  const headerNamesByLowerKey = new Map<string, string>();
   for (const headers of headerSources) {
     if (headers) {
-      Object.assign(merged, headers);
+      for (const [key, value] of Object.entries(headers)) {
+        const normalizedKey = key.toLowerCase();
+        const previousKey = headerNamesByLowerKey.get(normalizedKey);
+        if (previousKey && previousKey !== key) {
+          delete merged[previousKey];
+        }
+        merged[key] = value;
+        headerNamesByLowerKey.set(normalizedKey, key);
+      }
     }
   }
   return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+// The Gateway identifies and refunds a provisioning smoke turn from three
+// headers that must travel together: X-Boon-Session-ID (a smoke-flavored
+// value, not a distinct name), and X-Boon-Provisioning-Smoke-Run-ID /
+// X-Boon-Provisioning-Smoke-Capability (distinct names, shared prefix). If
+// only the session header were reasserted, a stale/incomplete upstream
+// header set (e.g. a model-registry response resolved before this turn's
+// smoke capability was attached) could still lose the run-id/capability
+// headers, breaking refund attribution while looking like the session
+// survived correctly.
+export function isProvisioningSmokeHeaderName(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized === "x-boon-session-id" || normalized.startsWith("x-boon-provisioning-smoke-");
+}
+
+export function preserveProvisioningSmokeSessionHeader(
+  headers: Record<string, string> | undefined,
+  modelHeaders: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  const hasSmokeSession = Object.entries(modelHeaders ?? {}).some(
+    ([key, value]) =>
+      key.toLowerCase() === "x-boon-session-id" && value.startsWith("provisioning-smoke-"),
+  );
+  if (!hasSmokeSession) {
+    return headers;
+  }
+  const smokeHeaders = Object.fromEntries(
+    Object.entries(modelHeaders ?? {}).filter(([key]) => isProvisioningSmokeHeaderName(key)),
+  );
+  return mergeTransportHeaders(headers, smokeHeaders);
 }
 
 export function mergeTransportMetadata<T extends Record<string, unknown>>(

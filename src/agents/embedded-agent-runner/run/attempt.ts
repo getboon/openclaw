@@ -503,6 +503,7 @@ import {
   isMidTurnPrecheckSignal,
   type MidTurnPrecheckRequest,
 } from "./midturn-precheck.js";
+import { applyModelRequestHeaders } from "./model-request-headers.js";
 import { normalizeToolMetas } from "./normalize-tool-metas.js";
 import {
   PREEMPTIVE_OVERFLOW_ERROR_TEXT,
@@ -2527,7 +2528,7 @@ export async function runEmbeddedAttempt(
           agentDir,
           authStorage: params.authStorage,
           modelRegistry: params.modelRegistry,
-          model: params.model,
+          model: applyModelRequestHeaders(params.model, params.modelRequestHeaders),
           thinkingLevel: mapThinkingLevel(params.thinkLevel),
           tools: sessionToolAllowlist,
           customTools: allCustomTools,

@@ -61,6 +61,7 @@ import {
   failTransportStream,
   finalizeTransportStream,
   mergeTransportHeaders,
+  preserveProvisioningSmokeSessionHeader,
   sanitizeNonEmptyTransportPayloadText,
   sanitizeTransportPayloadText,
 } from "./transport-stream-shared.js";
@@ -107,6 +108,17 @@ type AnthropicMessagesClient = {
     ): AsyncIterable<Record<string, unknown>>;
   };
 };
+
+function mergeAnthropicRequestHeaders(
+  baseHeaders: Record<string, string>,
+  modelHeaders: Record<string, string> | undefined,
+  ...optionHeaderSources: Array<Record<string, string> | undefined>
+): Record<string, string> | undefined {
+  return preserveProvisioningSmokeSessionHeader(
+    mergeTransportHeaders(baseHeaders, modelHeaders, ...optionHeaderSources),
+    modelHeaders,
+  );
+}
 
 function resolveAnthropicRequestModelId(model: AnthropicTransportModel): string {
   if (isDirectAnthropicModel(model) && /^anthropic\//i.test(model.id)) {
@@ -809,7 +821,7 @@ function createAnthropicTransportClient(params: {
         apiKey: null,
         authToken: apiKey,
         baseURL: model.baseUrl,
-        defaultHeaders: mergeTransportHeaders(
+        defaultHeaders: mergeAnthropicRequestHeaders(
           {
             accept: "application/json",
             "anthropic-dangerous-direct-browser-access": "true",
@@ -834,7 +846,7 @@ function createAnthropicTransportClient(params: {
         apiKey: null,
         authToken: apiKey,
         baseURL: model.baseUrl,
-        defaultHeaders: mergeTransportHeaders(
+        defaultHeaders: mergeAnthropicRequestHeaders(
           {
             accept: "application/json",
             "anthropic-dangerous-direct-browser-access": "true",
@@ -859,7 +871,7 @@ function createAnthropicTransportClient(params: {
         apiKey: null,
         authToken: apiKey,
         baseURL: model.baseUrl,
-        defaultHeaders: mergeTransportHeaders(
+        defaultHeaders: mergeAnthropicRequestHeaders(
           {
             accept: "application/json",
             "anthropic-dangerous-direct-browser-access": "true",
@@ -880,7 +892,7 @@ function createAnthropicTransportClient(params: {
     client: createAnthropicMessagesClient({
       apiKey,
       baseURL: model.baseUrl,
-      defaultHeaders: mergeTransportHeaders(
+      defaultHeaders: mergeAnthropicRequestHeaders(
         {
           accept: "application/json",
           "anthropic-dangerous-direct-browser-access": "true",

@@ -2081,6 +2081,7 @@ async function runEmbeddedAgentInternal(
           const rawAttempt = await runEmbeddedAttemptWithBackend({
             sessionId: activeSessionId,
             sessionKey: resolvedSessionKey,
+            modelRequestHeaders: params.modelRequestHeaders,
             promptCacheKey: params.promptCacheKey,
             sandboxSessionKey: params.sandboxSessionKey,
             trigger: params.trigger,

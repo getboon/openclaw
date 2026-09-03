@@ -18,6 +18,10 @@ import {
   type AgentOptions,
   type ThinkingLevel,
 } from "../runtime/index.js";
+import {
+  mergeTransportHeaders,
+  preserveProvisioningSmokeSessionHeader,
+} from "../transport-stream-shared.js";
 import { AgentSession, type AgentSessionWriteLockRunner } from "./agent-session.js";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.js";
 import { AuthStorage } from "./auth-storage.js";
@@ -200,6 +204,18 @@ function getAttributionHeaders(
   }
 
   return undefined;
+}
+
+function mergeRequestHeaders(
+  attributionHeaders: Record<string, string> | undefined,
+  runtimeHeaders: Record<string, string> | undefined,
+  authHeaders: Record<string, string> | undefined,
+  modelHeaders: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  return preserveProvisioningSmokeSessionHeader(
+    mergeTransportHeaders(attributionHeaders, authHeaders, runtimeHeaders),
+    modelHeaders,
+  );
 }
 
 /**
@@ -424,10 +440,14 @@ export async function createAgentSession(
         timeoutMs: optionsLocal?.timeoutMs ?? providerRetrySettings.timeoutMs,
         maxRetries: optionsLocal?.maxRetries ?? providerRetrySettings.maxRetries,
         maxRetryDelayMs: optionsLocal?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
-        headers:
-          attributionHeaders || auth.headers || optionsLocal?.headers
-            ? { ...attributionHeaders, ...auth.headers, ...optionsLocal?.headers }
-            : undefined,
+        // Normal runtime precedence is unchanged. Only a signed smoke session
+        // is reasserted when ordinary attribution carries a stale session.
+        headers: mergeRequestHeaders(
+          attributionHeaders,
+          optionsLocal?.headers,
+          auth.headers,
+          modelResult.headers,
+        ),
       });
     },
     onPayload: async (payload, modelValue) => {
