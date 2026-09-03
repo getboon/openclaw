@@ -1332,9 +1332,16 @@ export async function runPreparedReply(
         normalizeOptionalString(sessionCtx.GroupSubject),
       groupSpace: normalizeOptionalString(sessionCtx.GroupSpace),
       senderId: normalizeOptionalString(sessionCtx.SenderId),
-      // Gateway-audience OBO (ENG-19116) → x-boon-gateway-obo-token on the model call
-      // (ENG-19115). Rides the same seam as SenderId; absent on non-web surfaces.
-      oboToken: normalizeOptionalString(sessionCtx.OboToken),
+      // Gateway-audience OBO (ENG-19116) → x-boon-gateway-obo-token on the model
+      // call (ENG-19115). Unlike SenderId (a stable identity carried on the
+      // persisted session context), this is a FRESH per-turn token — boon-core
+      // mints it with a 5-min TTL on every /boon-chat inbound, so it lives on the
+      // inbound `ctx`, NOT the reconstructed `sessionCtx`. Read `ctx` first
+      // (fallback to sessionCtx), mirroring `channelContext` below. Reading only
+      // sessionCtx.OboToken left it empty on every persisted-session turn → the
+      // header was never emitted → the gateway fell back to tier-2 (the bug this
+      // fixes).
+      oboToken: normalizeOptionalString(ctx.OboToken ?? sessionCtx.OboToken),
       channelContext: ctx.ChannelContext ?? sessionCtx.ChannelContext,
       senderName: normalizeOptionalString(sessionCtx.SenderName),
       // Originating platform (slack/msteams/boon-web/…) for usage attribution.
