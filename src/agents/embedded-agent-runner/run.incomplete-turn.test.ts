@@ -34,6 +34,7 @@ import {
   resolveSilentToolResultReplyPayload,
   shouldRetryMissingAssistantTurn,
   shouldRetrySilentErrorAssistantTurn,
+  shouldRetryUnfinishedSteps,
   shouldTreatEmptyAssistantReplyAsSilent,
 } from "./run/incomplete-turn.js";
 import type { EmbeddedRunAttemptResult } from "./run/types.js";
@@ -1472,6 +1473,65 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
             activeCount: 1,
           },
         }),
+      }),
+    ).toBe(false);
+  });
+
+  it("retries unfinished steps silently up to the bound, then stops (ENG-18893)", () => {
+    const base = {
+      aborted: false,
+      externalAbort: false,
+      timedOut: false,
+      hasNonTerminalToolErrorWarning: true,
+      maxRetryAttempts: 2,
+    };
+    expect(shouldRetryUnfinishedSteps({ ...base, retryAttempts: 0 })).toBe(true);
+    expect(shouldRetryUnfinishedSteps({ ...base, retryAttempts: 1 })).toBe(true);
+    // Budget exhausted: fall through to the user-visible note + Retry button.
+    expect(shouldRetryUnfinishedSteps({ ...base, retryAttempts: 2 })).toBe(false);
+  });
+
+  it("does not retry unfinished steps when there is nothing non-terminal to recover", () => {
+    expect(
+      shouldRetryUnfinishedSteps({
+        aborted: false,
+        externalAbort: false,
+        timedOut: false,
+        hasNonTerminalToolErrorWarning: false,
+        retryAttempts: 0,
+        maxRetryAttempts: 2,
+      }),
+    ).toBe(false);
+  });
+
+  it("never retries unfinished steps for an aborted, externally aborted, or timed-out attempt", () => {
+    const withWarning = {
+      hasNonTerminalToolErrorWarning: true,
+      retryAttempts: 0,
+      maxRetryAttempts: 2,
+    };
+    expect(
+      shouldRetryUnfinishedSteps({
+        ...withWarning,
+        aborted: true,
+        externalAbort: false,
+        timedOut: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRetryUnfinishedSteps({
+        ...withWarning,
+        aborted: false,
+        externalAbort: true,
+        timedOut: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRetryUnfinishedSteps({
+        ...withWarning,
+        aborted: false,
+        externalAbort: false,
+        timedOut: true,
       }),
     ).toBe(false);
   });

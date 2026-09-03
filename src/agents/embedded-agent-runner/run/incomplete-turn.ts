@@ -365,6 +365,31 @@ export function shouldRetryMissingAssistantTurn(params: {
   return !resolveAttemptReplayMetadata(params.attempt).hadPotentialSideEffects;
 }
 
+/**
+ * ENG-18893: silently retries once more (same session, `/retry`'s own nudge
+ * text) when a real reply landed but `payloads.ts` classified an unrecovered
+ * exec-class tool failure as non-terminal — the same condition that would
+ * otherwise surface "N steps didn't finish" plus a manual Retry button. Bounded
+ * by `maxRetryAttempts` (matches booneval's own proven nudge cap) so a
+ * persistently-failing step can't loop forever.
+ */
+export function shouldRetryUnfinishedSteps(params: {
+  aborted: boolean;
+  externalAbort: boolean;
+  timedOut: boolean;
+  hasNonTerminalToolErrorWarning: boolean;
+  retryAttempts: number;
+  maxRetryAttempts: number;
+}): boolean {
+  if (params.aborted || params.externalAbort || params.timedOut) {
+    return false;
+  }
+  if (!params.hasNonTerminalToolErrorWarning) {
+    return false;
+  }
+  return params.retryAttempts < params.maxRetryAttempts;
+}
+
 function joinAssistantTexts(assistantTexts?: readonly string[]): string {
   return (assistantTexts ?? []).join("\n\n").trim();
 }
