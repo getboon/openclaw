@@ -1,5 +1,6 @@
 // Coverage for incomplete-turn safety, retry instructions, and liveness states.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { RETRY_NUDGE_TEXT } from "../../auto-reply/reply/commands-retry.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import {
   hasCommittedMessagingToolDeliveryEvidence,
@@ -8,6 +9,7 @@ import {
 import { makeAttemptResult } from "./run.overflow-compaction.fixture.js";
 import {
   loadRunOverflowCompactionHarness,
+  mockedBuildEmbeddedRunPayloads,
   mockedClassifyFailoverReason,
   mockedGlobalHookRunner,
   mockedIsFailoverAssistantError,
@@ -34,11 +36,20 @@ import {
   resolveSilentToolResultReplyPayload,
   shouldRetryMissingAssistantTurn,
   shouldRetrySilentErrorAssistantTurn,
+  shouldRetryUnfinishedSteps,
   shouldTreatEmptyAssistantReplyAsSilent,
 } from "./run/incomplete-turn.js";
 import type { EmbeddedRunAttemptResult } from "./run/types.js";
 
 let runEmbeddedAgent: typeof import("./run.js").runEmbeddedAgent;
+// `run.js` is dynamically re-imported after `vi.resetModules()` inside
+// `loadRunOverflowCompactionHarness()`, so its transitive `reply-payload.js`
+// (and the payload-metadata WeakMap it owns) is a *different module instance*
+// than one imported statically at the top of this file. Import it the same
+// way, post-reset, or `setReplyPayloadMetadata` here and
+// `isReplyPayloadNonTerminalToolErrorWarning` inside `run.ts` read from two
+// disjoint WeakMaps.
+let setReplyPayloadMetadata: typeof import("../../auto-reply/reply-payload.js").setReplyPayloadMetadata;
 
 function resolveIncompleteTurnPayloadText(
   params: Omit<Parameters<typeof resolveIncompleteTurnPayloadTextCore>[0], "externalAbort"> & {
@@ -53,6 +64,7 @@ function resolveIncompleteTurnPayloadText(
 describe("runEmbeddedAgent incomplete-turn safety", () => {
   beforeAll(async () => {
     ({ runEmbeddedAgent } = await loadRunOverflowCompactionHarness());
+    ({ setReplyPayloadMetadata } = await import("../../auto-reply/reply-payload.js"));
   });
 
   beforeEach(() => {
@@ -1474,6 +1486,153 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
         }),
       }),
     ).toBe(false);
+  });
+
+  it("retries unfinished steps silently up to the bound, then stops (ENG-18893)", () => {
+    const base = {
+      aborted: false,
+      externalAbort: false,
+      timedOut: false,
+      hasNonTerminalToolErrorWarning: true,
+      hadPotentialSideEffects: false,
+      maxRetryAttempts: 2,
+    };
+    expect(shouldRetryUnfinishedSteps({ ...base, retryAttempts: 0 })).toBe(true);
+    expect(shouldRetryUnfinishedSteps({ ...base, retryAttempts: 1 })).toBe(true);
+    // Budget exhausted: fall through to the user-visible note + Retry button.
+    expect(shouldRetryUnfinishedSteps({ ...base, retryAttempts: 2 })).toBe(false);
+  });
+
+  it("does not retry unfinished steps when there is nothing non-terminal to recover", () => {
+    expect(
+      shouldRetryUnfinishedSteps({
+        aborted: false,
+        externalAbort: false,
+        timedOut: false,
+        hasNonTerminalToolErrorWarning: false,
+        hadPotentialSideEffects: false,
+        retryAttempts: 0,
+        maxRetryAttempts: 2,
+      }),
+    ).toBe(false);
+  });
+
+  it("never retries unfinished steps for an aborted, externally aborted, or timed-out attempt", () => {
+    const withWarning = {
+      hasNonTerminalToolErrorWarning: true,
+      hadPotentialSideEffects: false,
+      retryAttempts: 0,
+      maxRetryAttempts: 2,
+    };
+    expect(
+      shouldRetryUnfinishedSteps({
+        ...withWarning,
+        aborted: true,
+        externalAbort: false,
+        timedOut: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRetryUnfinishedSteps({
+        ...withWarning,
+        aborted: false,
+        externalAbort: true,
+        timedOut: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRetryUnfinishedSteps({
+        ...withWarning,
+        aborted: false,
+        externalAbort: false,
+        timedOut: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("never retries unfinished steps once the attempt had potential side effects (messaging/cron/session_spawn)", () => {
+    // Re-prompting "redo it" after a mutation already landed risks the model
+    // replaying that mutation with no human in the loop to catch a duplicate.
+    expect(
+      shouldRetryUnfinishedSteps({
+        aborted: false,
+        externalAbort: false,
+        timedOut: false,
+        hasNonTerminalToolErrorWarning: true,
+        hadPotentialSideEffects: true,
+        retryAttempts: 0,
+        maxRetryAttempts: 2,
+      }),
+    ).toBe(false);
+  });
+
+  it("silently retries a full turn when payloads carry a non-terminal tool-error warning (ENG-18893)", async () => {
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(makeAttemptResult({}));
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(makeAttemptResult({}));
+    mockedBuildEmbeddedRunPayloads.mockReturnValueOnce([
+      setReplyPayloadMetadata(
+        { text: "2 steps didn't finish (6 of 8 steps completed): exec — not found." },
+        { nonTerminalToolErrorWarning: true },
+      ),
+    ]);
+    mockedBuildEmbeddedRunPayloads.mockReturnValueOnce([{ text: "All done." }]);
+
+    const result = await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      runId: "run-unfinished-steps-auto-retry",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
+    expect(runAttemptCall(1).prompt).toContain(RETRY_NUDGE_TEXT);
+    expectWarnMessageWith("unfinished steps detected");
+    expect(result.payloads).toEqual([{ text: "All done." }]);
+  });
+
+  it("falls through to the user-visible note once the unfinished-steps retry budget is exhausted (ENG-18893)", async () => {
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt.mockResolvedValue(makeAttemptResult({}));
+    mockedBuildEmbeddedRunPayloads.mockReturnValue([
+      setReplyPayloadMetadata(
+        { text: "2 steps didn't finish (6 of 8 steps completed): exec — not found." },
+        { nonTerminalToolErrorWarning: true },
+      ),
+    ]);
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      runId: "run-unfinished-steps-budget-exhausted",
+    });
+
+    // 1 initial attempt + 2 silent retries (the bound) = 3 total, then it stops
+    // retrying and lets the note through unchanged.
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(3);
+    expect(runAttemptCall(1).prompt).toContain(RETRY_NUDGE_TEXT);
+    expect(runAttemptCall(2).prompt).toContain(RETRY_NUDGE_TEXT);
+  });
+
+  it("never auto-retries unfinished steps after a messaging-tool send already landed (ENG-18893)", async () => {
+    // Re-prompting "redo it" after a real send already happened risks the
+    // model replaying that send — no human is in the loop to catch the
+    // duplicate the way a manual Retry click would.
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({ didSendViaMessagingTool: true }),
+    );
+    mockedBuildEmbeddedRunPayloads.mockReturnValueOnce([
+      setReplyPayloadMetadata(
+        { text: "2 steps didn't finish (6 of 8 steps completed): exec — not found." },
+        { nonTerminalToolErrorWarning: true },
+      ),
+    ]);
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      runId: "run-unfinished-steps-side-effects-no-retry",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
+    expectNoWarnMessageWith("unfinished steps detected");
   });
 
   it("detects tool-use terminal turn with pre-tool text as incomplete (#76477)", () => {
