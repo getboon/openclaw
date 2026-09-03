@@ -1,0 +1,19 @@
+CHANGELOG.md
+  s_9df158d9bbb710::t_b1dfe4ef94c4ee 5-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "f27bd391388738ac0b2b30a0d990561b5172b05a",
+  "prompts": {},
+  "sessions": {
+    "s_9df158d9bbb710": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9e26c7c2-a67e-4f7b-9850-0b4e3f93fe95",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
