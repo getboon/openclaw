@@ -2,6 +2,15 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.34
+
+Fixes the signed gateway-audience OBO token never reaching the usage meter — so internal `@getboon.ai` test traffic kept metering against customer agent tokens — and hardens Sentry correlation and cron failure-destination validation.
+
+- **#185 (ENG-19115):** the tier-1 signed-OBO meter-skip never fired. Every internal-test (org-99) gateway request logged `no OBO header on request` and fell back to the spoofable tier-2 `@getboon.ai` signal, so `@getboon.ai` traffic kept counting against customer agent-token metering. `get-reply-run` read the per-turn OBO from `sessionCtx` — the reconstructed/persisted session context — instead of the inbound turn `ctx`, so the freshly minted, 5-minute token was dropped before openclaw could emit the `x-boon-gateway-obo-token` header. The read is now `ctx.OboToken ?? sessionCtx.OboToken` in `src/auto-reply/reply/get-reply-run.ts`, mirroring the adjacent `ChannelContext` fallback, so the per-turn token threads through to the gateway and internal-test traffic is correctly excluded from customer metering.
+- **#182:** `agent_end` reported a failed customer turn to Sentry with `run_id` only in `contexts`, which Sentry does not index, so an operator holding a turn's correlation id could not search for the corresponding fleet event. Run/session correlation ids are now emitted as indexed Sentry tags.
+- **#181:** a cron job could be created or updated with a `delivery.failureDestination` announce override that can never resolve a recipient — no explicit `to`, and an isolated session with no `sessionKey` — so it silently failed to deliver its own failure notification on every run, forever, mirroring a real production incident. That configuration is now rejected at create/update time instead of being accepted and failing invisibly.
+- Base = `2026.6.11-boon.33`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.34` in lockstep. No other code changes; #181, #182, and #185 were merged onto `boon` before this release.
+
 ## 2026.6.11-boon.33
 
 Delivers macro-enabled Office files in chat, stops a large PDF read from failing outright, and rejects a truncated model turn instead of persisting it.
