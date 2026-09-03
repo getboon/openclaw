@@ -82,6 +82,7 @@ import {
 import {
   ADMIN_SCOPE,
   AGENT_LANE_SUBAGENT,
+  WRITE_SCOPE,
   DEFAULT_SUBAGENT_MAX_CHILDREN_PER_AGENT,
   DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH,
   buildSubagentSystemPrompt,
@@ -242,9 +243,15 @@ async function callSubagentGateway(
   // scope-upgrade handshake that headless gateway-client connections cannot
   // complete interactively, causing close(1008) "pairing required" (#59428).
   //
-  // Only admin-only methods are pinned to ADMIN_SCOPE; other methods (e.g.
-  // "agent" -> write) keep their least-privilege scope.
-  const scopes = params.scopes ?? (isAdminOnlyMethod(params.method) ? [ADMIN_SCOPE] : undefined);
+  // Trusted lifecycle calls use their gateway scopes inside scope-less request contexts.
+  // This prevents child startup denial while keeping unrelated methods default-deny.
+  const scopes =
+    params.scopes ??
+    (params.method === "agent"
+      ? [WRITE_SCOPE]
+      : isAdminOnlyMethod(params.method)
+        ? [ADMIN_SCOPE]
+        : undefined);
   const request = {
     ...params,
     ...(scopes != null ? { scopes } : {}),
