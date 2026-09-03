@@ -98,6 +98,7 @@ export type PluginHookName =
   | "message_sending"
   | "reply_payload_sending"
   | "message_sent"
+  | "delivery_recovery_exhausted"
   | "before_tool_call"
   | "after_tool_call"
   | "tool_result_persist"
@@ -145,6 +146,7 @@ export const PLUGIN_HOOK_NAMES = [
   "message_sending",
   "reply_payload_sending",
   "message_sent",
+  "delivery_recovery_exhausted",
   "before_tool_call",
   "after_tool_call",
   "tool_result_persist",
@@ -892,6 +894,24 @@ export type PluginHookGatewayStopEvent = {
   reason?: string;
 };
 
+/**
+ * Fires when outbound delivery-recovery gives up on a send whose platform
+ * state is ambiguous after a crash (it cannot safely tell whether the message
+ * already went out, so it refuses to blind-replay it). Observation only — no
+ * core behavior depends on a plugin's response.
+ */
+export type PluginHookDeliveryRecoveryExhaustedEvent = {
+  queueName: string;
+  deliveryId: string;
+  channel?: string;
+  to?: string;
+  accountId?: string;
+  sessionKey?: string;
+  retryCount: number;
+  recoveryState?: string;
+  error: string;
+};
+
 export type PluginHookGatewayCronRunStatus = "ok" | "error" | "skipped";
 
 export type PluginHookGatewayCronDeliveryStatus =
@@ -1212,6 +1232,10 @@ export type PluginHookHandlerMap = {
   message_sent: (
     event: PluginHookMessageSentEvent,
     ctx: PluginHookMessageContext,
+  ) => Promise<void> | void;
+  delivery_recovery_exhausted: (
+    event: PluginHookDeliveryRecoveryExhaustedEvent,
+    ctx: PluginHookGatewayContext,
   ) => Promise<void> | void;
   before_tool_call: (
     event: PluginHookBeforeToolCallEvent,

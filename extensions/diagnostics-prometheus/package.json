@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/diagnostics-prometheus",
-  "version": "2026.6.11-boon.30",
+  "version": "2026.6.11-boon.33",
   "description": "OpenClaw diagnostics Prometheus exporter for runtime metrics.",
   "repository": {
     "type": "git",

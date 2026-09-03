@@ -24,6 +24,28 @@ vi.mock("./channel-resolution.js", () => ({
   resolveOutboundChannelMessageAdapter: resolveOutboundChannelMessageAdapterMock,
 }));
 
+// sendCrashRecoveryNotice is statically imported by delivery-queue-recovery.ts,
+// so it must be hoisted-mocked here (a dynamic vi.doMock would be too late).
+const sendCrashRecoveryNoticeMock = vi.hoisted(() => vi.fn(async () => true));
+
+vi.mock("../crash-recovery-notice.js", () => ({
+  sendCrashRecoveryNotice: sendCrashRecoveryNoticeMock,
+}));
+
+// getGlobalHookRunner is likewise statically imported by the recovery module.
+// Preserve the module's other exports so unrelated consumers keep working.
+const hookRunnerMock = vi.hoisted(() => ({
+  hasHooks: vi.fn((_hookName: string) => false),
+  // Typed params so `mock.calls[0]` is a 2-tuple the assertion below can read.
+  runDeliveryRecoveryExhausted: vi.fn(async (_event: unknown, _ctx: unknown) => undefined),
+}));
+const getGlobalHookRunnerMock = vi.hoisted(() => vi.fn(() => hookRunnerMock));
+
+vi.mock("../../plugins/hook-runner-global.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../plugins/hook-runner-global.js")>();
+  return { ...actual, getGlobalHookRunner: getGlobalHookRunnerMock };
+});
+
 function mockCallArg(mock: { mock: { calls: unknown[][] } }, index = 0): unknown {
   const call = mock.mock.calls[index];
   if (!call) {
@@ -53,6 +75,10 @@ describe("delivery-queue recovery", () => {
 
   beforeEach(() => {
     resolveOutboundChannelMessageAdapterMock.mockReset();
+    sendCrashRecoveryNoticeMock.mockReset().mockResolvedValue(true);
+    hookRunnerMock.hasHooks.mockReset().mockReturnValue(false);
+    hookRunnerMock.runDeliveryRecoveryExhausted.mockReset().mockResolvedValue(undefined);
+    getGlobalHookRunnerMock.mockReset().mockReturnValue(hookRunnerMock);
   });
 
   const enqueueCrashRecoveryEntries = async () => {
@@ -187,6 +213,76 @@ describe("delivery-queue recovery", () => {
     expect(await loadPendingDeliveries(tmpDir())).toHaveLength(0);
     expect(readOutboundQueueStatus(tmpDir(), id)).toBe("failed");
     expectMockMessageContaining(log.warn, "refusing blind replay without adapter reconciliation");
+  });
+
+  it("sends a crash-recovery notice when an unresolved crash-ambiguous entry is given up on", async () => {
+    const id = await enqueueDelivery(
+      { channel: "demo-channel-a", to: "+1", payloads: [{ text: "maybe sent" }] },
+      tmpDir(),
+    );
+    setQueuedEntryState(tmpDir(), id, {
+      retryCount: 0,
+      platformSendStartedAt: Date.now(),
+      recoveryState: "send_attempt_started",
+    });
+
+    // No adapter reconciliation configured (mock returns undefined), so the
+    // entry hits the unresolved, non-retryable give-up branch.
+    const deliver = vi.fn().mockResolvedValue([]);
+    await runRecovery({ deliver });
+
+    expect(sendCrashRecoveryNoticeMock).toHaveBeenCalledOnce();
+    const arg = mockCallArg(sendCrashRecoveryNoticeMock) as {
+      target: { channel?: string; to?: string };
+    };
+    expect(arg.target).toMatchObject({ channel: "demo-channel-a", to: "+1" });
+  });
+
+  it("fires the delivery_recovery_exhausted hook when a listener is registered", async () => {
+    hookRunnerMock.hasHooks.mockReturnValue(true);
+    const id = await enqueueDelivery(
+      { channel: "demo-channel-a", to: "+1", payloads: [{ text: "maybe sent" }] },
+      tmpDir(),
+    );
+    setQueuedEntryState(tmpDir(), id, {
+      retryCount: 0,
+      platformSendStartedAt: Date.now(),
+      recoveryState: "send_attempt_started",
+    });
+
+    const deliver = vi.fn().mockResolvedValue([]);
+    await runRecovery({ deliver });
+
+    expect(hookRunnerMock.hasHooks).toHaveBeenCalledWith("delivery_recovery_exhausted");
+    expect(hookRunnerMock.runDeliveryRecoveryExhausted).toHaveBeenCalledOnce();
+    const [event, ctx] = hookRunnerMock.runDeliveryRecoveryExhausted.mock.calls[0] as [
+      { queueName: string; channel?: string; to?: string; recoveryState?: string },
+      { config: unknown },
+    ];
+    expect(event).toMatchObject({
+      queueName: "outbound",
+      channel: "demo-channel-a",
+      to: "+1",
+      recoveryState: "send_attempt_started",
+    });
+    expect(ctx).toMatchObject({ config: expect.anything() });
+  });
+
+  it("does not fire the hook when no listener is registered", async () => {
+    hookRunnerMock.hasHooks.mockReturnValue(false);
+    const id = await enqueueDelivery(
+      { channel: "demo-channel-a", to: "+1", payloads: [{ text: "maybe sent" }] },
+      tmpDir(),
+    );
+    setQueuedEntryState(tmpDir(), id, {
+      retryCount: 0,
+      platformSendStartedAt: Date.now(),
+      recoveryState: "send_attempt_started",
+    });
+
+    await runRecovery({ deliver: vi.fn().mockResolvedValue([]) });
+
+    expect(hookRunnerMock.runDeliveryRecoveryExhausted).not.toHaveBeenCalled();
   });
 
   it("replays started entries only after adapter proves they were not sent", async () => {

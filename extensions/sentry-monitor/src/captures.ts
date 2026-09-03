@@ -7,8 +7,10 @@
 
 import type {
   PluginHookAfterToolCallEvent,
+  PluginHookAgentContext,
   PluginHookAgentEndEvent,
   PluginHookCronChangedEvent,
+  PluginHookDeliveryRecoveryExhaustedEvent,
   PluginHookMessageSentEvent,
   PluginHookModelCallEndedEvent,
   PluginHookSessionEndEvent,
@@ -93,6 +95,11 @@ export function buildModelCallEndedCapture(
 export function buildAgentEndCapture(
   event: PluginHookAgentEndEvent,
   host: string,
+  // Optional so every existing call site (and test) keeps working; the
+  // ids come from PluginHookAgentContext, which already carries sessionId/agentId —
+  // no change to `src/plugins/hook-types.ts`, which is upstream-owned and would add
+  // merge-conflict surface against the (far behind) upstream fork.
+  ctx?: Pick<PluginHookAgentContext, "sessionId" | "agentId">,
 ): SentryCapture | null {
   if (event.success) {
     return null;
@@ -100,12 +107,31 @@ export function buildAgentEndCapture(
   return {
     kind: "exception",
     message: event.error ?? "agent_end success=false",
-    tags: pruneTags({ hook: "agent_end", host }),
+    // run_id is a TAG, not just a context field. `contexts` is payload you can only
+    // read once you have already found the event; tags are indexed, so this is what
+    // makes an event findable BY the correlation id. run_id is boon-core's
+    // `dispatch_ref` — minted per turn, sent here as run_id / X-Request-Id, printed
+    // in the Slack stall alert, and tagged on boon-core's own Sentry events. Without
+    // it you could not SEARCH the fleet project for the box's side of a turn whose
+    // id you already had.
+    //
+    // pruneTags drops undefined/empty, so a run without these ids emits no empty
+    // facets. Tags do not affect grouping — `fingerprint` below is unchanged, so
+    // this cannot fragment existing issues.
+    tags: pruneTags({
+      hook: "agent_end",
+      host,
+      run_id: event.runId,
+      session_id: ctx?.sessionId,
+      agent_id: ctx?.agentId,
+    }),
     fingerprint: fingerprintOf(
       "agent_end",
       event.error ? normalizeFingerprintText(event.error) : "success=false",
     ),
-    contexts: { run: runContext(event.runId) },
+    // runContext has always taken a sessionId; every caller passed only runId, so
+    // the field was permanently undefined. It resolves the box's session file.
+    contexts: { run: runContext(event.runId, ctx?.sessionId) },
     extra: {
       duration_ms: event.durationMs,
       message_count: Array.isArray(event.messages) ? event.messages.length : undefined,
@@ -271,6 +297,36 @@ export function buildCronChangedCapture(
       delivery_error: event.deliveryError,
       model: event.model,
       provider: event.provider,
+    },
+  };
+}
+
+export function buildDeliveryRecoveryExhaustedCapture(
+  event: PluginHookDeliveryRecoveryExhaustedEvent,
+  host: string,
+): SentryCapture | null {
+  return {
+    kind: "exception",
+    message: event.error,
+    tags: pruneTags({
+      hook: "delivery_recovery_exhausted",
+      host,
+      queue: event.queueName,
+      channel: event.channel,
+      recovery_state: event.recoveryState,
+    }),
+    fingerprint: fingerprintOf(
+      "delivery_recovery_exhausted",
+      event.queueName,
+      event.channel,
+      event.recoveryState,
+    ),
+    extra: {
+      delivery_id: event.deliveryId,
+      to: event.to,
+      account_id: event.accountId,
+      session_key: event.sessionKey,
+      retry_count: event.retryCount,
     },
   };
 }

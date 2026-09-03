@@ -296,6 +296,16 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
       if (output.stopReason === "error" || output.stopReason === "aborted") {
         throw new Error(output.errorMessage ?? "An unknown error occurred");
       }
+      // Same fix as anthropic-transport-stream.ts: messageStop alone isn't
+      // proof of a complete turn — a block opened via contentBlockStart but
+      // never closed (block.index stays set until contentBlockStop deletes
+      // it) leaves a self-contradictory message that can permanently poison
+      // a session on resume/retry. Checked last so a refusal/abort/error
+      // already caught above — which can legitimately leave a block open —
+      // keeps its own, more specific error message.
+      if (blocks.some((block) => block.index !== undefined)) {
+        throw new Error("Bedrock stream ended with an unclosed content block");
+      }
 
       refusalBuffer?.flush();
       stream.push({ type: "done", reason: output.stopReason, message: output });

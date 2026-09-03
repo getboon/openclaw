@@ -5,6 +5,7 @@ import {
   buildAfterToolCallCapture,
   buildAgentEndCapture,
   buildCronChangedCapture,
+  buildDeliveryRecoveryExhaustedCapture,
   buildMessageSentCapture,
   buildModelCallEndedCapture,
   buildSessionEndCapture,
@@ -111,9 +112,12 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
       dispatchCapture(Sentry, buildModelCallEndedCapture(event, hostname));
     });
   });
-  api.on("agent_end", (event) => {
+  // The second arg is PluginHookAgentContext, which already carries
+  // sessionId/agentId. Destructuring it here is what lets the capture tag the
+  // correlation ids; no upstream hook-type change was needed.
+  api.on("agent_end", (event, ctx) => {
     safe(api.logger, PLUGIN_ID, "agent_end", () => {
-      dispatchCapture(Sentry, buildAgentEndCapture(event, hostname));
+      dispatchCapture(Sentry, buildAgentEndCapture(event, hostname, ctx));
     });
   });
   api.on("after_tool_call", (event) => {
@@ -124,6 +128,11 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
   api.on("message_sent", (event) => {
     safe(api.logger, PLUGIN_ID, "message_sent", () => {
       dispatchCapture(Sentry, buildMessageSentCapture(event, hostname));
+    });
+  });
+  api.on("delivery_recovery_exhausted", (event) => {
+    safe(api.logger, PLUGIN_ID, "delivery_recovery_exhausted", () => {
+      dispatchCapture(Sentry, buildDeliveryRecoveryExhaustedCapture(event, hostname));
     });
   });
   api.on("subagent_ended", (event) => {

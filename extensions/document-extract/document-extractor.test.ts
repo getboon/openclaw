@@ -55,6 +55,16 @@ describe("PDF document extractor", () => {
     });
   });
 
+  it("hands the request buffer to clawpdf without copying it", async () => {
+    // Buffer already is a Uint8Array; re-wrapping it would double peak memory on a
+    // multi-hundred-megabyte set, which is the whole cost of opening one.
+    pdfDocument.extract.mockResolvedValue({ text: "x".repeat(50), images: [] });
+    const req = request();
+    await createPdfDocumentExtractor().extract(req);
+    const [input] = openPdfMock.mock.calls[0] as [Uint8Array];
+    expect(input).toBe(req.buffer);
+  });
+
   it("extracts text first and renders fallback images through clawpdf", async () => {
     pdfDocument.extract.mockResolvedValueOnce({ text: "", images: [] }).mockResolvedValueOnce({
       text: "",

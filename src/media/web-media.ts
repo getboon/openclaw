@@ -150,6 +150,15 @@ const HOST_READ_ALLOWED_DOCUMENT_MIMES = new Set([
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  // Macro-enabled OOXML documents are ordinary Office files to customers, and
+  // file-type still verifies the package bytes before these MIMEs are returned.
+  "application/vnd.ms-excel.sheet.macroenabled.12",
+  "application/vnd.ms-excel.template.macroenabled.12",
+  "application/vnd.ms-word.document.macroenabled.12",
+  "application/vnd.ms-word.template.macroenabled.12",
+  "application/vnd.ms-powerpoint.presentation.macroenabled.12",
+  "application/vnd.ms-powerpoint.template.macroenabled.12",
+  "application/vnd.ms-powerpoint.slideshow.macroenabled.12",
   "application/gzip",
   "application/x-7z-compressed",
   "application/x-tar",
@@ -1032,12 +1041,26 @@ async function loadWebMediaInternal(
   }
 
   // Local path
+  // Cap the read so an oversized file is refused from its stat instead of being
+  // materialized first. Same shape as the remote fetchCap above: when images are
+  // optimized the payload may legitimately exceed maxBytes and get compressed down.
+  const localReadCap =
+    maxBytes === undefined
+      ? undefined
+      : optimizeImages
+        ? Math.max(maxBytes, maxBytesForKind("document"))
+        : maxBytes;
   let data: Buffer;
   if (readFileOverride) {
     data = await readFileOverride(mediaUrl);
   } else {
     try {
-      data = (await readLocalFileSafely({ filePath: mediaUrl })).buffer;
+      data = (
+        await readLocalFileSafely({
+          filePath: mediaUrl,
+          ...(localReadCap === undefined ? {} : { maxBytes: localReadCap }),
+        })
+      ).buffer;
     } catch (err) {
       if (err instanceof FsSafeError) {
         if (err.code === "not-found") {
@@ -1049,6 +1072,13 @@ async function loadWebMediaInternal(
           throw new LocalMediaAccessError(
             "not-file",
             `Local media path is not a file: ${mediaUrl}`,
+            { cause: err },
+          );
+        }
+        if (err.code === "too-large") {
+          throw new LocalMediaAccessError(
+            "too-large",
+            `Local media file too large: ${mediaUrl} (${err.message})`,
             { cause: err },
           );
         }

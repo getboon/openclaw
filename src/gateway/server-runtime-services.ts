@@ -156,6 +156,22 @@ function recoverPendingOutboundDeliveries(params: {
   })().catch((err: unknown) => params.log.error(`Delivery recovery failed: ${String(err)}`));
 }
 
+function recoverPendingFollowupMessages(params: {
+  cfg: OpenClawConfig;
+  log: GatewayRuntimeServiceLogger;
+}): void {
+  // Recovery is best-effort background work; startup must continue even if
+  // the followup-replay module fails to import or notice delivery fails.
+  void (async () => {
+    const { recoverPendingFollowupReplays } = await import("../infra/followup-replay-recovery.js");
+    const logRecovery = params.log.child("followup-recovery");
+    await recoverPendingFollowupReplays({
+      cfg: params.cfg,
+      log: logRecovery,
+    });
+  })().catch((err: unknown) => params.log.error(`Followup recovery failed: ${String(err)}`));
+}
+
 function recoverPendingSessionDeliveries(params: {
   deps: import("../cli/deps.types.js").CliDeps;
   log: GatewayRuntimeServiceLogger;
@@ -274,6 +290,10 @@ export function activateGatewayScheduledServices(params: {
     });
   }
   recoverPendingOutboundDeliveries({
+    cfg: params.cfgAtStart,
+    log: params.log,
+  });
+  recoverPendingFollowupMessages({
     cfg: params.cfgAtStart,
     log: params.log,
   });

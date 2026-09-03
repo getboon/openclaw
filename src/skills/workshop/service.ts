@@ -46,6 +46,7 @@ import {
   withSkillProposalTargetLock,
   type PreparedSkillProposalSupportFile,
 } from "./store.js";
+import { assertValidSkillTldr } from "./tldr.js";
 import {
   SKILL_WORKSHOP_SCHEMA,
   type SkillProposalActionInput,
@@ -248,6 +249,7 @@ export async function proposeCreateSkill(
   const config = resolveSkillWorkshopConfig(input.config);
   assertProposalDescriptionWithinLimit(description);
   assertProposalContentWithinLimit(input.content, config.maxSkillBytes);
+  assertValidSkillTldr(input.content);
   const target = resolveSkillProposalTarget({ workspaceDir: input.workspaceDir, skillName: name });
   if ((await readWorkspaceSkillFile(target.skillFile)) !== null) {
     throw new Error(`Skill already exists at ${target.skillFile}.`);
@@ -324,6 +326,7 @@ export async function proposeUpdateSkill(
   }
   const description = resolveUpdateProposalDescription(input.description, targetSkill.description);
   assertProposalContentWithinLimit(input.content, config.maxSkillBytes);
+  assertValidSkillTldr(input.content);
 
   const supportFiles = prepareSkillProposalSupportFiles(input.supportFiles);
   const now = new Date().toISOString();
@@ -413,6 +416,7 @@ export async function reviseSkillProposal(
         ? await readProposalSupportFiles(record)
         : prepareSkillProposalSupportFiles(input.supportFiles);
     assertProposalContentWithinLimit(input.content, config.maxSkillBytes);
+    assertValidSkillTldr(input.content);
     const supportFileMetadata =
       supportFiles.length > 0
         ? await buildSupportFileMetadata(
@@ -515,6 +519,7 @@ export async function applySkillProposal(
     if (!draftFrontmatter) {
       throw new Error("Proposal draft must include proposal frontmatter.");
     }
+    assertValidSkillTldr(content);
     const scan = scanProposalBundle(content, supportFiles);
     if (scan.state !== "clean") {
       const updated = {

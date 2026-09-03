@@ -164,6 +164,77 @@ describe("buildAgentEndCapture", () => {
       "agent_end success=false",
     );
   });
+
+  // run_id is boon-core's `dispatch_ref`: minted per turn, sent to the box as
+  // run_id / X-Request-Id, printed in the Slack stall alert, and tagged on
+  // boon-core's own Sentry events. It was only ever in `contexts` here, which
+  // Sentry does not index — so given a dispatch_ref from an alert you could not
+  // SEARCH the fleet project for the box's side of the same turn. Promoting it
+  // to a tag closes that round trip.
+  it("tags run_id so an event can be found BY the correlation id, not just read after", () => {
+    const capture = buildAgentEndCapture(
+      { messages: [], success: false, error: "boom", runId: "r9" } as PluginHookAgentEndEvent,
+      HOST,
+    );
+    expect(capture?.tags).toMatchObject({ hook: "agent_end", host: HOST, run_id: "r9" });
+  });
+
+  it("tags session_id and agent_id from the hook context", () => {
+    // The ids come from PluginHookAgentContext, which already carries them — no
+    // upstream hook-type change needed, which matters because the fork is far
+    // behind upstream and `src/plugins/hook-types.ts` is upstream-owned.
+    const capture = buildAgentEndCapture(
+      { messages: [], success: false, error: "boom", runId: "r9" } as PluginHookAgentEndEvent,
+      HOST,
+      { sessionId: "thread-1529", agentId: "main" },
+    );
+    expect(capture?.tags).toMatchObject({
+      run_id: "r9",
+      session_id: "thread-1529",
+      agent_id: "main",
+    });
+  });
+
+  it("populates session_id in the run context, whose slot already existed", () => {
+    // runContext(runId, sessionId, callId) has always taken a sessionId; every
+    // caller passed only runId, so the field was permanently undefined.
+    const capture = buildAgentEndCapture(
+      { messages: [], success: false, error: "boom", runId: "r9" } as PluginHookAgentEndEvent,
+      HOST,
+      { sessionId: "thread-1529" },
+    );
+    expect(capture?.contexts?.run).toEqual({
+      run_id: "r9",
+      session_id: "thread-1529",
+      call_id: undefined,
+    });
+  });
+
+  it("omits correlation tags entirely when the ids are absent", () => {
+    // pruneTags drops undefined/empty; an empty-string tag would still create a
+    // searchable facet in Sentry, which is worse than the tag being absent.
+    const capture = buildAgentEndCapture(
+      { messages: [], success: false, error: "boom" } as PluginHookAgentEndEvent,
+      HOST,
+    );
+    expect(capture?.tags).toEqual({ hook: "agent_end", host: HOST });
+  });
+
+  it("does not change the fingerprint, so existing issues do not fragment", () => {
+    // Sentry groups on fingerprint, not tags. Adding tags to a live capture must
+    // not split an existing issue into two.
+    const withCtx = buildAgentEndCapture(
+      { messages: [], success: false, error: "boom", runId: "r9" } as PluginHookAgentEndEvent,
+      HOST,
+      { sessionId: "thread-1529", agentId: "main" },
+    );
+    const withoutCtx = buildAgentEndCapture(
+      { messages: [], success: false, error: "boom", runId: "r9" } as PluginHookAgentEndEvent,
+      HOST,
+    );
+    expect(withCtx?.fingerprint).toEqual(withoutCtx?.fingerprint);
+    expect(withCtx?.fingerprint).toEqual(["agent_end", "boom"]);
+  });
 });
 
 describe("buildAfterToolCallCapture", () => {

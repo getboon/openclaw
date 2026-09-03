@@ -1,0 +1,259 @@
+title: Confirm before acting on ambiguous requests
+
+scenario:
+  id: confirm-before-act-ambiguous-requests
+  surface: agent-behavior
+  runtimeParityTier: live-only
+  coverage:
+    primary:
+      - agents.instructions
+    secondary:
+      - models.anthropic
+      - tools.skill-invocation
+  objective: Verify Claude-backed agents clarify material ambiguity before acting and proceed once required inputs are complete.
+  successCriteria:
+    - Ambiguous submittal, bid-to-budget, and HCSS requests receive concise numbered clarification.
+    - The agent does not produce the requested result before clarification.
+    - Selecting a numbered submittal interpretation resumes the task.
+    - Repeating the same ambiguous request produces the same ordered clarification.
+    - A complete deterministic request proceeds without clarification.
+  docsRefs:
+    - docs/concepts/model-providers.md
+    - docs/tools/skills.md
+  codeRefs:
+    - src/agents/concise-interaction-overlay.ts
+    - extensions/anthropic/prompt-overlay.ts
+  execution:
+    kind: flow
+    summary: Exercise confirm-before-act behavior through synthetic deterministic skills on Anthropic Claude.
+    config:
+      requiredProviderMode: live-frontier
+      requiredProvider: anthropic
+      requiredModel: claude-opus-4-8
+      submittalPrompt: |-
+        Use the submittal-transmittal skill for Project 245. Create either:
+        option 1, the standard template for spec section 26 05 00 as PDF; or
+        option 2, the vendor template for spec section 23 05 00 as DOCX.
+        I have not chosen between those two interpretations.
+      bidPrompt: Use the bid-to-budget skill to prepare a comparison.
+      hcssPrompt: Use the hcss-query skill to run a production query.
+      completeHcssPrompt: Use the hcss-query skill for Project 245, query equipment hours, date range 2026-08-01 through 2026-08-31.
+      skills:
+        submittal-transmittal: |-
+          ---
+          name: submittal-transmittal
+          description: Create a submittal transmittal artifact from a selected project, template, specification section, and output format.
+          deterministic: true
+          ---
+
+          Required inputs: project, template, specification section, and output format.
+          When every required input is selected, reply `SUBMITTAL-READY` and summarize the selected values.
+        bid-to-budget: |-
+          ---
+          name: bid-to-budget
+          description: Compare a selected bid source with a selected project budget and produce a requested output format.
+          deterministic: true
+          ---
+
+          Required inputs: project, bid source, budget version, and output format.
+          Do not invent defaults. When every input is present, reply `BID-TO-BUDGET-READY`.
+        hcss-query: |-
+          ---
+          name: hcss-query
+          description: Query HCSS data for a selected project, query type, and date range.
+          deterministic: true
+          ---
+
+          Required inputs: project, query type, and date range.
+          When every input is present, reply `HCSS-READY` and summarize the selected values.
+
+flow:
+  steps:
+    - name: prepares live Claude skill fixtures
+      actions:
+        - set: selected
+          value:
+            expr: splitModelRef(env.primaryModel)
+        - assert:
+            expr: "env.providerMode === config.requiredProviderMode"
+            message:
+              expr: "`confirm-before-act requires ${config.requiredProviderMode}; got ${env.providerMode}`"
+        - assert:
+            expr: "selected?.provider === config.requiredProvider && selected?.model === config.requiredModel"
+            message:
+              expr: "`expected ${config.requiredProvider}/${config.requiredModel}, got ${env.primaryModel}`"
+        - call: reset
+        - set: skillsRoot
+          value:
+            expr: "path.join(env.gateway.workspaceDir, 'skills')"
+        - forEach:
+            items:
+              expr: "Object.entries(config.skills)"
+            item: skillFixture
+            actions:
+              - set: skillDir
+                value:
+                  expr: "path.join(skillsRoot, String(skillFixture[0]))"
+              - call: fs.mkdir
+                args:
+                  - ref: skillDir
+                  - recursive: true
+              - call: fs.writeFile
+                args:
+                  - expr: "path.join(skillDir, 'SKILL.md')"
+                  - expr: "`${String(skillFixture[1]).trimEnd()}\\n`"
+                  - utf8
+    - name: asks before creating an ambiguous submittal
+      actions:
+        - call: runAgentPrompt
+          args:
+            - ref: env
+            - sessionKey: agent:qa:confirm-before-act-submittal
+              message:
+                expr: config.submittalPrompt
+              provider:
+                expr: selected.provider
+              model:
+                expr: selected.model
+              timeoutMs:
+                expr: resolveQaLiveTurnTimeoutMs(env, 60000, env.primaryModel)
+        - call: waitForAgentHistoryReply
+          saveAs: submittalClarification
+          args:
+            - ref: env
+            - agent:qa:confirm-before-act-submittal
+            - lambda:
+                params: [text]
+                expr: "String(text).split('\\n').filter((line) => /^\\s*\\d+\\.\\s+/.test(line)).length >= 2 && !String(text).includes('SUBMITTAL-READY')"
+            - expr: resolveQaLiveTurnTimeoutMs(env, 30000, env.primaryModel)
+        - set: firstSubmittalQuestions
+          value:
+            expr: "submittalClarification.text.split('\\n').map((line) => line.trim()).filter((line) => /^\\d+\\.\\s+/.test(line)).join('\\n')"
+        - set: normalizedFirstSubmittalQuestions
+          value:
+            expr: "firstSubmittalQuestions.split('\\n').map((line) => line.replace(/^(\\d+)\\.\\s+option\\s+\\d+,\\s*/i, '$1. ')).join('\\n')"
+    - name: repeats the same ordered submittal clarification
+      actions:
+        - call: runAgentPrompt
+          args:
+            - ref: env
+            - sessionKey: agent:qa:confirm-before-act-submittal-repeat
+              message:
+                expr: config.submittalPrompt
+              provider:
+                expr: selected.provider
+              model:
+                expr: selected.model
+              timeoutMs:
+                expr: resolveQaLiveTurnTimeoutMs(env, 60000, env.primaryModel)
+        - call: waitForAgentHistoryReply
+          saveAs: repeatedSubmittalClarification
+          args:
+            - ref: env
+            - agent:qa:confirm-before-act-submittal-repeat
+            - lambda:
+                params: [text]
+                expr: "String(text).split('\\n').filter((line) => /^\\s*\\d+\\.\\s+/.test(line)).length >= 2"
+            - expr: resolveQaLiveTurnTimeoutMs(env, 30000, env.primaryModel)
+        - set: repeatedSubmittalQuestions
+          value:
+            expr: "repeatedSubmittalClarification.text.split('\\n').map((line) => line.trim()).filter((line) => /^\\d+\\.\\s+/.test(line)).join('\\n')"
+        - set: normalizedRepeatedSubmittalQuestions
+          value:
+            expr: "repeatedSubmittalQuestions.split('\\n').map((line) => line.replace(/^(\\d+)\\.\\s+option\\s+\\d+,\\s*/i, '$1. ')).join('\\n')"
+        - assert:
+            expr: "normalizedRepeatedSubmittalQuestions === normalizedFirstSubmittalQuestions"
+            message:
+              expr: "`same request produced different ordered choices: first=${firstSubmittalQuestions}; repeated=${repeatedSubmittalQuestions}`"
+    - name: resumes the submittal after a numbered choice
+      actions:
+        - call: runAgentPrompt
+          args:
+            - ref: env
+            - sessionKey: agent:qa:confirm-before-act-submittal
+              message: "1"
+              provider:
+                expr: selected.provider
+              model:
+                expr: selected.model
+              timeoutMs:
+                expr: resolveQaLiveTurnTimeoutMs(env, 60000, env.primaryModel)
+        - call: waitForAgentHistoryReply
+          saveAs: resumedSubmittal
+          args:
+            - ref: env
+            - agent:qa:confirm-before-act-submittal
+            - lambda:
+                params: [text]
+                expr: "String(text).includes('SUBMITTAL-READY')"
+            - expr: resolveQaLiveTurnTimeoutMs(env, 30000, env.primaryModel)
+    - name: asks for missing bid-to-budget inputs
+      actions:
+        - call: runAgentPrompt
+          args:
+            - ref: env
+            - sessionKey: agent:qa:confirm-before-act-bid
+              message:
+                expr: config.bidPrompt
+              provider:
+                expr: selected.provider
+              model:
+                expr: selected.model
+              timeoutMs:
+                expr: resolveQaLiveTurnTimeoutMs(env, 60000, env.primaryModel)
+        - call: waitForAgentHistoryReply
+          saveAs: bidClarification
+          args:
+            - ref: env
+            - agent:qa:confirm-before-act-bid
+            - lambda:
+                params: [text]
+                expr: "String(text).split('\\n').filter((line) => /^\\s*\\d+\\.\\s+/.test(line)).length >= 2 && !String(text).includes('BID-TO-BUDGET-READY')"
+            - expr: resolveQaLiveTurnTimeoutMs(env, 30000, env.primaryModel)
+    - name: asks for missing HCSS inputs
+      actions:
+        - call: runAgentPrompt
+          args:
+            - ref: env
+            - sessionKey: agent:qa:confirm-before-act-hcss
+              message:
+                expr: config.hcssPrompt
+              provider:
+                expr: selected.provider
+              model:
+                expr: selected.model
+              timeoutMs:
+                expr: resolveQaLiveTurnTimeoutMs(env, 60000, env.primaryModel)
+        - call: waitForAgentHistoryReply
+          saveAs: hcssClarification
+          args:
+            - ref: env
+            - agent:qa:confirm-before-act-hcss
+            - lambda:
+                params: [text]
+                expr: "String(text).split('\\n').filter((line) => /^\\s*\\d+\\.\\s+/.test(line)).length >= 2 && !String(text).includes('HCSS-READY')"
+            - expr: resolveQaLiveTurnTimeoutMs(env, 30000, env.primaryModel)
+    - name: proceeds immediately on a complete deterministic request
+      actions:
+        - call: runAgentPrompt
+          args:
+            - ref: env
+            - sessionKey: agent:qa:confirm-before-act-hcss-complete
+              message:
+                expr: config.completeHcssPrompt
+              provider:
+                expr: selected.provider
+              model:
+                expr: selected.model
+              timeoutMs:
+                expr: resolveQaLiveTurnTimeoutMs(env, 60000, env.primaryModel)
+        - call: waitForAgentHistoryReply
+          saveAs: completeHcss
+          args:
+            - ref: env
+            - agent:qa:confirm-before-act-hcss-complete
+            - lambda:
+                params: [text]
+                expr: "String(text).includes('HCSS-READY')"
+            - expr: resolveQaLiveTurnTimeoutMs(env, 30000, env.primaryModel)
+      detailsExpr: "({ submittalClarification: submittalClarification.text, resumedSubmittal: resumedSubmittal.text, bidClarification: bidClarification.text, hcssClarification: hcssClarification.text, completeHcss: completeHcss.text })"

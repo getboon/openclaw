@@ -28,6 +28,33 @@ afterEach(async () => {
   await tempDirs.cleanup();
 });
 
+function withTldr(content: string): string {
+  const normalized = content.trim();
+  const firstLineEnd = normalized.indexOf("\n");
+  const title = normalized.slice(0, firstLineEnd === -1 ? undefined : firstLineEnd);
+  const instructions = normalized
+    .slice(firstLineEnd === -1 ? normalized.length : firstLineEnd)
+    .trim();
+  return `${title}
+
+## TLDR
+
+This skill follows a reusable workflow from request to verified result.
+
+When you run this, the agent will:
+
+- Confirm the request and required context.
+- Follow the documented workflow in order.
+- Check the result before returning it.
+
+**Output:** A completed and verified result for the requested workflow.
+
+## Instructions
+
+${instructions}
+`;
+}
+
 describe("skill_workshop tool", () => {
   it("is exposed in the OpenClaw tool set", async () => {
     const workspaceDir = await tempDirs.make("openclaw-skill-workshop-tool-");
@@ -37,6 +64,19 @@ describe("skill_workshop tool", () => {
       disablePluginTools: true,
     });
     expect(tools.some((tool) => tool.name === "skill_workshop")).toBe(true);
+  });
+
+  it("documents the required TLDR scaffold in the proposal content schema", () => {
+    const tool = createSkillWorkshopTool({ workspaceDir: "/tmp/openclaw" });
+    const parameters = tool.parameters as {
+      properties?: Record<string, { description?: string }>;
+    };
+    const description = parameters.properties?.proposal_content?.description;
+
+    expect(description).toContain("## TLDR");
+    expect(description).toContain("When you run this, the agent will:");
+    expect(description).toContain("3-6");
+    expect(description).toContain("**Output:**");
   });
 
   it("stays exposed when autonomous proposal capture is disabled", async () => {
@@ -88,7 +128,9 @@ describe("skill_workshop tool", () => {
       action: "create",
       name: "Weather Planner",
       description: "Plan around current weather",
-      proposal_content: "# Weather Planner\n\nCheck weather before outdoor recommendations.\n",
+      proposal_content: withTldr(
+        "# Weather Planner\n\nCheck weather before outdoor recommendations.",
+      ),
       support_files: [
         {
           path: "references/weather.md",
@@ -158,7 +200,7 @@ describe("skill_workshop tool", () => {
     const revised = await tool.execute("call-2", {
       action: "revise",
       proposal_id: (result.details as { id: string }).id,
-      proposal_content: "# Weather Planner\n\nCheck weather, alerts, and timing.\n",
+      proposal_content: withTldr("# Weather Planner\n\nCheck weather, alerts, and timing."),
       support_files: [
         {
           path: "references/weather.md",
@@ -246,7 +288,9 @@ describe("skill_workshop tool", () => {
     const revisedByName = await tool.execute("call-5", {
       action: "revise",
       name: "weather-planner",
-      proposal_content: "# Weather Planner\n\nCheck weather, alerts, timing, and location.\n",
+      proposal_content: withTldr(
+        "# Weather Planner\n\nCheck weather, alerts, timing, and location.",
+      ),
     });
 
     expect(revisedByName.details).toMatchObject({
@@ -267,7 +311,9 @@ describe("skill_workshop tool", () => {
       action: "create",
       name: "Weather Planner",
       description: "Plan around current weather",
-      proposal_content: "# Weather Planner\n\nCheck weather before outdoor recommendations.\n",
+      proposal_content: withTldr(
+        "# Weather Planner\n\nCheck weather before outdoor recommendations.",
+      ),
       support_files: [
         {
           path: "references/weather.md",
@@ -310,7 +356,7 @@ describe("skill_workshop tool", () => {
       action: "update",
       skill_name: "weather-planner",
       description: "Refresh weather planning steps",
-      proposal_content: "# Weather Planner\n\nCheck weather, alerts, and timing.\n",
+      proposal_content: withTldr("# Weather Planner\n\nCheck weather, alerts, and timing."),
     });
 
     expect((update.content[0] as { text: string }).text).toBe(
@@ -326,7 +372,7 @@ describe("skill_workshop tool", () => {
       action: "create",
       name: "Rejected Skill",
       description: "Rejected proposal",
-      proposal_content: "# Rejected Skill\n\nDo not apply this.\n",
+      proposal_content: withTldr("# Rejected Skill\n\nDo not apply this."),
     });
     const rejectedId = (rejected.details as { id: string }).id;
     const rejectResult = await tool.execute("call-4", {
@@ -352,7 +398,7 @@ describe("skill_workshop tool", () => {
       action: "create",
       name: "Quarantined Skill",
       description: "Quarantined proposal",
-      proposal_content: "# Quarantined Skill\n\nDo not apply this.\n",
+      proposal_content: withTldr("# Quarantined Skill\n\nDo not apply this."),
     });
     const quarantinedId = (quarantined.details as { id: string }).id;
     const quarantineResult = await tool.execute("call-6", {
@@ -394,13 +440,13 @@ describe("skill_workshop tool", () => {
       action: "create",
       name: "First Workspace Skill",
       description: "First workspace proposal",
-      proposal_content: "# First\n",
+      proposal_content: withTldr("# First"),
     });
     const second = await secondTool.execute("call-2", {
       action: "create",
       name: "Second Workspace Skill",
       description: "Second workspace proposal",
-      proposal_content: "# Second\n",
+      proposal_content: withTldr("# Second"),
     });
 
     const listed = await firstTool.execute("call-3", {

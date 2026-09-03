@@ -1461,7 +1461,7 @@ export const FIELD_HELP: Record<string, string> = {
     "Optional PDF model (provider/model) for the PDF analysis tool. Defaults to imageModel, then session model.",
   "agents.defaults.pdfModel.fallbacks": "Ordered fallback PDF models (provider/model).",
   "agents.defaults.pdfMaxBytesMb":
-    "Maximum PDF file size in megabytes for the PDF tool (default: 10).",
+    "Maximum PDF file size in megabytes for the PDF tool (default: 10). Clamped to 768: PDFium runs in a 2GiB WASM heap and copies the whole file into it, so a larger value cannot be honored.",
   "agents.defaults.pdfMaxPages":
     "Maximum number of PDF pages to process for the PDF tool (default: 20).",
   "agents.defaults.imageMaxDimensionPx":

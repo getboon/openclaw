@@ -1583,6 +1583,21 @@ export function createAnthropicMessagesTransportStreamFn(): StreamFn {
         if (output.stopReason === "aborted" || output.stopReason === "error") {
           throw new Error(output.errorMessage ?? "An unknown error occurred");
         }
+        // message_stop alone isn't proof of a complete turn: a block opened
+        // via content_block_start but never closed (e.g. a tool_use whose
+        // JSON never finished streaming) leaves a self-contradictory
+        // message (stopReason set, no matching content block) that can
+        // permanently poison a session on resume/retry. Checked last so a
+        // refusal/abort/error already caught above — which can legitimately
+        // leave a block open — keeps its own, more specific error message.
+        // Scans `blocks` directly rather than `blockIndexes.size`: a
+        // duplicate content_block_start reusing a wire index (no
+        // content_block_stop in between) overwrites the map entry for the
+        // first block, so a single later content_block_stop would clear
+        // blockIndexes to size 0 while the first block is still open.
+        if (blocks.some((block) => block.index !== undefined)) {
+          throw new Error("Anthropic stream ended with an unclosed content block");
+        }
         refusalBuffer?.flush();
         finalizeTransportStream({ stream, output });
       } catch (error) {

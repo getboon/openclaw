@@ -17,12 +17,24 @@ export type SandboxedBridgeMediaPathConfig = {
 
 export function createSandboxBridgeReadFile(params: {
   sandbox: Pick<SandboxedBridgeMediaPathConfig, "root" | "bridge">;
+  maxBytes?: number;
 }): (filePath: string) => Promise<Buffer> {
-  return async (filePath: string) =>
-    await params.sandbox.bridge.readFile({
+  return async (filePath: string) => {
+    // Refuse an oversized file from its stat, before readFile materializes it. Keeps the
+    // sandboxed path aligned with the host path, which caps the read inside fs-safe.
+    if (params.maxBytes !== undefined) {
+      const stat = await params.sandbox.bridge.stat({ filePath, cwd: params.sandbox.root });
+      if (stat && stat.size > params.maxBytes) {
+        throw new Error(
+          `Media file too large: ${filePath} (${stat.size} bytes, limit: ${params.maxBytes} bytes)`,
+        );
+      }
+    }
+    return await params.sandbox.bridge.readFile({
       filePath,
       cwd: params.sandbox.root,
     });
+  };
 }
 
 export async function resolveSandboxedBridgeMediaPath(params: {

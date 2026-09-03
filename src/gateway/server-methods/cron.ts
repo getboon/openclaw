@@ -15,7 +15,12 @@ import {
 } from "../../../packages/gateway-protocol/src/index.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolveCronDeliveryPreviews } from "../../cron/delivery-preview.js";
-import { assertCronDeliveryInputNonBlankFields } from "../../cron/delivery-target-validation.js";
+import {
+  assertCronAnnounceDeliveryResolvesRecipient,
+  assertCronDeliveryInputNonBlankFields,
+  hasExplicitFailureDestinationOverride,
+  type CronAnnounceRecipientJob,
+} from "../../cron/delivery-target-validation.js";
 import { normalizeCronJobCreate, normalizeCronJobPatch } from "../../cron/normalize.js";
 import {
   isInvalidCronRunLogJobIdError,
@@ -24,7 +29,7 @@ import {
 } from "../../cron/run-log.js";
 import { applyJobPatch } from "../../cron/service/jobs.js";
 import { isInvalidCronSessionTargetIdError } from "../../cron/session-target.js";
-import type { CronDelivery, CronJob, CronJobCreate, CronJobPatch } from "../../cron/types.js";
+import type { CronJob, CronJobCreate, CronJobPatch } from "../../cron/types.js";
 import { validateScheduleTimestamp } from "../../cron/validate-timestamp.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { listConfiguredMessageChannels } from "../../infra/outbound/channel-selection.js";
@@ -154,36 +159,33 @@ function assertCompatibleAnnounceTarget(params: {
   }
 }
 
-async function assertValidCronAnnounceDelivery(params: {
+async function assertCompatibleAndConfiguredCronAnnounceDelivery(params: {
   cfg: OpenClawConfig;
-  delivery?: CronDelivery;
+  job: CronAnnounceRecipientJob;
 }) {
-  if (params.delivery && (params.delivery.mode ?? "announce") === "announce") {
+  const delivery = params.job.delivery;
+  if (delivery && (delivery.mode ?? "announce") === "announce") {
     assertCompatibleAnnounceTarget({
-      channel: params.delivery.channel,
-      to: params.delivery.to,
+      channel: delivery.channel,
+      to: delivery.to,
       field: "delivery.channel",
     });
     await assertConfiguredAnnounceChannel({
       cfg: params.cfg,
       channel: resolveAnnounceValidationChannel({
-        channel: params.delivery.channel,
-        to: params.delivery.to,
+        channel: delivery.channel,
+        to: delivery.to,
       }),
       field: "delivery.channel",
     });
   }
 
-  const failureDestination = params.delivery?.failureDestination;
-  if (failureDestination && (failureDestination.mode ?? "announce") === "announce") {
-    if (
-      failureDestination.channel === undefined &&
-      failureDestination.to === undefined &&
-      failureDestination.accountId === undefined &&
-      failureDestination.mode === undefined
-    ) {
-      return;
-    }
+  const failureDestination = delivery?.failureDestination;
+  if (
+    failureDestination &&
+    hasExplicitFailureDestinationOverride(failureDestination) &&
+    (failureDestination.mode ?? "announce") === "announce"
+  ) {
     assertCompatibleAnnounceTarget({
       channel: failureDestination.channel,
       to: failureDestination.to,
@@ -201,10 +203,13 @@ async function assertValidCronAnnounceDelivery(params: {
 }
 
 async function assertValidCronCreateDelivery(cfg: OpenClawConfig, jobCreate: CronJobCreate) {
-  await assertValidCronAnnounceDelivery({
-    cfg,
-    delivery: jobCreate.delivery,
-  });
+  await assertCompatibleAndConfiguredCronAnnounceDelivery({ cfg, job: jobCreate });
+  // Channel/prefix checks above only prove an explicit failureDestination
+  // override is well-formed; they do not prove anyone will ever receive it. An
+  // isolated job with an explicit failureDestination override but no session
+  // of its own has no way to resolve that recipient at run time — reject that
+  // here so a job's own failure alert does not also fail silently on every run.
+  assertCronAnnounceDeliveryResolvesRecipient({ cfg, job: jobCreate });
 }
 
 async function assertValidCronUpdatePatch(params: {
@@ -221,18 +226,28 @@ async function assertValidCronUpdatePatch(params: {
     defaultAgentId: params.defaultAgentId,
   });
   if ("delivery" in params.patch) {
-    const delivery =
+    if (
       params.patch.delivery?.channel === null &&
       nextJob.delivery &&
       (nextJob.delivery.mode ?? "announce") === "announce" &&
       nextJob.delivery.channel === undefined &&
       resolveTargetPrefixedChannel(nextJob.delivery.to) === undefined
-        ? { ...nextJob.delivery, channel: "last" as const }
-        : nextJob.delivery;
-    await assertValidCronAnnounceDelivery({
-      cfg: params.cfg,
-      delivery,
-    });
+    ) {
+      nextJob.delivery = { ...nextJob.delivery, channel: "last" as const };
+    }
+    await assertCompatibleAndConfiguredCronAnnounceDelivery({ cfg: params.cfg, job: nextJob });
+  }
+  // The recipient-basis check depends on sessionTarget/sessionKey as well as
+  // delivery, so it must also re-run when those change without delivery being
+  // touched — otherwise a patch that moves a job to sessionTarget="isolated"
+  // could silently orphan an existing failureDestination override that was
+  // only valid because of the session the job used to have.
+  if (
+    "delivery" in params.patch ||
+    "sessionTarget" in params.patch ||
+    "sessionKey" in params.patch
+  ) {
+    assertCronAnnounceDeliveryResolvesRecipient({ cfg: params.cfg, job: nextJob });
   }
 }
 

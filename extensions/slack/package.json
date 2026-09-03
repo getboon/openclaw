@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/slack",
-  "version": "2026.6.11-boon.30",
+  "version": "2026.6.11-boon.33",
   "description": "OpenClaw Slack channel plugin for channels, DMs, commands, and app events.",
   "repository": {
     "type": "git",

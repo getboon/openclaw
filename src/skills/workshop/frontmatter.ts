@@ -87,6 +87,10 @@ export function stripProposalFrontmatterForSkill(content: string): string {
   return result.endsWith("\n") ? result : `${result}\n`;
 }
 
+export function extractSkillMarkdownBody(content: string): string {
+  return stripFrontmatterBlock(content).trimStart();
+}
+
 function extractFrontmatterBlock(content: string): string | undefined {
   const normalized = normalizeNewlines(content);
   if (!normalized.startsWith("---")) {
