@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.35
+
+Makes the signed gateway-audience OBO actually reach the usage meter — closing the last hop that #185 (boon.34) left open — so internal `@getboon.ai` test traffic is finally excluded from customer agent-token metering, and stops a provisioned smoke turn's signed session identity from being overwritten.
+
+- **#190 (ENG-19115):** the tier-1 signed-OBO meter-skip still never fired on boon.34. #185 correctly read the per-turn OBO off the inbound `ctx` in `get-reply-run` and put it on `run.oboToken`, but `followup-runner` builds the embedded runner params from an explicit field list off the run block (`senderId`, `senderName`, `channelContext`, …) and never forwarded `oboToken` — and `FollowupRun.run` never declared the field, so no hop could legally reference it. Because `const followupRun = {…}` is untyped, TypeScript inferred the literal and structural typing let the value ride the object to that hop, where it was silently dropped: `params.oboToken` was always `undefined` in `attempt.ts` and `x-boon-gateway-obo-token` was never emitted. The gateway fell back to tier-2 email, or — for internal-test senders whose identity is not `@getboon.ai` — classified the turn as neither tier and fully metered it, confirmed live on org 543 (`arief-openclaw-test`) running boon.34 where the gateway logged only access lines for the turn. `oboToken` is now declared on `FollowupRun.run` and forwarded alongside `senderId`/`channelContext`; regression tests cover forwarded-when-present and undefined-when-absent (omit-when-absent kept, so the header is still skipped when no OBO was minted).
+- **#141 (ENG-15749):** a provisioned smoke turn could have its signed per-turn provider session headers overwritten by ordinary request attribution, so the gateway rejected the otherwise valid smoke capability before the model request ran. Per-turn provider session headers are now preserved through attribution.
+- Base = `2026.6.11-boon.34`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.35` in lockstep. No other code changes; #141 and #190 were merged onto `boon` before this release.
+
 ## 2026.6.11-boon.34
 
 Fixes the signed gateway-audience OBO token never reaching the usage meter — so internal `@getboon.ai` test traffic kept metering against customer agent tokens — and hardens Sentry correlation and cron failure-destination validation.
