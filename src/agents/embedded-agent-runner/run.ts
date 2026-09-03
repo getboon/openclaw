@@ -3901,6 +3901,13 @@ async function runEmbeddedAgentInternal(
             postCompactionGuard.armPostCompaction();
             continue;
           }
+          // Neither reasoning-only nor empty-response fired this iteration (both
+          // `continue` above when they do), so any value they're still holding is
+          // stale from an earlier iteration — clear all four alongside each other
+          // so a later iteration's prompt additions can never mix a no-longer-
+          // applicable instruction in with whichever retry actually fires next.
+          reasoningOnlyRetryInstruction = null;
+          emptyResponseRetryInstruction = null;
           compactionContinuationRetryInstruction = null;
           unfinishedStepsRetryInstruction = null;
           if (
@@ -3911,6 +3918,7 @@ async function runEmbeddedAgentInternal(
               hasNonTerminalToolErrorWarning: (payloadsWithToolMedia ?? []).some((payload) =>
                 isReplyPayloadNonTerminalToolErrorWarning(payload),
               ),
+              hadPotentialSideEffects: accumulatedReplayState.hadPotentialSideEffects === true,
               retryAttempts: unfinishedStepsRetryAttempts,
               maxRetryAttempts: MAX_UNFINISHED_STEPS_RETRY_ATTEMPTS,
             })
