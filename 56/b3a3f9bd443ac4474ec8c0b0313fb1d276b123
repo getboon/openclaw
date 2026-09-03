@@ -1,0 +1,26 @@
+.github/workflows/regression-coverage.yml
+  s_cbaa86f7f85508::t_586376585eb08e 5
+  s_cbaa86f7f85508::t_11fcfa5441cdad 1-4,6-74
+.github/pull_request_template.md
+  s_cbaa86f7f85508::t_11fcfa5441cdad 58-65
+AGENTS.md
+  s_cbaa86f7f85508::t_11fcfa5441cdad 24
+.github/CODEOWNERS
+  s_cbaa86f7f85508::t_11fcfa5441cdad 72-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "56b3a3f9bd443ac4474ec8c0b0313fb1d276b123",
+  "prompts": {},
+  "sessions": {
+    "s_cbaa86f7f85508": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f9ec0dc67ffesfd6dyK1X0RUSN",
+        "model": "global.openai.gpt-5.6-sol"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
