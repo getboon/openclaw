@@ -21,6 +21,7 @@ Skills own workflows; root owns hard policy and routing.
 - Product/docs/UI/changelog wording: "plugin/plugins"; `extensions/` is internal.
 - New channel/plugin/app/doc surface: update `.github/labeler.yml` + GH labels.
 - New `AGENTS.md`: add sibling `CLAUDE.md` symlink; edit `AGENTS.md` only.
+- Agent-behavior paths are registered in `.github/workflows/regression-coverage.yml`. When adding or moving behavior outside an existing glob, add the narrowest useful file or directory glob there in the same PR. Covered changes link a scenario PR under `getboon/boon/eval/agent-regression/scenarios/` through the PR body's `Regression:` trailer; only a reviewer may apply `no-regression-needed`.
 
 ## ClawSweeper Review Policy
 

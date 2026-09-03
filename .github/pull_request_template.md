@@ -55,3 +55,11 @@ changes when it clarifies the result.
 Reviewers will inspect the code, tests, and CI. Use this section to make the
 validation easy to understand, not to restate the diff.
 -->
+
+## Regression Coverage
+
+<!-- Agent-behavior change? Link the companion scenario PR in getboon/boon: -->
+
+Regression:
+
+<!-- No agent-behavior change? A reviewer may apply no-regression-needed. -->

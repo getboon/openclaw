@@ -1,0 +1,74 @@
+---
+name: Regression coverage
+
+on:
+  pull_request_target:  # zizmor: ignore[dangerous-triggers] metadata only
+    branches: [boon]
+    types: [opened, edited, synchronize, labeled, unlabeled, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  coverage:
+    name: Regression coverage
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify companion scenario
+        shell: bash
+        env:
+          AGENT_PATHS: |
+            .github/workflows/regression-coverage.yml
+            src/agents/**
+            src/llm/**
+            src/auto-reply/**
+            src/plugins/**
+            src/plugin-sdk/**
+            src/context-engine/**
+            src/skills/**
+            packages/agent-core/src/**
+            packages/llm-core/src/**
+            packages/llm-runtime/src/**
+            packages/tool-call-repair/src/**
+            !**/*.test.*
+            !**/*.spec.*
+            !**/__tests__/**
+            !**/test/**
+            !**/tests/**
+            !**/fixtures/**
+          WARN_ONLY: "true"
+          GITHUB_TOKEN: ${{ github.token }}
+          REGRESSION_GATE_TOKEN: ${{ secrets.REGRESSION_GATE_TOKEN }}
+          PR_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          set -euo pipefail
+          if [ -z "$REGRESSION_GATE_TOKEN" ]; then
+            if [ "$WARN_ONLY" = "true" ]; then
+              echo "::warning::Regression coverage:" \
+                "REGRESSION_GATE_TOKEN is unavailable."
+              exit 0
+            fi
+            echo "::error::Regression coverage:" \
+              "REGRESSION_GATE_TOKEN is unavailable."
+            exit 1
+          fi
+          gate="$RUNNER_TEMP/regression-coverage"
+          gate_ref="27603ecc313a7b2e10b9c9c2f1057406694f8604"
+          gate_path="repos/getboon/boon/contents/bin/regression-coverage"
+          GH_TOKEN="$REGRESSION_GATE_TOKEN" gh api \
+            "$gate_path?ref=$gate_ref" \
+            --jq '.content' | base64 --decode > "$gate"
+          bash "$gate"
