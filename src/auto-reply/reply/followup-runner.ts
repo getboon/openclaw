@@ -1158,6 +1158,11 @@ export function createFollowupRunner(params: {
                 senderUsername: run.senderUsername,
                 senderE164: run.senderE164,
                 channelContext: run.channelContext,
+                // Gateway-audience OBO → x-boon-gateway-obo-token on the model call
+                // (ENG-19115). get-reply-run sets run.oboToken from the inbound ctx;
+                // this hop is the only path into RunEmbeddedPiAgentParams.oboToken —
+                // omitting it here dropped the token and the header was never emitted.
+                oboToken: run.oboToken,
                 sessionFile: run.sessionFile,
                 agentDir: run.agentDir,
                 workspaceDir: run.workspaceDir,
