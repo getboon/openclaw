@@ -96,12 +96,16 @@ export function shouldRetryToolReadProbe(params: {
   provider: string;
   attempt: number;
   maxAttempts: number;
+  retryKnownNonceMismatch?: boolean;
 }): boolean {
   if (params.attempt + 1 >= params.maxAttempts) {
     return false;
   }
   if (hasExpectedToolNonce(params.text, params.nonceA, params.nonceB)) {
     return false;
+  }
+  if (params.retryKnownNonceMismatch) {
+    return true;
   }
   if (hasMalformedToolOutput(params.text)) {
     return true;
@@ -110,7 +114,10 @@ export function shouldRetryToolReadProbe(params: {
     return true;
   }
   const lower = normalizeLowercaseStringOrEmpty(params.text);
-  if (params.provider === "mistral" && (lower.includes("noncea=") || lower.includes("nonceb="))) {
+  const hasMistralProbeMarker = ["left=", "right=", "noncea=", "nonceb="].some((marker) =>
+    lower.includes(marker),
+  );
+  if (params.provider === "mistral" && hasMistralProbeMarker) {
     return true;
   }
   return false;
@@ -123,12 +130,16 @@ export function shouldRetryExecReadProbe(params: {
   provider: string;
   attempt: number;
   maxAttempts: number;
+  retryKnownNonceMismatch?: boolean;
 }): boolean {
   if (params.attempt + 1 >= params.maxAttempts) {
     return false;
   }
   if (hasExpectedSingleNonce(params.text, params.nonce)) {
     return false;
+  }
+  if (params.retryKnownNonceMismatch) {
+    return true;
   }
   if (params.provider === "anthropic" && isLikelyToolNonceRefusal(params.text)) {
     return true;

@@ -102,7 +102,7 @@ overrides:
   hono: 4.12.25
   "@hono/node-server": 1.19.14
   axios: 1.18.1
-  fast-uri: 3.1.6
+  fast-uri: 4.1.2
   follow-redirects: 1.16.0
   defu: 6.1.5
   fast-xml-parser: 5.7.0
@@ -120,7 +120,7 @@ overrides:
   tar: 7.5.21
   tough-cookie: 4.1.3
   yauzl: 3.2.1
-  protobufjs: 7.6.4
+  protobufjs: 7.6.5
   uuid: 14.0.0
   # Security-audit bumps (security-fast / pnpm-audit-prod): force transitive
   # deps off versions with high/critical advisories. Conservative in-range
@@ -133,6 +133,13 @@ overrides:
   # GHSA-r28c-9q8g-f849: postcss <=8.5.17 path traversal in source-map auto-load.
   postcss: 8.5.22
   "@opentelemetry/propagator-jaeger": 2.9.0
+  # sdk-node 0.220.0 (new at upstream 2026.6.34) pulls @opentelemetry/sdk-trace
+  # alongside sdk-trace-base, and this repo uses nodeLinker: hoisted -- so the single
+  # root copy decides. boon's @sentry/node root dep (bundled sentry-monitor) drags in
+  # sdk-trace-base 1.30.1, which then shadows the 2.9.0 that diagnostics-otel and
+  # sdk-node both require, and the 1.x/2.x Span types are nominally incompatible.
+  # Unify on 2.9.0, same direction as the @opentelemetry/core override above.
+  "@opentelemetry/sdk-trace-base": 2.9.0
   # Scope the undici security pin per major line. jsdom needs `undici@^7.25.0`
   # and imports lib/handler/wrap-handler.js, removed in 8.x, while the 6.11
   # extensions depend on undici 8.5.0 directly — a single flat override would

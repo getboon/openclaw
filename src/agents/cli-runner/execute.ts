@@ -363,10 +363,7 @@ function formatCliEnvKeyList(keys: readonly string[]): string {
 function buildCliEnvMcpLog(childEnv: Record<string, string>): string {
   return [
     `token=${childEnv.OPENCLAW_MCP_TOKEN ? "set" : "missing"}`,
-    `sessionKey=${childEnv.OPENCLAW_MCP_SESSION_KEY ? "set" : "<empty>"}`,
-    `agentId=${childEnv.OPENCLAW_MCP_AGENT_ID || "<empty>"}`,
-    `accountId=${childEnv.OPENCLAW_MCP_ACCOUNT_ID || "<empty>"}`,
-    `messageChannel=${childEnv.OPENCLAW_MCP_MESSAGE_CHANNEL || "<empty>"}`,
+    `capture=${childEnv.OPENCLAW_MCP_CLI_CAPTURE_KEY ? "set" : "missing"}`,
   ].join(" ");
 }
 
@@ -729,7 +726,7 @@ export async function executePreparedCliRun(
           });
           cliBackendLog.info(`cli argv: ${backend.command} ${logArgs.join(" ")}`);
           cliBackendLog.info(`cli env auth: ${buildCliEnvAuthLog(env)}`);
-          if (env.OPENCLAW_MCP_TOKEN || env.OPENCLAW_MCP_SESSION_KEY || env.OPENCLAW_MCP_AGENT_ID) {
+          if (env.OPENCLAW_MCP_TOKEN) {
             cliBackendLog.info(`cli env mcp: ${buildCliEnvMcpLog(env)}`);
           }
         }
@@ -828,6 +825,7 @@ export async function executePreparedCliRun(
           if (gatewayCaptureKey) {
             throw new Error("CLI MCP capture key changed during an active attempt");
           }
+          context.preparedBackend.mcpClientGrantCapture?.activate(captureKey);
           gatewayCaptureKey = captureKey;
           const isAdmittedPotentialMessagingDelivery = (toolName: string) => {
             return isMessagingTool(normalizeCliMessagingToolName(toolName));
@@ -903,6 +901,7 @@ export async function executePreparedCliRun(
           name: string;
           args: Record<string, unknown>;
         }) => {
+          params.replyOperation?.recordActivity();
           observedCliActivity = true;
           const toolName = normalizeCliMessagingToolName(event.name);
           if (
@@ -945,6 +944,7 @@ export async function executePreparedCliRun(
           isError: boolean;
           result?: unknown;
         }) => {
+          params.replyOperation?.recordActivity();
           observedCliActivity = true;
           const pending = pendingMessagingCalls.get(event.toolCallId);
           if (pending) {
@@ -974,6 +974,7 @@ export async function executePreparedCliRun(
         };
         let commentaryCounter = 0;
         const emitCliCommentaryText = (text: string) => {
+          params.replyOperation?.recordActivity();
           if (!emitLiveEvents) {
             return;
           }
@@ -997,6 +998,7 @@ export async function executePreparedCliRun(
         };
         const emitCliAssistantDelta = ({ text, delta }: CliStreamingDelta) => {
           if (text || delta) {
+            params.replyOperation?.recordActivity();
             observedCliActivity = true;
           }
           if (!emitLiveEvents) {
@@ -1124,6 +1126,7 @@ export async function executePreparedCliRun(
             onStdout: (chunk: string) => {
               stdoutBytes += Buffer.byteLength(chunk);
               stdoutHash.update(chunk);
+              params.replyOperation?.recordActivity();
               stdoutTail = appendCliOutputTail(stdoutTail, chunk);
               if (!stdoutParseExceeded) {
                 const nextStdoutParse = appendCliOutputParseBuffer(stdoutParseBuffer, chunk);
@@ -1135,6 +1138,7 @@ export async function executePreparedCliRun(
             onStderr: (chunk: string) => {
               stderrBytes += Buffer.byteLength(chunk);
               stderrHash.update(chunk);
+              params.replyOperation?.recordActivity();
               stderrTail = appendCliOutputTail(stderrTail, chunk);
               if (!stderrParseExceeded) {
                 const nextStderrParse = appendCliOutputParseBuffer(stderrParseBuffer, chunk);
@@ -1441,7 +1445,13 @@ export async function executePreparedCliRun(
           recordRunError(error);
         } finally {
           if (gatewayCaptureKey) {
-            clearMcpLoopbackToolCallCapture(gatewayCaptureKey);
+            // Fence this exact grant generation before clearing observers;
+            // otherwise a late request escapes accounting.
+            try {
+              context.preparedBackend.mcpClientGrantCapture?.deactivate(gatewayCaptureKey);
+            } finally {
+              clearMcpLoopbackToolCallCapture(gatewayCaptureKey);
+            }
           }
         }
         try {

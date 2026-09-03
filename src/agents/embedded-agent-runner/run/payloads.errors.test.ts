@@ -770,6 +770,25 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads[1]?.text).toContain("Write");
   });
 
+  it("still surfaces a read-only exec failure when the turn produced no reply", () => {
+    // Regression: boon keeps the ENG-16330 exec suppression below the mutating
+    // branch, but it must require a delivered reply. A read-only exec failure
+    // (mutatingAction false) with no assistant text skips the mutating branch, so
+    // an unconditional suppression returned zero payloads and the failure vanished
+    // silently -- the user saw nothing at all.
+    const payloads = buildPayloads({
+      lastToolError: {
+        toolName: "exec",
+        error: "/bin/bash: line 1: python: command not found",
+        mutatingAction: false,
+      },
+    });
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.isError).toBe(true);
+    expect(payloads[0]?.text).toContain("Exec");
+  });
+
   it("reframes a recovered exec timeout on a successful turn as an intermediate status", () => {
     // A recovered exec/bash/process error on a turn that still produced a
     // real reply is non-terminal — the deliverable is the answer, not the command
@@ -851,6 +870,7 @@ describe("buildEmbeddedRunPayloads", () => {
       lastToolError: {
         toolName: "exec",
         error: "/bin/bash: line 1: python: command not found",
+        mutatingAction: true,
       },
     });
 

@@ -196,7 +196,13 @@ export function shouldSurfaceToolFailure(
   if (isMutatingToolError) {
     return !ctx.hasUserFacingErrorReply && !ctx.hasUserFacingFailureAcknowledgement;
   }
-  if (isExecLikeToolName(toolError.toolName) && !ctx.includeDetails) {
+  // ENG-16330: a recovered exec/process/tmux failure is non-terminal status, not
+  // an error — the model saw the exit code and still produced the answer, so with
+  // no details to show a warning badge only alarms the customer. The suppression
+  // REQUIRES a delivered reply: a read-only exec failure (mutatingAction false)
+  // with no reply must still surface, or the failure vanishes silently and the
+  // user sees nothing (see payloads.errors.test.ts's read-only/no-reply case).
+  if (isExecLikeToolName(toolError.toolName) && ctx.hasUserFacingReply && !ctx.includeDetails) {
     return false;
   }
   return !ctx.hasUserFacingReply && !isRecoverableToolError(toolError.error);

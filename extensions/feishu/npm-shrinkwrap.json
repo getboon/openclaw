@@ -1,19 +1,19 @@
 {
   "name": "@openclaw/feishu",
-  "version": "2026.6.11",
+  "version": "2026.6.34-boon.1",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/feishu",
-      "version": "2026.6.11",
+      "version": "2026.6.34-boon.1",
       "dependencies": {
         "@larksuiteoapi/node-sdk": "1.66.0",
         "typebox": "1.1.39",
         "zod": "4.4.3"
       },
       "peerDependencies": {
-        "openclaw": ">=2026.6.11"
+        "openclaw": ">=2026.6.34-boon.1"
       },
       "peerDependenciesMeta": {
         "openclaw": {
@@ -478,9 +478,9 @@
       }
     },
     "node_modules/protobufjs": {
-      "version": "7.6.4",
-      "resolved": "https://registry.npmjs.org/protobufjs/-/protobufjs-7.6.4.tgz",
-      "integrity": "sha512-RJJPTTpvFfHcWLkIa2JFWK4XvtSzS0yEWDmunqHXli1h3JlkbcQZXDZdcWxv+JK3Xsl5/UFDPZ0iGm7DAengYw==",
+      "version": "7.6.5",
+      "resolved": "https://registry.npmjs.org/protobufjs/-/protobufjs-7.6.5.tgz",
+      "integrity": "sha512-/FPD0nUc9jH6rfFjji9IBqOz4pcSE3CsT1m7Ep6Mdb0LxSUMj8hgl6GomOvZzpNpAqqGaXA0P3VSrZLFzIhQrw==",
       "hasInstallScript": true,
       "license": "BSD-3-Clause",
       "dependencies": {

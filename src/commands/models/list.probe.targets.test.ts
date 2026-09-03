@@ -1,6 +1,9 @@
 // Model probe target tests cover selecting provider/model targets for probing.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AuthProfileStore } from "../../agents/auth-profiles.js";
+import type {
+  AuthProfileEligibilityReasonCode,
+  AuthProfileStore,
+} from "../../agents/auth-profiles.js";
 import type { ModelCatalogEntry } from "../../agents/model-catalog.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { withEnvAsync } from "../../test-utils/env.js";
@@ -11,10 +14,12 @@ let mockAllowedProfiles: string[];
 const loadModelCatalogMock = vi.fn<() => Promise<ModelCatalogEntry[]>>(async () => []);
 
 const resolveAuthProfileOrderMock = vi.fn(() => mockAllowedProfiles);
-const resolveAuthProfileEligibilityMock = vi.fn(() => ({
-  eligible: false,
-  reasonCode: "invalid_expires" as const,
-}));
+const resolveAuthProfileEligibilityMock = vi.fn(
+  (): { eligible: boolean; reasonCode: AuthProfileEligibilityReasonCode } => ({
+    eligible: false,
+    reasonCode: "invalid_expires",
+  }),
+);
 const resolveSecretRefStringMock = vi.fn(async () => "resolved-secret");
 
 vi.mock("../../agents/model-catalog.js", () => ({
@@ -200,6 +205,31 @@ describe("buildProbeTargets reason codes", () => {
         profileId: "anthropic:default",
         provider: "anthropic",
         reasonCode: "invalid_expires",
+        source: "profile",
+        status: "unknown",
+      },
+    ]);
+  });
+
+  it("reports malformed_api_key with an actionable diagnosis instead of collapsing to ineligible_profile", async () => {
+    resolveAuthProfileEligibilityMock.mockReturnValue({
+      eligible: false,
+      reasonCode: "malformed_api_key",
+    });
+
+    const plan = await buildAnthropicProbePlan(["anthropic:default"]);
+
+    expect(plan.targets).toStrictEqual([]);
+    expect(plan.results).toStrictEqual([
+      {
+        error:
+          "Auth profile credentials are missing or expired.\n↳ Auth reason [malformed_api_key]: paste the API key value, not an onboarding command.",
+        label: "anthropic:default",
+        mode: "token",
+        model: "anthropic/claude-sonnet-4-6",
+        profileId: "anthropic:default",
+        provider: "anthropic",
+        reasonCode: "malformed_api_key",
         source: "profile",
         status: "unknown",
       },

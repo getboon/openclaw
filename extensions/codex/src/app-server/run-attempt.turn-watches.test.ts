@@ -121,6 +121,42 @@ describe("createCodexAttemptTurnWatchController", () => {
 });
 
 describe("runCodexAppServerAttempt turn watches", () => {
+  it.each([
+    {
+      name: "keeps the 30-minute floor for the implicit 48-hour run timeout",
+      runTimeoutOverrideMs: undefined,
+      expectedTerminalIdleTimeoutMs: 30 * 60_000,
+    },
+    {
+      name: "follows an explicit 45-minute run timeout",
+      runTimeoutOverrideMs: 45 * 60_000,
+      expectedTerminalIdleTimeoutMs: 45 * 60_000,
+    },
+  ])("$name", async ({ runTimeoutOverrideMs, expectedTerminalIdleTimeoutMs }) => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const harness = createStartedThreadHarness();
+    const params = createParams(
+      path.join(tempDir, "session.jsonl"),
+      path.join(tempDir, "workspace"),
+    );
+    params.timeoutMs = 48 * 60 * 60_000;
+    params.runTimeoutOverrideMs = runTimeoutOverrideMs;
+    const run = runCodexAppServerAttempt(params);
+
+    await harness.waitForMethod("turn/start");
+    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), expectedTerminalIdleTimeoutMs);
+    await harness.notify({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        turn: { id: "turn-1", status: "completed", items: [] },
+      },
+    });
+
+    await expect(run).resolves.toMatchObject({ aborted: false, timedOut: false });
+  });
+
   it("releases the session when Codex never completes after a dynamic tool response", async () => {
     let handleRequest:
       | ((request: { id: string; method: string; params?: unknown }) => Promise<unknown>)
@@ -666,7 +702,10 @@ describe("runCodexAppServerAttempt turn watches", () => {
     expect(harness.request.mock.calls.some(([method]) => method === "turn/interrupt")).toBe(true);
   });
 
-  it("counts handled nullable-turn elicitations as turn attempt progress", async () => {
+  it("refreshes the turn attempt watch for handled nullable-turn elicitations", async () => {
+    let nowMs = 1_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
     const harness = createStartedThreadHarness();
     vi.spyOn(elicitationBridge, "handleCodexAppServerElicitationRequest").mockResolvedValue({
       action: "accept",
@@ -677,7 +716,7 @@ describe("runCodexAppServerAttempt turn watches", () => {
       path.join(tempDir, "session.jsonl"),
       path.join(tempDir, "workspace"),
     );
-    params.timeoutMs = 100;
+    params.timeoutMs = 10_000;
     const onRunProgress = vi.fn();
     params.onRunProgress = onRunProgress;
 
@@ -694,10 +733,14 @@ describe("runCodexAppServerAttempt turn watches", () => {
         ),
       fastWait,
     );
+    const initialAttemptWatch = setTimeoutSpy.mock.calls.find(
+      ([callback]) => typeof callback === "function" && callback.name === "fireAttemptIdleTimeout",
+    )?.[0];
+    if (typeof initialAttemptWatch !== "function") {
+      throw new Error("Expected the initial turn attempt watch timer");
+    }
+    nowMs += 6_000;
 
-    await new Promise((resolve) => {
-      setTimeout(resolve, 60);
-    });
     await harness.handleServerRequest({
       id: "request-null-turn-elicitation",
       method: "mcpServer/elicitation/request",
@@ -711,9 +754,15 @@ describe("runCodexAppServerAttempt turn watches", () => {
         _meta: null,
       },
     });
-    await new Promise((resolve) => {
-      setTimeout(resolve, 60);
-    });
+    await vi.waitFor(
+      () =>
+        expect(onRunProgress).toHaveBeenCalledWith(
+          expect.objectContaining({ reason: "request:mcpServer/elicitation/request:start" }),
+        ),
+      fastWait,
+    );
+    nowMs += 6_000;
+    initialAttemptWatch();
 
     expect(harness.request.mock.calls.some(([method]) => method === "turn/interrupt")).toBe(false);
     await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });

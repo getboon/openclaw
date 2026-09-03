@@ -152,6 +152,20 @@ export const buildTelegramMessageContext = async ({
   sendChatActionHandler,
 }: BuildTelegramMessageContextParams): Promise<TelegramMessageContext | null> => {
   const msg = primaryCtx.message;
+  let admissionFinalized = false;
+  const finalizeAdmission = async (admitted: boolean, cacheMessage = true): Promise<boolean> => {
+    if (admissionFinalized) {
+      return false;
+    }
+    admissionFinalized = true;
+    return (await options?.afterAdmissionShouldDrop?.(admitted, cacheMessage)) ?? false;
+  };
+  const dropBeforeAdmission = async (): Promise<null> => {
+    // Rejected before admission was ever attempted; the message was never
+    // really seen, so it must not be recorded as a cached/dropped-history entry.
+    await finalizeAdmission(false, false);
+    return null;
+  };
   const chatId = msg.chat.id;
   const isGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
   const senderId = msg.from?.id ? String(msg.from.id) : "";
@@ -275,7 +289,7 @@ export const buildTelegramMessageContext = async ({
       reason: "non-default account requires explicit binding",
       target: route.accountId,
     });
-    return null;
+    return await dropBeforeAdmission();
   }
   const groupAllowOverride = firstDefined(topicConfig?.allowFrom, groupConfig?.allowFrom);
   const dmAllow = await resolveTelegramDmAllow({
@@ -310,27 +324,27 @@ export const buildTelegramMessageContext = async ({
   if (!baseAccess.allowed) {
     if (baseAccess.reason === "group-disabled") {
       logVerbose(`Blocked telegram group ${chatId} (group disabled)`);
-      return null;
+      return await dropBeforeAdmission();
     }
     if (baseAccess.reason === "topic-disabled") {
       logVerbose(
         `Blocked telegram topic ${chatId} (${resolvedThreadId ?? "unknown"}) (topic disabled)`,
       );
-      return null;
+      return await dropBeforeAdmission();
     }
     logVerbose(
       isGroup
         ? `Blocked telegram group sender ${senderId || "unknown"} (group allowFrom override)`
         : `Blocked telegram DM sender ${senderId || "unknown"} (DM allowFrom override)`,
     );
-    return null;
+    return await dropBeforeAdmission();
   }
 
   const requireTopic = directConfig?.requireTopic;
   const topicRequiredButMissing = !isGroup && requireTopic === true && dmThreadId == null;
   if (topicRequiredButMissing) {
     logVerbose(`Blocked telegram DM ${chatId}: requireTopic=true but no topic present`);
-    return null;
+    return await dropBeforeAdmission();
   }
 
   const sendTyping = async () => {
@@ -374,7 +388,7 @@ export const buildTelegramMessageContext = async ({
       upsertPairingRequest,
     }))
   ) {
-    return null;
+    return await dropBeforeAdmission();
   }
   let initialTypingCueSent = false;
   const ensureConfiguredBindingReady = async (): Promise<boolean> => {
@@ -484,7 +498,7 @@ export const buildTelegramMessageContext = async ({
     logger,
   });
   if (!bodyResult) {
-    return null;
+    return await dropBeforeAdmission();
   }
 
   const groupHistoryContextMode = isGroup
@@ -495,9 +509,11 @@ export const buildTelegramMessageContext = async ({
     : undefined;
 
   if (!(await ensureConfiguredBindingReady())) {
+    return await dropBeforeAdmission();
+  }
+  if (await finalizeAdmission(true)) {
     return null;
   }
-
   // Direct chats are now reply-eligible; send the first typing cue before
   // expensive context/session construction without showing typing for dropped turns.
   if (!isGroup) {

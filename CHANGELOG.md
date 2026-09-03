@@ -285,6 +285,263 @@ Fork-only build atop upstream `v2026.5.18` (getboon/openclaw `boon` branch). Tar
 - Fork hardening on top of #86584 (from internal codex review): the benign session-fence advance now fails closed unless the fenced prefix is byte-identical to the trusted snapshot (prevents a prefix-rewrite + benign-append from masking a real takeover); and a reacquire takeover error no longer masks the original provider error.
 - Does NOT carry #87159 (embedded session file ownership race) — high backport risk; revisit if it lands upstream.
 
+## 2026.6.34
+
+### Highlights
+
+- **Safer browser and network boundaries:** sandboxed browser routes, trusted DNS targets, custom browser origins, and loopback provider endpoints now reject unsafe access paths. (#97958, #38290, #103075, #110693) Thanks @eleqtrizit, @brunowowk, @mosidevv, @pgondhi987, and @lsr911.
+- **More resilient agent and provider runs:** retained session writes, provider fallbacks, stream progress handling, and stdio failures now recover without silently ending active work. (#96100, #97128, #90908, #99803, #100521) Thanks @xialonglee, @sallyom, @richwilson-bloom, @LiuwqGit, @vincentkoc, @yetval, @shengting, and @cxbAsDev.
+- **Stronger channel recovery:** pending channel work resumes after recovery, acknowledgements are idempotent, and sustained Discord gateway bursts stay bounded. (#79811, #97041, #104919, #109108, #110954, #103793, #94016) Thanks @indulgeback, @cuiyuxin-gif, @Pick-cat, @Glucksberg, @evan-YM, @zhangguiping-xydt, @yetval, @sheyanmin, and @thomasthelen-kibeauftragter.
+- **Safer operator diagnostics:** command and status surfaces keep owner-only actions protected and prevent credentials from appearing in account URLs or summaries. (#98260, #107754, #105017) Thanks @eleqtrizit, @joshavant, @ooiuuii, @aniruddhaadak80, and @tzy-17.
+- **More robust local runtime state:** SQLite checkpoints, workspace reads, gateway process signalling, plugin HTTP responses, and dependency handling no longer turn transient host conditions into failed runs. (#99067, #100910, #102125, #109590, #112406) Thanks @ooiuuii, @masatohoshino, @vincentkoc, @mushuiyu886, and @krissding.
+
+### Changes
+
+- **Extended-stable hardening:** this maintenance release carries targeted security and reliability repairs without adding new release-line features.
+
+### Fixes
+
+- **OpenCode Go:** use the documented `hy3` model identifier instead of the failing `hy3-preview` alias.
+- **Codex native subagents:** retain the parent app-server subscription and recognize multi-agent V2 child activity until a yielded child completion reaches its requester.
+- **Dependency security:** updates production dependency resolutions for patched `brace-expansion`, PostCSS, `fast-uri`, `ip-address`, and Undici versions. (#113428, #118804)
+- **Execution and transport safety:** browser, sandbox, exec, MCP, and secret-resolution paths reject unsafe inputs and handle stream failures without crashing the host process.
+- **Delivery and channel stability:** outbound receipts, delivery evidence, channel lifecycle, health monitoring, and gateway queues recover cleanly under retries, restarts, and overload.
+- **Gateway and storage reliability:** plugin responses, process probes, workspace bootstrap reads, and SQLite writes tolerate expected transient failures while preserving correct state.
+
+### Upcoming deprecations
+
+- **Plugin SDK migration:** `before_agent_start`, root `openclaw/plugin-sdk` imports, `providerAuthEnvVars`, and `channelEnvVars` are scheduled for removal after July 24. Migrate to the modern hook stages, focused SDK subpath imports, and manifest setup descriptors. See [Plugin SDK migration](/plugins/sdk-migration) and [plugin manifests](/plugins/manifest).
+
+### Complete contribution record
+
+This audited record covers the complete v2026.6.33..496c84bf6159bd09ce2c2a261c354ea641757b19 history plus release-validation backports: 25 merged PRs. The generation manifest also supplies direct commits as editorial input; the grouped notes above prioritize user impact.
+
+#### Pull requests
+
+- **PR #96100** Related #95915. Thanks @xialonglee, @sallyom, and @richwilson-bloom.
+- **PR #79811** Related #79753. Thanks @indulgeback and @cuiyuxin-gif.
+- **PR #97041** Thanks @Pick-cat and @vincentkoc.
+- **PR #97128** Related #96518. Thanks @LiuwqGit, @vincentkoc, and @yetval.
+- **PR #90908** Thanks @shengting.
+- **PR #97958** Thanks @eleqtrizit.
+- **PR #98260** Thanks @eleqtrizit.
+- **PR #99803** Thanks @cxbAsDev and @vincentkoc.
+- **PR #99067** Related #99066. Thanks @ooiuuii.
+- **PR #100521** Thanks @cxbAsDev.
+- **PR #100910** Thanks @masatohoshino and @vincentkoc.
+- **PR #102125** Thanks @mushuiyu886.
+- **PR #38290** Related #46520. Thanks @brunowowk and @mosidevv.
+- **PR #103075** Thanks @pgondhi987.
+- **PR #104919** Related #104903. Thanks @Glucksberg and @evan-YM.
+- **PR #107754** Related #98633, #102932, #105427. Thanks @joshavant, @ooiuuii, and @aniruddhaadak80.
+- **PR #109108** Thanks @zhangguiping-xydt.
+- **PR #105017** Thanks @tzy-17.
+- **PR #109590** Thanks @krissding.
+- **PR #110693** Thanks @lsr911.
+- **PR #110954** Thanks @zhangguiping-xydt.
+- **PR #103793** Thanks @yetval.
+- **PR #94016** Related #94008. Thanks @sheyanmin and @thomasthelen-kibeauftragter.
+- **PR #112406** Thanks @vincentkoc.
+- **PR #107938**.
+
+## 2026.6.33
+
+### Highlights
+
+- **Safer network and secret boundaries:** provider streams, Discord REST responses, browser fetches, OAuth paths, and logs now cap hostile response sizes and keep Telegram credentials out of diagnostics. (#96989, #95412, #99428) Thanks @wangmiao0668000666, @Alix-007, @xialonglee, @liuhaiyang14, @Pick-cat, @mushuiyu886, @vincentkoc, @ZOOWH, @Pandah97, @solodmd, @zhangguiping-xydt, and @obviyus.
+- **More reliable long-running agents:** run release, liveness checks, and watchdog semantics now distinguish genuine stalls from active long model calls and wedged backends. (#102160) Thanks @obviyus, @kiagentkronos-cell, @alvelda, @alkor2000, and @vincentkoc.
+- **Stronger channel delivery:** Discord reconnects no longer silently drop queued messages or repeat ambiguous non-idempotent sends, while Telegram bot-to-bot and reply-fence handling preserve the intended thread and authorization result. (#100896, #103867, #106755) Thanks @tiffanychum, @Godecule, @yetval, @xialonglee, and @RomneyDa.
+- **Safer credential recovery:** service restarts preserve SecretRef-backed Telegram credentials, and OAuth repair no longer overwrites an already-valid destination profile. (#99124, #97541) Thanks @mushuiyu886, @1Wanker, @liuhao1024, @yetval, @Darren2030, @obviyus, and @RomneyDa.
+- **Extended-stable updates:** package installations can select, update from, and receive availability notices for the `extended-stable` channel without silently falling back to another release line. (#99811, #100438) Thanks @kevinslin.
+
+### Changes
+
+- **Approval and tool authority:** Codex app-server commands now require an actual human/plugin approval, exec auto-review stays bound to the exact resolved command, and narrow tool allowlists remain owned by the factory that constructs them. (#103430, #103457, #104213) Thanks @obviyus, @brokemac79, @Pandah97, @wangmiao0668000666, and @pgondhi987.
+- **Scoped external tooling:** external MCP loopback clients use short-lived session-bound attach grants instead of inheriting mutable child-process authority, and Gateway message actions retain trusted requester provenance and reject untrusted callers. (#102031) Thanks @pgondhi987, @Glucksberg, @wings1029, @Alix-007, @machine3at, and @anagnorisis2peripeteia.
+
+### Fixes
+
+- **Authorization and disclosure:** Gateway HTTP rejects disallowed browser origins before unauthenticated handling, permission repair stays confined to its intended include, MCP status output redacts secrets, and Gateway action bridges reject untrusted requesters. (#102881, #103267, #103396, #102031) Thanks @wangyan2026, @yetval, @NianJiuZst, @obviyus, @pgondhi987, and @brokemac79.
+- **Gateway and process stability:** agent-run caches are bounded, lock probes stop leaking file descriptors, close reasons preserve valid UTF-8, and heartbeat reads survive transient filesystem races. (#77973, #99291, #100047, #100389) Thanks @fede-kamel, @chenyangjun-xy, @zhangLei99586, @NarahariRaghava, @ogarciarevett, @markr9805, @849261680, @mushuiyu886, @vincentkoc, @wings1029, and @masatohoshino.
+- **Provider and browser reliability:** Anthropic-compatible partial streams stop hanging at their size bound, OpenAI Realtime uses the correct authentication and transcription secret flow, and remote CDP credentials stay out of responses. (#100686, #102518, #103139) Thanks @zhangguiping-xydt, @cxbAsDev, @sjf-oa, @sjf, @vincentkoc, and @obviyus.
+- **Ingress and webhook safety:** replayed Twilio requests are rejected under sustained traffic, corrupt queued channel rows are tombstoned without blocking later work, and Telegram tokens are redacted even when split across log chunks. (#101107, #105259, #103861) Thanks @zhangguiping-xydt, @vincentkoc, @mushuiyu886, @Pick-cat, and @xialonglee.
+
+### Complete contribution record
+
+This audited record covers the complete v2026.6.11..db7af38c0b228fbd57613f7517bce02b056aa9ab history: 169 merged PRs. The generation manifest also supplies direct commits as editorial input; the grouped notes above prioritize user impact.
+
+#### Pull requests
+
+- **PR #98835** Related #98672. Thanks @moguangyu5-design and @jalehman and @AaronFaby.
+- **PR #96989** Thanks @wangmiao0668000666 and @vincentkoc.
+- **PR #95412** Thanks @Alix-007.
+- **PR #95108** Thanks @vincentkoc.
+- **PR #97499** Thanks @wangmiao0668000666.
+- **PR #102953** Thanks @ZOOWH.
+- **PR #97551** Thanks @Alix-007 and @vincentkoc.
+- **PR #97540** Thanks @Alix-007 and @vincentkoc.
+- **PR #95416** Thanks @Alix-007 and @vincentkoc.
+- **PR #97614** Thanks @cxbAsDev.
+- **PR #97808** Thanks @Pick-cat.
+- **PR #96445** Thanks @lin-hongkuan.
+- **PR #97961** Thanks @eleqtrizit.
+- **PR #97838** Thanks @pgondhi987.
+- **PR #98455** Thanks @wings1029.
+- **PR #100889** Thanks @mushuiyu886.
+- **PR #77973** Related #77976. Thanks @fede-kamel and @vincentkoc.
+- **PR #99291** Related #98958. Thanks @chenyangjun-xy and @zhangLei99586.
+- **PR #99428** Related #96982. Thanks @xialonglee and @liuhaiyang14.
+- **PR #98130** Thanks @Pick-cat.
+- **PR #100047** Related #99976. Thanks @NarahariRaghava.
+- **PR #100389** Related #99994. Thanks @ogarciarevett and @markr9805.
+- **PR #98682** Thanks @wings1029.
+- **PR #99479** Thanks @Pandah97.
+- **PR #101079** Thanks @cxbAsDev.
+- **PR #101160** Thanks @cxbAsDev.
+- **PR #102105** Thanks @wangmiao0668000666.
+- **PR #102450** Thanks @qingminglong.
+- **PR #100483** Related #100423. Thanks @versatagent.
+- **PR #102050** Thanks @Alix-007.
+- **PR #102952** Related #55365. Thanks @lidge-jun and @Mdx2025.
+- **PR #102160** Related #85826, #96168. Thanks @obviyus and @kiagentkronos-cell and @alvelda.
+- **PR #96224** Related #77986. Thanks @eleqtrizit and @fede-kamel.
+- **PR #96599** Thanks @sjf-oa and @sjf.
+- **PR #96615** Related #96589. Thanks @liuhao1024 and @yetval.
+- **PR #89812** Related #89626. Thanks @Petru2224.
+- **PR #92274** Related #91527. Thanks @fsdwen and @zackchiutw.
+- **PR #96396** Related #95784. Thanks @849261680 and @velvet-shark and @BryceMurray.
+- **PR #96096** Related #85900. Thanks @849261680 and @velvet-shark and @fanispoulinakisai-boop.
+- **PR #96831** Related #94083. Thanks @velvet-shark and @ooiuuii.
+- **PR #96142** Related #95574. Thanks @brokemac79 and @riazrahaman.
+- **PR #97044** Related #96983. Thanks @zw-xysk and @vincentkoc and @liuhaiyang14.
+- **PR #94452** Related #94040. Thanks @mushuiyu886 and @xrow.
+- **PR #96772** Thanks @wangmiao0668000666 and @vincentkoc.
+- **PR #96042** Thanks @Alix-007 and @vincentkoc.
+- **PR #96038** Thanks @Alix-007 and @vincentkoc.
+- **PR #96031** Thanks @Alix-007.
+- **PR #95103** Thanks @vincentkoc.
+- **PR #97620** Thanks @Alix-007 and @vincentkoc.
+- **PR #97693** Thanks @Alix-007.
+- **PR #98496** Thanks @Pandah97.
+- **PR #97784** Thanks @Alix-007.
+- **PR #97140** Related #97091. Thanks @galiniliev.
+- **PR #95543** Related #95474. Thanks @mikasa0818 and @ElliotDrel.
+- **PR #97504** Thanks @hugenshen.
+- **PR #90908** Thanks @shengting.
+- **PR #97356** Thanks @miorbnli.
+- **PR #97541** Related #97522. Thanks @liuhao1024 and @yetval.
+- **PR #97520** Related #97313. Thanks @zhangguiping-xydt and @pmdvedar-ai.
+- **PR #96544** Thanks @yetval and @vincentkoc.
+- **PR #97579** Thanks @hugenshen.
+- **PR #96644** Thanks @solodmd.
+- **PR #97214** Thanks @masatohoshino and @vincentkoc.
+- **PR #97372** Thanks @masatohoshino.
+- **PR #95774** Thanks @mushuiyu886.
+- **PR #95084** Related #90684. Thanks @jailbirt and @studentzhou-svg.
+- **PR #97367** Thanks @masatohoshino.
+- **PR #98693** Thanks @ZengWen-DT and @cursoragent.
+- **PR #89817** Thanks @masatohoshino.
+- **PR #96965** Related #96929. Thanks @zw-xysk and @YouToco.
+- **PR #100107** Thanks @frank-beans.
+- **PR #97861** Thanks @yetval.
+- **PR #96444** Thanks @lin-hongkuan.
+- **PR #96492** Thanks @yetval.
+- **PR #97870** Thanks @eleqtrizit.
+- **PR #98142** Thanks @RomneyDa.
+- **PR #98226** Related #98225. Thanks @ooiuuii.
+- **PR #99460** Related #99459. Thanks @ooiuuii.
+- **PR #98354** Thanks @Pick-cat.
+- **PR #98508** Thanks @lzyyzznl.
+- **PR #93379** Related #77755. Thanks @xialonglee and @jiveshkalra.
+- **PR #99070** Thanks @LeonidasLux.
+- **PR #98720** Related #98463. Thanks @wangmiao0668000666 and @zhangLei99586.
+- **PR #99800** Thanks @cxbAsDev and @vincentkoc.
+- **PR #100744** Thanks @lsr911 and @vincentkoc.
+- **PR #98262** Related #98239. Thanks @brokemac79.
+- **PR #101366** Related #84600. Thanks @deepujain and @13884379776l.
+- **PR #100835** Thanks @machine3at.
+- **PR #102035** Thanks @pgondhi987.
+- **PR #101617** Thanks @zhangguiping-xydt.
+- **PR #101744** Thanks @hugenshen and @cursoragent.
+- **PR #101739** Thanks @Alix-007.
+- **PR #102089** Thanks @Alix-007.
+- **PR #102661** Related #98038. Thanks @mabaty.
+- **PR #102403** Thanks @yetval.
+- **PR #102398** Thanks @yetval.
+- **PR #102426** Thanks @pgondhi987.
+- **PR #102840** Thanks @yetval.
+- **PR #103441** Related #68691. Thanks @hobo-l-20230331 and @aaajiao.
+- **PR #103267** Thanks @NianJiuZst.
+- **PR #104015**
+- **PR #103619** Thanks @pgondhi987.
+- **PR #104337** Related #104330.
+- **PR #102881** Related #102834. Thanks @wangyan2026 and @yetval.
+- **PR #105769** Thanks @mushuiyu886.
+- **PR #102924** Thanks @hugenshen.
+- **PR #106056** Thanks @pgondhi987.
+- **PR #106806** Related #103056. Thanks @yetval.
+- **PR #96143** Related #77616. Thanks @brokemac79 and @RomneyDa and @slideshow-dingo.
+- **PR #97271** Thanks @hugenshen.
+- **PR #96762** Thanks @wangmiao0668000666 and @vincentkoc.
+- **PR #97235** Thanks @zhangguiping-xydt and @vincentkoc.
+- **PR #95542** Related #95519. Thanks @mikasa0818 and @altaywtf and @zjx111234.
+- **PR #97571** Related #97564. Thanks @liuhao1024 and @nicelysalted.
+- **PR #86088** Thanks @liaoandi and @altaywtf.
+- **PR #99960** Thanks @masatohoshino and @vincentkoc.
+- **PR #85296** Thanks @alkor2000 and @vincentkoc.
+- **PR #100484** Thanks @vincentkoc and @litang9.
+- **PR #100722** Related #98864. Thanks @cxbAsDev and @carterstebbins23-spec.
+- **PR #94149** Related #84698. Thanks @ZengWen-DT and @cursoragent and @zus-assistant.
+- **PR #96065** Thanks @Darren2030 and @obviyus.
+- **PR #99124** Related #98107. Thanks @mushuiyu886 and @1Wanker.
+- **PR #99931** Related #98357. Thanks @ooiuuii.
+- **PR #91584** Thanks @hiragram and @openclaw-agent.
+- **PR #100896** Related #56610. Thanks @tiffanychum and @Godecule.
+- **PR #103867** Thanks @yetval.
+- **PR #101378** Related #91489, #92054, #98573. Thanks @wendy-chsy and @Vilard7 and @arturomagdiel and @studiodevlabs.
+- **PR #101394** Thanks @cxbAsDev.
+- **PR #100686** Thanks @zhangguiping-xydt.
+- **PR #102518**
+- **PR #103139**
+- **PR #103353** Related #103317.
+- **PR #103247**
+- **PR #103430** Related #103427.
+- **PR #103457** Related #103427.
+- **PR #103617** Related #103610.
+- **PR #103396** Related #103053. Thanks @obviyus and @yetval.
+- **PR #103074** Thanks @pgondhi987.
+- **PR #103822**
+- **PR #101107** Thanks @zhangguiping-xydt.
+- **PR #103620** Thanks @pgondhi987.
+- **PR #103861** Thanks @vincentkoc.
+- **PR #105259** Thanks @Pick-cat.
+- **PR #104213** Related #104208. Thanks @obviyus.
+- **PR #104715** Thanks @Leon-SK668.
+- **PR #105082**
+- **PR #102031** Thanks @pgondhi987.
+- **PR #106755**
+- **PR #106854**
+- **PR #103994**
+- **PR #102996**
+- **PR #99811** Related #99808. Thanks @kevinslin.
+- **PR #100438** Thanks @kevinslin.
+- **PR #102759** Related #102757. Thanks @vincentkoc.
+- **PR #102858**
+- **PR #102896**
+- **PR #103737** Thanks @vincentkoc.
+- **PR #103759** Thanks @vincentkoc.
+- **PR #103906**
+- **PR #104162** Related #104161. Thanks @vincentkoc.
+- **PR #104697**
+- **PR #105746** Thanks @vincentkoc.
+- **PR #99266** Thanks @RomneyDa.
+- **PR #100448** Thanks @kevinslin.
+- **PR #107832** Thanks @RomneyDa.
+- **PR #99212**
+- **PR #107872** Thanks @RomneyDa.
+- **PR #102600**
+- **PR #103204** Related #103189.
+
 ## 2026.6.11
 
 ### Highlights

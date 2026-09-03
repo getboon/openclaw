@@ -54,6 +54,7 @@ import {
   untrackSessionBrowserTab,
 } from "./browser-tool.runtime.js";
 import { DEFAULT_BROWSER_SCREENSHOT_TIMEOUT_MS } from "./browser/constants.js";
+import { parseBrowserNavigationUrl } from "./browser/navigation-guard.js";
 import { normalizeBrowserScreenshot } from "./browser/screenshot.js";
 import { describeBrowserScreenshot, neutralizeMediaDirectives } from "./browser/vision.js";
 import { wrapExternalContent } from "./sdk-security-runtime.js";
@@ -156,10 +157,11 @@ function readOptionalTargetAndTimeout(params: Record<string, unknown>) {
 }
 
 function readTargetUrlParam(params: Record<string, unknown>) {
-  return (
+  const targetUrl =
     readStringParam(params, "targetUrl") ??
-    readStringParam(params, "url", { required: true, label: "targetUrl" })
-  );
+    readStringParam(params, "url", { required: true, label: "targetUrl" });
+  parseBrowserNavigationUrl(targetUrl);
+  return targetUrl;
 }
 
 const LEGACY_BROWSER_ACT_REQUEST_KEYS = [
@@ -262,7 +264,15 @@ async function resolveBrowserNodeTarget(params: {
   requestedNode?: string;
   target?: "sandbox" | "host" | "node";
   sandboxBridgeUrl?: string;
+  allowHostControl?: boolean;
 }): Promise<BrowserNodeTarget | null> {
+  if (params.allowHostControl === false) {
+    if (params.target === "node" || params.requestedNode) {
+      throw new Error("Node browser control is disabled by sandbox policy.");
+    }
+    return null;
+  }
+
   const cfg = browserToolDeps.getRuntimeConfig();
   const policy = cfg.gateway?.nodes?.browser;
   const mode = policy?.mode ?? "auto";
@@ -537,6 +547,7 @@ export function createBrowserTool(opts?: {
           requestedNode: requestedNode ?? undefined,
           target,
           sandboxBridgeUrl: opts?.sandboxBridgeUrl,
+          allowHostControl: opts?.allowHostControl,
         });
       } catch (error) {
         // Keep the logged-in user browser usable on the host when auto-discovery

@@ -24,8 +24,16 @@ export async function dispatchChannelMessageAction(
   ctx: ChannelMessageActionContext,
 ): Promise<AgentToolResult<unknown> | null> {
   // Some plugin actions depend on the sender identity to enforce channel-local
-  // trust. Reject tool-driven calls before invoking the plugin without it.
-  if (requiresTrustedRequesterSender(ctx) && !ctx.requesterSenderId?.trim()) {
+  // trust. Reject tool-driven calls before invoking the plugin without it,
+  // unless the Gateway caller itself is operator-admin scoped: multiple
+  // plugins (iMessage, MS Teams) independently honor that scope as an
+  // alternative to owner provenance in their own handleAction, so this outer
+  // gate must not reject those admin-scoped calls before they get there.
+  if (
+    requiresTrustedRequesterSender(ctx) &&
+    !ctx.requesterSenderId?.trim() &&
+    !ctx.gatewayClientScopes?.includes("operator.admin")
+  ) {
     throw new Error(
       `Trusted sender identity is required for ${ctx.channel}:${ctx.action} in tool-driven contexts.`,
     );

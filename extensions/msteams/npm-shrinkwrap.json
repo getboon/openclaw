@@ -1,12 +1,12 @@
 {
   "name": "@openclaw/msteams",
-  "version": "2026.6.11-boon.33",
+  "version": "2026.6.34-boon.1",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/msteams",
-      "version": "2026.6.11-boon.33",
+      "version": "2026.6.34-boon.1",
       "dependencies": {
         "@azure/identity": "4.13.1",
         "@microsoft/teams.api": "2.0.12",
@@ -15,7 +15,7 @@
         "typebox": "1.1.39"
       },
       "peerDependencies": {
-        "openclaw": ">=2026.6.11"
+        "openclaw": ">=2026.6.34-boon.1"
       },
       "peerDependenciesMeta": {
         "openclaw": {
@@ -290,9 +290,9 @@
       "license": "MIT"
     },
     "node_modules/@types/node": {
-      "version": "25.9.1",
-      "resolved": "https://registry.npmjs.org/@types/node/-/node-25.9.1.tgz",
-      "integrity": "sha512-xfrlY7UD5rMJk3ZVJP8BNzS28J36YJg+xp+LPXV1TdWxr8uMH5A860QNxYDGQe/ylDSgjxE52Q9VnO7p75tJxg==",
+      "version": "25.9.2",
+      "resolved": "https://registry.npmjs.org/@types/node/-/node-25.9.2.tgz",
+      "integrity": "sha512-G05zqtJhcDLb8uslf5EjCxXg9G1KQxiV8OS0R26IC//Eoyitzqe8z37I7cqvnZlrlSfgocQRfSn/AHBZJJFyGw==",
       "license": "MIT",
       "dependencies": {
         "undici-types": ">=7.24.0 <7.24.7"
@@ -1493,9 +1493,9 @@
       "license": "MIT"
     },
     "node_modules/semver": {
-      "version": "7.8.5",
-      "resolved": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz",
-      "integrity": "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==",
+      "version": "7.8.4",
+      "resolved": "https://registry.npmjs.org/semver/-/semver-7.8.4.tgz",
+      "integrity": "sha512-rUCObTnP32Q08R2uuIrt7r9PlEonuTmtuXYcW6s5kjdlj3xbnwe+21yXptAUYcMAABLkYYTtnmzb3w3EDZfueA==",
       "license": "ISC",
       "bin": {
         "semver": "bin/semver.js"

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import OpenClaw
 
@@ -17,5 +18,123 @@ struct ExecApprovalsSocketAuthTests {
     @Test
     func `timing safe hex compare rejects different length strings`() {
         #expect(!timingSafeHexStringEquals(String(repeating: "a", count: 64), "deadbeef"))
+    }
+
+    @Test
+    func `exec host limiter preserves small output`() {
+        #expect(ExecHostOutputLimiter.truncate("hello") == "hello")
+    }
+
+    @Test
+    func `exec host limiter preserves a valid utf8 tail`() {
+        let input = String(repeating: "x", count: 2 * 1024 * 1024) + "✅"
+        let limited = ExecHostOutputLimiter.truncate(input)
+
+        #expect(limited.hasPrefix("... (truncated) "))
+        #expect(limited.hasSuffix("✅"))
+        #expect(limited.utf8.count <= ExecHostOutputLimiter.maxOutputFieldBytes)
+    }
+
+    @Test
+    func `exec host limiter keeps escaped output below the jsonl cap`() throws {
+        let escaped = String(repeating: "\u{0}", count: 2 * 1024 * 1024)
+        let limited = ExecHostOutputLimiter.truncate(escaped)
+        let response = EncodedExecHostResponse(
+            type: "exec-res",
+            id: "test",
+            ok: true,
+            payload: EncodedExecHostRunResult(
+                exitCode: 0,
+                timedOut: false,
+                success: true,
+                stdout: limited,
+                stderr: limited,
+                error: nil),
+            error: nil)
+
+        #expect(try JSONEncoder().encode(response).count < ExecHostOutputLimiter.maxJsonlResponseBytes)
+    }
+
+    @Test
+    func `exec host limiter bounds real command output`() async throws {
+        let result = await ShellExecutor.runDetailed(
+            command: [
+                "/usr/bin/perl",
+                "-e",
+                "print 'x' x (2 * 1024 * 1024); print STDERR 'y' x (2 * 1024 * 1024);",
+            ],
+            cwd: nil,
+            env: nil,
+            timeout: 10)
+
+        #expect(ExecHostOutputLimiter.truncate(result.stdout).utf8.count <= ExecHostOutputLimiter.maxOutputFieldBytes)
+        #expect(ExecHostOutputLimiter.truncate(result.stderr).utf8.count <= ExecHostOutputLimiter.maxOutputFieldBytes)
+        #expect(result.exitCode == 0)
+    }
+
+    @Test
+    func `run detailed caps buffered output in memory while still fully draining the pipes`() async throws {
+        // Without a cap, ShellExecutor buffers the whole pipe before ExecHostOutputLimiter.truncate
+        // ever runs, so an unbounded command could exhaust memory before truncation helps at all.
+        // maxOutputBytes must bound what's held in memory here, and the excess must still be read
+        // (and discarded) rather than left in the pipe, or the child would block on a full pipe
+        // buffer and never exit.
+        let cap = 1024
+        let result = await ShellExecutor.runDetailed(
+            command: [
+                "/usr/bin/perl",
+                "-e",
+                "print 'x' x (4 * 1024 * 1024); print STDERR 'y' x (4 * 1024 * 1024);",
+            ],
+            cwd: nil,
+            env: nil,
+            timeout: 10,
+            maxOutputBytes: cap)
+
+        #expect(result.stdout.utf8.count <= cap)
+        #expect(result.stderr.utf8.count <= cap)
+        #expect(result.exitCode == 0)
+        #expect(!result.timedOut)
+    }
+
+    @Test
+    func `run detailed keeps the tail of oversized output, not the head`() async throws {
+        // ExecHostOutputLimiter.truncate presents the tail of whatever it's given, since a
+        // command's trailing error/status lines usually matter more than its start. A cap that
+        // kept the head instead would silently show stale early output and drop the real tail.
+        let cap = 1024
+        let result = await ShellExecutor.runDetailed(
+            command: [
+                "/usr/bin/perl",
+                "-e",
+                "print 'H' x (4 * 1024 * 1024); print 'TAIL_MARKER';",
+            ],
+            cwd: nil,
+            env: nil,
+            timeout: 10,
+            maxOutputBytes: cap)
+
+        #expect(result.stdout.utf8.count <= cap)
+        // The head-capping bug would keep only the first `cap` bytes -- all 'H' -- so the
+        // marker, written 4MB into the stream, would never appear at all.
+        #expect(result.stdout.hasSuffix("TAIL_MARKER"))
+        #expect(result.exitCode == 0)
+    }
+
+    private struct EncodedExecHostResponse: Codable {
+        var type: String
+        var id: String
+        var ok: Bool
+        var payload: EncodedExecHostRunResult?
+        var error: String?
+    }
+
+    private struct EncodedExecHostRunResult: Codable {
+        var exitCode: Int?
+        var timedOut: Bool
+        var success: Bool
+        var stdout: String
+        var stderr: String
+        var error: String?
     }
 }

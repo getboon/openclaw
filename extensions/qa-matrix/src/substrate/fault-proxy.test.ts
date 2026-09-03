@@ -173,6 +173,74 @@ describe("Matrix QA fault proxy", () => {
     ]);
   });
 
+  it("installs and removes a fault rule without changing the proxy endpoint", async () => {
+    const target = await startTargetServer();
+    proxy = await startMatrixQaFaultProxy({
+      targetBaseUrl: target.baseUrl,
+      rules: [],
+    });
+    const baseUrl = proxy.baseUrl;
+    proxy.installRule({
+      id: "temporary-sync-fault",
+      match: (request) => request.method === "GET" && request.path === "/_matrix/client/v3/sync",
+      response: () => ({ body: { faulted: true }, status: 418 }),
+    });
+
+    const faulted = await fetch(`${baseUrl}/_matrix/client/v3/sync`);
+    expect(faulted.status).toBe(418);
+    await expect(faulted.json()).resolves.toEqual({ faulted: true });
+
+    proxy.removeRule("temporary-sync-fault");
+    expect(proxy.baseUrl).toBe(baseUrl);
+    const forwarded = await fetch(`${baseUrl}/_matrix/client/v3/sync`);
+    expect(forwarded.status).toBe(200);
+    await expect(forwarded.json()).resolves.toEqual({ forwarded: true });
+    expect(proxy.hits()).toEqual([
+      {
+        method: "GET",
+        path: "/_matrix/client/v3/sync",
+        ruleId: "temporary-sync-fault",
+      },
+    ]);
+  });
+
+  it("rejects startup rules that share a duplicate id instead of silently dropping one", async () => {
+    const target = await startTargetServer();
+    const duplicateRule = {
+      id: "duplicate-rule",
+      match: () => true,
+      response: () => ({ body: {}, status: 200 }),
+    };
+
+    await expect(
+      startMatrixQaFaultProxy({
+        targetBaseUrl: target.baseUrl,
+        rules: [duplicateRule, { ...duplicateRule }],
+      }),
+    ).rejects.toThrow(/duplicate-rule.*registered more than once/);
+  });
+
+  it("rejects installing a rule id that is already installed", async () => {
+    const target = await startTargetServer();
+    proxy = await startMatrixQaFaultProxy({
+      targetBaseUrl: target.baseUrl,
+      rules: [],
+    });
+    proxy.installRule({
+      id: "temporary-sync-fault",
+      match: (request) => request.method === "GET" && request.path === "/_matrix/client/v3/sync",
+      response: () => ({ body: { faulted: true }, status: 418 }),
+    });
+
+    expect(() =>
+      proxy?.installRule({
+        id: "temporary-sync-fault",
+        match: () => true,
+        response: () => ({ body: {}, status: 200 }),
+      }),
+    ).toThrow(/temporary-sync-fault.*already installed/);
+  });
+
   it("rejects oversized forwarded request bodies before contacting the target", async () => {
     const target = await startTargetServer();
     proxy = await startMatrixQaFaultProxy({

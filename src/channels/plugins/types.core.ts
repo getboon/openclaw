@@ -220,6 +220,7 @@ export type ChannelAccountSnapshot = {
   busy?: boolean;
   activeRuns?: number;
   lastRunActivityAt?: number | null;
+  activeRunStartedAt?: number | null;
   mode?: string;
   dmPolicy?: string;
   allowFrom?: string[];
@@ -608,6 +609,8 @@ export type ChannelMessagingAdapter = {
   targetResolver?: {
     looksLikeId?: (raw: string, normalized?: string) => boolean;
     hint?: string;
+    /** Bare words that are command/session references, not literal destinations. */
+    reservedLiterals?: readonly string[];
     /**
      * Plugin-owned fallback for explicit/native targets or post-directory-miss
      * resolution. This should complement directory lookup, not duplicate it.

@@ -379,9 +379,10 @@ describe("buildEmbeddedRunPayloads tool-error warnings", () => {
     const payloads = buildPayloads({
       assistantTexts: ["Queued 3 topics."],
       lastToolError: {
-        toolName: "exec",
+        toolName: "write",
         error: "Tool output unavailable due to post-processing error",
         middlewareError: true,
+        mutatingAction: true,
       },
       verboseLevel: "off",
     });

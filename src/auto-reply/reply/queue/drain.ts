@@ -124,6 +124,33 @@ export function resolveFollowupAuthorizationKey(run: FollowupRun["run"]): string
   ]);
 }
 
+function splitCollectItemsByAuthorization(items: FollowupRun[]): FollowupRun[][] {
+  if (items.length <= 1) {
+    return items.length === 0 ? [] : [items];
+  }
+
+  const groups: FollowupRun[][] = [];
+  let currentGroup: FollowupRun[] = [];
+  let currentKey: string | undefined;
+
+  for (const item of items) {
+    const itemKey = resolveFollowupAuthorizationKey(item.run);
+    if (currentGroup.length === 0 || itemKey === currentKey) {
+      currentGroup.push(item);
+      currentKey = itemKey;
+      continue;
+    }
+    groups.push(currentGroup);
+    currentGroup = [item];
+    currentKey = itemKey;
+  }
+
+  if (currentGroup.length > 0) {
+    groups.push(currentGroup);
+  }
+  return groups;
+}
+
 export function resolveFollowupDeliveryContextKey(run: FollowupRun): string {
   const execution = run.run;
   const provenance = execution.inputProvenance;
@@ -203,6 +230,15 @@ function splitCollectItemsByDeliveryContext(items: FollowupRun[]): FollowupRun[]
   return groups;
 }
 
+function hasMixedSummarySourceContexts(items: FollowupRun[]): boolean {
+  return (
+    items.length > 1 &&
+    (hasCrossChannelItems(items, resolveCrossChannelKey) ||
+      splitCollectItemsByAuthorization(items).length > 1 ||
+      items.some(hasRuntimeOnlyFollowupMetadata))
+  );
+}
+
 function renderCollectItem(item: FollowupRun, idx: number): string {
   const senderLabel =
     item.run.senderName ?? item.run.senderUsername ?? item.run.senderId ?? item.run.senderE164;
@@ -235,6 +271,10 @@ type FollowupRuntimeMetadata = Pick<
   | "abortSignal"
   | "deliveryCorrelations"
   | "queuedLifecycle"
+  | "queuedDeliveryPayloadTransform"
+  | "queuedDeliveryReplyToMode"
+  | "queuedDeliveryPayloadDidDeliver"
+  | "queuedExecutionContext"
 >;
 
 function hasCurrentTurnRuntimeMetadata(item: FollowupRun): boolean {
@@ -250,7 +290,11 @@ function hasRuntimeOnlyFollowupMetadata(item: FollowupRun): boolean {
     hasCurrentTurnRuntimeMetadata(item) ||
     item.abortSignal ||
     item.deliveryCorrelations?.length ||
-    item.queuedLifecycle,
+    item.queuedLifecycle ||
+    item.queuedDeliveryPayloadTransform ||
+    item.queuedDeliveryReplyToMode ||
+    item.queuedDeliveryPayloadDidDeliver ||
+    item.queuedExecutionContext,
   );
 }
 
@@ -303,6 +347,18 @@ function collectRuntimeMetadata(
     queuedLifecycle:
       singletonOwner?.queuedLifecycle ??
       (items.length === 1 ? lifecycleSource?.queuedLifecycle : undefined),
+    queuedDeliveryPayloadTransform:
+      singletonOwner?.queuedDeliveryPayloadTransform ??
+      (items.length === 1 ? items[0]?.queuedDeliveryPayloadTransform : undefined),
+    queuedDeliveryReplyToMode:
+      singletonOwner?.queuedDeliveryReplyToMode ??
+      (items.length === 1 ? items[0]?.queuedDeliveryReplyToMode : undefined),
+    queuedDeliveryPayloadDidDeliver:
+      singletonOwner?.queuedDeliveryPayloadDidDeliver ??
+      (items.length === 1 ? items[0]?.queuedDeliveryPayloadDidDeliver : undefined),
+    queuedExecutionContext:
+      singletonOwner?.queuedExecutionContext ??
+      (items.length === 1 ? items[0]?.queuedExecutionContext : undefined),
   };
 }
 
@@ -742,9 +798,17 @@ export function scheduleFollowupDrain(
           // Debug: `pnpm test src/auto-reply/reply/reply-flow.test.ts`
           // Check if messages span multiple channels.
           // If so, process individually to preserve per-message routing.
+          // Retained overflow sources still own their original route and auth
+          // context. Drain live items first when combining them would deliver a
+          // summary through a different owner.
+          const summarySources = queue.summarySources ?? [];
           const isCrossChannel =
             hasCrossChannelItems(queue.items, resolveCrossChannelKey) ||
-            queue.items.some(hasRuntimeOnlyFollowupMetadata);
+            queue.items.some(hasRuntimeOnlyFollowupMetadata) ||
+            hasMixedSummarySourceContexts(summarySources) ||
+            summarySources.some(hasRuntimeOnlyFollowupMetadata) ||
+            (summarySources.length > 0 &&
+              hasCrossChannelItems([...queue.items, ...summarySources], resolveCrossChannelKey));
           if (collectState.forceIndividualCollect && !isCrossChannel && queue.items.length > 1) {
             collectState.forceIndividualCollect = false;
           }
