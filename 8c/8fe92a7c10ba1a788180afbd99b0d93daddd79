@@ -1,0 +1,23 @@
+src/auto-reply/reply/queue/types.ts
+  s_9df158d9bbb710::t_b9c61124e3156d 109-116
+src/auto-reply/reply/followup-runner.ts
+  s_9df158d9bbb710::t_a317ad91170d1f 1161-1165
+src/auto-reply/reply/followup-runner.test.ts
+  s_9df158d9bbb710::t_ffee55fc355d54 648-691
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "8c8fe92a7c10ba1a788180afbd99b0d93daddd79",
+  "prompts": {},
+  "sessions": {
+    "s_9df158d9bbb710": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9e26c7c2-a67e-4f7b-9850-0b4e3f93fe95",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
