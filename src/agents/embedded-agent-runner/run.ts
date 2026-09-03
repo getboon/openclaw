@@ -3918,7 +3918,7 @@ async function runEmbeddedAgentInternal(
               hasNonTerminalToolErrorWarning: (payloadsWithToolMedia ?? []).some((payload) =>
                 isReplyPayloadNonTerminalToolErrorWarning(payload),
               ),
-              hadPotentialSideEffects: accumulatedReplayState.hadPotentialSideEffects === true,
+              hadPotentialSideEffects: accumulatedReplayState.hadPotentialSideEffects,
               retryAttempts: unfinishedStepsRetryAttempts,
               maxRetryAttempts: MAX_UNFINISHED_STEPS_RETRY_ATTEMPTS,
             })
