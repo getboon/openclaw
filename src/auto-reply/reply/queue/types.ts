@@ -106,6 +106,14 @@ export type FollowupRun = {
     groupSpace?: string;
     senderId?: string;
     channelContext?: PluginHookChannelContext;
+    /**
+     * Gateway-audience OBO (ENG-19116) read off the inbound ctx in
+     * get-reply-run. Declared here so followup-runner can forward it into the
+     * embedded runner params → x-boon-gateway-obo-token (ENG-19115). Without
+     * this declaration the value rode the untyped literal but no hop could
+     * legally reference it, so it was silently dropped before the model call.
+     */
+    oboToken?: string;
     senderName?: string;
     senderUsername?: string;
     senderE164?: string;
