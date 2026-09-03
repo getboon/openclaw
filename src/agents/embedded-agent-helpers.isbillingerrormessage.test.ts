@@ -1367,6 +1367,16 @@ describe("classifyFailoverReason provider messages", () => {
     // walking the configured fallback chain.
     expect(classifyFailoverReason("Anthropic stream ended before message_stop")).toBe("timeout");
     expect(classifyFailoverReason("Bedrock stream ended before messageStop")).toBe("timeout");
+    // Shape B (ENG-19233): message_stop/messageStop arrives but a content
+    // block was left open — must classify the same way as the sibling
+    // message above, or a truncated-but-"stopped" stream dead-ends instead
+    // of walking the fallback chain.
+    expect(classifyFailoverReason("Anthropic stream ended with an unclosed content block")).toBe(
+      "timeout",
+    );
+    expect(classifyFailoverReason("Bedrock stream ended with an unclosed content block")).toBe(
+      "timeout",
+    );
     expect(classifyFailoverReason("Connection error.")).toBe("timeout");
     expect(classifyFailoverReason("fetch failed")).toBe("timeout");
     expect(classifyFailoverReason("network error: ECONNREFUSED")).toBe("timeout");

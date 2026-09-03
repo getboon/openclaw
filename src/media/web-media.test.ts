@@ -32,6 +32,16 @@ let canvasPngFile = "";
 let workspaceDir = "";
 let workspacePngFile = "";
 
+async function createOoxmlBuffer(mainMime: string, partPath: string): Promise<Buffer> {
+  const zip = new JSZip();
+  zip.file(
+    "[Content_Types].xml",
+    `<Types><Override PartName="${partPath}" ContentType="${mainMime}.main+xml"/></Types>`,
+  );
+  zip.file(partPath.slice(1), "<xml/>");
+  return await zip.generateAsync({ type: "nodebuffer" });
+}
+
 function installCanvasMediaResolver() {
   const registry = createEmptyPluginRegistry();
   registry.hostedMediaResolvers = [
@@ -472,6 +482,54 @@ describe("loadWebMedia", () => {
     ).rejects.toThrow(/dimensions exceed model image limits/i);
   });
 
+  // Sparse file so a post-materialization cap would have to allocate 640MB to fail,
+  // which is what the external-memory assertion below catches. Sparse truncate is a
+  // no-op on NTFS, where the fixture would cost real disk.
+  it.skipIf(process.platform === "win32")(
+    "refuses an oversized local file from its stat, before the bytes are materialized",
+    async () => {
+      const sparseFile = path.join(fixtureRoot, "oversized.pdf");
+      const sparseBytes = 640 * 1024 * 1024;
+      const handle = await fs.open(sparseFile, "w");
+      try {
+        await handle.truncate(sparseBytes);
+      } finally {
+        await handle.close();
+      }
+
+      const externalBefore = process.memoryUsage().external;
+      const error = await loadWebMediaRaw(sparseFile, {
+        maxBytes: 1024 * 1024,
+        localRoots: [fixtureRoot],
+      }).then(
+        () => undefined,
+        (err: unknown) => err,
+      );
+      const externalGrowth = process.memoryUsage().external - externalBefore;
+
+      expect(externalGrowth).toBeLessThan(sparseBytes / 2);
+      expect(String(error)).toMatch(
+        new RegExp(`too large:.*oversized\\.pdf.*limit of ${1024 * 1024} bytes`),
+      );
+      await fs.rm(sparseFile, { force: true });
+    },
+  );
+
+  it("keeps optimized image reads above maxBytes so compression can still fit them", async () => {
+    // maxBytes is the post-compression cap for images, so the read cap has to stay
+    // above it or oversized-but-compressible images would be refused unread.
+    const sourcePng = createLargeColorBlockPng(1600);
+    const largeImage = path.join(fixtureRoot, "read-cap-optimized.png");
+    await fs.writeFile(largeImage, sourcePng);
+    const result = await loadWebMedia(largeImage, {
+      maxBytes: 1024,
+      localRoots: [fixtureRoot],
+      imageCompression: { quality: "high", models: [{ maxSidePx: 32, preferredSidePx: 32 }] },
+    });
+    expect(result.kind).toBe("image");
+    expect(result.buffer.length).toBeLessThanOrEqual(1024);
+  });
+
   it("applies model image maxBytes to the effective image cap", async () => {
     await expect(
       loadWebMediaRaw(tinyPngFile, {
@@ -831,6 +889,58 @@ describe("loadWebMedia", () => {
     const result = await loadDocumentWithHostRead(fileName, body);
     expect(result.kind).toBe("document");
     expect(result.contentType).toBe(contentType);
+  });
+
+  it.each([
+    {
+      label: "XLSM",
+      fileName: "workbook.xlsm",
+      mainMime: "application/vnd.ms-excel.sheet.macroEnabled",
+      partPath: "/xl/workbook.xml",
+      contentType: "application/vnd.ms-excel.sheet.macroenabled.12",
+    },
+    {
+      label: "DOCM",
+      fileName: "letter.docm",
+      mainMime: "application/vnd.ms-word.document.macroEnabled",
+      partPath: "/word/document.xml",
+      contentType: "application/vnd.ms-word.document.macroenabled.12",
+    },
+    {
+      label: "PPTM",
+      fileName: "deck.pptm",
+      mainMime: "application/vnd.ms-powerpoint.presentation.macroEnabled",
+      partPath: "/ppt/presentation.xml",
+      contentType: "application/vnd.ms-powerpoint.presentation.macroenabled.12",
+    },
+  ])(
+    "allows host-read macro-enabled $label documents",
+    async ({ fileName, mainMime, partPath, contentType }) => {
+      const result = await loadDocumentWithHostRead(
+        fileName,
+        await createOoxmlBuffer(mainMime, partPath),
+      );
+      expect(result.kind).toBe("document");
+      expect(result.contentType).toBe(contentType);
+    },
+  );
+
+  it("rejects opaque binary renamed with a macro-enabled Office extension", async () => {
+    const disguised = path.join(fixtureRoot, "disguised.xlsm");
+    const opaqueBinary = Buffer.alloc(9000);
+    for (let i = 0; i < opaqueBinary.length; i += 1) {
+      opaqueBinary[i] = (i % 255) + 1;
+    }
+    await fs.writeFile(disguised, opaqueBinary);
+    await expectLoadWebMediaErrorCode(
+      loadWebMedia(disguised, {
+        maxBytes: 1024 * 1024,
+        localRoots: "any",
+        readFile: async (filePath) => await fs.readFile(filePath),
+        hostReadCapability: true,
+      }),
+      "path-not-allowed",
+    );
   });
 
   it("rejects binary data disguised as a CSV file", async () => {

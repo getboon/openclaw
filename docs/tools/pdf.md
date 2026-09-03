@@ -62,7 +62,11 @@ Optional model override in `provider/model` form.
 </ParamField>
 
 <ParamField path="maxBytesMb" type="number">
-Per-PDF size cap in MB. Defaults to `agents.defaults.pdfMaxBytesMb` or `10`.
+Per-PDF size cap in MB. Defaults to `agents.defaults.pdfMaxBytesMb` or `10`, and
+is clamped to `768` however it is set. PDFium runs in a 2GiB WASM heap and copies
+the whole file into it, so the file and its per-page working set share those 2GiB;
+a larger cap would accept files the engine then aborts on. A configured `1024`
+therefore behaves as `768`, and oversized files are refused naming the 768MB limit.
 </ParamField>
 
 Input notes:
@@ -96,8 +100,15 @@ The tool sends raw PDF bytes directly to provider APIs.
 
 Native mode limits:
 
+- The base64-encoded request must fit the provider's request cap: 32MB for
+  `anthropic`, 20MB for `google`. All PDFs in one call share a single request, so
+  the budget is their combined encoded size (about 3/4 of the cap in raw bytes).
+  Over it, the tool silently uses extraction fallback mode instead, which is
+  bounded by `maxPages` rather than by file size.
 - `pages` is not supported. If set, the tool returns an error.
 - `password` is not supported. Use a non-native model to analyze encrypted PDFs.
+  Note both errors above are only reachable while the request fits the size cap;
+  a larger PDF takes the extraction path, where `pages` and `password` do work.
 - Multi-PDF input is supported; each PDF is sent as a native document block /
   inline PDF part before the prompt.
 
