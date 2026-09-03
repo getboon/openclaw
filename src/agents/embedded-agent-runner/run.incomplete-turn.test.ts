@@ -1646,6 +1646,54 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     expectNoWarnMessageWith("unfinished steps detected");
   });
 
+  it("never auto-retries unfinished steps after a session spawn was accepted (ENG-18893)", async () => {
+    // Same duplication risk as a messaging-tool send: re-prompting "redo it"
+    // could make the model spawn a second child session for the same request.
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({
+        acceptedSessionSpawns: [
+          { runId: "run-child", childSessionKey: "agent:claude:subagent:child" },
+        ],
+      }),
+    );
+    mockedBuildEmbeddedRunPayloads.mockReturnValueOnce([
+      setReplyPayloadMetadata(
+        { text: "2 steps didn't finish (6 of 8 steps completed): exec — not found." },
+        { nonTerminalToolErrorWarning: true },
+      ),
+    ]);
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      runId: "run-unfinished-steps-session-spawn-no-retry",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
+    expectNoWarnMessageWith("unfinished steps detected");
+  });
+
+  it("never auto-retries unfinished steps after a cron job was added (ENG-18893)", async () => {
+    // Same duplication risk: re-prompting "redo it" could make the model add
+    // a second cron job for the same request.
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(makeAttemptResult({ successfulCronAdds: 1 }));
+    mockedBuildEmbeddedRunPayloads.mockReturnValueOnce([
+      setReplyPayloadMetadata(
+        { text: "2 steps didn't finish (6 of 8 steps completed): exec — not found." },
+        { nonTerminalToolErrorWarning: true },
+      ),
+    ]);
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      runId: "run-unfinished-steps-cron-add-no-retry",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
+    expectNoWarnMessageWith("unfinished steps detected");
+  });
+
   it("detects tool-use terminal turn with pre-tool text as incomplete (#76477)", () => {
     // When the last assistant message ended with stopReason=toolUse, pre-tool
     // text alone must not suppress the incomplete-turn guard. The model
