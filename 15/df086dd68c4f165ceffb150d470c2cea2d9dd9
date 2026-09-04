@@ -1,0 +1,34 @@
+src/auto-reply/reply/agent-runner-utils.ts
+  s_9df158d9bbb710::t_c2f2a712e7cfa1 304,311-317
+  s_9df158d9bbb710::t_9716991a74c7cd 340
+src/auto-reply/reply/agent-runner-utils.test.ts
+  s_9df158d9bbb710::t_7bd6c296067841 308-344
+src/agents/embedded-agent-runner/run/attempt.model-diagnostic-events.ts
+  s_9df158d9bbb710::t_a61ad2a1cb34fb 611,624,627-632
+  s_9df158d9bbb710::t_4e2bf670ed5fb9 40
+.design/tasks.json
+  s_9df158d9bbb710::t_2c50edd3ee153c 1-45
+.design/obo-primary-turn.trace.json
+  s_9df158d9bbb710::t_bcbcf990059a2c 1-60,69,74-75,80-82
+  s_9df158d9bbb710::t_f0875fca5c3eb6 61-68,70-73,76-79
+src/agents/embedded-agent-runner/run.before-agent-reply-cron.test.ts
+  s_9df158d9bbb710::t_571623a503b1a4 193-215
+src/agents/embedded-agent-runner/run.ts
+  s_9df158d9bbb710::t_b82b976090e8c5 2106-2109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "15df086dd68c4f165ceffb150d470c2cea2d9dd9",
+  "prompts": {},
+  "sessions": {
+    "s_9df158d9bbb710": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9e26c7c2-a67e-4f7b-9850-0b4e3f93fe95",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
