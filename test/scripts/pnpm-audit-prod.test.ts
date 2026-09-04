@@ -410,6 +410,21 @@ snapshots:
     await expect(request).rejects.toThrow(/Bulk advisory response body was empty/u);
   });
 
+  it("does not retry an empty successful bulk advisory response body", async () => {
+    let callCount = 0;
+    const request = fetchBulkAdvisories({
+      payload: { axios: ["1.0.0"] },
+      delayImpl: async () => {},
+      fetchImpl: async () => {
+        callCount += 1;
+        return new Response("", { status: 200 });
+      },
+    });
+
+    await expect(request).rejects.toThrow(/Bulk advisory response body was empty/u);
+    expect(callCount).toBe(1);
+  });
+
   it("retries once after a transient failure and returns the successful result", async () => {
     let callCount = 0;
     const delays: number[] = [];
@@ -523,6 +538,9 @@ snapshots:
       isRetryableBulkAdvisoryError(Object.assign(new Error("too big"), { code: "ETOOBIG" })),
     ).toBe(false);
     expect(isRetryableBulkAdvisoryError(new SyntaxError("bad json"))).toBe(false);
+    expect(
+      isRetryableBulkAdvisoryError(Object.assign(new Error("empty"), { code: "EEMPTYBODY" })),
+    ).toBe(false);
     expect(isRetryableBulkAdvisoryError(Object.assign(new Error("client"), { status: 404 }))).toBe(
       false,
     );
