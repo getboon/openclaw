@@ -1,0 +1,439 @@
+package.json
+  s_9df158d9bbb710::t_90d46e55c4005b 3
+CHANGELOG.md
+  s_9df158d9bbb710::t_b7614d7f3e97b0 5-14
+docs/.generated/config-baseline.json
+  s_9df158d9bbb710::t_d88d91447c181c 107051-107070
+docs/.generated/config-baseline.plugin.json
+  s_9df158d9bbb710::t_20aef526de1549 31478-31497
+docs/.generated/config-baseline.sha256
+  s_9df158d9bbb710::t_983b1f14315e57 1,4
+extensions/acpx/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_b1ee3650d90d9e 3,9
+extensions/acpx/package.json
+  s_9df158d9bbb710::t_02c9ede8e2b13f 3,29,32
+extensions/admin-http-rpc/package.json
+  s_9df158d9bbb710::t_cdae8f2d1e3465 3
+extensions/alibaba/package.json
+  s_9df158d9bbb710::t_0a10895d745951 3
+extensions/amazon-bedrock-mantle/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_3f2dd6f7b24792 3,9
+extensions/amazon-bedrock-mantle/package.json
+  s_9df158d9bbb710::t_6c7abe3ea5f5ae 3,27,30
+extensions/amazon-bedrock/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_9e0b424b41bb26 3,9
+extensions/amazon-bedrock/package.json
+  s_9df158d9bbb710::t_7d5ede0ef42f72 3,31,34
+extensions/anthropic-vertex/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_52dcd2ed00638f 3,9
+extensions/anthropic-vertex/package.json
+  s_9df158d9bbb710::t_71d579b10e0b03 3,26,29
+extensions/anthropic/package.json
+  s_9df158d9bbb710::t_34bdf510f7470b 3
+extensions/arcee/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_22a4d617eabd06 3,9
+extensions/arcee/package.json
+  s_9df158d9bbb710::t_678603399a9b06 3,24,27
+extensions/azure-speech/package.json
+  s_9df158d9bbb710::t_eb08743ba1520f 3
+extensions/bonjour/package.json
+  s_9df158d9bbb710::t_63e9abaac2626c 3
+extensions/brave/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_1114a1689c6cf7 3,9
+extensions/brave/package.json
+  s_9df158d9bbb710::t_082c49c81641a4 3,24,27
+extensions/browser-handoff/package.json
+  s_9df158d9bbb710::t_8399d3e18650c4 3
+extensions/browser/package.json
+  s_9df158d9bbb710::t_ba0d911cbe01bb 3
+extensions/byteplus/package.json
+  s_9df158d9bbb710::t_f871b5940ae6fa 3
+extensions/canvas/package.json
+  s_9df158d9bbb710::t_9eae6d17b896f3 3
+extensions/cerebras/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_7ea0ab26071604 3,9
+extensions/cerebras/package.json
+  s_9df158d9bbb710::t_f519007a9552c4 3,24,27
+extensions/chutes/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_8a7e939530e0be 3,9
+extensions/chutes/package.json
+  s_9df158d9bbb710::t_388a7e361ad3aa 3,24,27
+extensions/clickclack/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_e1250ae0c7d098 3,9,15
+extensions/clickclack/package.json
+  s_9df158d9bbb710::t_3fd060a33b04ac 3,20,56,59
+extensions/cloudflare-ai-gateway/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_e16fbbb806aa10 3,9
+extensions/cloudflare-ai-gateway/package.json
+  s_9df158d9bbb710::t_1b2a0276fce4a6 3,24,27
+extensions/codex-supervisor/package.json
+  s_9df158d9bbb710::t_1c89b2fe9b2217 3
+extensions/codex/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_5fa1d7b6441b1f 3,9
+extensions/codex/package.json
+  s_9df158d9bbb710::t_5a0479d5c7df9f 3,37,40
+extensions/cohere/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_0326ac992078c7 3,9
+extensions/cohere/package.json
+  s_9df158d9bbb710::t_f3afa3544bae49 3,24,27
+extensions/comfy/package.json
+  s_9df158d9bbb710::t_c0371de001d90b 3
+extensions/copilot-proxy/package.json
+  s_9df158d9bbb710::t_4d293296cc9c22 3
+extensions/copilot/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_34e14a36f0a2a3 3,9
+extensions/copilot/package.json
+  s_9df158d9bbb710::t_c76627d8a916d5 3,28,31
+extensions/deepgram/package.json
+  s_9df158d9bbb710::t_f0888e00547373 3
+extensions/deepinfra/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_c558166ab57373 3,9
+extensions/deepinfra/package.json
+  s_9df158d9bbb710::t_4e4cd1aa9305c4 3,24,27
+extensions/deepseek/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_729b21908b8776 3,9
+extensions/deepseek/package.json
+  s_9df158d9bbb710::t_a904ba228499b6 3,24,27
+extensions/diagnostics-otel/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_07f8b20714ba84 3,9
+extensions/diagnostics-otel/package.json
+  s_9df158d9bbb710::t_6934d7d9ed58a1 3,37,40
+extensions/diagnostics-prometheus/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_121cf0573cee46 3,9
+extensions/diagnostics-prometheus/package.json
+  s_9df158d9bbb710::t_9ce05ad3b6ea91 3,24,27
+extensions/diffs-language-pack/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_78a11b88ea9798 3,9
+extensions/diffs-language-pack/package.json
+  s_9df158d9bbb710::t_045c8062053fb6 3,25,31
+extensions/diffs/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_b78e9f90eb2c01 3,9
+extensions/diffs/package.json
+  s_9df158d9bbb710::t_b00ecafc83d1d5 3,32,38
+extensions/discord/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_a57abde250b88a 3,9,19
+extensions/discord/package.json
+  s_9df158d9bbb710::t_1a47f808c1789b 3,23,70,73
+extensions/document-extract/package.json
+  s_9df158d9bbb710::t_3ed122e9a886f7 3
+extensions/duckduckgo/package.json
+  s_9df158d9bbb710::t_1b434c74d338df 3
+extensions/elevenlabs/package.json
+  s_9df158d9bbb710::t_461caf4c6b6a8e 3
+extensions/exa/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_208dcd12d29017 3,9
+extensions/exa/package.json
+  s_9df158d9bbb710::t_db7e7fb779724f 3,24,27
+extensions/fal/package.json
+  s_9df158d9bbb710::t_bc4090b9316c71 3
+extensions/feishu/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_1fe1c29114de75 3,9,16
+extensions/feishu/package.json
+  s_9df158d9bbb710::t_9d0b48bb29c7f9 3,20,54,57
+extensions/file-transfer/package.json
+  s_9df158d9bbb710::t_5f4fcdad9dab59 3
+extensions/firecrawl/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_33ce301a8ee75a 3,9
+extensions/firecrawl/package.json
+  s_9df158d9bbb710::t_98096b9822788e 3,27,30
+extensions/fireworks/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_3825345c90ec88 3,9
+extensions/fireworks/package.json
+  s_9df158d9bbb710::t_6d3f442c271966 3,20,23
+extensions/github-copilot/package.json
+  s_9df158d9bbb710::t_fb5b5159ac153c 3
+extensions/gmi/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_adce7705e9e0a9 3,9
+extensions/gmi/package.json
+  s_9df158d9bbb710::t_2db7e8cd7a36c6 3,24,27
+extensions/google-meet/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_6ca67be34af59e 3,9,15
+extensions/google-meet/package.json
+  s_9df158d9bbb710::t_3118670ab21cf3 3,19,36,39
+extensions/google/package.json
+  s_9df158d9bbb710::t_bba12d853b05cf 3
+extensions/googlechat/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_2e2000d43382a2 3,9,16
+extensions/googlechat/package.json
+  s_9df158d9bbb710::t_ba778774474c45 3,20,78,81
+extensions/gradium/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_a3214a531f2d1b 3,9
+extensions/gradium/package.json
+  s_9df158d9bbb710::t_eef5ce3d3f6f84 3,24,27
+extensions/groq/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_500fe3c4c8b48b 3,9
+extensions/groq/package.json
+  s_9df158d9bbb710::t_d4caae0bfca8d6 3,24,27
+extensions/huggingface/package.json
+  s_9df158d9bbb710::t_625cf425931b09 3
+extensions/image-generation-core/package.json
+  s_9df158d9bbb710::t_7cf5ef6e781117 3
+extensions/imessage/package.json
+  s_9df158d9bbb710::t_834533e324b542 3,46,49
+extensions/inworld/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_b35561f7bb0321 3,9
+extensions/inworld/package.json
+  s_9df158d9bbb710::t_1a08bf2183deee 3,24,27
+extensions/irc/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_73bf2e46e122f8 3,9
+extensions/irc/package.json
+  s_9df158d9bbb710::t_10f7a8c9315aa5 3,45,48
+extensions/kilocode/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_8c3ae094ab69b2 3,9
+extensions/kilocode/package.json
+  s_9df158d9bbb710::t_1988986b5dfaf0 3,24,27
+extensions/kimi-coding/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_4c877a1e0a27c8 3,9
+extensions/kimi-coding/package.json
+  s_9df158d9bbb710::t_1bae846fd716f4 3,24,27
+extensions/line/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_61dce3dc923c47 3,9,15
+extensions/line/package.json
+  s_9df158d9bbb710::t_c440af88c449bb 3,19,49,52
+extensions/litellm/package.json
+  s_9df158d9bbb710::t_e3846923f489de 3
+extensions/llama-cpp/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_c15c62ccdc33fe 3,9
+extensions/llama-cpp/package.json
+  s_9df158d9bbb710::t_364942c97aad05 3,26,29
+extensions/llm-task/package.json
+  s_9df158d9bbb710::t_8eabdd51f72b6a 3
+extensions/lmstudio/package.json
+  s_9df158d9bbb710::t_6a598253339f51 3
+extensions/lobster/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_58a441f3df5d47 3,9
+extensions/lobster/package.json
+  s_9df158d9bbb710::t_a3f8c37862785d 3,27,30
+extensions/matrix/CHANGELOG.md
+  s_9df158d9bbb710::t_02a7be1b3f230e 3-8
+extensions/matrix/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_e89f44d43e6901 3,9,21
+extensions/matrix/package.json
+  s_9df158d9bbb710::t_78d4a773e80136 3,25,91,94
+extensions/mattermost/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_af43e1477bc017 3,9,15
+extensions/mattermost/package.json
+  s_9df158d9bbb710::t_b4492bcee92035 3,19,48,51
+extensions/media-understanding-core/package.json
+  s_9df158d9bbb710::t_481ac49045fcfb 3
+extensions/memory-core/package.json
+  s_9df158d9bbb710::t_766362cfa97ad4 3,17
+extensions/memory-lancedb/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_3b76d73e952dc7 3,9
+extensions/memory-lancedb/package.json
+  s_9df158d9bbb710::t_ba07c58f156aa4 3,29,32
+extensions/memory-wiki/package.json
+  s_9df158d9bbb710::t_edccff503c5698 3,17
+extensions/microsoft-foundry/package.json
+  s_9df158d9bbb710::t_2dd40d2a5cea89 3
+extensions/microsoft/package.json
+  s_9df158d9bbb710::t_0ddf148513215a 3
+extensions/migrate-claude/package.json
+  s_9df158d9bbb710::t_2d2c9f21cf8662 3,12
+extensions/migrate-hermes/package.json
+  s_9df158d9bbb710::t_5b18cdb582f136 3,15
+extensions/minimax/package.json
+  s_9df158d9bbb710::t_1e9bcb6fd9ee63 3
+extensions/mistral/package.json
+  s_9df158d9bbb710::t_47b3bca6f2b9b7 3
+extensions/moonshot/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_f2a3eb4453da74 3,9
+extensions/moonshot/package.json
+  s_9df158d9bbb710::t_0c9dc1ce220d0e 3,20,23
+extensions/msteams/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_64bae4837aaea3 3,9,18
+extensions/msteams/package.json
+  s_9df158d9bbb710::t_85e3aab8f26683 3,23,59,62
+extensions/nextcloud-talk/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_901724376f789d 3,9,14
+extensions/nextcloud-talk/package.json
+  s_9df158d9bbb710::t_6da259788bad96 3,15,47,50
+extensions/nostr/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_1ebc779b134c0e 3,9,15
+extensions/nostr/package.json
+  s_9df158d9bbb710::t_f896883881d139 3,19,57,60
+extensions/novita/package.json
+  s_9df158d9bbb710::t_0133b1f334454e 3
+extensions/nvidia/package.json
+  s_9df158d9bbb710::t_4017a955ee4bf3 3
+extensions/oc-path/package.json
+  s_9df158d9bbb710::t_5976cf60aafbee 3,18
+extensions/ollama/package.json
+  s_9df158d9bbb710::t_4c620f8fc885e8 3
+extensions/open-prose/package.json
+  s_9df158d9bbb710::t_6c8d9bc49c8a20 3
+extensions/openai/package.json
+  s_9df158d9bbb710::t_47176305ba7444 3
+extensions/opencode-go/package.json
+  s_9df158d9bbb710::t_183c6494d440d7 3
+extensions/opencode/package.json
+  s_9df158d9bbb710::t_6c2376e26d74ac 3
+extensions/openrouter/package.json
+  s_9df158d9bbb710::t_bb1bc08389b320 3
+extensions/openshell/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_7619a017c17feb 3,9
+extensions/openshell/package.json
+  s_9df158d9bbb710::t_cc683b16947151 3,26,29
+extensions/parallel/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_d66c887ad7097d 3,9
+extensions/parallel/package.json
+  s_9df158d9bbb710::t_07bed2252cd617 3,24,27
+extensions/perplexity/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_ce414a0b0e8e81 3,9
+extensions/perplexity/package.json
+  s_9df158d9bbb710::t_a459b62fac1651 3,24,27
+extensions/pixverse/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_89a6b8c08bf71b 3,9,11
+extensions/pixverse/package.json
+  s_9df158d9bbb710::t_1a1b402342f647 3,15,33,36
+extensions/policy/package.json
+  s_9df158d9bbb710::t_f9085637cb874b 3,15
+extensions/qa-channel/package.json
+  s_9df158d9bbb710::t_861675da6ea017 3,22
+extensions/qa-lab/package.json
+  s_9df158d9bbb710::t_fa18d8ba4278d3 3,23,35
+extensions/qa-matrix/package.json
+  s_9df158d9bbb710::t_acc7bff773ac08 3,16,28
+extensions/qianfan/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_7dc09c813a5bcb 3,9
+extensions/qianfan/package.json
+  s_9df158d9bbb710::t_f7e5c511f18cb5 3,24,27
+extensions/qqbot/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_469f8d31ef046f 3,9,18
+extensions/qqbot/package.json
+  s_9df158d9bbb710::t_3136c5a964532f 3,24,53,56
+extensions/qwen/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_e7a606d70fe5c5 3,9
+extensions/qwen/package.json
+  s_9df158d9bbb710::t_4280abd62c03d8 3,24,27
+extensions/raft/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_61601a05eef04e 3,9,14
+extensions/raft/package.json
+  s_9df158d9bbb710::t_27fdfe93d8bbd7 3,18,36,39
+extensions/runway/package.json
+  s_9df158d9bbb710::t_b4beaa5daf1537 3
+extensions/searxng/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_838bff31f6e96d 3,9
+extensions/searxng/package.json
+  s_9df158d9bbb710::t_456e781ae8c31b 3,21,24
+extensions/senseaudio/package.json
+  s_9df158d9bbb710::t_a23662da277143 3
+extensions/sentry-monitor/package.json
+  s_9df158d9bbb710::t_902b957818e12d 3
+extensions/sglang/package.json
+  s_9df158d9bbb710::t_38f29e27a17f52 3
+extensions/signal/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_08bb7652123c4c 3,9
+extensions/signal/package.json
+  s_9df158d9bbb710::t_2035733b23abd8 3,50,53
+extensions/slack/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_e36acf4e509fee 3,9,19
+extensions/slack/package.json
+  s_9df158d9bbb710::t_0b8101954e681b 3,23,68,74
+extensions/sms/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_4741d3934a9a5e 3,9
+extensions/sms/package.json
+  s_9df158d9bbb710::t_9b6e9a90aad5c4 3,32,35
+extensions/stepfun/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_218ef816ebc635 3,9
+extensions/stepfun/package.json
+  s_9df158d9bbb710::t_85e2bda12d6367 3,24,27
+extensions/synology-chat/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_5a7b10ebf63467 3,9
+extensions/synology-chat/package.json
+  s_9df158d9bbb710::t_50824646b021fb 3,33,36
+extensions/synthetic/package.json
+  s_9df158d9bbb710::t_942f2a36f1a97b 3
+extensions/tavily/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_f7618dd08f7dba 3,9
+extensions/tavily/package.json
+  s_9df158d9bbb710::t_152033d1510cbd 3,24,27
+extensions/telegram/package.json
+  s_9df158d9bbb710::t_1a8909330aea96 3
+extensions/tencent/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_4f567babc09dda 3,9
+extensions/tencent/package.json
+  s_9df158d9bbb710::t_986e1e22fa7f27 3,20,23
+extensions/tlon/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_a4fdda2c77061e 3,9,18
+extensions/tlon/package.json
+  s_9df158d9bbb710::t_633953ac5eb262 3,22,76,79
+extensions/together/package.json
+  s_9df158d9bbb710::t_8f12f0e2d50d49 3
+extensions/tokenjuice/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_95ace001500314 3,9,14
+extensions/tokenjuice/package.json
+  s_9df158d9bbb710::t_77fa85cce7bfb1 3,14,36,39
+extensions/tts-local-cli/package.json
+  s_9df158d9bbb710::t_6e759727b32ca3 3
+extensions/twitch/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_44d987d181113a 3,9
+extensions/twitch/package.json
+  s_9df158d9bbb710::t_04b0ce9848f7b6 3,30,33
+extensions/venice/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_7dd74c57b173fd 3,9
+extensions/venice/package.json
+  s_9df158d9bbb710::t_e01fc4145cf7f3 3,20,23
+extensions/vercel-ai-gateway/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_53bfa2b4e2e654 3,9
+extensions/vercel-ai-gateway/package.json
+  s_9df158d9bbb710::t_38d74f4c3a216d 3,20,23
+extensions/video-generation-core/package.json
+  s_9df158d9bbb710::t_eb1bc69d64292c 3
+extensions/vllm/package.json
+  s_9df158d9bbb710::t_c3b6b7d5b6c63e 3
+extensions/voice-call/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_f44ece60bb8c50 3,9,17
+extensions/voice-call/package.json
+  s_9df158d9bbb710::t_3d6ec6cbe1b808 3,21,38,41
+extensions/volcengine/package.json
+  s_9df158d9bbb710::t_3334ddec184d87 3
+extensions/voyage/package.json
+  s_9df158d9bbb710::t_2b84a9cb3acec9 3
+extensions/vydra/package.json
+  s_9df158d9bbb710::t_c8772c083b1c1d 3
+extensions/web-readability/package.json
+  s_9df158d9bbb710::t_48fa72ce86fae8 3
+extensions/webhooks/package.json
+  s_9df158d9bbb710::t_a6d3fc60961b13 3
+extensions/whatsapp/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_183e9d49e3858f 3,9,16
+extensions/whatsapp/package.json
+  s_9df158d9bbb710::t_52949111c7d9a7 3,20,63,66
+extensions/workboard/package.json
+  s_9df158d9bbb710::t_9d64508f89ea30 3,15
+extensions/xai/package.json
+  s_9df158d9bbb710::t_e5a08dd94e857a 3
+extensions/xiaomi/package.json
+  s_9df158d9bbb710::t_7f0aa79fb34f46 3
+extensions/zai/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_ea93e2d6214484 3,9
+extensions/zai/package.json
+  s_9df158d9bbb710::t_84f5f7dbe48b5e 3,20,23
+extensions/zalo/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_172fa721a363a4 3,9,14
+extensions/zalo/package.json
+  s_9df158d9bbb710::t_6d0dcbf727f6e3 3,15,46,49
+extensions/zalouser/npm-shrinkwrap.json
+  s_9df158d9bbb710::t_78c1bca2091797 3,9,16
+extensions/zalouser/package.json
+  s_9df158d9bbb710::t_8562821c901501 3,20,57,60
+npm-shrinkwrap.json
+  s_9df158d9bbb710::t_2f694c3668c65b 3,9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "773605ad0a4fc4125d5fd8c91bc39cc7826ee6d1",
+  "prompts": {},
+  "sessions": {
+    "s_9df158d9bbb710": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9e26c7c2-a67e-4f7b-9850-0b4e3f93fe95",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
