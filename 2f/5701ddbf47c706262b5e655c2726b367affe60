@@ -1,0 +1,19 @@
+src/agents/embedded-agent-runner/run/attempt.model-diagnostic-events.ts
+  s_9df158d9bbb710::t_87ea492eeddb26 125-128
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "2f5701ddbf47c706262b5e655c2726b367affe60",
+  "prompts": {},
+  "sessions": {
+    "s_9df158d9bbb710": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9e26c7c2-a67e-4f7b-9850-0b4e3f93fe95",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
