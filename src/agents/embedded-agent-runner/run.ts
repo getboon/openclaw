@@ -2103,6 +2103,10 @@ async function runEmbeddedAgentInternal(
             senderName: params.senderName,
             senderUsername: params.senderUsername,
             senderE164: params.senderE164,
+            // Gateway-audience OBO (ENG-19115) → attempt.ts → x-boon-gateway-obo-token.
+            // The attempt params are an explicit copy of the run params; omitting the
+            // field here is why attempt.ts's params.oboToken was always undefined.
+            oboToken: params.oboToken,
             approvalReviewerDeviceId: params.approvalReviewerDeviceId,
             currentChannelId: params.currentChannelId,
             chatId: params.chatId,
