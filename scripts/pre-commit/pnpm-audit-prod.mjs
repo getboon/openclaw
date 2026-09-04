@@ -45,6 +45,20 @@ const AUDIT_ADVISORY_VERSION_OVERRIDES = [
   },
 ];
 
+/**
+ * Excluded from the bulk advisory *request* entirely (not just filtered from
+ * findings afterward) -- live-verified (2026-09-04): a bulk advisory request
+ * containing only "@a2ui/web_core" hangs registry.npmjs.org's endpoint
+ * indefinitely (confirmed twice, 15-20s+, zero bytes received), even though
+ * the package's own registry metadata resolves normally in under a second.
+ * This isn't payload-size related -- it reproduces with this single package
+ * alone -- and blocks security-fast on every PR that pulls it in as a
+ * production dependency (the canvas extension's a2ui bundle), not just ones
+ * that touch it. Remove once npm fixes the underlying advisory-lookup bug
+ * for this package.
+ */
+export const BULK_ADVISORY_EXCLUDED_PACKAGES = new Set(["@a2ui/web_core"]);
+
 export function normalizeAuditLevel(level) {
   const normalized = String(level ?? "").toLowerCase();
   if (normalized in SEVERITY_RANK) {
@@ -935,10 +949,32 @@ export async function runPnpmAuditProd({
   const lockfileText = await readFile(lockfilePath, "utf8");
   const versionsByPackage = collectProdResolvedPackagesFromLockfile(lockfileText);
   const payload = createBulkAdvisoryPayload(versionsByPackage);
-  const payloadEntries = Object.entries(payload);
+  const excludedPackagesPresent = Object.keys(payload).filter((packageName) =>
+    BULK_ADVISORY_EXCLUDED_PACKAGES.has(packageName),
+  );
+  // Loud, not silent: excluding a package from the bulk request means it was
+  // NOT checked for advisories this run. A clean exit code must not read as
+  // "everything was audited" when that isn't true -- surface exactly what
+  // was skipped and why, every time it applies, so nobody mistakes a passing
+  // security-fast for full coverage.
+  for (const packageName of excludedPackagesPresent) {
+    stderr.write(
+      `SECURITY WARNING: "${packageName}" was not checked for advisories this run (excluded ` +
+        "from the bulk advisory request -- see BULK_ADVISORY_EXCLUDED_PACKAGES in " +
+        "scripts/pre-commit/pnpm-audit-prod.mjs for why).\n",
+    );
+  }
+  const payloadEntries = Object.entries(payload).filter(
+    ([packageName]) => !BULK_ADVISORY_EXCLUDED_PACKAGES.has(packageName),
+  );
 
   if (payloadEntries.length === 0) {
-    stdout.write("No production dependencies found in pnpm-lock.yaml.\n");
+    stdout.write(
+      excludedPackagesPresent.length > 0
+        ? "No production dependencies to audit: the only one(s) present were excluded from " +
+            "the bulk advisory request (see the SECURITY WARNING above).\n"
+        : "No production dependencies found in pnpm-lock.yaml.\n",
+    );
     return 0;
   }
 

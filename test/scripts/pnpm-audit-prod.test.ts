@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  BULK_ADVISORY_EXCLUDED_PACKAGES,
   BULK_ADVISORY_MAX_ATTEMPTS,
   BULK_ADVISORY_RETRY_DELAY_MS,
   collectProdResolvedPackagesFromLockfile,
@@ -613,6 +614,164 @@ snapshots:
       await rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it(
+    "excludes @a2ui/web_core from the bulk advisory request even when it is a production " +
+      "dependency, and warns loudly on stderr that it was not checked",
+    async () => {
+      expect(BULK_ADVISORY_EXCLUDED_PACKAGES.has("@a2ui/web_core")).toBe(true);
+
+      const tempDir = await mkdtemp(path.join(tmpdir(), "openclaw-audit-prod-"));
+      await writeFile(
+        path.join(tempDir, "pnpm-lock.yaml"),
+        `lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      axios:
+        version: 1.0.0
+      '@a2ui/web_core':
+        version: 0.10.0
+
+snapshots:
+  axios@1.0.0: {}
+  '@a2ui/web_core@0.10.0': {}
+`,
+        "utf8",
+      );
+
+      try {
+        const requestedPayloads: Record<string, string[]>[] = [];
+        const stderrChunks: string[] = [];
+        const exitCode = await runPnpmAuditProd({
+          rootDir: tempDir,
+          fetchImpl: async (_url: string, init: RequestInit) => {
+            requestedPayloads.push(JSON.parse(init.body as string));
+            return new Response(JSON.stringify({}), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            });
+          },
+          stdout: { write: () => true } as NodeJS.WriteStream,
+          stderr: {
+            write(chunk: string) {
+              stderrChunks.push(chunk);
+              return true;
+            },
+          } as NodeJS.WriteStream,
+        });
+
+        expect(exitCode).toBe(0);
+        const requestedPackages = requestedPayloads.flatMap((payload) => Object.keys(payload));
+        expect(requestedPackages).toContain("axios");
+        expect(requestedPackages).not.toContain("@a2ui/web_core");
+
+        const stderrText = stderrChunks.join("");
+        expect(stderrText).toContain("@a2ui/web_core");
+        expect(stderrText).toContain("not checked");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
+    "does not print an exclusion warning when the excluded package is only a devDependency, " +
+      "not a production one",
+    async () => {
+      const tempDir = await mkdtemp(path.join(tmpdir(), "openclaw-audit-prod-"));
+      await writeFile(
+        path.join(tempDir, "pnpm-lock.yaml"),
+        `lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      axios:
+        version: 1.0.0
+    devDependencies:
+      '@a2ui/web_core':
+        version: 0.10.0
+
+snapshots:
+  axios@1.0.0: {}
+  '@a2ui/web_core@0.10.0': {}
+`,
+        "utf8",
+      );
+
+      try {
+        const stderrChunks: string[] = [];
+        await runPnpmAuditProd({
+          rootDir: tempDir,
+          fetchImpl: async () =>
+            new Response(JSON.stringify({}), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            }),
+          stdout: { write: () => true } as NodeJS.WriteStream,
+          stderr: {
+            write(chunk: string) {
+              stderrChunks.push(chunk);
+              return true;
+            },
+          } as NodeJS.WriteStream,
+        });
+
+        expect(stderrChunks.join("")).not.toContain("@a2ui/web_core");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
+    "does not claim no production dependencies were found when the only one present was " +
+      "excluded, not absent",
+    async () => {
+      const tempDir = await mkdtemp(path.join(tmpdir(), "openclaw-audit-prod-"));
+      await writeFile(
+        path.join(tempDir, "pnpm-lock.yaml"),
+        `lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      '@a2ui/web_core':
+        version: 0.10.0
+
+snapshots:
+  '@a2ui/web_core@0.10.0': {}
+`,
+        "utf8",
+      );
+
+      try {
+        const stdoutChunks: string[] = [];
+        const exitCode = await runPnpmAuditProd({
+          rootDir: tempDir,
+          fetchImpl: async () => {
+            throw new Error("must not make a bulk advisory request when every package is excluded");
+          },
+          stdout: {
+            write(chunk: string) {
+              stdoutChunks.push(chunk);
+              return true;
+            },
+          } as NodeJS.WriteStream,
+          stderr: { write: () => true } as NodeJS.WriteStream,
+        });
+
+        expect(exitCode).toBe(0);
+        const stdoutText = stdoutChunks.join("");
+        expect(stdoutText).not.toContain("No production dependencies found");
+        expect(stdoutText).toContain("excluded");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
