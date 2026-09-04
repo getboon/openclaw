@@ -10,6 +10,7 @@ import {
   createBulkAdvisoryPayload,
   fetchBulkAdvisories,
   filterFindingsBySeverity,
+  isRetryableBulkAdvisoryError,
   parseArgs,
   parseSnapshotKey,
   readBoundedBulkAdvisoryErrorText,
@@ -446,6 +447,88 @@ snapshots:
 
     await expect(request).rejects.toThrow(/Bulk advisory request exceeded timeout/u);
     expect(callCount).toBe(BULK_ADVISORY_MAX_ATTEMPTS);
+  });
+
+  it("does not retry a deterministic 4xx bulk advisory rejection", async () => {
+    let callCount = 0;
+    const delays: number[] = [];
+    const request = fetchBulkAdvisories({
+      payload: { axios: ["1.0.0"] },
+      delayImpl: async (ms) => {
+        delays.push(ms);
+      },
+      fetchImpl: async () => {
+        callCount += 1;
+        return new Response("bad request", { status: 400, statusText: "Bad Request" });
+      },
+    });
+
+    await expect(request).rejects.toThrow(/Bulk advisory request failed \(400/u);
+    expect(callCount).toBe(1);
+    expect(delays).toEqual([]);
+  });
+
+  it("does not retry an oversized bulk advisory response body", async () => {
+    let callCount = 0;
+    const request = fetchBulkAdvisories({
+      payload: { axios: ["1.0.0"] },
+      responseBodyMaxBytes: 1,
+      delayImpl: async () => {},
+      fetchImpl: async () => {
+        callCount += 1;
+        return new Response(JSON.stringify({ axios: [] }), { status: 200 });
+      },
+    });
+
+    await expect(request).rejects.toThrow(/exceeded 1 bytes/u);
+    expect(callCount).toBe(1);
+  });
+
+  it("does not retry a malformed JSON bulk advisory response body", async () => {
+    let callCount = 0;
+    const request = fetchBulkAdvisories({
+      payload: { axios: ["1.0.0"] },
+      delayImpl: async () => {},
+      fetchImpl: async () => {
+        callCount += 1;
+        return new Response("not json", { status: 200 });
+      },
+    });
+
+    await expect(request).rejects.toThrow(SyntaxError);
+    expect(callCount).toBe(1);
+  });
+
+  it("retries a 5xx bulk advisory rejection", async () => {
+    let callCount = 0;
+    const request = fetchBulkAdvisories({
+      payload: { axios: ["1.0.0"] },
+      delayImpl: async () => {},
+      fetchImpl: async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return new Response("oops", { status: 503, statusText: "Service Unavailable" });
+        }
+        return new Response(JSON.stringify({ axios: [] }), { status: 200 });
+      },
+    });
+
+    await expect(request).resolves.toEqual({ axios: [] });
+    expect(callCount).toBe(2);
+  });
+
+  it("classifies bulk advisory errors by transience", () => {
+    expect(isRetryableBulkAdvisoryError(new Error("timed out"))).toBe(true);
+    expect(
+      isRetryableBulkAdvisoryError(Object.assign(new Error("too big"), { code: "ETOOBIG" })),
+    ).toBe(false);
+    expect(isRetryableBulkAdvisoryError(new SyntaxError("bad json"))).toBe(false);
+    expect(isRetryableBulkAdvisoryError(Object.assign(new Error("client"), { status: 404 }))).toBe(
+      false,
+    );
+    expect(isRetryableBulkAdvisoryError(Object.assign(new Error("server"), { status: 503 }))).toBe(
+      true,
+    );
   });
 
   it("returns a failing exit code when bulk advisories include high severity findings", async () => {

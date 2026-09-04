@@ -842,8 +842,11 @@ async function fetchBulkAdvisoriesOnce({
         const bodyText = await readBoundedBulkAdvisoryErrorText(response, undefined, {
           timeoutPromise,
         });
-        throw new Error(
-          `Bulk advisory request failed (${response.status} ${response.statusText}): ${bodyText}`,
+        throw Object.assign(
+          new Error(
+            `Bulk advisory request failed (${response.status} ${response.statusText}): ${bodyText}`,
+          ),
+          { status: response.status },
         );
       }
 
@@ -856,11 +859,31 @@ async function fetchBulkAdvisoriesOnce({
 }
 
 /**
- * Retries once on any failure (timeout, network error, non-2xx) before giving
- * up — registry.npmjs.org's bulk advisory endpoint has been observed to time
- * out on an otherwise-healthy request (two consecutive CI failures, same
- * payload that had passed minutes earlier on an equivalent PR). A retry does
- * not weaken the audit: a real advisory finding only surfaces once the
+ * Deterministic failures (a 4xx rejection, a response over the size cap, a
+ * malformed JSON body) will fail identically on retry, so retrying them only
+ * adds a delayImpl(retryDelayMs) wait plus a duplicate request before
+ * reporting the same finding. Only timeouts, network errors, and 5xx
+ * responses are worth a retry.
+ */
+export function isRetryableBulkAdvisoryError(error) {
+  if (error?.code === "ETOOBIG") {
+    return false;
+  }
+  if (error instanceof SyntaxError) {
+    return false;
+  }
+  if (typeof error?.status === "number") {
+    return error.status >= 500;
+  }
+  return true;
+}
+
+/**
+ * Retries once on a transient failure (timeout, network error, 5xx) before
+ * giving up — registry.npmjs.org's bulk advisory endpoint has been observed
+ * to time out on an otherwise-healthy request (two consecutive CI failures,
+ * same payload that had passed minutes earlier on an equivalent PR). A retry
+ * does not weaken the audit: a real advisory finding only surfaces once the
  * request actually succeeds, so this only shortens the gap between "the
  * registry hiccuped" and "the check passes," not what counts as a finding.
  */
@@ -889,9 +912,10 @@ export async function fetchBulkAdvisories({
       });
     } catch (error) {
       lastError = error;
-      if (attempt < maxAttempts) {
-        await delayImpl(retryDelayMs);
+      if (attempt >= maxAttempts || !isRetryableBulkAdvisoryError(error)) {
+        throw error;
       }
+      await delayImpl(retryDelayMs);
     }
   }
   throw lastError;
