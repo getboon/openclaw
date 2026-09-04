@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  BULK_ADVISORY_MAX_ATTEMPTS,
+  BULK_ADVISORY_RETRY_DELAY_MS,
   collectProdResolvedPackagesFromLockfile,
   createBulkAdvisoryPayload,
   fetchBulkAdvisories,
@@ -251,6 +253,7 @@ snapshots:
   it("aborts stalled bulk advisory requests", async () => {
     let signal: AbortSignal | undefined;
     const request = fetchBulkAdvisories({
+      maxAttempts: 1,
       payload: { axios: ["1.0.0"] },
       timeoutMs: 5,
       fetchImpl: ((_url, init) => {
@@ -277,6 +280,7 @@ snapshots:
   it("clamps oversized bulk advisory request timers before scheduling", async () => {
     let signal: AbortSignal | undefined;
     const request = fetchBulkAdvisories({
+      maxAttempts: 1,
       payload: { axios: ["1.0.0"] },
       timeoutMs: Number.MAX_SAFE_INTEGER,
       fetchImpl: (async (_url, init) => {
@@ -311,6 +315,7 @@ snapshots:
       },
     });
     const request = fetchBulkAdvisories({
+      maxAttempts: 1,
       payload: { axios: ["1.0.0"] },
       timeoutMs: 5,
       fetchImpl: async () => new Response(body, { status: 200 }),
@@ -331,6 +336,7 @@ snapshots:
       },
     });
     const request = fetchBulkAdvisories({
+      maxAttempts: 1,
       payload: { axios: ["1.0.0"] },
       timeoutMs: 5,
       fetchImpl: async () => new Response(body, { status: 500, statusText: "Internal Error" }),
@@ -351,6 +357,7 @@ snapshots:
       },
     });
     const request = fetchBulkAdvisories({
+      maxAttempts: 1,
       payload: { axios: ["1.0.0"] },
       responseBodyMaxBytes: 4,
       fetchImpl: async () =>
@@ -377,6 +384,7 @@ snapshots:
       },
     });
     const request = fetchBulkAdvisories({
+      maxAttempts: 1,
       payload: { axios: ["1.0.0"] },
       responseBodyMaxBytes: 4,
       fetchImpl: async () =>
@@ -393,11 +401,51 @@ snapshots:
 
   it("fails closed on empty successful bulk advisory response bodies", async () => {
     const request = fetchBulkAdvisories({
+      maxAttempts: 1,
       payload: { axios: ["1.0.0"] },
       fetchImpl: async () => new Response("", { status: 200 }),
     });
 
     await expect(request).rejects.toThrow(/Bulk advisory response body was empty/u);
+  });
+
+  it("retries once after a transient failure and returns the successful result", async () => {
+    let callCount = 0;
+    const delays: number[] = [];
+    const request = fetchBulkAdvisories({
+      payload: { axios: ["1.0.0"] },
+      timeoutMs: 5,
+      delayImpl: async (ms) => {
+        delays.push(ms);
+      },
+      fetchImpl: async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return await new Promise(() => {}); // never resolves -> times out
+        }
+        return new Response(JSON.stringify({ axios: [] }), { status: 200 });
+      },
+    });
+
+    await expect(request).resolves.toEqual({ axios: [] });
+    expect(callCount).toBe(2);
+    expect(delays).toEqual([BULK_ADVISORY_RETRY_DELAY_MS]);
+  });
+
+  it("throws the last error once every retry attempt is exhausted", async () => {
+    let callCount = 0;
+    const request = fetchBulkAdvisories({
+      payload: { axios: ["1.0.0"] },
+      timeoutMs: 5,
+      delayImpl: async () => {},
+      fetchImpl: async () => {
+        callCount += 1;
+        return await new Promise(() => {}); // always times out
+      },
+    });
+
+    await expect(request).rejects.toThrow(/Bulk advisory request exceeded timeout/u);
+    expect(callCount).toBe(BULK_ADVISORY_MAX_ATTEMPTS);
   });
 
   it("returns a failing exit code when bulk advisories include high severity findings", async () => {
