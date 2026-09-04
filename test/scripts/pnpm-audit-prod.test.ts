@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  BULK_ADVISORY_EXCLUDED_PACKAGES,
   BULK_ADVISORY_MAX_ATTEMPTS,
   BULK_ADVISORY_RETRY_DELAY_MS,
   collectProdResolvedPackagesFromLockfile,
@@ -613,6 +614,58 @@ snapshots:
       await rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it(
+    "excludes @a2ui/web_core from the bulk advisory request even when it's a production " +
+      "dependency, live-verified (2026-09-04) to hang registry.npmjs.org's bulk advisory " +
+      "endpoint indefinitely on its own, blocking every PR's security-fast check",
+    async () => {
+      expect(BULK_ADVISORY_EXCLUDED_PACKAGES.has("@a2ui/web_core")).toBe(true);
+
+      const tempDir = await mkdtemp(path.join(tmpdir(), "openclaw-audit-prod-"));
+      await writeFile(
+        path.join(tempDir, "pnpm-lock.yaml"),
+        `lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      axios:
+        version: 1.0.0
+      '@a2ui/web_core':
+        version: 0.10.0
+
+snapshots:
+  axios@1.0.0: {}
+  '@a2ui/web_core@0.10.0': {}
+`,
+        "utf8",
+      );
+
+      try {
+        const requestedPayloads: Record<string, string[]>[] = [];
+        const exitCode = await runPnpmAuditProd({
+          rootDir: tempDir,
+          fetchImpl: async (_url: string, init: RequestInit) => {
+            requestedPayloads.push(JSON.parse(init.body as string));
+            return new Response(JSON.stringify({}), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            });
+          },
+          stdout: { write: () => true } as NodeJS.WriteStream,
+          stderr: { write: () => true } as NodeJS.WriteStream,
+        });
+
+        expect(exitCode).toBe(0);
+        const requestedPackages = requestedPayloads.flatMap((payload) => Object.keys(payload));
+        expect(requestedPackages).toContain("axios");
+        expect(requestedPackages).not.toContain("@a2ui/web_core");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 function toLintErrorObject(value: unknown, fallbackMessage: string): Error {

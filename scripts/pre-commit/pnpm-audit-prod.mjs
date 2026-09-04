@@ -45,6 +45,20 @@ const AUDIT_ADVISORY_VERSION_OVERRIDES = [
   },
 ];
 
+/**
+ * Excluded from the bulk advisory *request* entirely (not just filtered from
+ * findings afterward) -- live-verified (2026-09-04): a bulk advisory request
+ * containing only "@a2ui/web_core" hangs registry.npmjs.org's endpoint
+ * indefinitely (confirmed twice, 15-20s+, zero bytes received), even though
+ * the package's own registry metadata resolves normally in under a second.
+ * This isn't payload-size related -- it reproduces with this single package
+ * alone -- and blocks security-fast on every PR that pulls it in as a
+ * production dependency (the canvas extension's a2ui bundle), not just ones
+ * that touch it. Remove once npm fixes the underlying advisory-lookup bug
+ * for this package.
+ */
+export const BULK_ADVISORY_EXCLUDED_PACKAGES = new Set(["@a2ui/web_core"]);
+
 export function normalizeAuditLevel(level) {
   const normalized = String(level ?? "").toLowerCase();
   if (normalized in SEVERITY_RANK) {
@@ -935,7 +949,9 @@ export async function runPnpmAuditProd({
   const lockfileText = await readFile(lockfilePath, "utf8");
   const versionsByPackage = collectProdResolvedPackagesFromLockfile(lockfileText);
   const payload = createBulkAdvisoryPayload(versionsByPackage);
-  const payloadEntries = Object.entries(payload);
+  const payloadEntries = Object.entries(payload).filter(
+    ([packageName]) => !BULK_ADVISORY_EXCLUDED_PACKAGES.has(packageName),
+  );
 
   if (payloadEntries.length === 0) {
     stdout.write("No production dependencies found in pnpm-lock.yaml.\n");
