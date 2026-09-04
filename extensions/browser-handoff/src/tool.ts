@@ -388,10 +388,23 @@ function readAction(raw: Record<string, unknown>): "request_login" | "status" | 
   throw new Error('browser_handoff: action must be one of "request_login", "status", "attach"');
 }
 
+// Model-supplied, and gets interpolated directly into scheduled-turn and
+// reply prompt text (schedule-recheck's message, the request_login reply,
+// status/error text) -- a value containing quotes, newlines, or
+// instruction-like text there is a prompt-injection surface. `site` is
+// documented as a hostname (e.g. "app.procore.com"), so reject anything
+// that isn't shaped like one, rather than trying to escape it at every
+// interpolation site.
+const HOSTNAME_PATTERN =
+  /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
 function readSite(raw: Record<string, unknown>): string {
   const site = typeof raw.site === "string" ? raw.site.trim() : "";
   if (!site) {
     throw new Error("browser_handoff: site is required");
+  }
+  if (!HOSTNAME_PATTERN.test(site)) {
+    throw new Error('browser_handoff: site must look like a hostname (e.g. "app.example.com")');
   }
   return site;
 }
