@@ -122,10 +122,10 @@ const BOON_THREAD_HEADER_NAME = "x-boon-thread-id";
 // The gateway-audience OBO token (ENG-19115). boon-core mints it, anychat-boon-web
 // puts it on MsgContext.OboToken (ENG-19116); the gateway verifies it fail-closed
 // (ENG-19117) to skip metering internal-test traffic. Omitted when absent.
-// Name pinned by the gateway verifier (boon-llm-gateway middleware/obo.go
-// `OboHeader = "X-Boon-Gateway-Obo-Token"`); lowercase here — Go net/http
-// canonicalizes on read. A mismatch would fail-open (traffic metered), so this
-// must stay in lockstep with that constant.
+// Name pinned by the gateway verifier's header constant
+// (`X-Boon-Gateway-Obo-Token`); lowercase here — the gateway canonicalizes on
+// read. A mismatch would fail-open (traffic metered), so this must stay in
+// lockstep with that constant.
 const BOON_OBO_HEADER_NAME = "x-boon-gateway-obo-token";
 type ModelCallStreamOptions = Parameters<StreamFn>[2];
 
