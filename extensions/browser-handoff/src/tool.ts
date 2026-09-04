@@ -395,8 +395,13 @@ function readAction(raw: Record<string, unknown>): "request_login" | "status" | 
 // documented as a hostname (e.g. "app.procore.com"), so reject anything
 // that isn't shaped like one, rather than trying to escape it at every
 // interpolation site.
+// `(?=.{1,253}$)` bounds the TOTAL length (the real DNS hostname limit) --
+// without it, each label is individually capped at 63 characters but an
+// arbitrary number of valid labels could still produce an unbounded
+// string, which then gets embedded in prompts and used to build state/
+// schedule keys.
 const HOSTNAME_PATTERN =
-  /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+  /^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
 
 function readSite(raw: Record<string, unknown>): string {
   const site = typeof raw.site === "string" ? raw.site.trim() : "";
