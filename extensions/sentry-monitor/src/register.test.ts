@@ -50,7 +50,13 @@ function makeApi(pluginConfig?: Record<string, unknown>) {
 describe("registerSentryMonitor", () => {
   // Snapshot every env var the plugin reads so a test can set them without
   // leaking into sibling tests or inheriting a value from the real shell.
-  const ENV_KEYS = ["BOON_SENTRY_DSN", "BOON_SKILLS_REF", "DEPLOY_WAVE", "WAVE"] as const;
+  const ENV_KEYS = [
+    "BOON_SENTRY_DSN",
+    "BOON_SKILLS_REF",
+    "DEPLOY_WAVE",
+    "WAVE",
+    "BOON_TENANT_ACCOUNT_ID",
+  ] as const;
   const saved: Record<string, string | undefined> = {};
 
   beforeEach(() => {
@@ -185,6 +191,74 @@ describe("registerSentryMonitor", () => {
     });
     // An abandoned crash-ambiguous send always reports (never null).
     expect(Sentry.captureException).toHaveBeenCalledTimes(2);
+  });
+
+  // ENG-19463 — trial containers share one host and get no `--hostname`, so
+  // os.hostname() is an opaque container id that changes on every respawn. The
+  // tenant id is the only stable identity. A TAG (not `environment`) because
+  // tags are the dimension built for cardinality and do not affect grouping.
+  it("sets a trial_account_id tag from BOON_TENANT_ACCOUNT_ID", () => {
+    process.env.BOON_TENANT_ACCOUNT_ID = "131";
+    const { api } = makeApi({ dsn: "https://k@o.ingest.sentry.io/1" });
+
+    registerSentryMonitor(api);
+
+    expect(Sentry.setTags).toHaveBeenCalledWith(
+      expect.objectContaining({ trial_account_id: "131" }),
+    );
+  });
+
+  it("omits the trial_account_id tag when the env var is unset (paid hosts unchanged)", () => {
+    const { api } = makeApi({ dsn: "https://k@o.ingest.sentry.io/1" });
+
+    registerSentryMonitor(api);
+
+    expect(Sentry.setTags).not.toHaveBeenCalled();
+  });
+
+  // ENG-19463 — after_tool_call is 88% of fleet plugin volume (4,850 of 5,500 in
+  // 14d) and is dominated by the agent's own exploratory failures, which it sees
+  // and adapts to. An operator cannot act on those. The allow-list lets a noisy
+  // tenant class report only turn- and delivery-level outcomes.
+  it("registers only the allow-listed hooks when config.hooks is set", () => {
+    const { api, on } = makeApi({
+      dsn: "https://k@o.ingest.sentry.io/1",
+      hooks: ["agent_end", "message_sent"],
+    });
+
+    registerSentryMonitor(api);
+
+    expect(on.mock.calls.map((c) => c[0]).toSorted()).toEqual(["agent_end", "message_sent"]);
+  });
+
+  it("registers all eight hooks when config.hooks is absent (default unchanged)", () => {
+    const { api, on } = makeApi({ dsn: "https://k@o.ingest.sentry.io/1" });
+
+    registerSentryMonitor(api);
+
+    expect(on.mock.calls.map((c) => c[0]).toSorted()).toEqual(HOOK_NAMES.toSorted());
+  });
+
+  // An empty array is a real operator intent ("report nothing") and must not be
+  // confused with "unset" — `??`/length checks that treat [] as absent would
+  // silently re-enable every hook on the noisiest tenant class.
+  it("registers no hooks when config.hooks is an empty array", () => {
+    const { api, on } = makeApi({ dsn: "https://k@o.ingest.sentry.io/1", hooks: [] });
+
+    registerSentryMonitor(api);
+
+    expect(on).not.toHaveBeenCalled();
+  });
+
+  it("ignores an unknown hook name in the allow-list rather than throwing", () => {
+    const { api, on } = makeApi({
+      dsn: "https://k@o.ingest.sentry.io/1",
+      hooks: ["agent_end", "not_a_real_hook"],
+    });
+
+    registerSentryMonitor(api);
+
+    expect(on.mock.calls.map((c) => c[0])).toEqual(["agent_end"]);
   });
 
   it("flushes Sentry with a 2s timeout on cleanup", async () => {
