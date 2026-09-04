@@ -193,10 +193,8 @@ describe("registerSentryMonitor", () => {
     expect(Sentry.captureException).toHaveBeenCalledTimes(2);
   });
 
-  // ENG-19463 — trial containers share one host and get no `--hostname`, so
-  // os.hostname() is an opaque container id that changes on every respawn. The
-  // tenant id is the only stable identity. A TAG (not `environment`) because
-  // tags are the dimension built for cardinality and do not affect grouping.
+  // Multi-tenant hosts share one hostname, so the tenant id is the only stable
+  // identity available to a capture.
   it("sets a trial_account_id tag from BOON_TENANT_ACCOUNT_ID", () => {
     process.env.BOON_TENANT_ACCOUNT_ID = "131";
     const { api } = makeApi({ dsn: "https://k@o.ingest.sentry.io/1" });
@@ -216,10 +214,8 @@ describe("registerSentryMonitor", () => {
     expect(Sentry.setTags).not.toHaveBeenCalled();
   });
 
-  // ENG-19463 — after_tool_call is 88% of fleet plugin volume (4,850 of 5,500 in
-  // 14d) and is dominated by the agent's own exploratory failures, which it sees
-  // and adapts to. An operator cannot act on those. The allow-list lets a noisy
-  // tenant class report only turn- and delivery-level outcomes.
+  // Lets a noisy host report only turn- and delivery-level outcomes instead of
+  // every per-tool failure the agent already handles itself.
   it("registers only the allow-listed hooks when config.hooks is set", () => {
     const { api, on } = makeApi({
       dsn: "https://k@o.ingest.sentry.io/1",
