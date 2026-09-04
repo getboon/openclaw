@@ -1,18 +1,18 @@
 {
   "name": "@openclaw/clickclack",
-  "version": "2026.6.11-boon.35",
+  "version": "2026.6.11-boon.36",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/clickclack",
-      "version": "2026.6.11-boon.35",
+      "version": "2026.6.11-boon.36",
       "dependencies": {
         "ws": "8.21.0",
         "zod": "4.4.3"
       },
       "peerDependencies": {
-        "openclaw": ">=2026.6.11-boon.35"
+        "openclaw": ">=2026.6.11-boon.36"
       },
       "peerDependenciesMeta": {
         "openclaw": {

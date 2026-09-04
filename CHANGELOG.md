@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.36
+
+Silently retries a turn that ends with a real reply but an unrecovered `exec`-class tool failure, instead of surfacing "N steps didn't finish" and waiting for a manual Retry click (ENG-18893).
+
+- **#188/#192 (ENG-18893):** a turn that produced a real reply but left a recoverable `exec`/`bash`/`process` failure unrecovered (`payloads.ts`'s non-terminal tool-error warning) ended with "N steps didn't finish... ask me to redo it if something looks off" plus a manual Retry button, on every channel, with no automatic recovery — the same self-fixable stall booneval's own regression harness already recovers from via its own nudge. The embedded run loop's existing internal silent-retry mechanism (already used for empty-response, reasoning-only, and compaction-interrupted turns) now also retries this case, reusing `/retry`'s own proven nudge text, bounded to 2 attempts. #188's first pass gated the retry on `hadPotentialSideEffects`, which is unconditionally true whenever an `exec`-class tool was called at all (`tool-replay-safety.ts` never marks those replay-safe), silently defeating the retry for its own primary case — caught live on a canary host and fixed in #192 by narrowing the guard to actual committed mutation evidence (a messaging-tool send, cron add, or session spawn), which is the specific duplication risk a retry after a real mutation would pose.
+- Base = `2026.6.11-boon.35`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.36` in lockstep. No other code changes; #188 and #192 were merged onto `boon` before this release.
+
 ## 2026.6.11-boon.35
 
 Makes the signed gateway-audience OBO actually reach the usage meter — closing the last hop that #185 (boon.34) left open — so internal `@getboon.ai` test traffic is finally excluded from customer agent-token metering, and stops a provisioned smoke turn's signed session identity from being overwritten.
