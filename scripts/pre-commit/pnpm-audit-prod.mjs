@@ -949,6 +949,21 @@ export async function runPnpmAuditProd({
   const lockfileText = await readFile(lockfilePath, "utf8");
   const versionsByPackage = collectProdResolvedPackagesFromLockfile(lockfileText);
   const payload = createBulkAdvisoryPayload(versionsByPackage);
+  const excludedPackagesPresent = Object.keys(payload).filter((packageName) =>
+    BULK_ADVISORY_EXCLUDED_PACKAGES.has(packageName),
+  );
+  // Loud, not silent: excluding a package from the bulk request means it was
+  // NOT checked for advisories this run. A clean exit code must not read as
+  // "everything was audited" when that isn't true -- surface exactly what
+  // was skipped and why, every time it applies, so nobody mistakes a passing
+  // security-fast for full coverage.
+  for (const packageName of excludedPackagesPresent) {
+    stderr.write(
+      `SECURITY WARNING: "${packageName}" was not checked for advisories this run (excluded ` +
+        "from the bulk advisory request -- see BULK_ADVISORY_EXCLUDED_PACKAGES in " +
+        "scripts/pre-commit/pnpm-audit-prod.mjs for why).\n",
+    );
+  }
   const payloadEntries = Object.entries(payload).filter(
     ([packageName]) => !BULK_ADVISORY_EXCLUDED_PACKAGES.has(packageName),
   );
