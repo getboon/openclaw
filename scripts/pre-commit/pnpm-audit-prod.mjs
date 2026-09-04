@@ -811,7 +811,9 @@ async function readBulkAdvisoryJson(response, maxBytes, options = {}) {
     options,
   );
   if (!text.trim()) {
-    throw new Error("Bulk advisory response body was empty");
+    throw Object.assign(new Error("Bulk advisory response body was empty"), {
+      code: "EEMPTYBODY",
+    });
   }
   return JSON.parse(text);
 }
@@ -866,7 +868,7 @@ async function fetchBulkAdvisoriesOnce({
  * responses are worth a retry.
  */
 export function isRetryableBulkAdvisoryError(error) {
-  if (error?.code === "ETOOBIG") {
+  if (error?.code === "ETOOBIG" || error?.code === "EEMPTYBODY") {
     return false;
   }
   if (error instanceof SyntaxError) {
