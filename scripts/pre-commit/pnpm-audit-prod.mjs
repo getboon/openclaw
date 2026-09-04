@@ -969,7 +969,12 @@ export async function runPnpmAuditProd({
   );
 
   if (payloadEntries.length === 0) {
-    stdout.write("No production dependencies found in pnpm-lock.yaml.\n");
+    stdout.write(
+      excludedPackagesPresent.length > 0
+        ? "No production dependencies to audit: the only one(s) present were excluded from " +
+            "the bulk advisory request (see the SECURITY WARNING above).\n"
+        : "No production dependencies found in pnpm-lock.yaml.\n",
+    );
     return 0;
   }
 
