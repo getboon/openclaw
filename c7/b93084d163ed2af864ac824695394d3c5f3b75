@@ -1,0 +1,29 @@
+scripts/boon/obo-e2e-local.sh
+  s_9df158d9bbb710::t_2f5de290f8f6c6 106
+  s_9df158d9bbb710::t_918f35eaa23101 71-72,75
+  s_9df158d9bbb710::t_42fe7892ac403e 1-57,67,80-81,83-87,89,92,94-99,103,105,107-111,113-118
+  s_9df158d9bbb710::t_4adc3c6b0eb586 68-70,76,79
+  s_9df158d9bbb710::t_9dc19974faad65 82,88,90-91,93,100-102,104
+  s_9df158d9bbb710::t_0bb9e4059dd813 112
+  s_9df158d9bbb710::t_d4f8819987f8dd 58-66,73-74,77-78
+.design/tasks.json
+  s_9df158d9bbb710::t_f97fd16ac2ff7e 40
+.design/obo-primary-turn.trace.json
+  s_9df158d9bbb710::t_5e43158a02671b 76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "c7b93084d163ed2af864ac824695394d3c5f3b75",
+  "prompts": {},
+  "sessions": {
+    "s_9df158d9bbb710": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9e26c7c2-a67e-4f7b-9850-0b4e3f93fe95",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
