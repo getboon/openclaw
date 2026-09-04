@@ -379,20 +379,25 @@ export function shouldRetryUnfinishedSteps(params: {
   timedOut: boolean;
   hasNonTerminalToolErrorWarning: boolean;
   /**
-   * Mirrors every sibling retry-safety check in this file (and the adjacent
-   * compaction-continuation gate in run.ts): re-prompting with "redo it" after
-   * a messaging/cron/session_spawn mutation already landed risks the model
-   * replaying that mutation, with no human in the loop to catch the duplicate
-   * (unlike a manual Retry click).
+   * True only when a messaging-tool send, cron add, or session spawn already
+   * committed this turn — re-prompting with "redo it" risks the model
+   * replaying that specific mutation, with no human in the loop to catch the
+   * duplicate (unlike a manual Retry click). Deliberately narrower than the
+   * broad `hadPotentialSideEffects` flag the other sibling checks use: that
+   * flag is also true for the mere PRESENCE of an unreplayable tool call
+   * (every `exec`/`bash`/`process` invocation, replay-safe or not — see
+   * `tool-replay-safety.ts`), which is unconditionally true for every attempt
+   * this retry exists to handle (`isRecoverableExecClassToolName`) and would
+   * make the guard fire 100% of the time, defeating the retry entirely.
    */
-  hadPotentialSideEffects: boolean;
+  hasCommittedMutation: boolean;
   retryAttempts: number;
   maxRetryAttempts: number;
 }): boolean {
   if (params.aborted || params.externalAbort || params.timedOut) {
     return false;
   }
-  if (params.hadPotentialSideEffects) {
+  if (params.hasCommittedMutation) {
     return false;
   }
   if (!params.hasNonTerminalToolErrorWarning) {
