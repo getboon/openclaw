@@ -14,6 +14,10 @@ const MIN_SEVERITY = "high";
 export const BULK_ADVISORY_ERROR_BODY_MAX_CHARS = 4096;
 export const BULK_ADVISORY_RESPONSE_BODY_MAX_BYTES = 8 * 1024 * 1024;
 export const BULK_ADVISORY_REQUEST_TIMEOUT_MS = 60_000;
+/** One retry after a transient failure (timeout/network/5xx) — registry.npmjs.org's
+ *  bulk endpoint has been observed to time out on an otherwise-healthy request. */
+export const BULK_ADVISORY_MAX_ATTEMPTS = 2;
+export const BULK_ADVISORY_RETRY_DELAY_MS = 2_000;
 const MAX_TIMER_TIMEOUT_MS = 2_147_000_000;
 const SEVERITY_RANK = {
   info: 0,
@@ -807,17 +811,19 @@ async function readBulkAdvisoryJson(response, maxBytes, options = {}) {
     options,
   );
   if (!text.trim()) {
-    throw new Error("Bulk advisory response body was empty");
+    throw Object.assign(new Error("Bulk advisory response body was empty"), {
+      code: "EEMPTYBODY",
+    });
   }
   return JSON.parse(text);
 }
 
-export async function fetchBulkAdvisories({
+async function fetchBulkAdvisoriesOnce({
   payload,
-  fetchImpl = fetch,
-  registryBaseUrl = resolveRegistryBaseUrl(),
-  responseBodyMaxBytes = resolveBulkAdvisoryResponseBodyMaxBytes(),
-  timeoutMs = resolveBulkAdvisoryRequestTimeoutMs(),
+  fetchImpl,
+  registryBaseUrl,
+  responseBodyMaxBytes,
+  timeoutMs,
 }) {
   const url = `${registryBaseUrl}${BULK_ADVISORY_PATH}`;
   return await withBulkAdvisoryTimeout({
@@ -838,8 +844,11 @@ export async function fetchBulkAdvisories({
         const bodyText = await readBoundedBulkAdvisoryErrorText(response, undefined, {
           timeoutPromise,
         });
-        throw new Error(
-          `Bulk advisory request failed (${response.status} ${response.statusText}): ${bodyText}`,
+        throw Object.assign(
+          new Error(
+            `Bulk advisory request failed (${response.status} ${response.statusText}): ${bodyText}`,
+          ),
+          { status: response.status },
         );
       }
 
@@ -849,6 +858,69 @@ export async function fetchBulkAdvisories({
       });
     },
   });
+}
+
+/**
+ * Deterministic failures (a 4xx rejection, a response over the size cap, a
+ * malformed JSON body) will fail identically on retry, so retrying them only
+ * adds a delayImpl(retryDelayMs) wait plus a duplicate request before
+ * reporting the same finding. Only timeouts, network errors, and 5xx
+ * responses are worth a retry.
+ */
+export function isRetryableBulkAdvisoryError(error) {
+  if (error?.code === "ETOOBIG" || error?.code === "EEMPTYBODY") {
+    return false;
+  }
+  if (error instanceof SyntaxError) {
+    return false;
+  }
+  if (typeof error?.status === "number") {
+    return error.status >= 500;
+  }
+  return true;
+}
+
+/**
+ * Retries once on a transient failure (timeout, network error, 5xx) before
+ * giving up — registry.npmjs.org's bulk advisory endpoint has been observed
+ * to time out on an otherwise-healthy request (two consecutive CI failures,
+ * same payload that had passed minutes earlier on an equivalent PR). A retry
+ * does not weaken the audit: a real advisory finding only surfaces once the
+ * request actually succeeds, so this only shortens the gap between "the
+ * registry hiccuped" and "the check passes," not what counts as a finding.
+ */
+export async function fetchBulkAdvisories({
+  payload,
+  fetchImpl = fetch,
+  registryBaseUrl = resolveRegistryBaseUrl(),
+  responseBodyMaxBytes = resolveBulkAdvisoryResponseBodyMaxBytes(),
+  timeoutMs = resolveBulkAdvisoryRequestTimeoutMs(),
+  maxAttempts = BULK_ADVISORY_MAX_ATTEMPTS,
+  retryDelayMs = BULK_ADVISORY_RETRY_DELAY_MS,
+  delayImpl = (ms) =>
+    new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    }),
+}) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await fetchBulkAdvisoriesOnce({
+        payload,
+        fetchImpl,
+        registryBaseUrl,
+        responseBodyMaxBytes,
+        timeoutMs,
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt >= maxAttempts || !isRetryableBulkAdvisoryError(error)) {
+        throw error;
+      }
+      await delayImpl(retryDelayMs);
+    }
+  }
+  throw lastError;
 }
 
 export async function runPnpmAuditProd({
