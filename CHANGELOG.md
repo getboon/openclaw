@@ -2,6 +2,16 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.37
+
+Finally lands the signed gateway-audience OBO on the wire — verified end to end on a local stack, not inferred — so internal `@getboon.ai` test traffic is excluded from customer agent-token metering; plus a browser-handoff recheck fix, a tenant tag for the trial Sentry monitor, and a hardened CI dependency audit.
+
+- **#198 (ENG-19115):** `x-boon-gateway-obo-token` still never reached the gateway on boon.35/boon.36 despite #185 and #190. A local end-to-end run (boon-core → anychat-boon-web → openclaw → boon-llm-gateway → boon-core) reproduced production exactly — boon-core minted, the plugin set `MsgContext.OboToken`, and the gateway never fetched the org's signing key, flushing `tokens_consumed` for the internal-test org — and presence-only tracing at each hop showed the token alive into `agent-runner-execution` and gone at `withBoonUsageHeaders`. Two more explicit-field-list hops were dropping it: `agent-runner-utils` `buildTemplateSenderContext` built the primary-turn sender identity from the persisted `sessionCtx` only (the OBO is a fresh per-turn token that lives on `run.oboToken`; #190's `followup-runner` fix only serves queued mid-turn followups, never the first turn), and `embedded-agent-runner/run.ts` copies the run params into the attempt params field by field and never copied `oboToken`, so `attempt.ts`'s `params.oboToken` was `undefined` on every turn since #173. Both are fixed together — with the builder alone the wire log still read `obo=absent`; with both, the header attached and the local gateway fetched the org's signing key from boon-core (200) for the first time. Adds a names-only debug log of the Boon headers attached to each model call (never values) — this hop had no observability, which is how three fixes shipped without moving the gateway. Regression tests cover both hops red-before/green-after. Compaction model calls still carry no identity (pre-existing; separate follow-up).
+- **#197:** the browser login handoff's scheduled recheck did not actually re-check, so the flow silently stopped after a customer signed in and they had to nudge the agent manually. The recheck now re-runs the login probe as scheduled.
+- **#194:** `sentry-monitor` gains a `trial_account_id` tag from `BOON_TENANT_ACCOUNT_ID` and a hook allow-list — both no-ops unless configured, so paid hosts are byte-identical.
+- **#195 / #196:** the `security-fast` CI dependency audit (`pnpm-audit-prod.mjs`) failed release PRs on `Bulk advisory request exceeded timeout of 60000ms`; the bulk advisory request is retried once on transient failure, and an empty advisory response body is treated as non-retryable instead of looping.
+- Base = `2026.6.11-boon.36`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.37` in lockstep. No other code changes; #194, #195, #196, #197, and #198 were merged onto `boon` before this release.
+
 ## 2026.6.11-boon.36
 
 Silently retries a turn that ends with a real reply but an unrecovered `exec`-class tool failure, instead of surfacing "N steps didn't finish" and waiting for a manual Retry click (ENG-18893).

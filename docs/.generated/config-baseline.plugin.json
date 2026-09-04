@@ -31476,6 +31476,26 @@
       "hasChildren": false
     },
     {
+      "path": "plugins.entries.sentry-monitor.config.hooks",
+      "kind": "plugin",
+      "type": "array",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": true
+    },
+    {
+      "path": "plugins.entries.sentry-monitor.config.hooks.*",
+      "kind": "plugin",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
       "path": "plugins.entries.sentry-monitor.config.tracesSampleRate",
       "kind": "plugin",
       "type": "number",
