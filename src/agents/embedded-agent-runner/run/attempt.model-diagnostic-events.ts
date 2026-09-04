@@ -37,6 +37,7 @@ import type {
   PluginHookModelCallStartedEvent,
 } from "../../../plugins/hook-types.js";
 import type { StreamFn } from "../../runtime/index.js";
+import { log } from "../logger.js";
 
 type ModelCallDiagnosticContext = {
   runId: string;
@@ -607,6 +608,7 @@ function withBoonUsageHeaders(
   ];
   const headers: Record<string, string> = { ...options?.headers };
   let added = false;
+  const attached: string[] = [];
   for (const [name, raw] of entries) {
     if (!raw) {
       continue;
@@ -619,8 +621,15 @@ function withBoonUsageHeaders(
       continue;
     }
     headers[name] = safe;
+    attached.push(name);
     added = true;
   }
+  // Names only — never values (the OBO is a bearer credential). This is the one
+  // hop where the per-turn identity becomes wire headers; without it, a dropped
+  // token upstream is indistinguishable from a gateway-side miss (ENG-19115).
+  log.debug(
+    `boon usage headers attached: [${attached.join(", ")}] obo=${ctx.oboToken ? "present" : "absent"}`,
+  );
   if (!added) {
     return options;
   }

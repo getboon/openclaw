@@ -190,6 +190,29 @@ describe("runEmbeddedAgent cron before_agent_reply seam", () => {
     expect(firstAttemptParams().promptCacheKey).toBe("cron-cache-key");
   });
 
+  // ENG-19115: the gateway-audience OBO rides RunEmbeddedAgentParams.oboToken and
+  // attempt.ts reads it off the ATTEMPT params to emit x-boon-gateway-obo-token.
+  // The attempt params are an explicit copy; omitting the field here left the
+  // header unemitted on every turn even after the upstream hops were fixed.
+  it("forwards the gateway-audience OBO into the embedded attempt", async () => {
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(makeAttemptResult({ promptError: null }));
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      oboToken: "obo-signed-token",
+    });
+
+    expect(firstAttemptParams().oboToken).toBe("obo-signed-token");
+  });
+
+  it("leaves the OBO undefined on the embedded attempt when the run has none", async () => {
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(makeAttemptResult({ promptError: null }));
+
+    await runEmbeddedAgent({ ...overflowBaseRunParams });
+
+    expect(firstAttemptParams().oboToken).toBeUndefined();
+  });
+
   it("forwards suppressed live stream output into the embedded attempt", async () => {
     mockedRunEmbeddedAttempt.mockResolvedValueOnce(makeAttemptResult({ promptError: null }));
 
