@@ -73,7 +73,7 @@
     "B4": {"contract": "names-only debug log", "red": "—", "green": "observed in turns #3–#5"}
   },
   "acceptance_ledger": {
-    "A1": {"red": "turn #1 13:54Z (boon.36 code): no pubkey fetch, org-2 llm_usage_flush with tokens_consumed → metered", "green": "turn #5 13:17Z: gateway GET /api/internal/organizations/2/openclaw_signing_key → 200 (first ever today) + x-boon-gateway-obo-token on the wire; gateway-stdout 'source' confirmation pending (user terminal)"},
+    "A1": {"red": "turn #1 12:54Z (boon.36 code): no pubkey fetch, org-2 llm_usage_flush with tokens_consumed → metered. Harness red (scripts/boon/obo-e2e-local.sh on origin/boon versions of the two files, 13:47Z): 'FAIL WIRE openclaw built headers WITHOUT the OBO: […] obo=absent', exit 1", "green": "turn #5 13:17Z manual; harness green 13:59Z: 12 passed, 0 failed incl. fresh 'A4 gateway fetched org 2 signing key from boon-core → 200'. gateway-stdout 'source' confirmation pending (user terminal)"},
     "A2": {"red": "✓ minted + attached account=2 internal_test=true (present in RED too — mint was never the fault)", "green": "✓"},
     "A3": {"red": "✓ gatewayOboPresent:true (present in RED too)", "green": "✓"},
     "A4": {"red": "✗ zero openclaw_signing_key fetches all day", "green": "✓ 200 OK at 20:17:02 +0700"}
