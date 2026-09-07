@@ -2,6 +2,16 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.38
+
+Lets a channel plugin own the reply to a sub-agent completion so Boon web chat renders it like any other reply, keeps a `message` send issued alongside `sessions_yield` from being aborted, and carries the upstream fix for `reply session initialization conflicted` on threaded web chat.
+
+- **#205 (ENG-19421):** on Boon web chat a sub-agent completion arrived as a plain text row without suggested replies, thought details or verification, and in some runs as a duplicate row or not at all. The completion announcement ran in the automatic source-reply mode for threaded direct chats, so a channel that renders its final reply from the `message` tool never saw that payload and the `NO_REPLY` rewrite produced a plain row instead. A plugin can now register a completion owner for its channel (`runtime.subagent.registerCompletionOwner`); the announce flow hands the completion to the owner and only falls back to the existing delivery path when no owner is registered, so Slack, Teams and every other channel are byte-identical. A terminal owner failure stops announce retries (`owner_terminal`), persisted so a gateway restart reaches the same verdict. Separately, `sessions_yield` now runs its tool batch sequentially: a `message` send issued in the same assistant turn used to be aborted by the yield (`Operation aborted`, "1 step didn't finish") on every channel; siblings before the yield now complete, siblings after it are skipped as before. The tool description tells the model to call it last.
+- **Upstream #97657 / #98835 (cherry-picked):** the reply session initialization revision compare is narrowed to identity fields, which removes the `reply session initialization conflicted` error a web-chat user hit while a sub-agent was running. The concurrency test's child snapshot file is written atomically to remove a flake seen in CI.
+- **#202:** plugin-sdk exposes the gateway live run count so a channel plugin can implement a drain guard.
+- **#201:** internal identifiers removed from the public tree.
+- Base = `2026.6.11-boon.37`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.38` in lockstep. No other code changes; #201, #202 and #205 were merged onto `boon` before this release. The fleet is currently pinned to `boon.36`, so a roll to `boon.38` also picks up the `boon.37` contents (#189 web chat sub-agent spawn authorization, #194–#198).
+
 ## 2026.6.11-boon.37
 
 Finally lands the signed gateway-audience OBO on the wire — verified end to end on a local stack, not inferred — so internal `@getboon.ai` test traffic is excluded from customer agent-token metering; plus a browser-handoff recheck fix, a tenant tag for the trial Sentry monitor, and a hardened CI dependency audit.
