@@ -1,6 +1,15 @@
-import { normalizeMessageChannel } from "../utils/message-channel.js";
+import { normalizeMessageChannel } from "../utils/message-channel-normalize.js";
 import type { AgentInternalEvent } from "./internal-events.js";
-import type { SubagentRunOutcome } from "./subagent-announce-output.js";
+
+// Structural copy of SubagentRunOutcome: importing it from the announce output
+// module would route this leaf through the gateway barrel and form an import cycle.
+export type SubagentCompletionOutcome = {
+  status: "ok" | "error" | "timeout" | "unknown";
+  error?: string;
+  startedAt?: number;
+  endedAt?: number;
+  elapsedMs?: number;
+};
 
 export type SubagentCompletionRoute = {
   channel: string;
@@ -17,7 +26,7 @@ export type SubagentCompletionRequest = {
   route: SubagentCompletionRoute;
   event: AgentInternalEvent;
   promptText: string;
-  outcome?: SubagentRunOutcome;
+  outcome?: SubagentCompletionOutcome;
   startedAt?: number;
   endedAt?: number;
   label?: string;
