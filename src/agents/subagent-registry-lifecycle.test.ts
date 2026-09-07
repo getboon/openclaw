@@ -547,6 +547,36 @@ describe("subagent registry lifecycle hardening", () => {
     });
   });
 
+  it("persists the completion owner channel from delivery", async () => {
+    const persist = vi.fn();
+    const entry = createRunEntry({ expectsCompletionMessage: true });
+    const delivery: SubagentAnnounceDeliveryResult = {
+      delivered: false,
+      path: "owner",
+      ownerChannel: "anychat-boon-web",
+      error: "pending",
+    };
+    const runSubagentAnnounceFlow: LifecycleControllerParams["runSubagentAnnounceFlow"] = vi.fn(
+      async (announceParams) => {
+        announceParams.onDeliveryResult?.(delivery);
+        return false;
+      },
+    );
+
+    const controller = createLifecycleController({ entry, persist, runSubagentAnnounceFlow });
+
+    await controller.completeSubagentRun({
+      runId: entry.runId,
+      endedAt: 4_000,
+      outcome: { status: "ok" },
+      reason: SUBAGENT_ENDED_REASON_COMPLETE,
+      triggerCleanup: true,
+    });
+
+    await vi.waitFor(() => expect(entry.delivery?.ownerChannel).toBe("anychat-boon-web"));
+    expect(persist).toHaveBeenCalled();
+  });
+
   it("records completion announcement timestamps from transcript delivery", async () => {
     const persist = vi.fn();
     const entry = createRunEntry({

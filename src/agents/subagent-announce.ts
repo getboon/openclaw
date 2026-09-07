@@ -15,12 +15,16 @@ import { defaultRuntime } from "../runtime.js";
 import { isCronSessionKey } from "../sessions/session-key-utils.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { type DeliveryContext, normalizeDeliveryContext } from "../utils/delivery-context.js";
-import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
+import { INTERNAL_MESSAGE_CHANNEL, normalizeMessageChannel } from "../utils/message-channel.js";
 import {
   buildAnnounceIdFromChildRun,
   buildAnnounceIdempotencyKey,
 } from "./announce-idempotency.js";
-import { formatAgentInternalEventsForPrompt, type AgentInternalEvent } from "./internal-events.js";
+import {
+  formatAgentInternalEventsForPlainPrompt,
+  formatAgentInternalEventsForPrompt,
+  type AgentInternalEvent,
+} from "./internal-events.js";
 import {
   deliverSubagentAnnouncement,
   loadRequesterSessionEntry,
@@ -49,7 +53,12 @@ import {
   getRuntimeConfig,
   waitForEmbeddedAgentRunEnd,
 } from "./subagent-announce.runtime.js";
+import {
+  getSubagentCompletionOwner,
+  type SubagentCompletionRequest,
+} from "./subagent-completion-owner.js";
 import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
+import { resolveRequesterStoreKey } from "./subagent-requester-store-key.js";
 import { deleteSubagentSessionForCleanup } from "./subagent-session-cleanup.js";
 import type { SpawnSubagentMode } from "./subagent-spawn.types.js";
 import { isAnnounceSkip } from "./tools/sessions-send-tokens.js";
@@ -257,6 +266,7 @@ export async function runSubagentAnnounceFlow(params: {
   signal?: AbortSignal;
   bestEffortDeliver?: boolean;
   onDeliveryResult?: (delivery: SubagentAnnounceDeliveryResult) => void;
+  claimedOwnerChannel?: string;
 }): Promise<boolean> {
   let didAnnounce = false;
   const expectsCompletionMessage = params.expectsCompletionMessage === true;
@@ -554,33 +564,114 @@ export async function runSubagentAnnounceFlow(params: {
           })
         : targetRequesterOrigin;
     const directIdempotencyKey = buildAnnounceIdempotencyKey(announceId);
-    const delivery = await deliverSubagentAnnouncement({
-      requesterSessionKey: targetRequesterSessionKey,
-      announceId,
-      triggerMessage,
-      steerMessage: triggerMessage,
-      internalEvents,
-      summaryLine: taskLabel,
-      requesterSessionOrigin: targetRequesterOrigin,
-      requesterOrigin:
-        expectsCompletionMessage && !requesterIsSubagent
-          ? completionDirectOrigin
-          : targetRequesterOrigin,
-      completionDirectOrigin,
-      directOrigin,
-      sourceSessionKey: params.childSessionKey,
-      sourceChannel: INTERNAL_MESSAGE_CHANNEL,
-      sourceTool: "subagent_announce",
-      targetRequesterSessionKey,
-      requesterIsSubagent,
-      expectsCompletionMessage,
-      bestEffortDeliver: params.bestEffortDeliver,
-      directIdempotencyKey,
-      signal: params.signal,
-    });
+    const ownerOrigin = completionDirectOrigin ?? directOrigin;
+    const ownerChannel = normalizeMessageChannel(
+      completionDirectOrigin?.channel ?? directOrigin?.channel,
+    );
+    const claimedOwnerChannel = normalizeMessageChannel(params.claimedOwnerChannel);
+    const selectedOwnerChannel = claimedOwnerChannel ?? ownerChannel;
+    const completionOwner = getSubagentCompletionOwner(selectedOwnerChannel);
+    let delivery: SubagentAnnounceDeliveryResult | undefined;
+    if (expectsCompletionMessage && !requesterIsSubagent && params.signal?.aborted !== true) {
+      const routeTo = ownerOrigin?.to?.trim();
+      if (selectedOwnerChannel && params.claimedOwnerChannel && !completionOwner) {
+        delivery = {
+          delivered: false,
+          path: "owner",
+          ownerChannel: selectedOwnerChannel,
+          error: `completion owner unavailable: ${selectedOwnerChannel}`,
+        };
+      } else if (completionOwner && routeTo) {
+        const ownerRequest: SubagentCompletionRequest = {
+          completionId: announceId,
+          childSessionKey: params.childSessionKey,
+          childRunId: params.childRunId,
+          requesterSessionKey: resolveRequesterStoreKey(
+            subagentAnnounceDeps.getRuntimeConfig(),
+            targetRequesterSessionKey,
+          ),
+          route: {
+            channel: selectedOwnerChannel ?? completionOwner.channel,
+            accountId: ownerOrigin?.accountId,
+            to: routeTo,
+            threadId: ownerOrigin?.threadId,
+          },
+          event: internalEvents[0]!,
+          promptText: formatAgentInternalEventsForPlainPrompt(internalEvents),
+          outcome,
+          startedAt: params.startedAt,
+          endedAt: params.endedAt,
+          label: params.label,
+          signal: params.signal,
+        };
+        let ownerResult;
+        try {
+          if (await completionOwner.accepts(ownerRequest)) {
+            ownerResult = await completionOwner.deliver(ownerRequest);
+          }
+        } catch (error) {
+          ownerResult = { status: "failed" as const, retryable: true, error: String(error) };
+        }
+        if (ownerResult && ownerResult.status !== "not_handled") {
+          delivery =
+            ownerResult.status === "delivered"
+              ? {
+                  delivered: true,
+                  path: "owner",
+                  ownerChannel: selectedOwnerChannel ?? completionOwner.channel,
+                  deliveredAt: ownerResult.deliveredAt,
+                }
+              : ownerResult.status === "pending"
+                ? {
+                    delivered: false,
+                    path: "owner",
+                    ownerChannel: selectedOwnerChannel ?? completionOwner.channel,
+                    error: ownerResult.error ?? "completion owner pending",
+                  }
+                : {
+                    delivered: false,
+                    path: "owner",
+                    ownerChannel: selectedOwnerChannel ?? completionOwner.channel,
+                    terminal: !ownerResult.retryable,
+                    error: ownerResult.error,
+                    reason: ownerResult.retryable ? undefined : "visible_reply_missing",
+                  };
+        }
+      }
+    }
+    if (!delivery) {
+      delivery = await deliverSubagentAnnouncement({
+        requesterSessionKey: targetRequesterSessionKey,
+        announceId,
+        triggerMessage,
+        steerMessage: triggerMessage,
+        internalEvents,
+        summaryLine: taskLabel,
+        requesterSessionOrigin: targetRequesterOrigin,
+        requesterOrigin:
+          expectsCompletionMessage && !requesterIsSubagent
+            ? completionDirectOrigin
+            : targetRequesterOrigin,
+        completionDirectOrigin,
+        directOrigin,
+        sourceSessionKey: params.childSessionKey,
+        sourceChannel: INTERNAL_MESSAGE_CHANNEL,
+        sourceTool: "subagent_announce",
+        targetRequesterSessionKey,
+        requesterIsSubagent,
+        expectsCompletionMessage,
+        bestEffortDeliver: params.bestEffortDeliver,
+        directIdempotencyKey,
+        signal: params.signal,
+      });
+    }
     params.onDeliveryResult?.(delivery);
     didAnnounce = delivery.delivered;
-    if (!delivery.delivered && delivery.path === "direct" && delivery.error) {
+    if (
+      !delivery.delivered &&
+      delivery.error &&
+      (delivery.path === "direct" || delivery.path === "owner")
+    ) {
       defaultRuntime.log(
         `[warn] Subagent completion direct announce failed for run ${params.childRunId}: ${delivery.error}`,
       );

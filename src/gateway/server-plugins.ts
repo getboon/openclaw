@@ -10,6 +10,7 @@ import {
 import type { ErrorShape } from "../../packages/gateway-protocol/src/index.js";
 import { PROTOCOL_VERSION } from "../../packages/gateway-protocol/src/version.js";
 import { normalizeModelRef, parseModelRef } from "../agents/model-selection.js";
+import { registerSubagentCompletionOwner } from "../agents/subagent-completion-owner.js";
 import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizePluginsConfig } from "../plugins/config-state.js";
@@ -555,6 +556,7 @@ export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
   };
 
   return {
+    registerCompletionOwner: registerSubagentCompletionOwner,
     async run(params) {
       const scope = getPluginRuntimeGatewayRequestScope();
       const pluginId =

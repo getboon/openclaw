@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../../agents/defaults.js";
+import { getSubagentCompletionOwner } from "../../agents/subagent-completion-owner.js";
 import {
   resetConfigRuntimeState,
   setRuntimeConfigSnapshot,
@@ -50,6 +51,7 @@ function createCommandResult() {
 
 function createGatewaySubagentRuntime() {
   return {
+    registerCompletionOwner: vi.fn(() => ({ dispose: vi.fn() })),
     run: vi.fn(),
     waitForRun: vi.fn(),
     getSessionMessages: vi.fn(),
@@ -123,6 +125,19 @@ function expectRunCommandOutcome(params: {
 }
 
 describe("plugin runtime command execution", () => {
+  it("registers completion owners from the subagent runtime", () => {
+    const owner = {
+      channel: "anychat-boon-web",
+      accepts: () => true,
+      deliver: async () => ({ status: "not_handled" as const }),
+    };
+
+    const registration = createPluginRuntime().subagent.registerCompletionOwner(owner);
+
+    expect(registration).toEqual({ dispose: expect.any(Function) });
+    expect(getSubagentCompletionOwner("anychat-boon-web")).toBe(owner);
+    registration.dispose();
+  });
   beforeEach(() => {
     vi.restoreAllMocks();
     runtimeModelAuthMocks.getApiKeyForModel.mockReset();

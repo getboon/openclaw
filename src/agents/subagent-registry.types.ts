@@ -58,6 +58,7 @@ export type SubagentCompletionDeliveryState = {
   enqueuedAt?: number;
   deliveredAt?: number;
   announcedAt?: number;
+  ownerChannel?: string;
   lastAttemptAt?: number;
   attemptCount?: number;
   lastError?: string | null;

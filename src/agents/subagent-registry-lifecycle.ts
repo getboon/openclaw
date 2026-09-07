@@ -217,6 +217,9 @@ export function createSubagentRegistryLifecycleController(params: {
     if (typeof delivery.enqueuedAt === "number") {
       deliveryState.enqueuedAt ??= delivery.enqueuedAt;
     }
+    if (delivery.path === "owner") {
+      deliveryState.ownerChannel = delivery.ownerChannel;
+    }
     if (delivery.delivered) {
       const deliveredAt =
         typeof delivery.deliveredAt === "number" ? delivery.deliveredAt : Date.now();
@@ -1061,8 +1064,12 @@ export function createSubagentRegistryLifecycleController(params: {
         spawnMode: pendingPayload.spawnMode,
         expectsCompletionMessage: pendingPayload.expectsCompletionMessage,
         wakeOnDescendantSettle: pendingPayload.wakeOnDescendantSettle === true,
+        claimedOwnerChannel: entry.delivery?.ownerChannel,
         onDeliveryResult: (delivery) => {
           recordAnnounceDeliveryResult(entry, delivery);
+          if (delivery.path === "owner") {
+            params.persist();
+          }
           if (delivery.delivered) {
             const deliveryState = ensureDeliveryState(entry);
             if (deliveryState.lastError !== undefined) {
