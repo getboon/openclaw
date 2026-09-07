@@ -70,10 +70,6 @@ export type { ResolvedProviderRuntimeAuth } from "../plugins/runtime/model-auth-
 export type {
   PluginRuntime,
   RuntimeLogger,
-  SubagentCompletionOwner,
-  SubagentCompletionRequest,
-  SubagentCompletionResult,
-  SubagentCompletionRoute,
   SubagentRunParams,
   SubagentRunResult,
 } from "../plugins/runtime/types.js";
