@@ -1094,6 +1094,7 @@ export function createSubagentRegistryLifecycleController(params: {
           }
           if (delivery.path === "owner" && delivery.terminal) {
             ensureDeliveryState(entry).lastDropReason = "owner_terminal";
+            params.persist();
           }
           latestDeliveryError = formatAnnounceDeliveryError(delivery);
           if (ensureDeliveryState(entry).lastError !== latestDeliveryError) {

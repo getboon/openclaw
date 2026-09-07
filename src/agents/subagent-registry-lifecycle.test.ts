@@ -687,6 +687,7 @@ describe("subagent registry lifecycle hardening", () => {
 
     await vi.waitFor(() => expect(entry.delivery?.lastDropReason).toBe("owner_terminal"));
     expect(runSubagentAnnounceFlow).toHaveBeenCalledTimes(1);
+    expect(persist).toHaveBeenCalled();
   });
 
   it("skips announce delivery when completion messages are disabled", async () => {
