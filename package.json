@@ -593,6 +593,10 @@
       "types": "./dist/plugin-sdk/security-runtime.d.ts",
       "default": "./dist/plugin-sdk/security-runtime.js"
     },
+    "./plugin-sdk/gateway-activity-runtime": {
+      "types": "./dist/plugin-sdk/gateway-activity-runtime.d.ts",
+      "default": "./dist/plugin-sdk/gateway-activity-runtime.js"
+    },
     "./plugin-sdk/gateway-method-runtime": {
       "types": "./dist/plugin-sdk/gateway-method-runtime.d.ts",
       "default": "./dist/plugin-sdk/gateway-method-runtime.js"

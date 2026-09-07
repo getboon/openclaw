@@ -28,6 +28,7 @@ function firstAttemptParams(): {
   promptMode?: string;
   promptCacheKey?: string;
   suppressLiveStreamOutput?: boolean;
+  oboToken?: string;
 } {
   const call = mockedRunEmbeddedAttempt.mock.calls[0] as
     | [
@@ -37,6 +38,7 @@ function firstAttemptParams(): {
           promptMode?: string;
           promptCacheKey?: string;
           suppressLiveStreamOutput?: boolean;
+          oboToken?: string;
         },
       ]
     | undefined;
