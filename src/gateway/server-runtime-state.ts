@@ -18,7 +18,11 @@ import type { AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth.js";
 import type { ChatAbortControllerEntry } from "./chat-abort.js";
 import type { ControlUiRootState } from "./control-ui.js";
-import { countUnabortedRuns, setGatewayActiveRunCountProbe } from "./gateway-activity.js";
+import {
+  clearGatewayActiveRunCountProbe,
+  countUnabortedRuns,
+  setGatewayActiveRunCountProbe,
+} from "./gateway-activity.js";
 import type { HooksConfigResolved } from "./hooks.js";
 import type { AuthorizedGatewayHttpRequest } from "./http-auth-utils.js";
 import { isLoopbackHost, resolveGatewayListenHosts } from "./net.js";
@@ -134,6 +138,10 @@ export async function createGatewayRuntimeState(params: {
   } else {
     releasePinnedPluginChannelRegistry();
   }
+  // Declared out here so the catch below can clear it: the probe is installed deep
+  // inside the try, and a half-created runtime must not leave it pointing at a map
+  // nobody owns.
+  let installedActiveRunCountProbe: (() => number) | null = null;
   try {
     const resolvePluginRouteRegistry = () =>
       params.getPluginRouteRegistry?.() ?? params.pluginRegistry;
@@ -344,7 +352,12 @@ export async function createGatewayRuntimeState(params: {
     // Publishes the live run count to plugins without handing out the run map. Paired with the
     // clear in releasePluginRouteRegistry: an in-process restart must not leave readers pointed
     // at the previous runtime's map, which would report stale activity forever.
-    setGatewayActiveRunCountProbe(() => countUnabortedRuns(chatAbortControllers));
+    // Kept in a named const so release can clear it BY IDENTITY — runtime lifecycles
+    // can overlap, and an outgoing runtime's late release must never drop the probe a
+    // newer runtime already installed.
+    const activeRunCountProbe = () => countUnabortedRuns(chatAbortControllers);
+    installedActiveRunCountProbe = activeRunCountProbe;
+    setGatewayActiveRunCountProbe(activeRunCountProbe);
     const toolEventRecipients = createToolEventRecipientRegistry();
 
     return {
@@ -360,7 +373,7 @@ export async function createGatewayRuntimeState(params: {
         releasePinnedPluginChannelRegistry();
         // Clear the activity probe with the pins: after close, readers must see "unknown"
         // rather than a stale count from this runtime's abandoned run map.
-        setGatewayActiveRunCountProbe(null);
+        clearGatewayActiveRunCountProbe(activeRunCountProbe);
       },
       httpServer,
       httpServers,
@@ -388,7 +401,9 @@ export async function createGatewayRuntimeState(params: {
     releasePinnedPluginHttpRouteRegistry();
     releasePinnedPluginSessionExtensionRegistry();
     releasePinnedPluginChannelRegistry();
-    setGatewayActiveRunCountProbe(null);
+    if (installedActiveRunCountProbe) {
+      clearGatewayActiveRunCountProbe(installedActiveRunCountProbe);
+    }
     throw err;
   }
 }

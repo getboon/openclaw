@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChatAbortControllerEntry } from "./chat-abort.js";
 import {
+  clearGatewayActiveRunCountProbe,
   countUnabortedRuns,
   getGatewayActiveRunCount,
   setGatewayActiveRunCountProbe,
@@ -22,6 +23,31 @@ function entry(aborted: boolean): ChatAbortControllerEntry {
 }
 
 describe("gateway activity probe", () => {
+  it("a stale runtime's clear does not drop the probe a newer runtime installed", () => {
+    // Runtime lifecycles overlap: the replacement installs its probe before the outgoing
+    // one finishes releasing. An unconditional clear on that late release would make every
+    // later read report "unknown" while runs were in flight — readers treat unknown as
+    // "do not act", so the gateway would look undrainable for the rest of the process.
+    const oldProbe = () => 1;
+    const newProbe = () => 7;
+    setGatewayActiveRunCountProbe(oldProbe);
+    setGatewayActiveRunCountProbe(newProbe);
+
+    clearGatewayActiveRunCountProbe(oldProbe);
+
+    expect(getGatewayActiveRunCount()).toBe(7);
+    setGatewayActiveRunCountProbe(null);
+  });
+
+  it("the owning runtime's clear does remove its own probe", () => {
+    const probe = () => 3;
+    setGatewayActiveRunCountProbe(probe);
+    expect(getGatewayActiveRunCount()).toBe(3);
+
+    clearGatewayActiveRunCountProbe(probe);
+
+    expect(getGatewayActiveRunCount()).toBeNull();
+  });
   it("is null until a probe is set", () => {
     setGatewayActiveRunCountProbe(null);
     expect(getGatewayActiveRunCount()).toBeNull();

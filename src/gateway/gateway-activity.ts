@@ -14,6 +14,22 @@ export function setGatewayActiveRunCountProbe(probe: ActiveRunCountProbe | null)
 }
 
 /**
+ * Clear the probe only if `probe` is the one currently installed.
+ *
+ * Runtime lifecycles can overlap: a replacement gateway may create its runtime state (and
+ * install its probe) before the outgoing one finishes releasing. An unconditional clear on
+ * that late release would drop the LIVE runtime's probe, and every later read would report
+ * "unknown" while runs were actually in flight. Readers treat unknown as "do not act", so
+ * this is not dangerous on its own — but it silently disables the drain guard for the rest
+ * of the process's life, which defeats the point of having one.
+ */
+export function clearGatewayActiveRunCountProbe(probe: ActiveRunCountProbe): void {
+  if (activeRunCountProbe === probe) {
+    activeRunCountProbe = null;
+  }
+}
+
+/**
  * Live, unaborted run count, or null when it cannot be read: no gateway is running in this
  * process, or the probe failed. Callers must treat null as "unknown", never as zero — a
  * drain guard that reads null must not conclude the gateway is idle.
