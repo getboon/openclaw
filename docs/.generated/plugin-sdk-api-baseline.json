@@ -11373,7 +11373,7 @@
           "exportName": "getGatewayActiveRunCount",
           "kind": "function",
           "source": {
-            "line": 21,
+            "line": 37,
             "path": "src/gateway/gateway-activity.ts"
           }
         }

@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/oc-path",
-  "version": "2026.6.11-boon.37",
+  "version": "2026.6.11-boon.38",
   "private": true,
   "description": "OpenClaw oc:// workspace path plugin",
   "type": "module",
@@ -15,7 +15,7 @@
     "openclaw": "workspace:*"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.6.11-boon.37"
+    "openclaw": ">=2026.6.11-boon.38"
   },
   "peerDependenciesMeta": {
     "openclaw": {
