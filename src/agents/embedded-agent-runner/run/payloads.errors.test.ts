@@ -723,7 +723,7 @@ describe("buildEmbeddedRunPayloads", () => {
     const payloads = buildPayloads({
       yieldDetected: true,
       hasAcceptedSessionSpawn: true,
-      runAborted: false, // a real yield forces aborted=false — it is NOT an abort
+      runAborted: false, // yield forces runAborted=false and strips its synthetic aborted turn — not an abort
       assistantTexts: [],
       lastToolError: {
         toolName: "message",

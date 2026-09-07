@@ -250,7 +250,7 @@ function resolveToolErrorWarningPolicy(params: {
     verboseLevel: dynamicToolErrorWarningsDisabled ? "off" : params.verboseLevel,
   });
   const suppressToolErrorWarnings = toolErrorWarningOverride === true;
-  // These two are turn-wide overrides, not per-failure decisions — they must
+  // These are turn-wide overrides, not per-failure decisions — they must
   // win before any failure-shape check runs, and the digest builder applies
   // them the same way (as a single upfront gate) for the same reason.
   if (suppressToolErrorWarnings || params.suppressToolErrors || params.yieldHandoff) {
