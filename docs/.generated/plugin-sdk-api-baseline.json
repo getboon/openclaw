@@ -11365,6 +11365,26 @@
       }
     },
     {
+      "category": "runtime",
+      "entrypoint": "gateway-activity-runtime",
+      "exports": [
+        {
+          "declaration": "export function getGatewayActiveRunCount(): number | null;",
+          "exportName": "getGatewayActiveRunCount",
+          "kind": "function",
+          "source": {
+            "line": 21,
+            "path": "src/gateway/gateway-activity.ts"
+          }
+        }
+      ],
+      "importSpecifier": "openclaw/plugin-sdk/gateway-activity-runtime",
+      "source": {
+        "line": 1,
+        "path": "src/plugin-sdk/gateway-activity-runtime.ts"
+      }
+    },
+    {
       "category": "core",
       "entrypoint": "health",
       "exports": [
