@@ -57,6 +57,13 @@ export type PartialReplyPayload = Pick<ReplyPayload, "text" | "mediaUrls"> & {
 export type GetReplyOptions = {
   /** Override run id for agent events (defaults to random UUID). */
   runId?: string;
+  /**
+   * Explicit per-turn provider request headers.
+   *
+   * These are carried with the queued agent run instead of relying on the
+   * provider/model registry snapshot, which may be shared across turns.
+   */
+  modelRequestHeaders?: Record<string, string>;
   /** Stable provider prompt-cache affinity key; distinct from run id/idempotency. */
   promptCacheKey?: string;
   /** Abort signal for the underlying agent run. */

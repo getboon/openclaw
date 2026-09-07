@@ -645,6 +645,50 @@ describe("createFollowupRunner reply-lane admission", () => {
     expect(recorder.message).toBe(preparedUserTurnMessage);
   });
 
+  // ENG-19115: get-reply-run puts the per-turn gateway-audience OBO on
+  // run.oboToken; this hop is the only path into RunEmbeddedPiAgentParams.oboToken
+  // (→ x-boon-gateway-obo-token). Dropping it here silently disabled the header.
+  it("forwards run.oboToken into the embedded runner params", async () => {
+    runEmbeddedAgentMock.mockResolvedValueOnce({ payloads: [], meta: {} });
+    const runner = createFollowupRunner({
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      sessionKey: "main",
+      defaultModel: "anthropic/claude",
+    });
+
+    await runner(
+      createQueuedRun({
+        run: {
+          provider: "anthropic",
+          model: "claude",
+          senderId: "U123",
+          oboToken: "obo-signed-token",
+        },
+      }),
+    );
+
+    const call = requireLastMockCallArg(runEmbeddedAgentMock, "run embedded agent");
+    expect(call.oboToken).toBe("obo-signed-token");
+    // Sibling per-turn identity keeps flowing alongside it.
+    expect(call.senderId).toBe("U123");
+  });
+
+  it("leaves oboToken undefined on the embedded runner params when the run has none", async () => {
+    runEmbeddedAgentMock.mockResolvedValueOnce({ payloads: [], meta: {} });
+    const runner = createFollowupRunner({
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      sessionKey: "main",
+      defaultModel: "anthropic/claude",
+    });
+
+    await runner(createQueuedRun({ run: { provider: "anthropic", model: "claude" } }));
+
+    const call = requireLastMockCallArg(runEmbeddedAgentMock, "run embedded agent");
+    expect(call.oboToken).toBeUndefined();
+  });
+
   it("runs queued followups with the session id returned by admission", async () => {
     const active = createReplyOperationForTest({
       sessionKey: "main",

@@ -4,10 +4,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  BULK_ADVISORY_EXCLUDED_PACKAGES,
+  BULK_ADVISORY_MAX_ATTEMPTS,
+  BULK_ADVISORY_RETRY_DELAY_MS,
   collectProdResolvedPackagesFromLockfile,
   createBulkAdvisoryPayload,
   fetchBulkAdvisories,
   filterFindingsBySeverity,
+  isRetryableBulkAdvisoryError,
   parseArgs,
   parseSnapshotKey,
   readBoundedBulkAdvisoryErrorText,
@@ -251,6 +255,7 @@ snapshots:
   it("aborts stalled bulk advisory requests", async () => {
     let signal: AbortSignal | undefined;
     const request = fetchBulkAdvisories({
+      maxAttempts: 1,
       payload: { axios: ["1.0.0"] },
       timeoutMs: 5,
       fetchImpl: ((_url, init) => {
@@ -277,6 +282,7 @@ snapshots:
   it("clamps oversized bulk advisory request timers before scheduling", async () => {
     let signal: AbortSignal | undefined;
     const request = fetchBulkAdvisories({
+      maxAttempts: 1,
       payload: { axios: ["1.0.0"] },
       timeoutMs: Number.MAX_SAFE_INTEGER,
       fetchImpl: (async (_url, init) => {
@@ -311,6 +317,7 @@ snapshots:
       },
     });
     const request = fetchBulkAdvisories({
+      maxAttempts: 1,
       payload: { axios: ["1.0.0"] },
       timeoutMs: 5,
       fetchImpl: async () => new Response(body, { status: 200 }),
@@ -331,6 +338,7 @@ snapshots:
       },
     });
     const request = fetchBulkAdvisories({
+      maxAttempts: 1,
       payload: { axios: ["1.0.0"] },
       timeoutMs: 5,
       fetchImpl: async () => new Response(body, { status: 500, statusText: "Internal Error" }),
@@ -351,6 +359,7 @@ snapshots:
       },
     });
     const request = fetchBulkAdvisories({
+      maxAttempts: 1,
       payload: { axios: ["1.0.0"] },
       responseBodyMaxBytes: 4,
       fetchImpl: async () =>
@@ -377,6 +386,7 @@ snapshots:
       },
     });
     const request = fetchBulkAdvisories({
+      maxAttempts: 1,
       payload: { axios: ["1.0.0"] },
       responseBodyMaxBytes: 4,
       fetchImpl: async () =>
@@ -393,11 +403,151 @@ snapshots:
 
   it("fails closed on empty successful bulk advisory response bodies", async () => {
     const request = fetchBulkAdvisories({
+      maxAttempts: 1,
       payload: { axios: ["1.0.0"] },
       fetchImpl: async () => new Response("", { status: 200 }),
     });
 
     await expect(request).rejects.toThrow(/Bulk advisory response body was empty/u);
+  });
+
+  it("does not retry an empty successful bulk advisory response body", async () => {
+    let callCount = 0;
+    const request = fetchBulkAdvisories({
+      payload: { axios: ["1.0.0"] },
+      delayImpl: async () => {},
+      fetchImpl: async () => {
+        callCount += 1;
+        return new Response("", { status: 200 });
+      },
+    });
+
+    await expect(request).rejects.toThrow(/Bulk advisory response body was empty/u);
+    expect(callCount).toBe(1);
+  });
+
+  it("retries once after a transient failure and returns the successful result", async () => {
+    let callCount = 0;
+    const delays: number[] = [];
+    const request = fetchBulkAdvisories({
+      payload: { axios: ["1.0.0"] },
+      timeoutMs: 5,
+      delayImpl: async (ms) => {
+        delays.push(ms);
+      },
+      fetchImpl: async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return await new Promise(() => {}); // never resolves -> times out
+        }
+        return new Response(JSON.stringify({ axios: [] }), { status: 200 });
+      },
+    });
+
+    await expect(request).resolves.toEqual({ axios: [] });
+    expect(callCount).toBe(2);
+    expect(delays).toEqual([BULK_ADVISORY_RETRY_DELAY_MS]);
+  });
+
+  it("throws the last error once every retry attempt is exhausted", async () => {
+    let callCount = 0;
+    const request = fetchBulkAdvisories({
+      payload: { axios: ["1.0.0"] },
+      timeoutMs: 5,
+      delayImpl: async () => {},
+      fetchImpl: async () => {
+        callCount += 1;
+        return await new Promise(() => {}); // always times out
+      },
+    });
+
+    await expect(request).rejects.toThrow(/Bulk advisory request exceeded timeout/u);
+    expect(callCount).toBe(BULK_ADVISORY_MAX_ATTEMPTS);
+  });
+
+  it("does not retry a deterministic 4xx bulk advisory rejection", async () => {
+    let callCount = 0;
+    const delays: number[] = [];
+    const request = fetchBulkAdvisories({
+      payload: { axios: ["1.0.0"] },
+      delayImpl: async (ms) => {
+        delays.push(ms);
+      },
+      fetchImpl: async () => {
+        callCount += 1;
+        return new Response("bad request", { status: 400, statusText: "Bad Request" });
+      },
+    });
+
+    await expect(request).rejects.toThrow(/Bulk advisory request failed \(400/u);
+    expect(callCount).toBe(1);
+    expect(delays).toEqual([]);
+  });
+
+  it("does not retry an oversized bulk advisory response body", async () => {
+    let callCount = 0;
+    const request = fetchBulkAdvisories({
+      payload: { axios: ["1.0.0"] },
+      responseBodyMaxBytes: 1,
+      delayImpl: async () => {},
+      fetchImpl: async () => {
+        callCount += 1;
+        return new Response(JSON.stringify({ axios: [] }), { status: 200 });
+      },
+    });
+
+    await expect(request).rejects.toThrow(/exceeded 1 bytes/u);
+    expect(callCount).toBe(1);
+  });
+
+  it("does not retry a malformed JSON bulk advisory response body", async () => {
+    let callCount = 0;
+    const request = fetchBulkAdvisories({
+      payload: { axios: ["1.0.0"] },
+      delayImpl: async () => {},
+      fetchImpl: async () => {
+        callCount += 1;
+        return new Response("not json", { status: 200 });
+      },
+    });
+
+    await expect(request).rejects.toThrow(SyntaxError);
+    expect(callCount).toBe(1);
+  });
+
+  it("retries a 5xx bulk advisory rejection", async () => {
+    let callCount = 0;
+    const request = fetchBulkAdvisories({
+      payload: { axios: ["1.0.0"] },
+      delayImpl: async () => {},
+      fetchImpl: async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return new Response("oops", { status: 503, statusText: "Service Unavailable" });
+        }
+        return new Response(JSON.stringify({ axios: [] }), { status: 200 });
+      },
+    });
+
+    await expect(request).resolves.toEqual({ axios: [] });
+    expect(callCount).toBe(2);
+  });
+
+  it("classifies bulk advisory errors by transience", () => {
+    expect(isRetryableBulkAdvisoryError(new Error("timed out"))).toBe(true);
+    expect(
+      isRetryableBulkAdvisoryError(Object.assign(new Error("too big"), { code: "ETOOBIG" })),
+    ).toBe(false);
+    expect(isRetryableBulkAdvisoryError(new SyntaxError("bad json"))).toBe(false);
+    expect(
+      isRetryableBulkAdvisoryError(Object.assign(new Error("empty"), { code: "EEMPTYBODY" })),
+    ).toBe(false);
+    expect(isRetryableBulkAdvisoryError(Object.assign(new Error("client"), { status: 404 }))).toBe(
+      false,
+    );
+    expect(isRetryableBulkAdvisoryError(Object.assign(new Error("server"), { status: 503 }))).toBe(
+      true,
+    );
   });
 
   it("returns a failing exit code when bulk advisories include high severity findings", async () => {
@@ -464,6 +614,164 @@ snapshots:
       await rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it(
+    "excludes @a2ui/web_core from the bulk advisory request even when it is a production " +
+      "dependency, and warns loudly on stderr that it was not checked",
+    async () => {
+      expect(BULK_ADVISORY_EXCLUDED_PACKAGES.has("@a2ui/web_core")).toBe(true);
+
+      const tempDir = await mkdtemp(path.join(tmpdir(), "openclaw-audit-prod-"));
+      await writeFile(
+        path.join(tempDir, "pnpm-lock.yaml"),
+        `lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      axios:
+        version: 1.0.0
+      '@a2ui/web_core':
+        version: 0.10.0
+
+snapshots:
+  axios@1.0.0: {}
+  '@a2ui/web_core@0.10.0': {}
+`,
+        "utf8",
+      );
+
+      try {
+        const requestedPayloads: Record<string, string[]>[] = [];
+        const stderrChunks: string[] = [];
+        const exitCode = await runPnpmAuditProd({
+          rootDir: tempDir,
+          fetchImpl: async (_url: string, init: RequestInit) => {
+            requestedPayloads.push(JSON.parse(init.body as string));
+            return new Response(JSON.stringify({}), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            });
+          },
+          stdout: { write: () => true } as NodeJS.WriteStream,
+          stderr: {
+            write(chunk: string) {
+              stderrChunks.push(chunk);
+              return true;
+            },
+          } as NodeJS.WriteStream,
+        });
+
+        expect(exitCode).toBe(0);
+        const requestedPackages = requestedPayloads.flatMap((payload) => Object.keys(payload));
+        expect(requestedPackages).toContain("axios");
+        expect(requestedPackages).not.toContain("@a2ui/web_core");
+
+        const stderrText = stderrChunks.join("");
+        expect(stderrText).toContain("@a2ui/web_core");
+        expect(stderrText).toContain("not checked");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
+    "does not print an exclusion warning when the excluded package is only a devDependency, " +
+      "not a production one",
+    async () => {
+      const tempDir = await mkdtemp(path.join(tmpdir(), "openclaw-audit-prod-"));
+      await writeFile(
+        path.join(tempDir, "pnpm-lock.yaml"),
+        `lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      axios:
+        version: 1.0.0
+    devDependencies:
+      '@a2ui/web_core':
+        version: 0.10.0
+
+snapshots:
+  axios@1.0.0: {}
+  '@a2ui/web_core@0.10.0': {}
+`,
+        "utf8",
+      );
+
+      try {
+        const stderrChunks: string[] = [];
+        await runPnpmAuditProd({
+          rootDir: tempDir,
+          fetchImpl: async () =>
+            new Response(JSON.stringify({}), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            }),
+          stdout: { write: () => true } as NodeJS.WriteStream,
+          stderr: {
+            write(chunk: string) {
+              stderrChunks.push(chunk);
+              return true;
+            },
+          } as NodeJS.WriteStream,
+        });
+
+        expect(stderrChunks.join("")).not.toContain("@a2ui/web_core");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
+    "does not claim no production dependencies were found when the only one present was " +
+      "excluded, not absent",
+    async () => {
+      const tempDir = await mkdtemp(path.join(tmpdir(), "openclaw-audit-prod-"));
+      await writeFile(
+        path.join(tempDir, "pnpm-lock.yaml"),
+        `lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      '@a2ui/web_core':
+        version: 0.10.0
+
+snapshots:
+  '@a2ui/web_core@0.10.0': {}
+`,
+        "utf8",
+      );
+
+      try {
+        const stdoutChunks: string[] = [];
+        const exitCode = await runPnpmAuditProd({
+          rootDir: tempDir,
+          fetchImpl: async () => {
+            throw new Error("must not make a bulk advisory request when every package is excluded");
+          },
+          stdout: {
+            write(chunk: string) {
+              stdoutChunks.push(chunk);
+              return true;
+            },
+          } as NodeJS.WriteStream,
+          stderr: { write: () => true } as NodeJS.WriteStream,
+        });
+
+        expect(exitCode).toBe(0);
+        const stdoutText = stdoutChunks.join("");
+        expect(stdoutText).not.toContain("No production dependencies found");
+        expect(stdoutText).toContain("excluded");
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
