@@ -528,21 +528,20 @@ export async function runSubagentAnnounceFlow(params: {
       startedAt: params.startedAt,
       endedAt: params.endedAt,
     });
-    const internalEvents: AgentInternalEvent[] = [
-      {
-        type: "task_completion",
-        source: announceType === "cron job" ? "cron" : "subagent",
-        childSessionKey: params.childSessionKey,
-        childSessionId: announceSessionId,
-        announceType,
-        taskLabel,
-        status: outcome.status,
-        statusLabel,
-        result: findings,
-        statsLine,
-        replyInstruction,
-      },
-    ];
+    const completionEvent: AgentInternalEvent = {
+      type: "task_completion",
+      source: announceType === "cron job" ? "cron" : "subagent",
+      childSessionKey: params.childSessionKey,
+      childSessionId: announceSessionId,
+      announceType,
+      taskLabel,
+      status: outcome.status,
+      statusLabel,
+      result: findings,
+      statsLine,
+      replyInstruction,
+    };
+    const internalEvents: AgentInternalEvent[] = [completionEvent];
     const triggerMessage = buildAnnounceSteerMessage(internalEvents);
 
     // Send to the requester session. For nested subagents this is an internal
@@ -596,7 +595,7 @@ export async function runSubagentAnnounceFlow(params: {
             to: routeTo,
             threadId: ownerOrigin?.threadId,
           },
-          event: internalEvents[0]!,
+          event: completionEvent,
           promptText: formatAgentInternalEventsForPlainPrompt(internalEvents),
           outcome,
           startedAt: params.startedAt,
