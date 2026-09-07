@@ -18,6 +18,7 @@ import type { AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth.js";
 import type { ChatAbortControllerEntry } from "./chat-abort.js";
 import type { ControlUiRootState } from "./control-ui.js";
+import { countUnabortedRuns, setGatewayActiveRunCountProbe } from "./gateway-activity.js";
 import type { HooksConfigResolved } from "./hooks.js";
 import type { AuthorizedGatewayHttpRequest } from "./http-auth-utils.js";
 import { isLoopbackHost, resolveGatewayListenHosts } from "./net.js";
@@ -340,6 +341,10 @@ export async function createGatewayRuntimeState(params: {
     const addChatRun = chatRunRegistry.add;
     const removeChatRun = chatRunRegistry.remove;
     const chatAbortControllers = new Map<string, ChatAbortControllerEntry>();
+    // Publishes the live run count to plugins without handing out the run map. Paired with the
+    // clear in releasePluginRouteRegistry: an in-process restart must not leave readers pointed
+    // at the previous runtime's map, which would report stale activity forever.
+    setGatewayActiveRunCountProbe(() => countUnabortedRuns(chatAbortControllers));
     const toolEventRecipients = createToolEventRecipientRegistry();
 
     return {
@@ -353,6 +358,9 @@ export async function createGatewayRuntimeState(params: {
         // original params.pluginRegistry, so an identity-guarded release would
         // be a no-op and leak the pin across in-process restarts.
         releasePinnedPluginChannelRegistry();
+        // Clear the activity probe with the pins: after close, readers must see "unknown"
+        // rather than a stale count from this runtime's abandoned run map.
+        setGatewayActiveRunCountProbe(null);
       },
       httpServer,
       httpServers,
@@ -380,6 +388,7 @@ export async function createGatewayRuntimeState(params: {
     releasePinnedPluginHttpRouteRegistry();
     releasePinnedPluginSessionExtensionRegistry();
     releasePinnedPluginChannelRegistry();
+    setGatewayActiveRunCountProbe(null);
     throw err;
   }
 }
