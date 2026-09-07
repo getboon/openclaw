@@ -39,6 +39,7 @@ import type { CommandQueueEnqueueOptions } from "../../process/command-queue.typ
 import { createAgentHarnessTaskRuntimeScope } from "../../tasks/agent-harness-task-runtime-scope.js";
 import { resolveUserPath } from "../../utils.js";
 import { isMarkdownCapableMessageChannel } from "../../utils/message-channel.js";
+import { hasAcceptedSessionSpawn } from "../accepted-session-spawn.js";
 import {
   retireSessionMcpRuntime,
   retireSessionMcpRuntimeForSessionKey,
@@ -3608,6 +3609,8 @@ async function runEmbeddedAgentInternal(
             agentId: params.agentId,
             runId: params.runId,
             runAborted: aborted,
+            yieldDetected: attempt.yieldDetected === true,
+            hasAcceptedSessionSpawn: hasAcceptedSessionSpawn(attempt.acceptedSessionSpawns),
             didSendDeterministicApprovalPrompt: attempt.didSendDeterministicApprovalPrompt,
             heartbeatToolResponse: attempt.heartbeatToolResponse,
           });
