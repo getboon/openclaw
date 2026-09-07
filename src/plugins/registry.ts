@@ -2717,6 +2717,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
         }
         const subagent = getRuntimeProperty();
         return {
+          registerCompletionOwner: subagent.registerCompletionOwner,
           run: (params) => withPluginRuntimePluginIdScope(pluginId, () => subagent.run(params)),
           waitForRun: (params) =>
             withPluginRuntimePluginIdScope(pluginId, () => subagent.waitForRun(params)),

@@ -83,6 +83,8 @@ export type GetReplyOptions = {
   isHeartbeat?: boolean;
   /** Policy-level typing control for run classes (user/system/internal/heartbeat). */
   typingPolicy?: TypingPolicy;
+  /** Wait for an active run instead of steering or queueing a follow-up. */
+  activeRunPolicy?: "wait";
   /** Force-disable typing indicators for this run (system/internal/cross-channel routes). */
   suppressTyping?: boolean;
   /** Resolved heartbeat model override (provider/model string from merged per-agent config). */

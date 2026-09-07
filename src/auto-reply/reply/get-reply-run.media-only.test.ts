@@ -1492,6 +1492,37 @@ describe("runPreparedReply media-only handling", () => {
     },
   );
 
+  it("waits for active runs without steering or queueing a follow-up", async () => {
+    const queueSettings = await import("./queue/settings-runtime.js");
+    const embeddedAgentRuntime = await import("../../agents/embedded-agent.runtime.js");
+    vi.mocked(queueSettings.resolveQueueSettings).mockReturnValueOnce({
+      mode: "steer",
+      debounceMs: 500,
+      cap: 20,
+      dropPolicy: "summarize",
+    });
+    vi.mocked(embeddedAgentRuntime.resolveActiveEmbeddedRunSessionId)
+      .mockReturnValueOnce("active-session")
+      .mockReturnValueOnce("active-session");
+    vi.mocked(embeddedAgentRuntime.isEmbeddedAgentRunActive)
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+    vi.mocked(embeddedAgentRuntime.isEmbeddedAgentRunStreaming).mockReturnValueOnce(true);
+
+    await runPreparedReply(
+      baseParams({
+        isNewSession: false,
+        opts: { activeRunPolicy: "wait" },
+      }),
+    );
+
+    const call = requireLastRunReplyAgentCall();
+    expect(call.shouldSteer).toBe(false);
+    expect(call.shouldFollowup).toBe(false);
+    expect(call.isActive).toBe(true);
+    expect(call.isStreaming).toBe(true);
+  });
+
   it("keeps non-Slack same-session turns steerable when route threads differ", async () => {
     const queueSettings = await import("./queue/settings-runtime.js");
     const embeddedAgentRuntime = await import("../../agents/embedded-agent.runtime.js");
