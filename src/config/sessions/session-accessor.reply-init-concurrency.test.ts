@@ -84,7 +84,10 @@ async function waitForFile(filePath) {
 }
 
 async function writeJsonFile(filePath, value) {
-  await fs.writeFile(filePath, \`\${JSON.stringify(value, null, 2)}\\n\`, "utf8");
+  // The parent polls for this file, so publish it atomically.
+  const tempPath = \`\${filePath}.tmp\`;
+  await fs.writeFile(tempPath, \`\${JSON.stringify(value, null, 2)}\\n\`, "utf8");
+  await fs.rename(tempPath, filePath);
 }
 
 const storePath = process.env.REPLY_INIT_STORE_PATH;
