@@ -653,6 +653,42 @@ describe("subagent registry lifecycle hardening", () => {
     expect(runSubagentAnnounceFlow).toHaveBeenCalledTimes(1);
   });
 
+  it("marks a terminal completion owner failure and gives up after one attempt", async () => {
+    const persist = vi.fn();
+    const entry = createRunEntry({
+      expectsCompletionMessage: true,
+    });
+    const delivery: SubagentAnnounceDeliveryResult = {
+      delivered: false,
+      path: "owner",
+      ownerChannel: "anychat-boon-web",
+      terminal: true,
+      reason: "visible_reply_missing",
+      error: "media_unsupported",
+    };
+    const runSubagentAnnounceFlow: LifecycleControllerParams["runSubagentAnnounceFlow"] = vi.fn(
+      async (announceParams) => {
+        announceParams.onDeliveryResult?.(delivery);
+        return false;
+      },
+    );
+
+    const controller = createLifecycleController({ entry, persist, runSubagentAnnounceFlow });
+
+    await expect(
+      controller.completeSubagentRun({
+        runId: entry.runId,
+        endedAt: 4_000,
+        outcome: { status: "ok" },
+        reason: SUBAGENT_ENDED_REASON_COMPLETE,
+        triggerCleanup: true,
+      }),
+    ).resolves.toBeUndefined();
+
+    await vi.waitFor(() => expect(entry.delivery?.lastDropReason).toBe("owner_terminal"));
+    expect(runSubagentAnnounceFlow).toHaveBeenCalledTimes(1);
+  });
+
   it("skips announce delivery when completion messages are disabled", async () => {
     const persist = vi.fn();
     const entry = createRunEntry({

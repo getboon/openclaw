@@ -134,9 +134,12 @@ describe("plugin runtime command execution", () => {
 
     const registration = createPluginRuntime().subagent.registerCompletionOwner(owner);
 
-    expect(registration).toEqual({ dispose: expect.any(Function) });
-    expect(getSubagentCompletionOwner("anychat-boon-web")).toBe(owner);
-    registration.dispose();
+    try {
+      expect(registration).toEqual({ dispose: expect.any(Function) });
+      expect(getSubagentCompletionOwner("anychat-boon-web")).toBe(owner);
+    } finally {
+      registration.dispose();
+    }
   });
   beforeEach(() => {
     vi.restoreAllMocks();

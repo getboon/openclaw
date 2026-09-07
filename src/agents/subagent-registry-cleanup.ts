@@ -8,7 +8,7 @@ import {
   SUBAGENT_ENDED_REASON_COMPLETE,
   type SubagentLifecycleEndedReason,
 } from "./subagent-lifecycle-events.js";
-import type { SubagentRunRecord } from "./subagent-registry.types.js";
+import type { SubagentAnnounceGiveUpReason, SubagentRunRecord } from "./subagent-registry.types.js";
 
 type DeferredCleanupDecision =
   | {
@@ -17,7 +17,7 @@ type DeferredCleanupDecision =
     }
   | {
       kind: "give-up";
-      reason: "retry-limit" | "expiry" | "subagent_no_output";
+      reason: SubagentAnnounceGiveUpReason;
       retryCount?: number;
     }
   | {
@@ -66,6 +66,11 @@ export function resolveDeferredCleanupDecision(params: {
   // that recorded this drop reason instead of burning the full retry budget.
   if (params.entry.delivery?.lastDropReason === "subagent_no_output") {
     return { kind: "give-up", reason: "subagent_no_output", retryCount };
+  }
+  // A completion owner reported a non-retryable failure: the same request would
+  // fail the same way, so stop instead of re-invoking the owner.
+  if (params.entry.delivery?.lastDropReason === "owner_terminal") {
+    return { kind: "give-up", reason: "owner_terminal", retryCount };
   }
   const expiryExceeded = isCompletionMessageFlow
     ? completionHardExpiryExceeded
