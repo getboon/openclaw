@@ -50,6 +50,9 @@ function resolveToolCounts(
         .length,
     };
   }
+  // Current embedded and Codex collectors set per-call outcomes. This branch
+  // remains for direct payload-builder compatibility callers that provide only
+  // a last failure, and normalized attempt records whose source omitted outcomes.
   const totalToolCount = Math.max(toolMetas.length, surfacedFailureCount);
   return {
     totalToolCount,

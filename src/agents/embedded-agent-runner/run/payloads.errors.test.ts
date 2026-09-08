@@ -1248,6 +1248,22 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text).not.toContain("2 of 3 steps completed");
   });
 
+  it("does not emit a step note for legacy tool metadata without recorded failures", () => {
+    const payloads = buildPayloads({
+      assistantTexts: ["Everything completed successfully."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      currentAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      toolMetas: [{ toolName: "read" }, { toolName: "write" }],
+    });
+
+    expect(
+      payloads.some(
+        (payload) => getReplyPayloadMetadata(payload)?.nonTerminalToolErrorWarning === true,
+      ),
+    ).toBe(false);
+    expect(payloads.map((payload) => payload.text ?? "").join("\n")).not.toContain("didn't finish");
+  });
+
   it("wraps markdown-capable mutating tool warnings so mention-looking names stay inert", () => {
     const payloads = buildPayloads({
       lastToolError: {
