@@ -1,5 +1,6 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { hasReplyPayloadContent } from "../../interactive/payload.js";
+import { truncateUtf16Safe } from "../../utils.js";
 import { copyReplyPayloadMetadata } from "../reply-payload.js";
 import type { AgentDecisionTrace, ReplyPayload } from "../reply-payload.js";
 
@@ -54,7 +55,9 @@ function normalizeTraceDetail(value: unknown): string | undefined {
   if (!detail) {
     return undefined;
   }
-  return detail.length > MAX_TRACE_DETAIL_CHARS ? detail.slice(0, MAX_TRACE_DETAIL_CHARS) : detail;
+  // UTF-16-safe so the cap never splits a surrogate pair (emoji) into a
+  // malformed final character in the durable trace.
+  return truncateUtf16Safe(detail, MAX_TRACE_DETAIL_CHARS);
 }
 
 function normalizeNames(values: readonly string[] | undefined): string[] {

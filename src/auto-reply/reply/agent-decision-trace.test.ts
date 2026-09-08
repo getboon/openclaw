@@ -115,6 +115,24 @@ describe("buildAgentDecisionTrace", () => {
     expect(trace.toolInvocations[0].detail).toHaveLength(500);
   });
 
+  it("truncates on a UTF-16 boundary without splitting a surrogate pair", () => {
+    // "😀" is two UTF-16 code units straddling the 500-unit cap; the safe
+    // truncation drops the whole emoji rather than storing a lone surrogate.
+    const detail = `${"E".repeat(499)}😀tail`;
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["message"],
+        visibleTools: ["message"],
+        invocations: [{ name: "message", status: "blocked", detail }],
+      },
+    });
+    const truncated = trace.toolInvocations[0].detail ?? "";
+    expect(truncated).toBe("E".repeat(499));
+    // No lone/unpaired surrogate at the end.
+    expect(truncated.charCodeAt(truncated.length - 1)).toBeLessThan(0xd800);
+  });
+
   it("marks an unattempted response as unverified when tools were visible", () => {
     expect(
       buildAgentDecisionTrace({
