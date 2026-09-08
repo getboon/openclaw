@@ -59,8 +59,8 @@ function normalizeNames(values: readonly string[] | undefined): string[] {
 function isTraceablePayload(payload: ReplyPayload): boolean {
   return (
     payload.isReasoning !== true &&
-    // `boon` has no `isCommentary` payload concept (present on upstream `main`).
-    // Preserve #80's exclusion via a widening read so it self-heals if added.
+    // `boon` has no `isCommentary` payload concept. Preserve the exclusion via
+    // a widening read so it self-heals if the field is added upstream.
     (payload as { isCommentary?: boolean }).isCommentary !== true &&
     payload.isStatusNotice !== true
   );
