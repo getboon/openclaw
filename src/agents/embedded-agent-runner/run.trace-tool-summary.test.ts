@@ -55,4 +55,52 @@ describe("buildTraceToolSummary", () => {
       }),
     ).toBeUndefined();
   });
+
+  it("counts only the failures the runtime never marked retried", () => {
+    // A successfully re-run step is retired so it cannot demote a finished
+    // turn to "partial".
+    const summary = buildTraceToolSummary({
+      visibleToolNames: ["exec"],
+      toolMetas: [
+        { toolName: "exec", errored: true },
+        { toolName: "exec", errored: false },
+        { toolName: "sessions_spawn", errored: true },
+      ],
+      hadFailure: true,
+      toolFailures: [{ retried: true }, {}],
+    });
+
+    expect(summary?.unrecoveredFailures).toBe(1);
+    // Per-call outcomes stay untouched: both errors remain visible as evidence.
+    expect(summary?.invocations).toEqual([
+      { name: "exec", status: "error" },
+      { name: "exec", status: "ok" },
+      { name: "sessions_spawn", status: "error" },
+    ]);
+  });
+
+  it("reports zero unrecovered failures once every error was retried", () => {
+    expect(
+      buildTraceToolSummary({
+        visibleToolNames: ["exec"],
+        toolMetas: [
+          { toolName: "exec", errored: true },
+          { toolName: "exec", errored: false },
+        ],
+        hadFailure: true,
+        toolFailures: [{ retried: true }],
+      })?.unrecoveredFailures,
+    ).toBe(0);
+  });
+
+  it("omits the recovery count for producers that do not track failures", () => {
+    // Producers without a failure list keep the existing disposition.
+    expect(
+      buildTraceToolSummary({
+        visibleToolNames: ["exec"],
+        toolMetas: [{ toolName: "exec", errored: true }],
+        hadFailure: true,
+      }),
+    ).not.toHaveProperty("unrecoveredFailures");
+  });
 });

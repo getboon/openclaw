@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  getReplyPayloadMetadata,
-  setReplyPayloadMetadata,
-} from "../reply-payload.js";
+import { getReplyPayloadMetadata, setReplyPayloadMetadata } from "../reply-payload.js";
 import { attachAgentDecisionTrace, buildAgentDecisionTrace } from "./agent-decision-trace.js";
 
 describe("buildAgentDecisionTrace", () => {
@@ -143,6 +140,138 @@ describe("buildAgentDecisionTrace", () => {
     expect(trace.reason).toBe("tool_execution_partial");
     expect(trace.confidence).toBe("medium");
   });
+
+  it("reports a recovered turn as succeeded once every failure was retried", () => {
+    // Recovered errors remain visible as evidence but no longer demote the
+    // completed turn to "partial".
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 3,
+        tools: ["sessions_spawn", "exec", "message"],
+        failures: 1,
+        visibleTools: ["sessions_spawn", "exec", "message"],
+        invocations: [
+          { name: "sessions_spawn", status: "error" },
+          { name: "exec", status: "ok" },
+          { name: "message", status: "ok" },
+        ],
+        unrecoveredFailures: 0,
+      },
+      payloads: [{ text: "The work is complete." }],
+    });
+
+    expect(trace.disposition).toBe("completed");
+    expect(trace.reason).toBe("tool_execution_succeeded");
+    // Medium, not high: calls did error, they were just recovered.
+    expect(trace.confidence).toBe("medium");
+    // The error is still enumerated for the verification surfaces.
+    expect(trace.toolInvocations).toEqual([
+      { name: "sessions_spawn", status: "error" },
+      { name: "exec", status: "ok" },
+      { name: "message", status: "ok" },
+    ]);
+    expect(trace.evidence).toContainEqual({
+      kind: "tool_outcome",
+      tool: "sessions_spawn",
+      status: "error",
+    });
+  });
+
+  it("keeps a recovered failure partial when the terminal tool is not message", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 2,
+        tools: ["sessions_spawn", "exec"],
+        failures: 1,
+        invocations: [
+          { name: "sessions_spawn", status: "error" },
+          { name: "exec", status: "ok" },
+        ],
+        unrecoveredFailures: 0,
+      },
+      payloads: [{ text: "The work is complete." }],
+    });
+
+    expect(trace.reason).toBe("tool_execution_partial");
+  });
+
+  it("keeps a recovered failure partial when the final answer is blank", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 2,
+        tools: ["exec", "message"],
+        failures: 1,
+        invocations: [
+          { name: "exec", status: "error" },
+          { name: "message", status: "ok" },
+        ],
+        unrecoveredFailures: 0,
+      },
+      payloads: [{ text: "   " }],
+    });
+
+    expect(trace.reason).toBe("tool_execution_partial");
+  });
+
+  it("keeps reporting partial while a failure is still unrecovered", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 2,
+        tools: ["exec", "message"],
+        failures: 1,
+        visibleTools: ["exec", "message"],
+        invocations: [
+          { name: "exec", status: "error" },
+          { name: "message", status: "ok" },
+        ],
+        unrecoveredFailures: 1,
+      },
+    });
+
+    expect(trace.disposition).toBe("completed");
+    expect(trace.reason).toBe("tool_execution_partial");
+    expect(trace.confidence).toBe("medium");
+  });
+
+  it("leaves the disposition unchanged when the runtime reports no recovery count", () => {
+    // Producers that never populate `unrecoveredFailures` (the CLI runner and
+    // every legacy caller) must keep today's output exactly.
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 2,
+        tools: ["exec", "message"],
+        failures: 1,
+        visibleTools: ["exec", "message"],
+        invocations: [
+          { name: "exec", status: "error" },
+          { name: "message", status: "ok" },
+        ],
+      },
+    });
+
+    expect(trace.reason).toBe("tool_execution_partial");
+    expect(trace.confidence).toBe("medium");
+  });
+
+  it("never treats a blocked call as recovered", () => {
+    // A blocked call never ran, so nothing could have retried it — recovery
+    // accounting covers errors only.
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 2,
+        tools: ["exec", "message"],
+        failures: 0,
+        visibleTools: ["exec", "message"],
+        invocations: [
+          { name: "exec", status: "blocked" },
+          { name: "message", status: "ok" },
+        ],
+        unrecoveredFailures: 0,
+      },
+    });
+
+    expect(trace.reason).toBe("tool_execution_partial");
+  });
 });
 
 describe("attachAgentDecisionTrace", () => {
@@ -188,5 +317,92 @@ describe("attachAgentDecisionTrace", () => {
 
     expect(traced.auditTrace).toBe(auditTrace);
     expect(getReplyPayloadMetadata(traced)?.replyToIdExplicit).toBe(true);
+  });
+
+  it("attaches the trace to the answer instead of a trailing tool-failure warning", () => {
+    // A trailing warning must not steal the answer's audit trace.
+    const payloads = [
+      { text: "answer" },
+      { text: "\u21bb One step didn't finish.", isError: true },
+    ];
+    const auditTrace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["exec"],
+        failures: 1,
+        visibleTools: ["exec"],
+        invocations: [{ name: "exec", status: "error" }],
+      },
+    });
+
+    expect(attachAgentDecisionTrace(payloads, auditTrace)).toEqual([
+      { text: "answer", auditTrace },
+      { text: "\u21bb One step didn't finish.", isError: true },
+    ]);
+  });
+
+  it("does not treat a blank payload as an answer ahead of a warning", () => {
+    const payloads = [{ text: "   " }, { text: "\u21bb One step didn't finish.", isError: true }];
+    const auditTrace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["message"],
+        failures: 1,
+        invocations: [{ name: "message", status: "error" }],
+      },
+    });
+
+    expect(attachAgentDecisionTrace(payloads, auditTrace)).toEqual([
+      { text: "   " },
+      { text: "\u21bb One step didn't finish.", auditTrace, isError: true },
+    ]);
+  });
+
+  it("does not attach the trace when the only payload is blank", () => {
+    const payloads = [{ text: "   " }];
+    const auditTrace = buildAgentDecisionTrace({});
+
+    expect(attachAgentDecisionTrace(payloads, auditTrace)).toEqual(payloads);
+  });
+
+  it("still treats a media-only payload as a traceable answer", () => {
+    const payloads = [
+      { text: "   ", mediaUrls: ["https://example.com/result.png"] },
+      { text: "\u21bb One step didn't finish.", isError: true },
+    ];
+    const auditTrace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["message"],
+        failures: 1,
+        invocations: [{ name: "message", status: "error" }],
+      },
+    });
+
+    expect(attachAgentDecisionTrace(payloads, auditTrace)).toEqual([
+      {
+        text: "   ",
+        mediaUrls: ["https://example.com/result.png"],
+        auditTrace,
+      },
+      { text: "\u21bb One step didn't finish.", isError: true },
+    ]);
+  });
+
+  it("still attaches the trace when every payload is an error notice", () => {
+    const payloads = [{ text: "\u26a0\ufe0f message failed", isError: true }];
+    const auditTrace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["message"],
+        failures: 1,
+        visibleTools: ["message"],
+        invocations: [{ name: "message", status: "error" }],
+      },
+    });
+
+    expect(attachAgentDecisionTrace(payloads, auditTrace)).toEqual([
+      { text: "\u26a0\ufe0f message failed", auditTrace, isError: true },
+    ]);
   });
 });

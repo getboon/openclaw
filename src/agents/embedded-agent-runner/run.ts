@@ -495,6 +495,10 @@ export function buildTraceToolSummary(params: {
   }>;
   visibleToolNames?: readonly string[];
   hadFailure: boolean;
+  /**
+   * Errored calls with recovery flags. Omit to keep the legacy disposition.
+   */
+  toolFailures?: readonly { retried?: boolean }[];
 }): ToolSummaryTrace | undefined {
   const toolMetas = params.toolMetas ?? [];
   const visibleTools = [...new Set(params.visibleToolNames ?? [])]
@@ -529,6 +533,11 @@ export function buildTraceToolSummary(params: {
             ? ("error" as const)
             : ("ok" as const),
     })),
+    ...(params.toolFailures
+      ? {
+          unrecoveredFailures: params.toolFailures.filter((failure) => !failure.retried).length,
+        }
+      : {}),
   };
 }
 
@@ -3682,6 +3691,7 @@ async function runEmbeddedAgentInternal(
             toolMetas: attempt.toolMetas,
             visibleToolNames: attempt.visibleToolNames,
             hadFailure: Boolean(attempt.lastToolError),
+            toolFailures: attempt.toolFailures,
           });
           const failureSignal = resolveEmbeddedRunFailureSignal({
             trigger: params.trigger,
