@@ -917,6 +917,122 @@ describe("agentLoop tool termination", () => {
   });
 });
 
+describe("agentLoop sequential yield batch", () => {
+  function makeAssistantMessage(content: AssistantMessage["content"]): AssistantMessage {
+    return {
+      role: "assistant",
+      content,
+      api: model.api,
+      provider: model.provider,
+      model: model.id,
+      usage: TEST_USAGE,
+      stopReason: content.some((item) => item.type === "toolCall") ? "toolUse" : "stop",
+      timestamp: 1,
+    };
+  }
+
+  function makeYieldBatchStream(): StreamFn {
+    let streamCalls = 0;
+    return () => {
+      streamCalls += 1;
+      const stream = createAssistantMessageEventStream();
+      queueMicrotask(() => {
+        const message =
+          streamCalls === 1
+            ? makeAssistantMessage([
+                { type: "toolCall", id: "call-send", name: "send", arguments: {} },
+                { type: "toolCall", id: "call-yield", name: "yield_tool", arguments: {} },
+              ])
+            : makeAssistantMessage([{ type: "text", text: "done" }]);
+        stream.push({ type: "done", reason: message.stopReason as "toolUse" | "stop", message });
+        stream.end();
+      });
+      return stream;
+    };
+  }
+
+  function makeSlowSendTool(sent: string[]): AgentTool {
+    return {
+      name: "send",
+      label: "send",
+      description: "send a message",
+      parameters: Type.Object({}, { additionalProperties: false }),
+      execute: async (_id, _params, signal) => {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 5);
+        });
+        if (signal?.aborted) {
+          throw new Error("Operation aborted");
+        }
+        sent.push("send");
+        return { content: [{ type: "text", text: "sent" }], details: {} };
+      },
+    };
+  }
+
+  function makeYieldTool(controller: AbortController, executionMode?: "sequential"): AgentTool {
+    return {
+      name: "yield_tool",
+      label: "yield_tool",
+      description: "yield",
+      parameters: Type.Object({}, { additionalProperties: false }),
+      ...(executionMode ? { executionMode } : {}),
+      execute: async () => {
+        controller.abort("sessions_yield");
+        return { content: [{ type: "text", text: "yielded" }], details: {} };
+      },
+    };
+  }
+
+  function toolResultsFrom(messages: AgentMessage[]) {
+    return messages.filter((message) => message.role === "toolResult") as Array<{
+      toolName: string;
+      isError?: boolean;
+    }>;
+  }
+
+  it("a parallel yield abort cancels a sibling send in the same batch", async () => {
+    const controller = new AbortController();
+    const sent: string[] = [];
+    const messages = await runAgentLoop(
+      [{ role: "user", content: "send then yield", timestamp: 1 }],
+      {
+        systemPrompt: "",
+        messages: [],
+        tools: [makeSlowSendTool(sent), makeYieldTool(controller)],
+      },
+      config,
+      () => {},
+      controller.signal,
+      makeYieldBatchStream(),
+    );
+    expect(sent).toEqual([]);
+    const sendResult = toolResultsFrom(messages).find((result) => result.toolName === "send");
+    expect(sendResult?.isError).toBe(true);
+  });
+
+  it("a sequential yield lets a sibling send finish before the abort", async () => {
+    const controller = new AbortController();
+    const sent: string[] = [];
+    const messages = await runAgentLoop(
+      [{ role: "user", content: "send then yield", timestamp: 1 }],
+      {
+        systemPrompt: "",
+        messages: [],
+        tools: [makeSlowSendTool(sent), makeYieldTool(controller, "sequential")],
+      },
+      config,
+      () => {},
+      controller.signal,
+      makeYieldBatchStream(),
+    );
+    expect(sent).toEqual(["send"]);
+    const results = toolResultsFrom(messages);
+    expect(results.find((result) => result.toolName === "send")?.isError).toBeFalsy();
+    expect(results.find((result) => result.toolName === "yield_tool")?.isError).toBeFalsy();
+  });
+});
+
 describe("agentLoop thinking state", () => {
   function makeAssistantMessage(
     activeModel: Model,

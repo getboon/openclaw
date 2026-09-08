@@ -111,6 +111,9 @@ export const pluginSdkDocMetadata = {
   "provider-catalog-live-runtime": {
     category: "provider",
   },
+  "gateway-activity-runtime": {
+    category: "runtime",
+  },
   "runtime-store": {
     category: "runtime",
   },

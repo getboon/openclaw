@@ -21,7 +21,7 @@ vi.mock("@anthropic-ai/sdk", () => ({
   },
 }));
 
-import { streamAnthropic, streamSimpleAnthropic } from "./anthropic.js";
+import { mergeAnthropicHeaders, streamAnthropic, streamSimpleAnthropic } from "./anthropic.js";
 
 function createSseResponse(events: Record<string, unknown>[] = []): Response {
   const body = events
@@ -52,6 +52,75 @@ function makeAnthropicModel(overrides: Partial<Model<"anthropic-messages">> = {}
 describe("Anthropic provider", () => {
   beforeEach(() => {
     anthropicMockState.configs = [];
+  });
+
+  it("merges header names case-insensitively so provider session headers are not duplicated", () => {
+    const merged = mergeAnthropicHeaders(
+      { "x-boon-session-id": "ordinary-session" },
+      { "X-Boon-Session-ID": "provisioning-smoke-session" },
+    );
+
+    expect(
+      Object.keys(merged).filter((key) => key.toLowerCase() === "x-boon-session-id"),
+    ).toHaveLength(1);
+    expect(merged["X-Boon-Session-ID"]).toBe("provisioning-smoke-session");
+  });
+
+  it("reasserts the smoke run-id and capability headers together with the session id", async () => {
+    // Same correctness property as transport-stream-shared.test.ts's
+    // equivalent test, for this file's separate (string | null typed)
+    // implementation: a stale/colliding per-call session header must not
+    // cause the run-id/capability headers to be silently dropped while the
+    // session id alone survives.
+    const model = makeAnthropicModel({
+      headers: {
+        "X-Boon-Session-ID": "provisioning-smoke-run",
+        "X-Boon-Provisioning-Smoke-Run-ID": "run-123",
+        "X-Boon-Provisioning-Smoke-Capability": "signed-token",
+      },
+    });
+    const context = {
+      messages: [{ role: "user", content: "hello", timestamp: 1 }],
+    } satisfies Context;
+
+    streamAnthropic(model, context, {
+      apiKey: "sk-ant-provider",
+      headers: { "x-boon-session-id": "stale-ordinary-session" },
+    });
+
+    await vi.waitFor(() => expect(anthropicMockState.configs).toHaveLength(1));
+    const config = anthropicMockState.configs[0] as {
+      defaultHeaders?: Record<string, string | null>;
+    };
+
+    expect(config.defaultHeaders?.["X-Boon-Session-ID"]).toBe("provisioning-smoke-run");
+    expect(config.defaultHeaders?.["X-Boon-Provisioning-Smoke-Run-ID"]).toBe("run-123");
+    expect(config.defaultHeaders?.["X-Boon-Provisioning-Smoke-Capability"]).toBe("signed-token");
+  });
+
+  it("keeps a per-call header override ahead of a static model header on an ordinary session", async () => {
+    // Regression guard: the smoke-session preservation fix must not reorder
+    // header precedence for every session. A per-call options.headers value
+    // must still win over a same-named static model.headers value, exactly
+    // as it did before provisioning-smoke support was added.
+    const model = makeAnthropicModel({
+      headers: { "x-custom-marker": "from-model" },
+    });
+    const context = {
+      messages: [{ role: "user", content: "hello", timestamp: 1 }],
+    } satisfies Context;
+
+    streamAnthropic(model, context, {
+      apiKey: "sk-ant-provider",
+      headers: { "x-custom-marker": "from-options" },
+    });
+
+    await vi.waitFor(() => expect(anthropicMockState.configs).toHaveLength(1));
+    const config = anthropicMockState.configs[0] as {
+      defaultHeaders?: Record<string, string | null>;
+    };
+
+    expect(config.defaultHeaders?.["x-custom-marker"]).toBe("from-options");
   });
 
   it("keeps Cloudflare AI Gateway upstream provider auth on the Anthropic API key", async () => {

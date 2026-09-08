@@ -715,6 +715,44 @@ describe("buildEmbeddedRunPayloads", () => {
     expectSingleToolErrorPayload(payloads, { title, absentDetail });
   });
 
+  it("does not surface a stale tool error when the turn yielded to a spawned subagent (ENG-19495)", () => {
+    // Repro of thread 2445: the agent's own incidental message-tool status update
+    // failed validation, then the agent spawned a subagent and yielded. The turn
+    // has no answer text (the subagent answers later) — this must NOT be reported
+    // to the user as a failure.
+    const payloads = buildPayloads({
+      yieldDetected: true,
+      hasAcceptedSessionSpawn: true,
+      runAborted: false, // yield forces runAborted=false and strips its synthetic aborted turn — not an abort
+      assistantTexts: [],
+      lastToolError: {
+        toolName: "message",
+        meta: "status update",
+        error: "Boon Web message sends require two to five valid suggested replies",
+      },
+    });
+    expect(payloads).toEqual([]);
+  });
+
+  it("still surfaces a tool error on a yield WITHOUT a spawned subagent (narrow gate) — ENG-19495", () => {
+    // A plain yield-to-wait has no continuation, so a genuine failure must still show.
+    const payloads = buildPayloads({
+      yieldDetected: true,
+      hasAcceptedSessionSpawn: false,
+      lastToolError: { toolName: "message", meta: "reply", error: "text required" },
+    });
+    expectSingleToolErrorPayload(payloads, { title: "Message" });
+  });
+
+  it("still surfaces a tool error on a normal (non-yield) turn even if a subagent was spawned — ENG-19495", () => {
+    const payloads = buildPayloads({
+      yieldDetected: false,
+      hasAcceptedSessionSpawn: true,
+      lastToolError: { toolName: "browser", error: "connection timeout" },
+    });
+    expectSingleToolErrorPayload(payloads, { title: "Browser" });
+  });
+
   it("shows mutating tool errors when assistant output claims success", () => {
     const payloads = buildPayloads({
       assistantTexts: ["Done."],

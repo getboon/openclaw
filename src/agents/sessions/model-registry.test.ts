@@ -93,6 +93,112 @@ afterEach(() => {
 });
 
 describe("ModelRegistry models.json auth", () => {
+  it("merges provider and model headers case-insensitively", async () => {
+    const registry = ModelRegistry.inMemory(AuthStorage.inMemory());
+    registry.registerProvider("boon-llm-gateway", {
+      api: "anthropic-messages",
+      apiKey: "gateway-key",
+      baseUrl: "https://gateway.example/v1",
+      models: [
+        {
+          id: "claude-sonnet-4-6",
+          name: "Claude Sonnet 4.6",
+          reasoning: true,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 200_000,
+          maxTokens: 4096,
+          headers: { "x-boon-session-id": "ordinary-session" },
+        },
+      ],
+    });
+
+    const model = registry.find("boon-llm-gateway", "claude-sonnet-4-6");
+    const result = await registry.getApiKeyAndHeaders({
+      ...model!,
+      headers: { "X-Boon-Session-ID": "provisioning-smoke-session" },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      apiKey: "gateway-key",
+      headers: { "X-Boon-Session-ID": "provisioning-smoke-session" },
+    });
+  });
+
+  it("keeps provider config headers ahead of a colliding static model header", async () => {
+    // The existing "merges provider and model headers case-insensitively"
+    // test above only ever has one non-empty header source in play, so it
+    // cannot catch a source-order regression. This one collides
+    // providerConfig.headers directly against model.headers on the same key
+    // to prove which one actually wins. The model is registered WITHOUT a
+    // model-level `headers` field (registering one here would also populate
+    // the registry's separate per-model modelRequestHeaders store via
+    // storeModelHeaders, giving "from-model" a second, later-precedence
+    // source to win from and defeating the point of this test) — model.headers
+    // is set only via the call-site override, exactly like the test above.
+    const registry = ModelRegistry.inMemory(AuthStorage.inMemory());
+    registry.registerProvider("boon-llm-gateway", {
+      api: "anthropic-messages",
+      apiKey: "gateway-key",
+      baseUrl: "https://gateway.example/v1",
+      headers: { "x-custom-marker": "from-provider" },
+      models: [
+        {
+          id: "claude-sonnet-4-6",
+          name: "Claude Sonnet 4.6",
+          reasoning: true,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 200_000,
+          maxTokens: 4096,
+        },
+      ],
+    });
+
+    const model = registry.find("boon-llm-gateway", "claude-sonnet-4-6");
+    const result = await registry.getApiKeyAndHeaders({
+      ...model!,
+      headers: { "x-custom-marker": "from-model" },
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      apiKey: "gateway-key",
+      headers: { "x-custom-marker": "from-provider" },
+    });
+  });
+
+  it("keeps dynamic bearer auth ahead of a static model Authorization header", async () => {
+    const registry = ModelRegistry.inMemory(AuthStorage.inMemory());
+    registry.registerProvider("boon-llm-gateway", {
+      api: "anthropic-messages",
+      apiKey: "gateway-key",
+      authHeader: true,
+      baseUrl: "https://gateway.example/v1",
+      models: [
+        {
+          id: "claude-sonnet-4-6",
+          name: "Claude Sonnet 4.6",
+          reasoning: true,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 200_000,
+          maxTokens: 4096,
+          headers: { Authorization: "Bearer stale-model-token" },
+        },
+      ],
+    });
+
+    const model = registry.find("boon-llm-gateway", "claude-sonnet-4-6");
+
+    await expect(registry.getApiKeyAndHeaders(model!)).resolves.toEqual({
+      ok: true,
+      apiKey: "gateway-key",
+      headers: { Authorization: "Bearer gateway-key" },
+    });
+  });
+
   it("accepts Bedrock AWS SDK auth without apiKey", async () => {
     // AWS SDK credential resolution is provider-owned; requiring an apiKey here
     // would make Bedrock catalogs impossible to express in models.json.

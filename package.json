@@ -1,6 +1,6 @@
 {
   "name": "openclaw",
-  "version": "2026.6.11-boon.33",
+  "version": "2026.6.11-boon.37",
   "description": "Multi-channel AI gateway with extensible messaging integrations",
   "keywords": [],
   "homepage": "https://github.com/openclaw/openclaw#readme",
@@ -592,6 +592,10 @@
     "./plugin-sdk/security-runtime": {
       "types": "./dist/plugin-sdk/security-runtime.d.ts",
       "default": "./dist/plugin-sdk/security-runtime.js"
+    },
+    "./plugin-sdk/gateway-activity-runtime": {
+      "types": "./dist/plugin-sdk/gateway-activity-runtime.d.ts",
+      "default": "./dist/plugin-sdk/gateway-activity-runtime.js"
     },
     "./plugin-sdk/gateway-method-runtime": {
       "types": "./dist/plugin-sdk/gateway-method-runtime.d.ts",

@@ -87,14 +87,18 @@ function createResourceLoaderWithHandlers(
   };
 }
 
-async function createSessionAndStreamModel(model: Model): Promise<SimpleStreamOptions> {
+async function createSessionAndStreamModel(
+  model: Model,
+  optionsLocal: SimpleStreamOptions = {},
+  modelRegistry: ModelRegistry = ModelRegistry.inMemory(AuthStorage.inMemory()),
+): Promise<SimpleStreamOptions> {
   streamMocks.streamSimple.mockClear();
   const { session } = await createAgentSession({
     model,
     resourceLoader: createEmptyResourceLoader(),
     sessionManager: SessionManager.inMemory(),
     settingsManager: SettingsManager.inMemory(),
-    modelRegistry: ModelRegistry.inMemory(AuthStorage.inMemory()),
+    modelRegistry,
   });
 
   await session.agent.streamFn?.(
@@ -104,7 +108,7 @@ async function createSessionAndStreamModel(model: Model): Promise<SimpleStreamOp
       systemPrompt: "",
       tools: [],
     },
-    {},
+    optionsLocal,
   );
 
   return streamMocks.streamSimple.mock.lastCall?.[2] ?? {};
@@ -240,6 +244,86 @@ describe("createAgentSession attribution headers", () => {
 
     expect(providerOptions.headers).toMatchObject({ "User-Agent": "openclaw" });
     expect(endpointOptions.headers).toMatchObject({ "User-Agent": "openclaw" });
+  });
+
+  it("keeps provider-authenticated headers when attribution uses different casing", async () => {
+    const options = await createSessionAndStreamModel(
+      {
+        ...testModel,
+        headers: {
+          "X-Boon-Session-ID": "provisioning-smoke-run",
+        },
+      },
+      {
+        headers: {
+          "x-boon-session-id": "thread-ordinary",
+        },
+      },
+    );
+
+    expect(options.headers).toEqual({
+      "X-Boon-Session-ID": "provisioning-smoke-run",
+    });
+  });
+
+  it("keeps ordinary runtime headers ahead of ordinary model headers", async () => {
+    const options = await createSessionAndStreamModel(
+      {
+        ...testModel,
+        headers: {
+          Authorization: "Bearer model-token",
+          "X-Boon-Session-ID": "ordinary-model-session",
+        },
+      },
+      {
+        headers: {
+          Authorization: "Bearer runtime-token",
+          "x-boon-session-id": "ordinary-runtime-session",
+        },
+      },
+    );
+
+    expect(options.headers).toEqual({
+      Authorization: "Bearer runtime-token",
+      "x-boon-session-id": "ordinary-runtime-session",
+    });
+  });
+
+  it("keeps resolved model headers when the registry has stale session attribution", async () => {
+    const modelRegistry = {
+      getApiKeyAndHeaders: vi.fn().mockResolvedValue({
+        ok: true,
+        headers: {
+          "x-boon-session-id": "thread-ordinary",
+        },
+      }),
+    } as unknown as ModelRegistry;
+    const options = await createSessionAndStreamModel(
+      {
+        ...testModel,
+        headers: {
+          "X-Boon-Session-ID": "provisioning-smoke-run",
+          "X-Boon-Provisioning-Smoke-Run-ID": "smoke-run-1",
+        },
+      },
+      {
+        headers: {
+          "x-boon-session-id": "thread-ordinary",
+        },
+      },
+      modelRegistry,
+    );
+
+    expect(streamMocks.streamSimple.mock.lastCall?.[0]).toMatchObject({
+      headers: {
+        "X-Boon-Session-ID": "provisioning-smoke-run",
+        "X-Boon-Provisioning-Smoke-Run-ID": "smoke-run-1",
+      },
+    });
+    expect(options.headers).toEqual({
+      "X-Boon-Session-ID": "provisioning-smoke-run",
+      "X-Boon-Provisioning-Smoke-Run-ID": "smoke-run-1",
+    });
   });
 });
 

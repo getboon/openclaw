@@ -1325,6 +1325,29 @@ describe("runAgentTurnWithFallback", () => {
     expect(embeddedCall.abortSignal).toBe(replyOperation.abortSignal);
   });
 
+  it("passes per-turn model request headers to embedded execution", async () => {
+    const modelRequestHeaders = {
+      "X-Boon-Session-ID": "provisioning-smoke-42",
+    };
+    state.runEmbeddedAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "ok" }],
+      meta: {},
+    });
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    await runAgentTurnWithFallback(
+      createMinimalRunAgentTurnParams({
+        opts: { modelRequestHeaders },
+      }),
+    );
+
+    const embeddedCall = requireRecord(
+      state.runEmbeddedAgentMock.mock.calls[0]?.[0],
+      "runEmbeddedAgent params",
+    );
+    expect(embeddedCall.modelRequestHeaders).toBe(modelRequestHeaders);
+  });
+
   it("passes the hydrated run account to embedded execution", async () => {
     state.runEmbeddedAgentMock.mockResolvedValueOnce({
       payloads: [{ text: "ok" }],
