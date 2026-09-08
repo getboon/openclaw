@@ -3626,6 +3626,8 @@ async function runEmbeddedAgentInternal(
             agentId: params.agentId,
             runId: params.runId,
             runAborted: aborted,
+            yieldDetected: attempt.yieldDetected === true,
+            hasAcceptedSessionSpawn: hasAcceptedSessionSpawn(attempt.acceptedSessionSpawns),
             didSendDeterministicApprovalPrompt: attempt.didSendDeterministicApprovalPrompt,
             heartbeatToolResponse: attempt.heartbeatToolResponse,
           });
