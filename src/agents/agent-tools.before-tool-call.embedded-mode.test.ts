@@ -161,6 +161,24 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
     });
   });
 
+  it("bounds the recorded detail so a huge error string cannot retain unbounded memory in the map", async () => {
+    runBeforeToolCallMock.mockRejectedValueOnce(new Error("X".repeat(5000)));
+
+    const result = await runBeforeToolCallHook({
+      toolName: "message",
+      params: {},
+      toolCallId: "tc-huge",
+      ctx: { runId: "run-huge" },
+    });
+
+    // The returned outcome + log + Sentry keep the full text...
+    expect((result as { detail?: string }).detail?.length).toBeGreaterThan(4000);
+    // ...but the value held in the pending-call map is bounded (<= 1024 chars).
+    const consumed = consumePreExecutionBlockedToolCall("tc-huge", "run-huge");
+    expect(consumed.blocked).toBe(true);
+    expect(consumed.detail?.length).toBe(1024);
+  });
+
   it("does not emit before_tool_call_hook_failed for a deliberate plugin veto", async () => {
     runBeforeToolCallMock.mockResolvedValueOnce({ block: true, blockReason: "policy says no" });
 

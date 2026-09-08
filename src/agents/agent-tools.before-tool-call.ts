@@ -221,6 +221,11 @@ const BEFORE_TOOL_CALL_HOOK_CONTEXT = Symbol("beforeToolCallHookContext");
 const BEFORE_TOOL_CALL_HOOK_FAILURE_REASON =
   "Tool call blocked because before_tool_call hook failed";
 const MAX_TRACKED_ADJUSTED_PARAMS = 1024;
+// Bound the hook-failure detail we hold in the pending-call Map so up to
+// MAX_TRACKED_ADJUSTED_PARAMS unconsumed entries can't retain unbounded memory.
+// Comfortably above the audit trace's own 500-char cap, so display is unaffected;
+// the full text still flows to the log line and the Sentry event.
+const MAX_RECORDED_BLOCK_DETAIL_CHARS = 1024;
 const MAX_PENDING_TERMINAL_PRESENTATIONS = 1024;
 const LOOP_WARNING_BUCKET_SIZE = 10;
 const MAX_LOOP_WARNING_KEYS = 256;
@@ -1346,7 +1351,11 @@ export async function runBeforeToolCallHook(args: {
     // Record the detail so it reaches toolMetas -> audit trace whether the
     // caller returns or throws this block. Failure-only; a veto never reaches
     // this catch.
-    recordPreExecutionBlockedToolCall(args.toolCallId, args.ctx?.runId, causeText);
+    recordPreExecutionBlockedToolCall(
+      args.toolCallId,
+      args.ctx?.runId,
+      truncateUtf16Safe(causeText, MAX_RECORDED_BLOCK_DETAIL_CHARS),
+    );
     // Fire-and-forget the observer emission so it never blocks the block
     // outcome; the try/catch + .catch cover sync and async failures.
     try {
