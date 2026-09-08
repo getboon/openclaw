@@ -1072,7 +1072,7 @@
           "exportName": "PluginRuntime",
           "kind": "type",
           "source": {
-            "line": 80,
+            "line": 88,
             "path": "src/plugins/runtime/types.ts"
           }
         },
@@ -1270,7 +1270,7 @@
           "exportName": "SubagentRunParams",
           "kind": "type",
           "source": {
-            "line": 10,
+            "line": 18,
             "path": "src/plugins/runtime/types.ts"
           }
         },
@@ -1279,7 +1279,7 @@
           "exportName": "SubagentRunResult",
           "kind": "type",
           "source": {
-            "line": 22,
+            "line": 30,
             "path": "src/plugins/runtime/types.ts"
           }
         },
@@ -10615,7 +10615,7 @@
           "exportName": "PluginRuntime",
           "kind": "type",
           "source": {
-            "line": 80,
+            "line": 88,
             "path": "src/plugins/runtime/types.ts"
           }
         },
@@ -11362,6 +11362,26 @@
       "source": {
         "line": 1,
         "path": "src/plugin-sdk/core.ts"
+      }
+    },
+    {
+      "category": "runtime",
+      "entrypoint": "gateway-activity-runtime",
+      "exports": [
+        {
+          "declaration": "export function getGatewayActiveRunCount(): number | null;",
+          "exportName": "getGatewayActiveRunCount",
+          "kind": "function",
+          "source": {
+            "line": 37,
+            "path": "src/gateway/gateway-activity.ts"
+          }
+        }
+      ],
+      "importSpecifier": "openclaw/plugin-sdk/gateway-activity-runtime",
+      "source": {
+        "line": 1,
+        "path": "src/plugin-sdk/gateway-activity-runtime.ts"
       }
     },
     {
@@ -15301,7 +15321,7 @@
           "exportName": "PluginRuntime",
           "kind": "type",
           "source": {
-            "line": 80,
+            "line": 88,
             "path": "src/plugins/runtime/types.ts"
           }
         }

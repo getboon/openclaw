@@ -431,6 +431,11 @@ type TraceToolSummaryView = {
     status: "ok" | "error" | "blocked";
     detail?: string;
   }>;
+  /**
+   * Errored calls still unresolved when the turn ended. `undefined` means the
+   * producer does not track recovery and preserves the existing disposition.
+   */
+  unrecoveredFailures?: number;
 };
 
 type TraceCompletionView = {
@@ -2422,6 +2427,7 @@ export async function runReplyAgent(params: {
           completion,
           error: runResult.meta?.error,
           failureSignal: runResult.meta?.failureSignal,
+          payloads: finalPayloads,
         }),
       );
     }

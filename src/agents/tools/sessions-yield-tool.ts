@@ -19,8 +19,12 @@ export function createSessionsYieldTool(opts?: {
   return {
     label: "Yield",
     name: "sessions_yield",
-    description: "End current turn. Use after spawning subagents; results arrive as next message.",
+    description:
+      "End current turn. Use after spawning subagents; results arrive as next message. Call this last: tool calls issued after it in the same turn are not executed.",
     parameters: SessionsYieldToolSchema,
+    // onYield aborts the run; a parallel batch would cancel sibling tool calls
+    // (e.g. message send) that the model issued in the same turn.
+    executionMode: "sequential",
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
       const message = readStringParam(params, "message") || "Turn yielded.";

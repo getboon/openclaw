@@ -121,6 +121,11 @@ export type ToolSummaryTrace = {
     /** Real error text for a blocked hook-failure call; absent otherwise (ENG-19492). */
     detail?: string;
   }>;
+  /**
+   * Errored calls still unresolved when the turn ended. `undefined` means the
+   * producer does not track recovery and preserves the existing disposition.
+   */
+  unrecoveredFailures?: number;
 };
 
 type CompletionTrace = {

@@ -1,4 +1,5 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { hasReplyPayloadContent } from "../../interactive/payload.js";
 import { copyReplyPayloadMetadata } from "../reply-payload.js";
 import type { AgentDecisionTrace, ReplyPayload } from "../reply-payload.js";
 
@@ -12,6 +13,13 @@ type ToolSummary = {
     status: "ok" | "error" | "blocked";
     detail?: string;
   }>;
+  /**
+   * Errored calls still unresolved when the turn ended — every failure the
+   * runtime did not mark `retried` (fixed by a later identical call). `0` means
+   * every error was recovered before the turn finished; `undefined` means the
+   * producer does not track recovery, so keep the legacy disposition.
+   */
+  unrecoveredFailures?: number;
 };
 
 const MAX_TRACE_TOOL_NAME_CHARS = 120;
@@ -62,12 +70,38 @@ function normalizeNames(values: readonly string[] | undefined): string[] {
     .slice(0, MAX_TRACE_ITEMS);
 }
 
+function isTraceablePayload(payload: ReplyPayload): boolean {
+  return (
+    payload.isReasoning !== true &&
+    // `boon` has no `isCommentary` payload concept. Preserve the exclusion via
+    // a widening read so it self-heals if the field is added upstream.
+    (payload as { isCommentary?: boolean }).isCommentary !== true &&
+    payload.isStatusNotice !== true
+  );
+}
+
+function isUsableAnswerPayload(payload: ReplyPayload): boolean {
+  return (
+    isTraceablePayload(payload) &&
+    payload.isError !== true &&
+    hasReplyPayloadContent(payload, { trimText: true, hasChannelData: false })
+  );
+}
+
+function hasTraceablePayloadContent(payload: ReplyPayload): boolean {
+  return (
+    isTraceablePayload(payload) &&
+    hasReplyPayloadContent(payload, { trimText: true, hasChannelData: false })
+  );
+}
+
 /** Projects runtime-owned facts into the portable, chain-of-thought-free audit contract. */
 export function buildAgentDecisionTrace(params: {
   toolSummary?: ToolSummary;
   completion?: { refusal?: boolean };
   error?: unknown;
   failureSignal?: { kind?: string; code?: string };
+  payloads?: readonly ReplyPayload[];
 }): AgentDecisionTrace {
   const visibleTools = normalizeNames(params.toolSummary?.visibleTools);
   // Normalize the FULL invocation set first and derive the disposition from it,
@@ -93,6 +127,19 @@ export function buildAgentDecisionTrace(params: {
   const permissionRequired =
     params.failureSignal?.kind === "execution_denied" ||
     params.failureSignal?.code === "SYSTEM_RUN_DENIED";
+  const terminalInvocation = allInvocations.at(-1);
+  const hasSuccessfulTerminalMessage =
+    terminalInvocation?.name === "message" && terminalInvocation.status === "ok";
+  const hasUsableAnswer = params.payloads?.some(isUsableAnswerPayload) === true;
+  // Only runtime-confirmed retries can promote errored calls to recovered.
+  // Blocked calls never ran, so they always remain partial. Recovery also
+  // requires durable terminal delivery evidence and a usable assistant answer.
+  const recoveredEveryFailure =
+    failedCalls > 0 &&
+    blockedCalls === 0 &&
+    params.toolSummary?.unrecoveredFailures === 0 &&
+    hasSuccessfulTerminalMessage &&
+    hasUsableAnswer;
 
   let decision: Pick<AgentDecisionTrace, "confidence" | "disposition" | "reason">;
   if (permissionRequired) {
@@ -114,6 +161,14 @@ export function buildAgentDecisionTrace(params: {
       confidence: "high",
       disposition: "failed",
       reason: blockedCalls > 0 ? "tool_execution_blocked" : "tool_execution_failed",
+    };
+  } else if (recoveredEveryFailure) {
+    decision = {
+      // Medium, not high: calls did error, they were just resolved before the
+      // turn ended. `toolInvocations`/`evidence` still carry every error.
+      confidence: "medium",
+      disposition: "completed",
+      reason: "tool_execution_succeeded",
     };
   } else if (failedCalls + blockedCalls > 0) {
     decision = {
@@ -165,14 +220,11 @@ export function attachAgentDecisionTrace(
   payloads: readonly ReplyPayload[],
   auditTrace: AgentDecisionTrace,
 ): ReplyPayload[] {
-  const targetIndex = payloads.findLastIndex(
-    (payload) =>
-      payload.isReasoning !== true &&
-      // `boon` has no `isCommentary` payload concept (present on upstream `main`).
-      // Preserve #80's exclusion via a widening read so it self-heals if added.
-      (payload as { isCommentary?: boolean }).isCommentary !== true &&
-      payload.isStatusNotice !== true,
-  );
+  // Prefer a real answer over a trailing warning. Fall back to the warning
+  // when it is the turn's only traceable payload.
+  const answerIndex = payloads.findLastIndex(isUsableAnswerPayload);
+  const targetIndex =
+    answerIndex >= 0 ? answerIndex : payloads.findLastIndex(hasTraceablePayloadContent);
   if (targetIndex < 0) {
     return [...payloads];
   }

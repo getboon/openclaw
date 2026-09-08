@@ -998,7 +998,12 @@ export async function runPreparedReply(
     ? embeddedAgentRuntime.resolveEmbeddedSessionLane(sessionKey ?? sessionIdFinal)
     : undefined;
   const laneSize = sessionLaneKey ? getQueueSize(sessionLaneKey) : 0;
-  const activeRunQueueMode = effectiveResetTriggered ? "interrupt" : resolvedQueue.mode;
+  const shouldWaitForActiveRun = opts?.activeRunPolicy === "wait";
+  const activeRunQueueMode = shouldWaitForActiveRun
+    ? "followup"
+    : effectiveResetTriggered
+      ? "interrupt"
+      : resolvedQueue.mode;
   const rawActiveSessionIdForInterrupt = resolveActiveEmbeddedSessionId();
   const activeSessionIdForInterrupt = isOwnPreDispatchOperationSession(
     rawActiveSessionIdForInterrupt,
@@ -1134,12 +1139,14 @@ export async function runPreparedReply(
   const activeRunAcceptsCurrentThread = resolveActiveRunAcceptsCurrentThread({ isActive });
   const isHeartbeatRun = opts?.isHeartbeat === true;
   const shouldSteer =
+    !shouldWaitForActiveRun &&
     !isRoomEvent &&
     activeRunAcceptsCurrentThread &&
     !isHeartbeatRun &&
     !effectiveResetTriggered &&
     resolvedQueue.mode === "steer";
   const shouldFollowup =
+    !shouldWaitForActiveRun &&
     !effectiveResetTriggered &&
     ((isRoomEvent && isActive) ||
       resolvedQueue.mode === "steer" ||

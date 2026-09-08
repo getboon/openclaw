@@ -496,6 +496,10 @@ export function buildTraceToolSummary(params: {
   }>;
   visibleToolNames?: readonly string[];
   hadFailure: boolean;
+  /**
+   * Errored calls with recovery flags. Omit to keep the legacy disposition.
+   */
+  toolFailures?: readonly { retried?: boolean }[];
 }): ToolSummaryTrace | undefined {
   const toolMetas = params.toolMetas ?? [];
   const visibleTools = [...new Set(params.visibleToolNames ?? [])]
@@ -538,6 +542,11 @@ export function buildTraceToolSummary(params: {
       }
       return invocation;
     }),
+    ...(params.toolFailures
+      ? {
+          unrecoveredFailures: params.toolFailures.filter((failure) => !failure.retried).length,
+        }
+      : {}),
   };
 }
 
@@ -3635,6 +3644,8 @@ async function runEmbeddedAgentInternal(
             agentId: params.agentId,
             runId: params.runId,
             runAborted: aborted,
+            yieldDetected: attempt.yieldDetected === true,
+            hasAcceptedSessionSpawn: hasAcceptedSessionSpawn(attempt.acceptedSessionSpawns),
             didSendDeterministicApprovalPrompt: attempt.didSendDeterministicApprovalPrompt,
             heartbeatToolResponse: attempt.heartbeatToolResponse,
           });
@@ -3689,6 +3700,7 @@ async function runEmbeddedAgentInternal(
             toolMetas: attempt.toolMetas,
             visibleToolNames: attempt.visibleToolNames,
             hadFailure: Boolean(attempt.lastToolError),
+            toolFailures: attempt.toolFailures,
           });
           const failureSignal = resolveEmbeddedRunFailureSignal({
             trigger: params.trigger,

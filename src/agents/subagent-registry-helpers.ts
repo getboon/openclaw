@@ -15,7 +15,7 @@ import { withSubagentOutcomeTiming } from "./subagent-announce-output.js";
 import { getDeliveryAttemptCount, getDeliveryLastError } from "./subagent-delivery-state.js";
 import { SUBAGENT_ENDED_REASON_ERROR } from "./subagent-lifecycle-events.js";
 import { shouldUpdateRunOutcome } from "./subagent-registry-completion.js";
-import type { SubagentRunRecord } from "./subagent-registry.types.js";
+import type { SubagentAnnounceGiveUpReason, SubagentRunRecord } from "./subagent-registry.types.js";
 import {
   getSubagentSessionRuntimeMs,
   getSubagentSessionStartedAt,
@@ -74,10 +74,7 @@ function formatAnnounceGiveUpLogField(value: string): string {
 }
 
 /** Logs a sanitized final give-up line for failed subagent announce delivery. */
-export function logAnnounceGiveUp(
-  entry: SubagentRunRecord,
-  reason: "retry-limit" | "expiry" | "subagent_no_output",
-) {
+export function logAnnounceGiveUp(entry: SubagentRunRecord, reason: SubagentAnnounceGiveUpReason) {
   const retryCount = getDeliveryAttemptCount(entry);
   const endedAgoMs =
     typeof entry.endedAt === "number" ? Math.max(0, Date.now() - entry.endedAt) : undefined;

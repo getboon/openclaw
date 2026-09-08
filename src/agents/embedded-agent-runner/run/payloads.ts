@@ -234,6 +234,8 @@ function resolveToolErrorWarningPolicy(params: {
   isHeartbeatTrigger?: boolean;
   sessionKey: string;
   verboseLevel?: VerboseLevel;
+  /** ENG-19495 — a yield-to-a-spawned-subagent turn is a deliberate handoff, not a failure. */
+  yieldHandoff?: boolean;
 }): ToolErrorWarningPolicy {
   let toolErrorWarningOverride: boolean | undefined;
   let dynamicToolErrorWarningsDisabled = false;
@@ -248,10 +250,10 @@ function resolveToolErrorWarningPolicy(params: {
     verboseLevel: dynamicToolErrorWarningsDisabled ? "off" : params.verboseLevel,
   });
   const suppressToolErrorWarnings = toolErrorWarningOverride === true;
-  // These two are turn-wide overrides, not per-failure decisions — they must
+  // These are turn-wide overrides, not per-failure decisions — they must
   // win before any failure-shape check runs, and the digest builder applies
   // them the same way (as a single upfront gate) for the same reason.
-  if (suppressToolErrorWarnings || params.suppressToolErrors) {
+  if (suppressToolErrorWarnings || params.suppressToolErrors || params.yieldHandoff) {
     return { showWarning: false, includeDetails };
   }
   return {
@@ -301,6 +303,10 @@ export function buildEmbeddedRunPayloads(params: {
   agentId?: string;
   runId?: string;
   runAborted?: boolean;
+  /** ENG-19495 — true when this attempt ended via the sessions_yield tool. */
+  yieldDetected?: boolean;
+  /** ENG-19495 — true when this attempt spawned a subagent (a continuation exists). */
+  hasAcceptedSessionSpawn?: boolean;
   didSendDeterministicApprovalPrompt?: boolean;
   heartbeatToolResponse?: HeartbeatToolResponse;
 }): ReplyPayload[] {
@@ -639,6 +645,7 @@ export function buildEmbeddedRunPayloads(params: {
       isHeartbeatTrigger: params.isHeartbeatTrigger,
       sessionKey: params.sessionKey,
       verboseLevel: params.verboseLevel,
+      yieldHandoff: params.yieldDetected === true && params.hasAcceptedSessionSpawn === true,
     });
 
     // Surface mutating failures unless the assistant explicitly acknowledged the failed action.
