@@ -430,6 +430,11 @@ type TraceToolSummaryView = {
     name: string;
     status: "ok" | "error" | "blocked";
   }>;
+  /**
+   * Errored calls still unresolved when the turn ended. `undefined` means the
+   * producer does not track recovery and preserves the existing disposition.
+   */
+  unrecoveredFailures?: number;
 };
 
 type TraceCompletionView = {
