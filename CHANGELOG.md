@@ -4,11 +4,12 @@ Docs: https://docs.openclaw.ai
 
 ## 2026.6.11-boon.38
 
-Exposes the gateway's live run count to in-process plugins, so a channel plugin can answer "is a turn in flight right now?" without reaching into gateway internals — the box-side half of a drain guard that must not restart a gateway mid-turn.
+Exposes the gateway's live run count to in-process plugins, so a channel plugin can answer "is a turn in flight right now?" without reaching into gateway internals — the box-side half of a drain guard that must not restart a gateway mid-turn. Also lands channel-owned sub-agent completion replies, fixing plain, duplicated or missing completion rows on web chat.
 
 - **#202:** new `plugin-sdk/gateway-activity-runtime` entrypoint exporting `getGatewayActiveRunCount(): number | null`. It counts `chatAbortControllers` entries whose abort signal has not fired, so the number is gateway-wide and covers every channel, not just one. It returns `null` — never `0`, never a negative — whenever the count cannot be read: no gateway in this process, the gateway already closed, runtime-state creation failed part-way, or the probe threw or returned a non-finite value. Callers must treat `null` as unknown and never as idle; a drain guard that reads `null` as zero would restart a busy gateway. The runtime state owns the only probe and clears it **by identity** on release, so an outgoing runtime whose cleanup lands after a replacement has already installed its probe cannot drop the live one and leave every later read reporting unknown.
+- **#205:** a turn that delegated to a sub-agent announced its completion through the automatic source-reply path, which a channel that renders its final reply from the `message` tool never sees — so the completion landed as a plain text row with no suggested replies, thought details or verification, and in some runs duplicated or missing entirely. Adds an opt-in completion-owner registry so a channel plugin can register one owner per channel and render the completion itself. Also fixes `message` failing with `Operation aborted` when the model called it and `sessions_yield` in the same assistant turn, which surfaced as a "couldn't complete one of the steps" row instead of the intended text.
 - **#201:** internal identifiers removed from the public tree.
-- Base = `2026.6.11-boon.37`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.38` in lockstep. No other code changes; #201 and #202 were merged onto `boon` before this release.
+- Base = `2026.6.11-boon.37`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.38` in lockstep. No other code changes; #201, #202 and #205 were merged onto `boon` before this release.
 
 ## 2026.6.11-boon.37
 
