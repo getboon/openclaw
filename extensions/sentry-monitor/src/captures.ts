@@ -200,11 +200,11 @@ export function buildAfterToolCallCapture(
 }
 
 /**
- * A `before_tool_call` hook threw (ENG-19492). Unlike `after_tool_call`, this
- * hook is fired by the host ONLY on the `kind: "failure"` path — never for a
- * deliberate policy veto — so there is deliberately no `denied`-style
- * suppression branch here: every event that reaches this builder is a real,
- * actionable defect. Never returns null.
+ * A `before_tool_call` hook threw. Unlike `after_tool_call`, this hook is fired
+ * by the host ONLY on the `kind: "failure"` path — never for a deliberate policy
+ * veto — so there is deliberately no `denied`-style suppression branch here:
+ * every event that reaches this builder is a real, actionable defect. Never
+ * returns null.
  */
 export function buildBeforeToolCallHookFailedCapture(
   event: PluginHookBeforeToolCallFailedEvent,
@@ -225,7 +225,7 @@ export function buildBeforeToolCallHookFailedCapture(
       event.toolName,
       normalizeFingerprintText(event.error),
     ),
-    contexts: { run: runContext(event.runId) },
+    contexts: { run: runContext(event.runId, event.sessionKey) },
     extra: { tool_call_id: event.toolCallId },
   };
 }

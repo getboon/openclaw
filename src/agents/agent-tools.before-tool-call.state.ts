@@ -4,7 +4,7 @@
  * normalized payload selected by hook processing.
  */
 export const adjustedParamsByToolCallId = new Map<string, unknown>();
-// Value is the optional hook-failure detail (ENG-19492): present only for a
+// Value is the optional hook-failure detail: present only for a
 // block that came from a thrown before_tool_call hook, undefined for a plain
 // policy veto. Map (was a Set) so the detail rides alongside the blocked key.
 export const preExecutionBlockedToolCallIds = new Map<string, string | undefined>();
@@ -34,7 +34,7 @@ export function peekAdjustedParamsForToolCall(toolCallId: string, runId?: string
 
 /**
  * Consume whether policy prevented the target tool from starting, plus any
- * hook-failure detail (ENG-19492). `detail` is set only when the block came
+ * hook-failure detail. `detail` is set only when the block came
  * from a thrown before_tool_call hook (kind:"failure"); it is undefined for a
  * plain policy veto.
  */

@@ -24,7 +24,7 @@ type ToolSummary = {
 
 const MAX_TRACE_TOOL_NAME_CHARS = 120;
 // Cap the hook-failure detail so this bounded, user-visible trace can't carry an
-// unbounded error blob into the audit contract (ENG-19492). Generous enough for
+// unbounded error blob into the audit contract. Generous enough for
 // a real error message; long stack dumps are truncated.
 const MAX_TRACE_DETAIL_CHARS = 500;
 // must stay <= boon-core AUDIT_TRACE_MAX_ITEMS
@@ -116,7 +116,7 @@ export function buildAgentDecisionTrace(params: {
         return [];
       }
       // Detail is only meaningful for a blocked (hook-failure) entry; never
-      // attach a stray detail to an ok/error entry (ENG-19492).
+      // attach a stray detail to an ok/error entry.
       const detail = status === "blocked" ? normalizeTraceDetail(invocation.detail) : undefined;
       return [{ name, status, ...(detail ? { detail } : {}) }];
     }) ?? [];

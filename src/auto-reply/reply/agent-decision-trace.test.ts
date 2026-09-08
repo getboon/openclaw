@@ -53,7 +53,7 @@ describe("buildAgentDecisionTrace", () => {
     });
   });
 
-  it("carries hook-failure detail on a blocked entry into toolInvocations and evidence (ENG-19492)", () => {
+  it("carries hook-failure detail on a blocked entry into toolInvocations and evidence", () => {
     const trace = buildAgentDecisionTrace({
       toolSummary: {
         calls: 1,

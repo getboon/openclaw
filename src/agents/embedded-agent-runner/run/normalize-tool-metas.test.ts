@@ -36,7 +36,7 @@ describe("normalizeToolMetas", () => {
     expect(normalized.map((entry) => entry.status)).toEqual(["blocked", undefined]);
   });
 
-  it("carries the hook-failure `detail` forward for a blocked entry (ENG-19492)", () => {
+  it("carries the hook-failure `detail` forward for a blocked entry", () => {
     const normalized = normalizeToolMetas([
       { toolName: "message", status: "blocked", detail: "Error: kaboom" },
     ]);

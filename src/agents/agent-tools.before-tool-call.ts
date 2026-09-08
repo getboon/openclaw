@@ -141,7 +141,7 @@ type HookOutcome =
       kind?: HookBlockedKind;
       deniedReason?: HookBlockedReason;
       reason: string;
-      /** Real error text, set only for a `kind: "failure"` block (ENG-19492). */
+      /** Real error text, set only for a `kind: "failure"` block. */
       detail?: string;
       params?: unknown;
     }
@@ -919,7 +919,7 @@ export function buildBlockedToolResult(params: {
       status: "blocked",
       deniedReason: params.deniedReason ?? "plugin-before-tool-call",
       reason: params.reason,
-      // ENG-19492: real hook-failure error text, present only for kind:"failure".
+      // real hook-failure error text, present only for kind:"failure".
       ...(params.detail ? { detail: params.detail } : {}),
     },
   };
@@ -1339,35 +1339,46 @@ export async function runBeforeToolCallHook(args: {
     }
     return allowed;
   } catch (err) {
-    const toolCallId = args.toolCallId ? ` toolCallId=${args.toolCallId}` : "";
+    const toolCallIdLog = args.toolCallId ? ` toolCallId=${args.toolCallId}` : "";
     const cause = unwrapErrorCause(err);
     const causeText = String(cause);
-    log.error(`before_tool_call hook failed: tool=${toolName}${toolCallId} error=${causeText}`);
-    // ENG-19492: surface the real exception text that would otherwise stay only
-    // in this local log line — page on it (Sentry) and carry it downstream. Only
-    // this `kind: "failure"` path emits it; a deliberate veto never reaches here.
-    // `toolContext` is declared inside the try above (out of scope here), so build
-    // a minimal, valid PluginHookToolContext from the identity available in catch.
-    // Wrapped so observability emission can never mask or replace the original
-    // block outcome we are already committed to returning.
+    log.error(`before_tool_call hook failed: tool=${toolName}${toolCallIdLog} error=${causeText}`);
+    // Surface the real exception text that would otherwise stay only in this
+    // local log line. Record it against the tool call so the tool-execution
+    // handler stamps it onto toolMetas (which flows to the audit trace's
+    // evidence[].detail), regardless of whether the caller returns or throws
+    // this block. Only this failure path records detail; a deliberate veto
+    // never reaches here (a veto returns without throwing).
+    recordPreExecutionBlockedToolCall(args.toolCallId, args.ctx?.runId, causeText);
+    // Fire-and-forget the observer emission (page on it via Sentry): a slow or
+    // failing observer must never block or mask the block outcome we are
+    // committed to returning, so we do not await it. `toolContext` is declared
+    // inside the try above (out of scope here), so build a minimal context from
+    // the catch identity. The outer try/catch guards synchronous construction
+    // errors; the `.catch` handles asynchronous rejection.
     try {
-      await hookRunner?.runBeforeToolCallHookFailed(
-        {
-          toolName,
-          ...(args.toolCallId && { toolCallId: args.toolCallId }),
-          ...(args.ctx?.runId && { runId: args.ctx.runId }),
-          error: causeText,
-        },
-        {
-          toolName,
-          ...(args.ctx?.agentId && { agentId: args.ctx.agentId }),
-          ...(args.ctx?.sessionKey && { sessionKey: args.ctx.sessionKey }),
-          ...(args.ctx?.sessionId && { sessionId: args.ctx.sessionId }),
-          ...(args.ctx?.runId && { runId: args.ctx.runId }),
-          ...(args.toolCallId && { toolCallId: args.toolCallId }),
-          ...(args.ctx?.channelId && { channelId: args.ctx.channelId }),
-        },
-      );
+      void Promise.resolve(
+        hookRunner?.runBeforeToolCallHookFailed(
+          {
+            toolName,
+            ...(args.toolCallId && { toolCallId: args.toolCallId }),
+            ...(args.ctx?.runId && { runId: args.ctx.runId }),
+            ...(args.ctx?.sessionKey && { sessionKey: args.ctx.sessionKey }),
+            error: causeText,
+          },
+          {
+            toolName,
+            ...(args.ctx?.agentId && { agentId: args.ctx.agentId }),
+            ...(args.ctx?.sessionKey && { sessionKey: args.ctx.sessionKey }),
+            ...(args.ctx?.sessionId && { sessionId: args.ctx.sessionId }),
+            ...(args.ctx?.runId && { runId: args.ctx.runId }),
+            ...(args.toolCallId && { toolCallId: args.toolCallId }),
+            ...(args.ctx?.channelId && { channelId: args.ctx.channelId }),
+          },
+        ),
+      ).catch((emitErr: unknown) => {
+        log.warn(`before_tool_call_hook_failed emission failed: ${String(emitErr)}`);
+      });
     } catch (emitErr) {
       log.warn(`before_tool_call_hook_failed emission failed: ${String(emitErr)}`);
     }
@@ -1460,10 +1471,12 @@ export function wrapToolWithBeforeToolCallHook(
             paramsSummary: eventBase.paramsSummary,
           });
         }
+        // This branch is veto-only (the failure path threw above), so there is
+        // no detail to carry here — a failure records its detail in the catch
+        // block of runBeforeToolCallHook instead.
         const blockedResult = buildBlockedToolResult({
           reason: outcome.reason,
           deniedReason: outcome.deniedReason ?? "plugin-before-tool-call",
-          ...(outcome.detail ? { detail: outcome.detail } : {}),
           toolCallId,
           runId: ctx?.runId,
         });

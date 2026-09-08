@@ -714,12 +714,14 @@ export type PluginHookAfterToolCallEvent = {
  * `kind: "failure"` block path). Deliberately NOT fired for a policy veto
  * (`kind: "veto"` — loop-breaker, approval-required, plugin `block: true`),
  * which is the system working as intended. Carries the real error text that
- * would otherwise only reach the local gateway log (ENG-19492).
+ * would otherwise only reach the local gateway log, plus the identity needed
+ * to correlate it (tool call, run, session).
  */
 export type PluginHookBeforeToolCallFailedEvent = {
   toolName: string;
   toolCallId?: string;
   runId?: string;
+  sessionKey?: string;
   error: string;
 };
 

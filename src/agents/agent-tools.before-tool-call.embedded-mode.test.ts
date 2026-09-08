@@ -19,6 +19,7 @@ import {
 } from "../plugins/runtime.js";
 import { PluginApprovalResolutions } from "../plugins/types.js";
 import { runBeforeToolCallHook } from "./agent-tools.before-tool-call.js";
+import { consumePreExecutionBlockedToolCall } from "./agent-tools.before-tool-call.state.js";
 import { callGatewayTool } from "./tools/gateway.js";
 
 vi.mock("../plugins/hook-runner-global.js", async () => {
@@ -131,6 +132,26 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
       }),
       expect.objectContaining({ toolName: "message", runId: "run-1", toolCallId: "tc-1" }),
     );
+  });
+
+  it("records the hook-failure detail so a thrown block still reaches toolMetas via the state map", async () => {
+    // Regression guard for the wrapper failure path: both wrapToolWithBeforeToolCallHook
+    // and the tool-definition adapter *throw* on a kind:"failure" block (they never
+    // call buildBlockedToolResult), so the detail must be recorded here in the catch
+    // to survive to consumePreExecutionBlockedToolCall -> toolMetas -> audit trace.
+    runBeforeToolCallMock.mockRejectedValueOnce(new Error("boom"));
+
+    await runBeforeToolCallHook({
+      toolName: "message",
+      params: {},
+      toolCallId: "tc-record",
+      ctx: { runId: "run-record" },
+    });
+
+    expect(consumePreExecutionBlockedToolCall("tc-record", "run-record")).toEqual({
+      blocked: true,
+      detail: "Error: boom",
+    });
   });
 
   it("does not emit before_tool_call_hook_failed for a deliberate plugin veto", async () => {

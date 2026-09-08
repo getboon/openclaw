@@ -1309,7 +1309,7 @@ export function createHookRunner(
   /**
    * Run before_tool_call_hook_failed hook.
    * Runs in parallel (fire-and-forget). Fired only when a before_tool_call
-   * handler throws (kind: "failure") — never for a deliberate veto. ENG-19492.
+   * handler throws (kind: "failure") — never for a deliberate veto.
    */
   async function runBeforeToolCallHookFailed(
     event: PluginHookBeforeToolCallFailedEvent,

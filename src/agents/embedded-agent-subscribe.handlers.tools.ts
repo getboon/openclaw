@@ -1217,7 +1217,7 @@ export async function handleToolExecutionEnd(
     // the turn (cubic P2 follow-up).
     errored: isToolError,
     ...(approvalUnavailable || !executionStarted ? { status: "blocked" as const } : {}),
-    // ENG-19492: real hook-failure error text, present only when the block came
+    // real hook-failure error text, present only when the block came
     // from a thrown before_tool_call hook (kind:"failure"), never for a veto.
     ...(preExecutionBlockDetail ? { detail: preExecutionBlockDetail } : {}),
     ...(asyncStarted ? { asyncStarted: true, ...asyncTaskIds } : {}),

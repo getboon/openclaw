@@ -56,7 +56,7 @@ describe("buildTraceToolSummary", () => {
     ).toBeUndefined();
   });
 
-  it("carries hook-failure detail on a blocked invocation, but not on ok/error (ENG-19492)", () => {
+  it("carries hook-failure detail on a blocked invocation, but not on ok/error", () => {
     const summary = buildTraceToolSummary({
       visibleToolNames: ["message"],
       toolMetas: [

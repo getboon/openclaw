@@ -1,5 +1,5 @@
 /**
- * ENG-19492: a before_tool_call hook FAILURE (a thrown handler) must carry its
+ * a before_tool_call hook FAILURE (a thrown handler) must carry its
  * real error text downstream as `detail`, while a plain policy VETO must not.
  * Covers buildBlockedToolResult's output plus the pre-execution-block state
  * map round-trip that carries the detail to the tool-execution handler.

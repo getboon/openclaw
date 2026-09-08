@@ -536,7 +536,7 @@ export function buildTraceToolSummary(params: {
         name: entry.toolName,
         status,
       };
-      // Carry the hook-failure detail only for a blocked entry (ENG-19492).
+      // Carry the hook-failure detail only for a blocked entry.
       if (status === "blocked" && entry.detail) {
         invocation.detail = entry.detail;
       }

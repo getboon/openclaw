@@ -503,7 +503,7 @@ describe("handleToolExecutionEnd cron mutation tracking", () => {
     expect(ctx.state.lastToolError?.mutatingAction).toBe(false);
   });
 
-  it("carries hook-failure detail into toolMetas for a kind:failure block (ENG-19492)", async () => {
+  it("carries hook-failure detail into toolMetas for a kind:failure block", async () => {
     const { ctx } = createTestContext();
     const toolCallId = "tool-msg-hook-failed";
     await handleToolExecutionStart(
@@ -538,7 +538,7 @@ describe("handleToolExecutionEnd cron mutation tracking", () => {
     });
   });
 
-  it("does not set detail on toolMetas for a plain veto block (ENG-19492)", async () => {
+  it("does not set detail on toolMetas for a plain veto block", async () => {
     const { ctx } = createTestContext();
     const toolCallId = "tool-msg-veto";
     await handleToolExecutionStart(

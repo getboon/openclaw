@@ -68,7 +68,7 @@ export function normalizeToolMetas(
         normalized.status = "blocked";
       }
       // Carry the hook-failure detail forward alongside the blocked marker so
-      // the audit trace can surface the real error text (ENG-19492). Only ever
+      // the audit trace can surface the real error text. Only ever
       // set for a kind:"failure" block — never a plain veto.
       if (entry.status === "blocked" && entry.detail) {
         normalized.detail = entry.detail;

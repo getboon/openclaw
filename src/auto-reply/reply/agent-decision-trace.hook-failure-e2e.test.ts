@@ -1,5 +1,5 @@
 /**
- * ENG-19492 end-to-end (durable half): a before_tool_call hook failure on the
+ * End-to-end (durable half): a before_tool_call hook failure on the
  * `message` tool — the shape of the Egan "Thread tangled — tools aren't landing"
  * incident — must carry its real error text all the way from the per-call
  * tool-meta the execution handler records, through normalization and the trace
@@ -16,7 +16,7 @@ import { buildAgentDecisionTrace } from "./agent-decision-trace.js";
 
 const HOOK_ERROR = "Error: suggestedReplies.0.kind: must be equal to one of the allowed values";
 
-describe("ENG-19492 durable projection — message-tool hook failure", () => {
+describe("Durable projection — message-tool hook failure", () => {
   it("carries the real hook-failure error text into the audit trace evidence", () => {
     // As the tool-execution handler records them: the turn did real work, then
     // the message-delivery tool call was blocked by a thrown before_tool_call
