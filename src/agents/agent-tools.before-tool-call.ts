@@ -1343,19 +1343,12 @@ export async function runBeforeToolCallHook(args: {
     const cause = unwrapErrorCause(err);
     const causeText = String(cause);
     log.error(`before_tool_call hook failed: tool=${toolName}${toolCallIdLog} error=${causeText}`);
-    // Surface the real exception text that would otherwise stay only in this
-    // local log line. Record it against the tool call so the tool-execution
-    // handler stamps it onto toolMetas (which flows to the audit trace's
-    // evidence[].detail), regardless of whether the caller returns or throws
-    // this block. Only this failure path records detail; a deliberate veto
-    // never reaches here (a veto returns without throwing).
+    // Record the detail so it reaches toolMetas -> audit trace whether the
+    // caller returns or throws this block. Failure-only; a veto never reaches
+    // this catch.
     recordPreExecutionBlockedToolCall(args.toolCallId, args.ctx?.runId, causeText);
-    // Fire-and-forget the observer emission (page on it via Sentry): a slow or
-    // failing observer must never block or mask the block outcome we are
-    // committed to returning, so we do not await it. `toolContext` is declared
-    // inside the try above (out of scope here), so build a minimal context from
-    // the catch identity. The outer try/catch guards synchronous construction
-    // errors; the `.catch` handles asynchronous rejection.
+    // Fire-and-forget the observer emission so it never blocks the block
+    // outcome; the try/catch + .catch cover sync and async failures.
     try {
       void Promise.resolve(
         hookRunner?.runBeforeToolCallHookFailed(

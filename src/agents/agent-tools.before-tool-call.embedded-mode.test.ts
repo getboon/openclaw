@@ -19,7 +19,10 @@ import {
 } from "../plugins/runtime.js";
 import { PluginApprovalResolutions } from "../plugins/types.js";
 import { runBeforeToolCallHook } from "./agent-tools.before-tool-call.js";
-import { consumePreExecutionBlockedToolCall } from "./agent-tools.before-tool-call.state.js";
+import {
+  consumePreExecutionBlockedToolCall,
+  resetAdjustedParamsByToolCallIdForTests,
+} from "./agent-tools.before-tool-call.state.js";
 import { callGatewayTool } from "./tools/gateway.js";
 
 vi.mock("../plugins/hook-runner-global.js", async () => {
@@ -103,6 +106,10 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
     setEmbeddedMode(false);
     setActivePluginRegistry(createEmptyPluginRegistry());
     resetGlobalHookRunner();
+    // The failure-path tests write to the module-level pre-execution-block Map
+    // via recordPreExecutionBlockedToolCall; clear it so no entry leaks between
+    // tests.
+    resetAdjustedParamsByToolCallIdForTests();
   });
 
   it("emits before_tool_call_hook_failed with the real error when a hook throws, and only then", async () => {
