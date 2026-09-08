@@ -1124,12 +1124,9 @@ export async function runBeforeToolCallHook(args: {
   }
 
   const hookRunner = getGlobalHookRunner();
-  // Whether the exception (if any) came from the before_tool_call HANDLER
-  // invocation itself, vs. surrounding pipeline processing (trusted policy,
-  // approval, skill-workshop) that this same try also covers. Only a true
-  // handler failure should fire the before_tool_call_hook_failed observability
-  // signal — a policy/approval/skill-workshop throw is a different fault class
-  // and must not pollute that Sentry bucket (see the catch below).
+  // Only a throw from runBeforeToolCall itself is a handler failure; a
+  // policy/approval/skill-workshop throw stays blocked but must not fire the
+  // before_tool_call_hook_failed signal (gated on this flag in the catch below).
   let hookInvocationThrew = false;
   try {
     const hasBeforeToolCallHooks = hookRunner?.hasHooks("before_tool_call") === true;
