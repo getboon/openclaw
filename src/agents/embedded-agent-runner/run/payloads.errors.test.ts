@@ -1212,6 +1212,42 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text).not.toMatch(/redo that step/i);
   });
 
+  it("uses every surfaced failure when legacy tool metadata has no outcomes", () => {
+    const toolFailures = [
+      {
+        toolName: "write",
+        error: "permission denied",
+        mutatingAction: true,
+      },
+      {
+        toolName: "process",
+        error: "connection timed out",
+        timedOut: true,
+        mutatingAction: true,
+      },
+    ];
+    const payloads = buildPayloads({
+      assistantTexts: ["Here's the summary you asked for."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      currentAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      toolMetas: [
+        { toolName: "bash", meta: "run migration" },
+        { toolName: "write", meta: "config.json" },
+        { toolName: "process", meta: "worker" },
+      ],
+      lastToolError: toolFailures[1],
+      toolFailures,
+    });
+
+    const warning = payloads.find(
+      (payload) => getReplyPayloadMetadata(payload)?.nonTerminalToolErrorWarning === true,
+    );
+    expect(warning).toBeDefined();
+    expect(warning?.text).toContain("2 steps didn't finish");
+    expect(warning?.text).toContain("1 of 3 steps completed");
+    expect(warning?.text).not.toContain("2 of 3 steps completed");
+  });
+
   it("wraps markdown-capable mutating tool warnings so mention-looking names stay inert", () => {
     const payloads = buildPayloads({
       lastToolError: {
