@@ -1124,6 +1124,13 @@ export async function runBeforeToolCallHook(args: {
   }
 
   const hookRunner = getGlobalHookRunner();
+  // Whether the exception (if any) came from the before_tool_call HANDLER
+  // invocation itself, vs. surrounding pipeline processing (trusted policy,
+  // approval, skill-workshop) that this same try also covers. Only a true
+  // handler failure should fire the before_tool_call_hook_failed observability
+  // signal — a policy/approval/skill-workshop throw is a different fault class
+  // and must not pollute that Sentry bucket (see the catch below).
+  let hookInvocationThrew = false;
   try {
     const hasBeforeToolCallHooks = hookRunner?.hasHooks("before_tool_call") === true;
     const policyRegistry = getGlobalHookRunnerRegistry() ?? undefined;
@@ -1273,19 +1280,28 @@ export async function runBeforeToolCallHook(args: {
       return allowed;
     }
     const hookEventParams = isPlainObject(policyAdjustedParams) ? policyAdjustedParams : {};
-    const hookResult = await hookRunner.runBeforeToolCall(
-      {
-        toolName,
-        params: hookEventParams,
-        ...policyAdjustedToolIdentity,
-        ...(args.ctx?.runId && { runId: args.ctx.runId }),
-        ...(args.toolCallId && { toolCallId: args.toolCallId }),
-        ...(policyAdjustedDerivedToolParams.derivedPaths
-          ? { derivedPaths: policyAdjustedDerivedToolParams.derivedPaths }
-          : {}),
-      },
-      policyAdjustedToolContext,
-    );
+    let hookResult: PluginHookBeforeToolCallResult | undefined;
+    try {
+      hookResult = await hookRunner.runBeforeToolCall(
+        {
+          toolName,
+          params: hookEventParams,
+          ...policyAdjustedToolIdentity,
+          ...(args.ctx?.runId && { runId: args.ctx.runId }),
+          ...(args.toolCallId && { toolCallId: args.toolCallId }),
+          ...(policyAdjustedDerivedToolParams.derivedPaths
+            ? { derivedPaths: policyAdjustedDerivedToolParams.derivedPaths }
+            : {}),
+        },
+        policyAdjustedToolContext,
+      );
+    } catch (hookErr) {
+      // The handler invocation itself threw: flag it so the outer catch fires
+      // the hook-failed signal, then rethrow so the block/record path (which
+      // stays shared with pipeline failures) is unchanged.
+      hookInvocationThrew = true;
+      throw hookErr;
+    }
 
     if (hookResult?.block) {
       return {
@@ -1347,43 +1363,54 @@ export async function runBeforeToolCallHook(args: {
     const toolCallIdLog = args.toolCallId ? ` toolCallId=${args.toolCallId}` : "";
     const cause = unwrapErrorCause(err);
     const causeText = String(cause);
-    log.error(`before_tool_call hook failed: tool=${toolName}${toolCallIdLog} error=${causeText}`);
+    // Name the fault class: a thrown before_tool_call HANDLER vs. a throw from
+    // the surrounding pipeline (trusted policy / approval / skill-workshop).
+    // Both still block the tool; only the former is a plugin-hook defect.
+    const faultClass = hookInvocationThrew ? "hook" : "pipeline";
+    log.error(
+      `before_tool_call ${faultClass} failed: tool=${toolName}${toolCallIdLog} error=${causeText}`,
+    );
     // Record the detail so it reaches toolMetas -> audit trace whether the
-    // caller returns or throws this block. Failure-only; a veto never reaches
-    // this catch.
+    // caller returns or throws this block. Recorded for BOTH fault classes —
+    // the detail is a generic "why blocked", useful regardless of source.
     recordPreExecutionBlockedToolCall(
       args.toolCallId,
       args.ctx?.runId,
       truncateUtf16Safe(causeText, MAX_RECORDED_BLOCK_DETAIL_CHARS),
     );
-    // Fire-and-forget the observer emission so it never blocks the block
-    // outcome; the try/catch + .catch cover sync and async failures.
-    try {
-      void Promise.resolve(
-        hookRunner?.runBeforeToolCallHookFailed(
-          {
-            toolName,
-            ...(args.toolCallId && { toolCallId: args.toolCallId }),
-            ...(args.ctx?.runId && { runId: args.ctx.runId }),
-            ...(args.ctx?.sessionId && { sessionId: args.ctx.sessionId }),
-            ...(args.ctx?.sessionKey && { sessionKey: args.ctx.sessionKey }),
-            error: causeText,
-          },
-          {
-            toolName,
-            ...(args.ctx?.agentId && { agentId: args.ctx.agentId }),
-            ...(args.ctx?.sessionKey && { sessionKey: args.ctx.sessionKey }),
-            ...(args.ctx?.sessionId && { sessionId: args.ctx.sessionId }),
-            ...(args.ctx?.runId && { runId: args.ctx.runId }),
-            ...(args.toolCallId && { toolCallId: args.toolCallId }),
-            ...(args.ctx?.channelId && { channelId: args.ctx.channelId }),
-          },
-        ),
-      ).catch((emitErr: unknown) => {
+    // Fire the before_tool_call_hook_failed observability signal ONLY for a real
+    // handler failure — never for a policy/approval/skill-workshop throw, which
+    // would mis-attribute a different fault class into this Sentry bucket.
+    // Fire-and-forget so it never blocks the block outcome; the try/catch +
+    // .catch cover sync and async failures.
+    if (hookInvocationThrew) {
+      try {
+        void Promise.resolve(
+          hookRunner?.runBeforeToolCallHookFailed(
+            {
+              toolName,
+              ...(args.toolCallId && { toolCallId: args.toolCallId }),
+              ...(args.ctx?.runId && { runId: args.ctx.runId }),
+              ...(args.ctx?.sessionId && { sessionId: args.ctx.sessionId }),
+              ...(args.ctx?.sessionKey && { sessionKey: args.ctx.sessionKey }),
+              error: causeText,
+            },
+            {
+              toolName,
+              ...(args.ctx?.agentId && { agentId: args.ctx.agentId }),
+              ...(args.ctx?.sessionKey && { sessionKey: args.ctx.sessionKey }),
+              ...(args.ctx?.sessionId && { sessionId: args.ctx.sessionId }),
+              ...(args.ctx?.runId && { runId: args.ctx.runId }),
+              ...(args.toolCallId && { toolCallId: args.toolCallId }),
+              ...(args.ctx?.channelId && { channelId: args.ctx.channelId }),
+            },
+          ),
+        ).catch((emitErr: unknown) => {
+          log.warn(`before_tool_call_hook_failed emission failed: ${String(emitErr)}`);
+        });
+      } catch (emitErr) {
         log.warn(`before_tool_call_hook_failed emission failed: ${String(emitErr)}`);
-      });
-    } catch (emitErr) {
-      log.warn(`before_tool_call_hook_failed emission failed: ${String(emitErr)}`);
+      }
     }
     return {
       blocked: true,

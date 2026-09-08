@@ -195,6 +195,38 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
     expect(runBeforeToolCallHookFailedMock).not.toHaveBeenCalled();
   });
 
+  it("does not emit before_tool_call_hook_failed when a non-handler pipeline step throws", async () => {
+    // The try in runBeforeToolCallHook also covers pipeline work around the
+    // handler (trusted policy, approval, skill-workshop). A throw from any of
+    // those is a DIFFERENT fault class and must not pollute the hook-failed
+    // Sentry bucket. We stand in for that class with the earliest pipeline step
+    // — the hasHooks registry probe — which runs before the handler is ever
+    // invoked, so it exercises the outer catch with hookInvocationThrew=false.
+    vi.mocked(hookRunner.hasHooks).mockImplementationOnce(() => {
+      throw new Error("pipeline boom");
+    });
+
+    const result = await runBeforeToolCallHook({
+      toolName: "message",
+      params: { text: "hi" },
+      toolCallId: "tc-pipeline",
+      ctx: { runId: "run-1" },
+    });
+
+    // Still blocked, and the real detail is still recorded (graceful
+    // degradation + audit-trace diagnostics are unchanged for this class)...
+    expect(result.blocked).toBe(true);
+    expect((result as { kind?: string }).kind).toBe("failure");
+    expect((result as { detail?: string }).detail).toBe("Error: pipeline boom");
+    expect(consumePreExecutionBlockedToolCall("tc-pipeline", "run-1")).toEqual({
+      blocked: true,
+      detail: "Error: pipeline boom",
+    });
+    // ...but the hook-failed observability signal must NOT fire — the handler
+    // was never even reached.
+    expect(runBeforeToolCallHookFailedMock).not.toHaveBeenCalled();
+  });
+
   it("blocks approval-required tools in embedded mode when no gateway approval route exists", async () => {
     setEmbeddedMode(true);
     const onResolution = vi.fn();
