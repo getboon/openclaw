@@ -118,6 +118,8 @@ export type ToolSummaryTrace = {
   invocations?: Array<{
     name: string;
     status: "ok" | "error" | "blocked";
+    /** Real error text for a blocked hook-failure call; absent otherwise (ENG-19492). */
+    detail?: string;
   }>;
 };
 

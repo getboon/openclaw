@@ -204,6 +204,7 @@ export type EmbeddedRunAttemptResult = {
     replaySafe?: boolean;
     errored?: boolean;
     status?: "blocked";
+    detail?: string;
     asyncStarted?: boolean;
     asyncTaskRunId?: string;
     asyncTaskId?: string;

@@ -36,6 +36,25 @@ describe("normalizeToolMetas", () => {
     expect(normalized.map((entry) => entry.status)).toEqual(["blocked", undefined]);
   });
 
+  it("carries the hook-failure `detail` forward for a blocked entry (ENG-19492)", () => {
+    const normalized = normalizeToolMetas([
+      { toolName: "message", status: "blocked", detail: "Error: kaboom" },
+    ]);
+    expect(normalized[0]).toMatchObject({ status: "blocked", detail: "Error: kaboom" });
+  });
+
+  it("omits `detail` for a blocked entry that never set it (a plain veto)", () => {
+    const normalized = normalizeToolMetas([{ toolName: "message", status: "blocked" }]);
+    expect("detail" in normalized[0]).toBe(false);
+  });
+
+  it("never carries `detail` on a non-blocked entry", () => {
+    const normalized = normalizeToolMetas([
+      { toolName: "exec", errored: false, detail: "stray" } as never,
+    ]);
+    expect("detail" in normalized[0]).toBe(false);
+  });
+
   it("drops entries without a usable tool name", () => {
     const normalized = normalizeToolMetas([
       { toolName: "", errored: true },

@@ -22,6 +22,7 @@ const HOOK_NAMES = [
   "model_call_ended",
   "agent_end",
   "after_tool_call",
+  "before_tool_call_hook_failed",
   "message_sent",
   "delivery_recovery_exhausted",
   "subagent_ended",
@@ -87,7 +88,7 @@ describe("registerSentryMonitor", () => {
     expect(registerRuntimeLifecycle).not.toHaveBeenCalled();
   });
 
-  it("activates from a plugin-config dsn: inits Sentry and registers all eight hooks plus flush", () => {
+  it("activates from a plugin-config dsn: inits Sentry and registers all nine hooks plus flush", () => {
     const { api, on, registerRuntimeLifecycle, info } = makeApi({
       dsn: "https://abc@o1.ingest.sentry.io/1",
     });
@@ -191,6 +192,14 @@ describe("registerSentryMonitor", () => {
     });
     // An abandoned crash-ambiguous send always reports (never null).
     expect(Sentry.captureException).toHaveBeenCalledTimes(2);
+    fire("before_tool_call_hook_failed", {
+      toolName: "message",
+      toolCallId: "tc1",
+      runId: "r",
+      error: "hook crashed",
+    });
+    // A before_tool_call hook failure always reports (never null).
+    expect(Sentry.captureException).toHaveBeenCalledTimes(3);
   });
 
   // Multi-tenant hosts share one hostname, so the tenant id is the only stable
@@ -227,7 +236,7 @@ describe("registerSentryMonitor", () => {
     expect(on.mock.calls.map((c) => c[0]).toSorted()).toEqual(["agent_end", "message_sent"]);
   });
 
-  it("registers all eight hooks when config.hooks is absent (default unchanged)", () => {
+  it("registers all nine hooks when config.hooks is absent (default unchanged)", () => {
     const { api, on } = makeApi({ dsn: "https://k@o.ingest.sentry.io/1" });
 
     registerSentryMonitor(api);

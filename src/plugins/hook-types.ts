@@ -100,6 +100,7 @@ export type PluginHookName =
   | "message_sent"
   | "delivery_recovery_exhausted"
   | "before_tool_call"
+  | "before_tool_call_hook_failed"
   | "after_tool_call"
   | "tool_result_persist"
   | "before_message_write"
@@ -148,6 +149,7 @@ export const PLUGIN_HOOK_NAMES = [
   "message_sent",
   "delivery_recovery_exhausted",
   "before_tool_call",
+  "before_tool_call_hook_failed",
   "after_tool_call",
   "tool_result_persist",
   "before_message_write",
@@ -707,6 +709,20 @@ export type PluginHookAfterToolCallEvent = {
   durationMs?: number;
 };
 
+/**
+ * Fired when a `before_tool_call` handler throws an unhandled exception (the
+ * `kind: "failure"` block path). Deliberately NOT fired for a policy veto
+ * (`kind: "veto"` — loop-breaker, approval-required, plugin `block: true`),
+ * which is the system working as intended. Carries the real error text that
+ * would otherwise only reach the local gateway log (ENG-19492).
+ */
+export type PluginHookBeforeToolCallFailedEvent = {
+  toolName: string;
+  toolCallId?: string;
+  runId?: string;
+  error: string;
+};
+
 export type PluginHookToolResultPersistContext = {
   agentId?: string;
   sessionKey?: string;
@@ -1243,6 +1259,10 @@ export type PluginHookHandlerMap = {
   ) => Promise<PluginHookBeforeToolCallResult | void> | PluginHookBeforeToolCallResult | void;
   after_tool_call: (
     event: PluginHookAfterToolCallEvent,
+    ctx: PluginHookToolContext,
+  ) => Promise<void> | void;
+  before_tool_call_hook_failed: (
+    event: PluginHookBeforeToolCallFailedEvent,
     ctx: PluginHookToolContext,
   ) => Promise<void> | void;
   tool_result_persist: (

@@ -141,6 +141,8 @@ type HookOutcome =
       kind?: HookBlockedKind;
       deniedReason?: HookBlockedReason;
       reason: string;
+      /** Real error text, set only for a `kind: "failure"` block (ENG-19492). */
+      detail?: string;
       params?: unknown;
     }
   | {
@@ -906,16 +908,19 @@ async function resolveSkillWorkshopApprovalForFinalParams(params: {
 export function buildBlockedToolResult(params: {
   reason: string;
   deniedReason?: HookBlockedReason;
+  detail?: string;
   toolCallId?: string;
   runId?: string;
 }) {
-  recordPreExecutionBlockedToolCall(params.toolCallId, params.runId);
+  recordPreExecutionBlockedToolCall(params.toolCallId, params.runId, params.detail);
   return {
     content: [{ type: "text" as const, text: params.reason }],
     details: {
       status: "blocked",
       deniedReason: params.deniedReason ?? "plugin-before-tool-call",
       reason: params.reason,
+      // ENG-19492: real hook-failure error text, present only for kind:"failure".
+      ...(params.detail ? { detail: params.detail } : {}),
     },
   };
 }
@@ -1336,12 +1341,42 @@ export async function runBeforeToolCallHook(args: {
   } catch (err) {
     const toolCallId = args.toolCallId ? ` toolCallId=${args.toolCallId}` : "";
     const cause = unwrapErrorCause(err);
-    log.error(`before_tool_call hook failed: tool=${toolName}${toolCallId} error=${String(cause)}`);
+    const causeText = String(cause);
+    log.error(`before_tool_call hook failed: tool=${toolName}${toolCallId} error=${causeText}`);
+    // ENG-19492: surface the real exception text that would otherwise stay only
+    // in this local log line — page on it (Sentry) and carry it downstream. Only
+    // this `kind: "failure"` path emits it; a deliberate veto never reaches here.
+    // `toolContext` is declared inside the try above (out of scope here), so build
+    // a minimal, valid PluginHookToolContext from the identity available in catch.
+    // Wrapped so observability emission can never mask or replace the original
+    // block outcome we are already committed to returning.
+    try {
+      await hookRunner?.runBeforeToolCallHookFailed(
+        {
+          toolName,
+          ...(args.toolCallId && { toolCallId: args.toolCallId }),
+          ...(args.ctx?.runId && { runId: args.ctx.runId }),
+          error: causeText,
+        },
+        {
+          toolName,
+          ...(args.ctx?.agentId && { agentId: args.ctx.agentId }),
+          ...(args.ctx?.sessionKey && { sessionKey: args.ctx.sessionKey }),
+          ...(args.ctx?.sessionId && { sessionId: args.ctx.sessionId }),
+          ...(args.ctx?.runId && { runId: args.ctx.runId }),
+          ...(args.toolCallId && { toolCallId: args.toolCallId }),
+          ...(args.ctx?.channelId && { channelId: args.ctx.channelId }),
+        },
+      );
+    } catch (emitErr) {
+      log.warn(`before_tool_call_hook_failed emission failed: ${String(emitErr)}`);
+    }
     return {
       blocked: true,
       kind: "failure",
       deniedReason: "plugin-before-tool-call",
       reason: BEFORE_TOOL_CALL_HOOK_FAILURE_REASON,
+      detail: causeText,
       params,
     };
   }
@@ -1428,6 +1463,7 @@ export function wrapToolWithBeforeToolCallHook(
         const blockedResult = buildBlockedToolResult({
           reason: outcome.reason,
           deniedReason: outcome.deniedReason ?? "plugin-before-tool-call",
+          ...(outcome.detail ? { detail: outcome.detail } : {}),
           toolCallId,
           runId: ctx?.runId,
         });
@@ -1645,13 +1681,19 @@ export function copyBeforeToolCallHookMarker(source: AnyAgentTool, target: AnyAg
   });
 }
 
-function recordPreExecutionBlockedToolCall(toolCallId?: string, runId?: string): void {
+function recordPreExecutionBlockedToolCall(
+  toolCallId?: string,
+  runId?: string,
+  detail?: string,
+): void {
   if (!toolCallId) {
     return;
   }
-  preExecutionBlockedToolCallIds.add(buildAdjustedParamsKey({ runId, toolCallId }));
+  preExecutionBlockedToolCallIds.set(buildAdjustedParamsKey({ runId, toolCallId }), detail);
   while (preExecutionBlockedToolCallIds.size > MAX_TRACKED_ADJUSTED_PARAMS) {
-    const oldest = preExecutionBlockedToolCallIds.values().next().value;
+    // `.keys()` (not `.values()`): the collection is now a Map, and eviction
+    // must delete by the oldest KEY, not by its detail value.
+    const oldest = preExecutionBlockedToolCallIds.keys().next().value;
     if (!oldest) {
       break;
     }

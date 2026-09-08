@@ -74,6 +74,8 @@ export type EmbeddedAgentSubscribeState = {
     replaySafe?: boolean;
     errored?: boolean;
     status?: "blocked";
+    /** Real hook-failure error text; set only for a kind:"failure" block (ENG-19492). */
+    detail?: string;
     asyncStarted?: boolean;
     asyncTaskRunId?: string;
     asyncTaskId?: string;

@@ -1,6 +1,7 @@
 import type {
   PluginHookAfterToolCallEvent,
   PluginHookAgentEndEvent,
+  PluginHookBeforeToolCallFailedEvent,
   PluginHookCronChangedEvent,
   PluginHookMessageSentEvent,
   PluginHookModelCallEndedEvent,
@@ -11,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAfterToolCallCapture,
   buildAgentEndCapture,
+  buildBeforeToolCallHookFailedCapture,
   buildCronChangedCapture,
   buildMessageSentCapture,
   buildModelCallEndedCapture,
@@ -557,5 +559,37 @@ describe("buildSessionEndCapture", () => {
       expect(capture?.extra?.message_count).toBe(3);
       expect(capture?.fingerprint).toEqual(["session_end", "unknown"]);
     }
+  });
+});
+
+describe("buildBeforeToolCallHookFailedCapture", () => {
+  function event(
+    overrides: Partial<PluginHookBeforeToolCallFailedEvent> = {},
+  ): PluginHookBeforeToolCallFailedEvent {
+    return { toolName: "message", toolCallId: "tc1", runId: "r1", error: "boom", ...overrides };
+  }
+
+  it("always captures as an exception — this hook never fires for a deliberate veto", () => {
+    const capture = buildBeforeToolCallHookFailedCapture(event(), HOST);
+    expect(capture.kind).toBe("exception");
+    expect(capture.message).toBe("boom");
+    expect(capture.tags.tool).toBe("message");
+    expect(capture.tags.hook).toBe("before_tool_call_hook_failed");
+    expect(capture.tags.host).toBe(HOST);
+    expect(capture.extra?.tool_call_id).toBe("tc1");
+    expect(capture.contexts?.run?.run_id).toBe("r1");
+  });
+
+  it("fingerprints by tool + normalized error so repeats of the same failure bucket together", () => {
+    const a = buildBeforeToolCallHookFailedCapture(event({ error: "boom at line 42" }), HOST);
+    const b = buildBeforeToolCallHookFailedCapture(event({ error: "boom at line 99" }), HOST);
+    expect(a.fingerprint).toEqual(b.fingerprint);
+    expect(a.fingerprint[0]).toBe("before_tool_call_hook_failed");
+  });
+
+  it("keeps distinct tools in distinct buckets", () => {
+    const msg = buildBeforeToolCallHookFailedCapture(event({ toolName: "message" }), HOST);
+    const exec = buildBeforeToolCallHookFailedCapture(event({ toolName: "exec" }), HOST);
+    expect(msg.fingerprint).not.toEqual(exec.fingerprint);
   });
 });

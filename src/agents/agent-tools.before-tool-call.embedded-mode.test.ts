@@ -73,15 +73,25 @@ function requireBeforeToolCall(
 }
 
 describe("runBeforeToolCallHook — embedded mode approvals", () => {
-  let hookRunner: Pick<HookRunner, "hasHooks" | "runBeforeToolCall">;
+  let hookRunner: Pick<
+    HookRunner,
+    "hasHooks" | "runBeforeToolCall" | "runBeforeToolCallHookFailed"
+  >;
   let runBeforeToolCallMock: ReturnType<typeof vi.fn<HookRunner["runBeforeToolCall"]>>;
+  let runBeforeToolCallHookFailedMock: ReturnType<
+    typeof vi.fn<HookRunner["runBeforeToolCallHookFailed"]>
+  >;
 
   beforeEach(() => {
     resetGlobalHookRunner();
     runBeforeToolCallMock = vi.fn<HookRunner["runBeforeToolCall"]>();
+    runBeforeToolCallHookFailedMock = vi
+      .fn<HookRunner["runBeforeToolCallHookFailed"]>()
+      .mockResolvedValue(undefined);
     hookRunner = {
       hasHooks: vi.fn<HookRunner["hasHooks"]>().mockReturnValue(true),
       runBeforeToolCall: runBeforeToolCallMock,
+      runBeforeToolCallHookFailed: runBeforeToolCallHookFailedMock,
     };
     mockGetGlobalHookRunner.mockReturnValue(hookRunner as HookRunner);
     mockCallGatewayTool.mockReset();
@@ -92,6 +102,51 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
     setEmbeddedMode(false);
     setActivePluginRegistry(createEmptyPluginRegistry());
     resetGlobalHookRunner();
+  });
+
+  it("emits before_tool_call_hook_failed with the real error when a hook throws, and only then", async () => {
+    runBeforeToolCallMock.mockRejectedValueOnce(new Error("boom: explicit-route lookup failed"));
+
+    const result = await runBeforeToolCallHook({
+      toolName: "message",
+      params: { text: "hi" },
+      toolCallId: "tc-1",
+      ctx: { runId: "run-1" },
+    });
+
+    // `String(cause)` preserves the full stringified error (incl. the "Error: "
+    // prefix), exactly matching the pre-existing local log line — this is the
+    // real text that was previously discarded.
+    const expectedError = "Error: boom: explicit-route lookup failed";
+    expect(result.blocked).toBe(true);
+    expect((result as { kind?: string }).kind).toBe("failure");
+    expect((result as { detail?: string }).detail).toBe(expectedError);
+    expect(runBeforeToolCallHookFailedMock).toHaveBeenCalledTimes(1);
+    expect(runBeforeToolCallHookFailedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: "message",
+        toolCallId: "tc-1",
+        runId: "run-1",
+        error: expectedError,
+      }),
+      expect.objectContaining({ toolName: "message", runId: "run-1", toolCallId: "tc-1" }),
+    );
+  });
+
+  it("does not emit before_tool_call_hook_failed for a deliberate plugin veto", async () => {
+    runBeforeToolCallMock.mockResolvedValueOnce({ block: true, blockReason: "policy says no" });
+
+    const result = await runBeforeToolCallHook({
+      toolName: "message",
+      params: {},
+      toolCallId: "tc-2",
+      ctx: { runId: "run-1" },
+    });
+
+    expect(result.blocked).toBe(true);
+    expect((result as { kind?: string }).kind).toBe("veto");
+    expect((result as { detail?: string }).detail).toBeUndefined();
+    expect(runBeforeToolCallHookFailedMock).not.toHaveBeenCalled();
   });
 
   it("blocks approval-required tools in embedded mode when no gateway approval route exists", async () => {

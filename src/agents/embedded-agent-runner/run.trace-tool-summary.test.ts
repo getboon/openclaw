@@ -55,4 +55,28 @@ describe("buildTraceToolSummary", () => {
       }),
     ).toBeUndefined();
   });
+
+  it("carries hook-failure detail on a blocked invocation, but not on ok/error (ENG-19492)", () => {
+    const summary = buildTraceToolSummary({
+      visibleToolNames: ["message"],
+      toolMetas: [
+        { toolName: "exec", errored: false, detail: "stray" },
+        { toolName: "message", status: "blocked", detail: "Error: kaboom" },
+      ],
+      hadFailure: true,
+    });
+    expect(summary?.invocations).toEqual([
+      { name: "exec", status: "ok" },
+      { name: "message", status: "blocked", detail: "Error: kaboom" },
+    ]);
+  });
+
+  it("omits detail on a blocked invocation that never set it (a plain veto)", () => {
+    const summary = buildTraceToolSummary({
+      visibleToolNames: [],
+      toolMetas: [{ toolName: "message", status: "blocked" }],
+      hadFailure: true,
+    });
+    expect(summary?.invocations?.[0]).toEqual({ name: "message", status: "blocked" });
+  });
 });

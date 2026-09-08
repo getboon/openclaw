@@ -429,6 +429,7 @@ type TraceToolSummaryView = {
   invocations?: Array<{
     name: string;
     status: "ok" | "error" | "blocked";
+    detail?: string;
   }>;
 };
 

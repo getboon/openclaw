@@ -1186,7 +1186,8 @@ export async function handleToolExecutionEnd(
       ? (startData.args as Record<string, unknown>)
       : {};
   const adjustedArgs = consumeAdjustedParamsForToolCall(toolCallId, runId);
-  const executionPrevented = consumePreExecutionBlockedToolCall(toolCallId, runId);
+  const { blocked: executionPrevented, detail: preExecutionBlockDetail } =
+    consumePreExecutionBlockedToolCall(toolCallId, runId);
   const structuredReplaySafe = consumeStructuredReplaySafeToolCall(toolCallId, runId);
   const startArgs =
     adjustedArgs && typeof adjustedArgs === "object"
@@ -1216,6 +1217,9 @@ export async function handleToolExecutionEnd(
     // the turn (cubic P2 follow-up).
     errored: isToolError,
     ...(approvalUnavailable || !executionStarted ? { status: "blocked" as const } : {}),
+    // ENG-19492: real hook-failure error text, present only when the block came
+    // from a thrown before_tool_call hook (kind:"failure"), never for a veto.
+    ...(preExecutionBlockDetail ? { detail: preExecutionBlockDetail } : {}),
     ...(asyncStarted ? { asyncStarted: true, ...asyncTaskIds } : {}),
   });
   const acceptedSessionSpawn =

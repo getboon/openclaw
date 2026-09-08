@@ -4,7 +4,10 @@
  * normalized payload selected by hook processing.
  */
 export const adjustedParamsByToolCallId = new Map<string, unknown>();
-export const preExecutionBlockedToolCallIds = new Set<string>();
+// Value is the optional hook-failure detail (ENG-19492): present only for a
+// block that came from a thrown before_tool_call hook, undefined for a plain
+// policy veto. Map (was a Set) so the detail rides alongside the blocked key.
+export const preExecutionBlockedToolCallIds = new Map<string, string | undefined>();
 export const structuredReplaySafeToolCallIds = new Set<string>();
 
 export function buildAdjustedParamsKey(params: { runId?: string; toolCallId: string }): string {
@@ -29,12 +32,21 @@ export function peekAdjustedParamsForToolCall(toolCallId: string, runId?: string
   return params === undefined ? undefined : structuredClone(params);
 }
 
-/** Consume whether policy prevented the target tool from starting. */
-export function consumePreExecutionBlockedToolCall(toolCallId: string, runId?: string): boolean {
+/**
+ * Consume whether policy prevented the target tool from starting, plus any
+ * hook-failure detail (ENG-19492). `detail` is set only when the block came
+ * from a thrown before_tool_call hook (kind:"failure"); it is undefined for a
+ * plain policy veto.
+ */
+export function consumePreExecutionBlockedToolCall(
+  toolCallId: string,
+  runId?: string,
+): { blocked: boolean; detail?: string } {
   const key = buildAdjustedParamsKey({ runId, toolCallId });
   const blocked = preExecutionBlockedToolCallIds.has(key);
+  const detail = preExecutionBlockedToolCallIds.get(key);
   preExecutionBlockedToolCallIds.delete(key);
-  return blocked;
+  return { blocked, ...(detail ? { detail } : {}) };
 }
 
 export function recordStructuredReplaySafeToolCall(toolCallId: string, runId?: string): void {

@@ -16,11 +16,19 @@ export type AgentDecisionTrace = {
   toolInvocations: Array<{
     name: string;
     status: AgentDecisionTraceToolStatus;
+    /**
+     * Real error text for a `status:"blocked"` entry that came from a thrown
+     * before_tool_call hook (kind:"failure"); absent for a plain veto and for
+     * ok/error entries (ENG-19492). Additive — old consumers ignore it.
+     */
+    detail?: string;
   }>;
   evidence: Array<{
     kind: "tool_outcome";
     tool: string;
     status: AgentDecisionTraceToolStatus;
+    /** See toolInvocations[].detail — same hook-failure error text (ENG-19492). */
+    detail?: string;
   }>;
   confidence: "high" | "medium" | "low";
   disposition: "completed" | "permission_required" | "refused" | "failed" | "unverified";

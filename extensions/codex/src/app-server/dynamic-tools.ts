@@ -285,7 +285,7 @@ export function createCodexDynamicToolBridge(params: {
         executionPrevented = consumePreExecutionBlockedToolCall(
           call.callId,
           toolResultHookContext.runId,
-        );
+        ).blocked;
         const telemetryRawResult = sanitizeToolResult(rawResult);
         const rawIsError = isCodexToolResultError(rawResult);
         const middlewareResult = await middlewareRunner.applyToolResultMiddleware({
@@ -385,7 +385,7 @@ export function createCodexDynamicToolBridge(params: {
         }
         executionPrevented =
           executionPrevented ||
-          consumePreExecutionBlockedToolCall(call.callId, toolResultHookContext.runId);
+          consumePreExecutionBlockedToolCall(call.callId, toolResultHookContext.runId).blocked;
         const failedResult = failedToolResult(errorMessage);
         finalizeToolTerminalPresentation({
           toolCallId: call.callId,
