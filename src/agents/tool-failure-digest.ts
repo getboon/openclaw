@@ -36,22 +36,28 @@ export type ToolFailureDigest = {
 /** Caps the note's failure list so a pathological turn can't produce a wall of text. */
 const MAX_DIGEST_ENTRIES = 8;
 
-/**
- * Counts steps that finished cleanly. Mirrors the legacy single-failure
- * fallback (`toolMetas.length - 1`) for producers that never set `errored`,
- * and, matching `buildAgentDecisionTrace`'s three-way disposition, treats
- * `status: "blocked"` as NOT completed, unlike the prose counter this
- * replaces, which previously counted blocked calls as completed and could
- * disagree with the audit trace shown alongside it.
- */
-function countCompletedTools(
+/** Derives an honest total/completed pair from explicit outcomes when present,
+ * or from the surfaced failure records when a legacy producer omits outcomes. */
+function resolveToolCounts(
   toolMetas: readonly { errored?: boolean; status?: "blocked" }[],
-): number {
+  surfacedFailureCount: number,
+): Pick<ToolFailureDigest, "totalToolCount" | "completedToolCount"> {
   const hasErroredFlags = toolMetas.some((meta) => meta.errored !== undefined);
-  if (!hasErroredFlags) {
-    return Math.max(0, toolMetas.length - 1);
+  if (hasErroredFlags) {
+    return {
+      totalToolCount: toolMetas.length,
+      completedToolCount: toolMetas.filter((meta) => !meta.errored && meta.status !== "blocked")
+        .length,
+    };
   }
-  return toolMetas.filter((meta) => !meta.errored && meta.status !== "blocked").length;
+  // Current embedded and Codex collectors set per-call outcomes. This branch
+  // remains for direct payload-builder compatibility callers that provide only
+  // a last failure, and normalized attempt records whose source omitted outcomes.
+  const totalToolCount = Math.max(toolMetas.length, surfacedFailureCount);
+  return {
+    totalToolCount,
+    completedToolCount: totalToolCount - surfacedFailureCount,
+  };
 }
 
 /**
@@ -98,10 +104,10 @@ export function buildToolFailureDigest(params: {
   const allEntries = order.map((key) => grouped.get(key)!);
   const failures = allEntries.slice(0, MAX_DIGEST_ENTRIES);
   const omittedCount = allEntries.length - failures.length;
+  const toolCounts = resolveToolCounts(params.toolMetas, surfaced.length);
 
   return {
-    totalToolCount: params.toolMetas.length,
-    completedToolCount: countCompletedTools(params.toolMetas),
+    ...toolCounts,
     failures,
     omittedCount,
   };
