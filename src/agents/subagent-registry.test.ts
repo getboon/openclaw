@@ -1294,6 +1294,49 @@ describe("subagent registry seam flow", () => {
     expect(mocks.runSubagentAnnounceFlow).not.toHaveBeenCalled();
   });
 
+  it("gives up without re-announcing when a restored entry recorded a terminal owner failure", async () => {
+    const createdAt = Date.parse("2026-03-24T11:50:00Z");
+    mocks.restoreSubagentRunsFromDisk.mockImplementation(((params: {
+      runs: Map<string, unknown>;
+      mergeOnly?: boolean;
+    }) => {
+      params.runs.set("run-resumed-owner-terminal", {
+        runId: "run-resumed-owner-terminal",
+        childSessionKey: "agent:main:subagent:child",
+        requesterSessionKey: "agent:main:main",
+        requesterDisplayKey: "main",
+        task: "owner terminal resume",
+        cleanup: "keep",
+        createdAt,
+        startedAt: createdAt,
+        sessionStartedAt: createdAt,
+        endedAt: createdAt + 30_000,
+        endedReason: "complete",
+        expectsCompletionMessage: true,
+        outcome: { status: "ok" },
+        delivery: {
+          status: "pending",
+          attemptCount: 1,
+          lastAttemptAt: createdAt + 40_000,
+          ownerChannel: "anychat-boon-web",
+          lastDropReason: "owner_terminal",
+          lastError: "media_unsupported",
+        },
+      });
+      return 1;
+    }) as never);
+
+    mod.initSubagentRegistry();
+
+    await waitForFast(() => {
+      const entry = mod
+        .listSubagentRunsForRequester("agent:main:main")
+        .find((run) => run.runId === "run-resumed-owner-terminal");
+      expect(entry?.delivery?.status).toBe("failed");
+    });
+    expect(mocks.runSubagentAnnounceFlow).not.toHaveBeenCalled();
+  });
+
   it("prefers explicit run timeout over late restored agent.wait success", async () => {
     const startedAt = Date.parse("2026-03-24T11:59:00Z");
     vi.setSystemTime(startedAt + 61_000);

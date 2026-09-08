@@ -1,3 +1,4 @@
+import { registerSubagentCompletionOwner } from "../../agents/subagent-completion-owner.js";
 // Plugin runtime entrypoint assembles runtime helpers available to activated plugins.
 import { getRuntimeConfig } from "../../config/config.js";
 import { resolveStateDir } from "../../config/paths.js";
@@ -158,6 +159,7 @@ function createUnavailableSubagentRuntime(): PluginRuntime["subagent"] {
     throw new RequestScopedSubagentRuntimeError();
   };
   return {
+    registerCompletionOwner: registerSubagentCompletionOwner,
     run: unavailable,
     waitForRun: unavailable,
     getSessionMessages: unavailable,
@@ -184,7 +186,10 @@ function createLateBindingSubagent(
   allowGatewaySubagentBinding = false,
 ): PluginRuntime["subagent"] {
   if (explicit) {
-    return explicit;
+    return {
+      ...explicit,
+      registerCompletionOwner: registerSubagentCompletionOwner,
+    };
   }
 
   const unavailable = createUnavailableSubagentRuntime();
