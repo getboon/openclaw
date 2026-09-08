@@ -53,6 +53,86 @@ describe("buildAgentDecisionTrace", () => {
     });
   });
 
+  it("carries hook-failure detail on a blocked entry into toolInvocations and evidence", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["message"],
+        failures: 1,
+        visibleTools: ["message"],
+        invocations: [{ name: "message", status: "blocked", detail: "Error: kaboom" }],
+      },
+    });
+    expect(trace.toolInvocations).toEqual([
+      { name: "message", status: "blocked", detail: "Error: kaboom" },
+    ]);
+    expect(trace.evidence).toEqual([
+      { kind: "tool_outcome", tool: "message", status: "blocked", detail: "Error: kaboom" },
+    ]);
+    expect(trace.reason).toBe("tool_execution_blocked");
+  });
+
+  it("omits detail for a veto-blocked entry (no detail supplied)", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["message"],
+        failures: 1,
+        visibleTools: ["message"],
+        invocations: [{ name: "message", status: "blocked" }],
+      },
+    });
+    expect(trace.toolInvocations[0]).not.toHaveProperty("detail");
+    expect(trace.evidence[0]).not.toHaveProperty("detail");
+  });
+
+  it("never attaches a stray detail to a non-blocked entry", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 2,
+        tools: ["exec", "message"],
+        visibleTools: ["exec", "message"],
+        invocations: [
+          { name: "exec", status: "ok", detail: "stray" },
+          { name: "message", status: "error", detail: "stray" },
+        ],
+      },
+    });
+    expect(trace.toolInvocations.every((entry) => !("detail" in entry))).toBe(true);
+    expect(trace.evidence.every((entry) => !("detail" in entry))).toBe(true);
+  });
+
+  it("truncates an oversized detail to the bounded cap", () => {
+    const longDetail = "E".repeat(900);
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["message"],
+        visibleTools: ["message"],
+        invocations: [{ name: "message", status: "blocked", detail: longDetail }],
+      },
+    });
+    expect(trace.toolInvocations[0].detail).toHaveLength(500);
+  });
+
+  it("truncates on a UTF-16 boundary without splitting a surrogate pair", () => {
+    // "😀" is two UTF-16 code units straddling the 500-unit cap; the safe
+    // truncation drops the whole emoji rather than storing a lone surrogate.
+    const detail = `${"E".repeat(499)}😀tail`;
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["message"],
+        visibleTools: ["message"],
+        invocations: [{ name: "message", status: "blocked", detail }],
+      },
+    });
+    const truncated = trace.toolInvocations[0].detail ?? "";
+    expect(truncated).toBe("E".repeat(499));
+    // No lone/unpaired surrogate at the end.
+    expect(truncated.charCodeAt(truncated.length - 1)).toBeLessThan(0xd800);
+  });
+
   it("marks an unattempted response as unverified when tools were visible", () => {
     expect(
       buildAgentDecisionTrace({

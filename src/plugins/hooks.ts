@@ -19,6 +19,7 @@ import type { GlobalHookRunnerRegistry, HookRunnerRegistry } from "./hook-regist
 import type {
   PluginHookAfterCompactionEvent,
   PluginHookAfterToolCallEvent,
+  PluginHookBeforeToolCallFailedEvent,
   PluginHookAgentContext,
   PluginHookAgentEndEvent,
   PluginHookBeforeAgentFinalizeEvent,
@@ -1306,6 +1307,18 @@ export function createHookRunner(
   }
 
   /**
+   * Run before_tool_call_hook_failed hook.
+   * Runs in parallel (fire-and-forget). Fired only when a before_tool_call
+   * handler throws (kind: "failure") — never for a deliberate veto.
+   */
+  async function runBeforeToolCallHookFailed(
+    event: PluginHookBeforeToolCallFailedEvent,
+    ctx: PluginHookToolContext,
+  ): Promise<void> {
+    return runVoidHook("before_tool_call_hook_failed", event, ctx);
+  }
+
+  /**
    * Run tool_result_persist hook.
    *
    * This hook is intentionally synchronous: it runs in hot paths where session
@@ -1665,6 +1678,7 @@ export function createHookRunner(
     runMessageSent,
     // Tool hooks
     runBeforeToolCall,
+    runBeforeToolCallHookFailed,
     runAfterToolCall,
     runToolResultPersist,
     // Message write hooks

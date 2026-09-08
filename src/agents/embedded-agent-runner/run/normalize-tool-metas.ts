@@ -18,6 +18,7 @@ export type RawToolMetaEntry = {
   replaySafe?: boolean;
   errored?: boolean;
   status?: "blocked";
+  detail?: string;
   asyncStarted?: boolean;
   asyncTaskRunId?: string;
   asyncTaskId?: string;
@@ -30,6 +31,7 @@ export type NormalizedToolMetaEntry = {
   replaySafe: boolean;
   errored?: boolean;
   status?: "blocked";
+  detail?: string;
   asyncStarted?: true;
   asyncTaskRunId?: string;
   asyncTaskId?: string;
@@ -64,6 +66,12 @@ export function normalizeToolMetas(
       // approval-unavailable/never-started calls (ENG-16854).
       if (entry.status === "blocked") {
         normalized.status = "blocked";
+      }
+      // Carry the pre-execution failure detail forward alongside the blocked
+      // marker so the audit trace can surface the real error text. Set for any
+      // thrown pre-execution failure (handler or pipeline) — never a plain veto.
+      if (entry.status === "blocked" && entry.detail) {
+        normalized.detail = entry.detail;
       }
       if (entry.asyncStarted === true) {
         normalized.asyncStarted = true;

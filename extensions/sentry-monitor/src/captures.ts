@@ -9,6 +9,7 @@ import type {
   PluginHookAfterToolCallEvent,
   PluginHookAgentContext,
   PluginHookAgentEndEvent,
+  PluginHookBeforeToolCallFailedEvent,
   PluginHookCronChangedEvent,
   PluginHookDeliveryRecoveryExhaustedEvent,
   PluginHookMessageSentEvent,
@@ -195,6 +196,39 @@ export function buildAfterToolCallCapture(
     fingerprint,
     contexts,
     extra,
+  };
+}
+
+/**
+ * A `before_tool_call` hook threw. Unlike `after_tool_call`, this hook is fired
+ * by the host ONLY on the `kind: "failure"` path — never for a deliberate policy
+ * veto — so there is deliberately no `denied`-style suppression branch here:
+ * every event that reaches this builder is a real, actionable defect. Never
+ * returns null.
+ */
+export function buildBeforeToolCallHookFailedCapture(
+  event: PluginHookBeforeToolCallFailedEvent,
+  host: string,
+): SentryCapture {
+  return {
+    kind: "exception",
+    message: event.error,
+    tags: pruneTags({
+      hook: "before_tool_call_hook_failed",
+      host,
+      tool: event.toolName,
+    }),
+    // Fingerprint by tool + normalized error so repeats of the same failure
+    // bucket into one issue, and different tools/errors never share a bucket.
+    fingerprint: fingerprintOf(
+      "before_tool_call_hook_failed",
+      event.toolName,
+      normalizeFingerprintText(event.error),
+    ),
+    // Correlate by the actual session id; keep the routing key under its own
+    // field rather than mislabeling it as `session_id`.
+    contexts: { run: runContext(event.runId, event.sessionId) },
+    extra: { tool_call_id: event.toolCallId, session_key: event.sessionKey },
   };
 }
 

@@ -141,6 +141,8 @@ type HookOutcome =
       kind?: HookBlockedKind;
       deniedReason?: HookBlockedReason;
       reason: string;
+      /** Real error text, set only for a `kind: "failure"` block. */
+      detail?: string;
       params?: unknown;
     }
   | {
@@ -219,6 +221,11 @@ const BEFORE_TOOL_CALL_HOOK_CONTEXT = Symbol("beforeToolCallHookContext");
 const BEFORE_TOOL_CALL_HOOK_FAILURE_REASON =
   "Tool call blocked because before_tool_call hook failed";
 const MAX_TRACKED_ADJUSTED_PARAMS = 1024;
+// Bound the pre-execution failure detail we hold in the pending-call Map so up to
+// MAX_TRACKED_ADJUSTED_PARAMS unconsumed entries can't retain unbounded memory.
+// Comfortably above the audit trace's own 500-char cap, so display is unaffected;
+// the full text still flows to the log line and the Sentry event.
+const MAX_RECORDED_BLOCK_DETAIL_CHARS = 1024;
 const MAX_PENDING_TERMINAL_PRESENTATIONS = 1024;
 const LOOP_WARNING_BUCKET_SIZE = 10;
 const MAX_LOOP_WARNING_KEYS = 256;
@@ -906,16 +913,19 @@ async function resolveSkillWorkshopApprovalForFinalParams(params: {
 export function buildBlockedToolResult(params: {
   reason: string;
   deniedReason?: HookBlockedReason;
+  detail?: string;
   toolCallId?: string;
   runId?: string;
 }) {
-  recordPreExecutionBlockedToolCall(params.toolCallId, params.runId);
+  recordPreExecutionBlockedToolCall(params.toolCallId, params.runId, params.detail);
   return {
     content: [{ type: "text" as const, text: params.reason }],
     details: {
       status: "blocked",
       deniedReason: params.deniedReason ?? "plugin-before-tool-call",
       reason: params.reason,
+      // real pre-execution failure error text, present only for a kind:"failure" block.
+      ...(params.detail ? { detail: params.detail } : {}),
     },
   };
 }
@@ -1114,6 +1124,10 @@ export async function runBeforeToolCallHook(args: {
   }
 
   const hookRunner = getGlobalHookRunner();
+  // Only a throw from runBeforeToolCall itself is a handler failure; a
+  // policy/approval/skill-workshop throw stays blocked but must not fire the
+  // before_tool_call_hook_failed signal (gated on this flag in the catch below).
+  let hookInvocationThrew = false;
   try {
     const hasBeforeToolCallHooks = hookRunner?.hasHooks("before_tool_call") === true;
     const policyRegistry = getGlobalHookRunnerRegistry() ?? undefined;
@@ -1263,19 +1277,28 @@ export async function runBeforeToolCallHook(args: {
       return allowed;
     }
     const hookEventParams = isPlainObject(policyAdjustedParams) ? policyAdjustedParams : {};
-    const hookResult = await hookRunner.runBeforeToolCall(
-      {
-        toolName,
-        params: hookEventParams,
-        ...policyAdjustedToolIdentity,
-        ...(args.ctx?.runId && { runId: args.ctx.runId }),
-        ...(args.toolCallId && { toolCallId: args.toolCallId }),
-        ...(policyAdjustedDerivedToolParams.derivedPaths
-          ? { derivedPaths: policyAdjustedDerivedToolParams.derivedPaths }
-          : {}),
-      },
-      policyAdjustedToolContext,
-    );
+    let hookResult: PluginHookBeforeToolCallResult | undefined;
+    try {
+      hookResult = await hookRunner.runBeforeToolCall(
+        {
+          toolName,
+          params: hookEventParams,
+          ...policyAdjustedToolIdentity,
+          ...(args.ctx?.runId && { runId: args.ctx.runId }),
+          ...(args.toolCallId && { toolCallId: args.toolCallId }),
+          ...(policyAdjustedDerivedToolParams.derivedPaths
+            ? { derivedPaths: policyAdjustedDerivedToolParams.derivedPaths }
+            : {}),
+        },
+        policyAdjustedToolContext,
+      );
+    } catch (hookErr) {
+      // The handler invocation itself threw: flag it so the outer catch fires
+      // the hook-failed signal, then rethrow so the block/record path (which
+      // stays shared with pipeline failures) is unchanged.
+      hookInvocationThrew = true;
+      throw hookErr;
+    }
 
     if (hookResult?.block) {
       return {
@@ -1334,14 +1357,64 @@ export async function runBeforeToolCallHook(args: {
     }
     return allowed;
   } catch (err) {
-    const toolCallId = args.toolCallId ? ` toolCallId=${args.toolCallId}` : "";
+    const toolCallIdLog = args.toolCallId ? ` toolCallId=${args.toolCallId}` : "";
     const cause = unwrapErrorCause(err);
-    log.error(`before_tool_call hook failed: tool=${toolName}${toolCallId} error=${String(cause)}`);
+    const causeText = String(cause);
+    // Name the fault class: a thrown before_tool_call HANDLER vs. a throw from
+    // the surrounding pipeline (trusted policy / approval / skill-workshop).
+    // Both still block the tool; only the former is a plugin-hook defect.
+    const faultClass = hookInvocationThrew ? "hook" : "pipeline";
+    log.error(
+      `before_tool_call ${faultClass} failed: tool=${toolName}${toolCallIdLog} error=${causeText}`,
+    );
+    // Record the detail so it reaches toolMetas -> audit trace whether the
+    // caller returns or throws this block. Recorded for BOTH fault classes —
+    // the detail is a generic "why blocked", useful regardless of source.
+    recordPreExecutionBlockedToolCall(
+      args.toolCallId,
+      args.ctx?.runId,
+      truncateUtf16Safe(causeText, MAX_RECORDED_BLOCK_DETAIL_CHARS),
+    );
+    // Fire the before_tool_call_hook_failed observability signal ONLY for a real
+    // handler failure — never for a policy/approval/skill-workshop throw, which
+    // would mis-attribute a different fault class into this Sentry bucket.
+    // Fire-and-forget so it never blocks the block outcome; the try/catch +
+    // .catch cover sync and async failures.
+    if (hookInvocationThrew) {
+      try {
+        void Promise.resolve(
+          hookRunner?.runBeforeToolCallHookFailed(
+            {
+              toolName,
+              ...(args.toolCallId && { toolCallId: args.toolCallId }),
+              ...(args.ctx?.runId && { runId: args.ctx.runId }),
+              ...(args.ctx?.sessionId && { sessionId: args.ctx.sessionId }),
+              ...(args.ctx?.sessionKey && { sessionKey: args.ctx.sessionKey }),
+              error: causeText,
+            },
+            {
+              toolName,
+              ...(args.ctx?.agentId && { agentId: args.ctx.agentId }),
+              ...(args.ctx?.sessionKey && { sessionKey: args.ctx.sessionKey }),
+              ...(args.ctx?.sessionId && { sessionId: args.ctx.sessionId }),
+              ...(args.ctx?.runId && { runId: args.ctx.runId }),
+              ...(args.toolCallId && { toolCallId: args.toolCallId }),
+              ...(args.ctx?.channelId && { channelId: args.ctx.channelId }),
+            },
+          ),
+        ).catch((emitErr: unknown) => {
+          log.warn(`before_tool_call_hook_failed emission failed: ${String(emitErr)}`);
+        });
+      } catch (emitErr) {
+        log.warn(`before_tool_call_hook_failed emission failed: ${String(emitErr)}`);
+      }
+    }
     return {
       blocked: true,
       kind: "failure",
       deniedReason: "plugin-before-tool-call",
       reason: BEFORE_TOOL_CALL_HOOK_FAILURE_REASON,
+      detail: causeText,
       params,
     };
   }
@@ -1425,6 +1498,9 @@ export function wrapToolWithBeforeToolCallHook(
             paramsSummary: eventBase.paramsSummary,
           });
         }
+        // This branch is veto-only (the failure path threw above), so there is
+        // no detail to carry here — a failure records its detail in the catch
+        // block of runBeforeToolCallHook instead.
         const blockedResult = buildBlockedToolResult({
           reason: outcome.reason,
           deniedReason: outcome.deniedReason ?? "plugin-before-tool-call",
@@ -1645,13 +1721,19 @@ export function copyBeforeToolCallHookMarker(source: AnyAgentTool, target: AnyAg
   });
 }
 
-function recordPreExecutionBlockedToolCall(toolCallId?: string, runId?: string): void {
+function recordPreExecutionBlockedToolCall(
+  toolCallId?: string,
+  runId?: string,
+  detail?: string,
+): void {
   if (!toolCallId) {
     return;
   }
-  preExecutionBlockedToolCallIds.add(buildAdjustedParamsKey({ runId, toolCallId }));
+  preExecutionBlockedToolCallIds.set(buildAdjustedParamsKey({ runId, toolCallId }), detail);
   while (preExecutionBlockedToolCallIds.size > MAX_TRACKED_ADJUSTED_PARAMS) {
-    const oldest = preExecutionBlockedToolCallIds.values().next().value;
+    // `.keys()` (not `.values()`): the collection is now a Map, and eviction
+    // must delete by the oldest KEY, not by its detail value.
+    const oldest = preExecutionBlockedToolCallIds.keys().next().value;
     if (!oldest) {
       break;
     }

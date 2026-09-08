@@ -503,6 +503,73 @@ describe("handleToolExecutionEnd cron mutation tracking", () => {
     expect(ctx.state.lastToolError?.mutatingAction).toBe(false);
   });
 
+  it("carries hook-failure detail into toolMetas for a kind:failure block", async () => {
+    const { ctx } = createTestContext();
+    const toolCallId = "tool-msg-hook-failed";
+    await handleToolExecutionStart(
+      ctx as never,
+      {
+        type: "tool_execution_start",
+        toolName: "message",
+        toolCallId,
+        args: { text: "here's your spreadsheet" },
+      } as never,
+    );
+    await handleToolExecutionEnd(
+      ctx as never,
+      {
+        type: "tool_execution_end",
+        toolName: "message",
+        toolCallId,
+        isError: false,
+        result: buildBlockedToolResult({
+          reason: "Tool call blocked because before_tool_call hook failed",
+          detail: "Error: kaboom",
+          toolCallId,
+          runId: "run-test",
+        }),
+      } as never,
+    );
+
+    expect(ctx.state.toolMetas.at(-1)).toMatchObject({
+      toolName: "message",
+      status: "blocked",
+      detail: "Error: kaboom",
+    });
+  });
+
+  it("does not set detail on toolMetas for a plain veto block", async () => {
+    const { ctx } = createTestContext();
+    const toolCallId = "tool-msg-veto";
+    await handleToolExecutionStart(
+      ctx as never,
+      {
+        type: "tool_execution_start",
+        toolName: "message",
+        toolCallId,
+        args: { text: "hi" },
+      } as never,
+    );
+    await handleToolExecutionEnd(
+      ctx as never,
+      {
+        type: "tool_execution_end",
+        toolName: "message",
+        toolCallId,
+        isError: false,
+        result: buildBlockedToolResult({
+          reason: "Tool call blocked by plugin hook",
+          toolCallId,
+          runId: "run-test",
+        }),
+      } as never,
+    );
+
+    const last = ctx.state.toolMetas.at(-1);
+    expect(last).toMatchObject({ toolName: "message", status: "blocked" });
+    expect(last).not.toHaveProperty("detail");
+  });
+
   it("keeps executed mutations replay-unsafe when middleware rewrites the result as blocked", async () => {
     const { ctx } = createTestContext();
     const toolCallId = "tool-cron-rewritten-blocked";

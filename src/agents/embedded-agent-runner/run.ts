@@ -491,6 +491,7 @@ export function buildTraceToolSummary(params: {
     meta?: string;
     errored?: boolean;
     status?: "blocked";
+    detail?: string;
     asyncStarted?: boolean;
   }>;
   visibleToolNames?: readonly string[];
@@ -524,15 +525,23 @@ export function buildTraceToolSummary(params: {
     // outcomes now flow through `invocations` for the audit projection.
     failures: params.hadFailure ? 1 : 0,
     visibleTools,
-    invocations: toolMetas.map((entry) => ({
-      name: entry.toolName,
-      status:
+    invocations: toolMetas.map((entry) => {
+      const status =
         entry.status === "blocked"
           ? ("blocked" as const)
           : entry.errored === true
             ? ("error" as const)
-            : ("ok" as const),
-    })),
+            : ("ok" as const);
+      const invocation: NonNullable<ToolSummaryTrace["invocations"]>[number] = {
+        name: entry.toolName,
+        status,
+      };
+      // Carry the pre-execution failure detail only for a blocked entry.
+      if (status === "blocked" && entry.detail) {
+        invocation.detail = entry.detail;
+      }
+      return invocation;
+    }),
     ...(params.toolFailures
       ? {
           unrecoveredFailures: params.toolFailures.filter((failure) => !failure.retried).length,

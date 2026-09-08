@@ -4,6 +4,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import {
   buildAfterToolCallCapture,
   buildAgentEndCapture,
+  buildBeforeToolCallHookFailedCapture,
   buildCronChangedCapture,
   buildDeliveryRecoveryExhaustedCapture,
   buildMessageSentCapture,
@@ -145,6 +146,13 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
     api.on("after_tool_call", (event) => {
       safe(api.logger, PLUGIN_ID, "after_tool_call", () => {
         dispatchCapture(Sentry, buildAfterToolCallCapture(event, hostname));
+      });
+    });
+  }
+  if (hookEnabled("before_tool_call_hook_failed")) {
+    api.on("before_tool_call_hook_failed", (event) => {
+      safe(api.logger, PLUGIN_ID, "before_tool_call_hook_failed", () => {
+        dispatchCapture(Sentry, buildBeforeToolCallHookFailedCapture(event, hostname));
       });
     });
   }

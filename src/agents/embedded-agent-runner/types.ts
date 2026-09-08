@@ -118,6 +118,8 @@ export type ToolSummaryTrace = {
   invocations?: Array<{
     name: string;
     status: "ok" | "error" | "blocked";
+    /** Real error text for a blocked pre-execution-failure call; absent otherwise. */
+    detail?: string;
   }>;
   /**
    * Errored calls still unresolved when the turn ended. `undefined` means the

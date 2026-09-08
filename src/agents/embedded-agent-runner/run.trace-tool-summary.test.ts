@@ -56,6 +56,30 @@ describe("buildTraceToolSummary", () => {
     ).toBeUndefined();
   });
 
+  it("carries hook-failure detail on a blocked invocation, but not on ok/error", () => {
+    const summary = buildTraceToolSummary({
+      visibleToolNames: ["message"],
+      toolMetas: [
+        { toolName: "exec", errored: false, detail: "stray" },
+        { toolName: "message", status: "blocked", detail: "Error: kaboom" },
+      ],
+      hadFailure: true,
+    });
+    expect(summary?.invocations).toEqual([
+      { name: "exec", status: "ok" },
+      { name: "message", status: "blocked", detail: "Error: kaboom" },
+    ]);
+  });
+
+  it("omits detail on a blocked invocation that never set it (a plain veto)", () => {
+    const summary = buildTraceToolSummary({
+      visibleToolNames: [],
+      toolMetas: [{ toolName: "message", status: "blocked" }],
+      hadFailure: true,
+    });
+    expect(summary?.invocations?.[0]).toEqual({ name: "message", status: "blocked" });
+  });
+
   it("counts only the failures the runtime never marked retried", () => {
     // A successfully re-run step is retired so it cannot demote a finished
     // turn to "partial".
