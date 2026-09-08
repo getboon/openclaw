@@ -67,9 +67,9 @@ export function normalizeToolMetas(
       if (entry.status === "blocked") {
         normalized.status = "blocked";
       }
-      // Carry the hook-failure detail forward alongside the blocked marker so
-      // the audit trace can surface the real error text. Only ever
-      // set for a kind:"failure" block — never a plain veto.
+      // Carry the pre-execution failure detail forward alongside the blocked
+      // marker so the audit trace can surface the real error text. Set for any
+      // thrown pre-execution failure (handler or pipeline) — never a plain veto.
       if (entry.status === "blocked" && entry.detail) {
         normalized.detail = entry.detail;
       }

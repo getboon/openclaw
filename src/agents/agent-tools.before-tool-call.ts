@@ -221,7 +221,7 @@ const BEFORE_TOOL_CALL_HOOK_CONTEXT = Symbol("beforeToolCallHookContext");
 const BEFORE_TOOL_CALL_HOOK_FAILURE_REASON =
   "Tool call blocked because before_tool_call hook failed";
 const MAX_TRACKED_ADJUSTED_PARAMS = 1024;
-// Bound the hook-failure detail we hold in the pending-call Map so up to
+// Bound the pre-execution failure detail we hold in the pending-call Map so up to
 // MAX_TRACKED_ADJUSTED_PARAMS unconsumed entries can't retain unbounded memory.
 // Comfortably above the audit trace's own 500-char cap, so display is unaffected;
 // the full text still flows to the log line and the Sentry event.
@@ -924,7 +924,7 @@ export function buildBlockedToolResult(params: {
       status: "blocked",
       deniedReason: params.deniedReason ?? "plugin-before-tool-call",
       reason: params.reason,
-      // real hook-failure error text, present only for kind:"failure".
+      // real pre-execution failure error text, present only for a kind:"failure" block.
       ...(params.detail ? { detail: params.detail } : {}),
     },
   };

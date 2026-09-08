@@ -24,7 +24,7 @@ type ToolSummary = {
 };
 
 const MAX_TRACE_TOOL_NAME_CHARS = 120;
-// Cap the hook-failure detail so this bounded, user-visible trace can't carry an
+// Cap the pre-execution failure detail so this bounded, user-visible trace can't carry an
 // unbounded error blob into the audit contract. Generous enough for
 // a real error message; long stack dumps are truncated.
 const MAX_TRACE_DETAIL_CHARS = 500;
@@ -49,7 +49,7 @@ function normalizeTraceToolStatus(value: unknown): "ok" | "error" | "blocked" | 
   return value === "ok" || value === "error" || value === "blocked" ? value : undefined;
 }
 
-/** Normalize + bound the hook-failure detail; undefined when empty. */
+/** Normalize + bound the pre-execution failure detail; undefined when empty. */
 function normalizeTraceDetail(value: unknown): string | undefined {
   const detail = normalizeOptionalString(value);
   if (!detail) {
@@ -118,7 +118,7 @@ export function buildAgentDecisionTrace(params: {
       if (!name || !status) {
         return [];
       }
-      // Detail is only meaningful for a blocked (hook-failure) entry; never
+      // Detail is only meaningful for a blocked (pre-execution-failure) entry; never
       // attach a stray detail to an ok/error entry.
       const detail = status === "blocked" ? normalizeTraceDetail(invocation.detail) : undefined;
       return [{ name, status, ...(detail ? { detail } : {}) }];
