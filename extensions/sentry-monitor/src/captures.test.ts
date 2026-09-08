@@ -592,4 +592,22 @@ describe("buildBeforeToolCallHookFailedCapture", () => {
     const exec = buildBeforeToolCallHookFailedCapture(event({ toolName: "exec" }), HOST);
     expect(msg.fingerprint).not.toEqual(exec.fingerprint);
   });
+
+  it("correlates by the real session_id and keeps the routing key separate", () => {
+    const capture = buildBeforeToolCallHookFailedCapture(
+      event({ sessionId: "sess-123", sessionKey: "agent:main:slack:channel:c1:thread:t1" }),
+      HOST,
+    );
+    expect(capture.contexts?.run?.session_id).toBe("sess-123");
+    expect(capture.extra?.session_key).toBe("agent:main:slack:channel:c1:thread:t1");
+  });
+
+  it("omits session_id from the run context when no sessionId is present", () => {
+    const capture = buildBeforeToolCallHookFailedCapture(
+      event({ sessionId: undefined, runId: undefined }),
+      HOST,
+    );
+    // runContext returns undefined when it has no ids at all.
+    expect(capture.contexts?.run?.session_id).toBeUndefined();
+  });
 });

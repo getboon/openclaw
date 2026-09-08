@@ -721,6 +721,9 @@ export type PluginHookBeforeToolCallFailedEvent = {
   toolName: string;
   toolCallId?: string;
   runId?: string;
+  /** Actual session id (maps to the Sentry `session_id` correlation key). */
+  sessionId?: string;
+  /** Routing/session key (channel/thread identity); reported as its own field. */
   sessionKey?: string;
   error: string;
 };

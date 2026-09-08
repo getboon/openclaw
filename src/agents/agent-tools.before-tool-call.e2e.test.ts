@@ -83,6 +83,7 @@ describe("before_tool_call loop detection behavior", () => {
   let hookRunner: {
     hasHooks: ReturnType<typeof vi.fn>;
     runBeforeToolCall: ReturnType<typeof vi.fn>;
+    runBeforeToolCallHookFailed: ReturnType<typeof vi.fn>;
   };
   const enabledLoopDetectionContext = {
     agentId: "main",
@@ -1006,6 +1007,7 @@ describe("before_tool_call requireApproval handling", () => {
   let hookRunner: {
     hasHooks: ReturnType<typeof vi.fn>;
     runBeforeToolCall: ReturnType<typeof vi.fn>;
+    runBeforeToolCallHookFailed: ReturnType<typeof vi.fn>;
   };
   const mockCallGateway = vi.mocked(callGatewayTool);
 

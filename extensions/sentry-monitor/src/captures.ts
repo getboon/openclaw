@@ -225,8 +225,10 @@ export function buildBeforeToolCallHookFailedCapture(
       event.toolName,
       normalizeFingerprintText(event.error),
     ),
-    contexts: { run: runContext(event.runId, event.sessionKey) },
-    extra: { tool_call_id: event.toolCallId },
+    // Correlate by the actual session id; keep the routing key under its own
+    // field rather than mislabeling it as `session_id`.
+    contexts: { run: runContext(event.runId, event.sessionId) },
+    extra: { tool_call_id: event.toolCallId, session_key: event.sessionKey },
   };
 }
 

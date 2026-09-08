@@ -1356,6 +1356,7 @@ export async function runBeforeToolCallHook(args: {
             toolName,
             ...(args.toolCallId && { toolCallId: args.toolCallId }),
             ...(args.ctx?.runId && { runId: args.ctx.runId }),
+            ...(args.ctx?.sessionId && { sessionId: args.ctx.sessionId }),
             ...(args.ctx?.sessionKey && { sessionKey: args.ctx.sessionKey }),
             error: causeText,
           },
