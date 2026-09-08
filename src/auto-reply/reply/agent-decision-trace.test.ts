@@ -157,6 +157,7 @@ describe("buildAgentDecisionTrace", () => {
         ],
         unrecoveredFailures: 0,
       },
+      payloads: [{ text: "The work is complete." }],
     });
 
     expect(trace.disposition).toBe("completed");
@@ -174,6 +175,42 @@ describe("buildAgentDecisionTrace", () => {
       tool: "sessions_spawn",
       status: "error",
     });
+  });
+
+  it("keeps a recovered failure partial when the terminal tool is not message", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 2,
+        tools: ["sessions_spawn", "exec"],
+        failures: 1,
+        invocations: [
+          { name: "sessions_spawn", status: "error" },
+          { name: "exec", status: "ok" },
+        ],
+        unrecoveredFailures: 0,
+      },
+      payloads: [{ text: "The work is complete." }],
+    });
+
+    expect(trace.reason).toBe("tool_execution_partial");
+  });
+
+  it("keeps a recovered failure partial when the final answer is blank", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 2,
+        tools: ["exec", "message"],
+        failures: 1,
+        invocations: [
+          { name: "exec", status: "error" },
+          { name: "message", status: "ok" },
+        ],
+        unrecoveredFailures: 0,
+      },
+      payloads: [{ text: "   " }],
+    });
+
+    expect(trace.reason).toBe("tool_execution_partial");
   });
 
   it("keeps reporting partial while a failure is still unrecovered", () => {
@@ -300,6 +337,54 @@ describe("attachAgentDecisionTrace", () => {
 
     expect(attachAgentDecisionTrace(payloads, auditTrace)).toEqual([
       { text: "answer", auditTrace },
+      { text: "\u21bb One step didn't finish.", isError: true },
+    ]);
+  });
+
+  it("does not treat a blank payload as an answer ahead of a warning", () => {
+    const payloads = [{ text: "   " }, { text: "\u21bb One step didn't finish.", isError: true }];
+    const auditTrace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["message"],
+        failures: 1,
+        invocations: [{ name: "message", status: "error" }],
+      },
+    });
+
+    expect(attachAgentDecisionTrace(payloads, auditTrace)).toEqual([
+      { text: "   " },
+      { text: "\u21bb One step didn't finish.", auditTrace, isError: true },
+    ]);
+  });
+
+  it("does not attach the trace when the only payload is blank", () => {
+    const payloads = [{ text: "   " }];
+    const auditTrace = buildAgentDecisionTrace({});
+
+    expect(attachAgentDecisionTrace(payloads, auditTrace)).toEqual(payloads);
+  });
+
+  it("still treats a media-only payload as a traceable answer", () => {
+    const payloads = [
+      { text: "   ", mediaUrls: ["https://example.com/result.png"] },
+      { text: "\u21bb One step didn't finish.", isError: true },
+    ];
+    const auditTrace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["message"],
+        failures: 1,
+        invocations: [{ name: "message", status: "error" }],
+      },
+    });
+
+    expect(attachAgentDecisionTrace(payloads, auditTrace)).toEqual([
+      {
+        text: "   ",
+        mediaUrls: ["https://example.com/result.png"],
+        auditTrace,
+      },
       { text: "\u21bb One step didn't finish.", isError: true },
     ]);
   });

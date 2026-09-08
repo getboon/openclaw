@@ -1,4 +1,5 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { hasReplyPayloadContent } from "../../interactive/payload.js";
 import { copyReplyPayloadMetadata } from "../reply-payload.js";
 import type { AgentDecisionTrace, ReplyPayload } from "../reply-payload.js";
 
@@ -55,12 +56,38 @@ function normalizeNames(values: readonly string[] | undefined): string[] {
     .slice(0, MAX_TRACE_ITEMS);
 }
 
+function isTraceablePayload(payload: ReplyPayload): boolean {
+  return (
+    payload.isReasoning !== true &&
+    // `boon` has no `isCommentary` payload concept (present on upstream `main`).
+    // Preserve #80's exclusion via a widening read so it self-heals if added.
+    (payload as { isCommentary?: boolean }).isCommentary !== true &&
+    payload.isStatusNotice !== true
+  );
+}
+
+function isUsableAnswerPayload(payload: ReplyPayload): boolean {
+  return (
+    isTraceablePayload(payload) &&
+    payload.isError !== true &&
+    hasReplyPayloadContent(payload, { trimText: true, hasChannelData: false })
+  );
+}
+
+function hasTraceablePayloadContent(payload: ReplyPayload): boolean {
+  return (
+    isTraceablePayload(payload) &&
+    hasReplyPayloadContent(payload, { trimText: true, hasChannelData: false })
+  );
+}
+
 /** Projects runtime-owned facts into the portable, chain-of-thought-free audit contract. */
 export function buildAgentDecisionTrace(params: {
   toolSummary?: ToolSummary;
   completion?: { refusal?: boolean };
   error?: unknown;
   failureSignal?: { kind?: string; code?: string };
+  payloads?: readonly ReplyPayload[];
 }): AgentDecisionTrace {
   const visibleTools = normalizeNames(params.toolSummary?.visibleTools);
   // Normalize the FULL invocation set first and derive the disposition from it,
@@ -80,10 +107,19 @@ export function buildAgentDecisionTrace(params: {
   const permissionRequired =
     params.failureSignal?.kind === "execution_denied" ||
     params.failureSignal?.code === "SYSTEM_RUN_DENIED";
+  const terminalInvocation = allInvocations.at(-1);
+  const hasSuccessfulTerminalMessage =
+    terminalInvocation?.name === "message" && terminalInvocation.status === "ok";
+  const hasUsableAnswer = params.payloads?.some(isUsableAnswerPayload) === true;
   // Only runtime-confirmed retries can promote errored calls to recovered.
-  // Blocked calls never ran, so they always remain partial.
+  // Blocked calls never ran, so they always remain partial. Recovery also
+  // requires durable terminal delivery evidence and a usable assistant answer.
   const recoveredEveryFailure =
-    failedCalls > 0 && blockedCalls === 0 && params.toolSummary?.unrecoveredFailures === 0;
+    failedCalls > 0 &&
+    blockedCalls === 0 &&
+    params.toolSummary?.unrecoveredFailures === 0 &&
+    hasSuccessfulTerminalMessage &&
+    hasUsableAnswer;
 
   let decision: Pick<AgentDecisionTrace, "confidence" | "disposition" | "reason">;
   if (permissionRequired) {
@@ -158,18 +194,11 @@ export function attachAgentDecisionTrace(
   payloads: readonly ReplyPayload[],
   auditTrace: AgentDecisionTrace,
 ): ReplyPayload[] {
-  const isTraceable = (payload: ReplyPayload): boolean =>
-    payload.isReasoning !== true &&
-    // `boon` has no `isCommentary` payload concept (present on upstream `main`).
-    // Preserve #80's exclusion via a widening read so it self-heals if added.
-    (payload as { isCommentary?: boolean }).isCommentary !== true &&
-    payload.isStatusNotice !== true;
   // Prefer a real answer over a trailing warning. Fall back to the warning
   // when it is the turn's only traceable payload.
-  const answerIndex = payloads.findLastIndex(
-    (payload) => isTraceable(payload) && payload.isError !== true,
-  );
-  const targetIndex = answerIndex >= 0 ? answerIndex : payloads.findLastIndex(isTraceable);
+  const answerIndex = payloads.findLastIndex(isUsableAnswerPayload);
+  const targetIndex =
+    answerIndex >= 0 ? answerIndex : payloads.findLastIndex(hasTraceablePayloadContent);
   if (targetIndex < 0) {
     return [...payloads];
   }

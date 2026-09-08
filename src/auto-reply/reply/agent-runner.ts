@@ -2426,6 +2426,7 @@ export async function runReplyAgent(params: {
           completion,
           error: runResult.meta?.error,
           failureSignal: runResult.meta?.failureSignal,
+          payloads: finalPayloads,
         }),
       );
     }
