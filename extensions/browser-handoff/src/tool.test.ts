@@ -26,7 +26,11 @@ vi.mock("openclaw/plugin-sdk/browser-profile-config", () => ({
 }));
 
 import { browserHandoffScheduleTag } from "./state.js";
-import { executeBrowserHandoffTool, executeBrowserHandoffToolFromArgs } from "./tool.js";
+import {
+  CLEAR_RECHECK_RETRY_DELAY_MS,
+  executeBrowserHandoffTool,
+  executeBrowserHandoffToolFromArgs,
+} from "./tool.js";
 
 const exampleComTag = browserHandoffScheduleTag("example.com");
 
@@ -454,7 +458,7 @@ describe("browser-handoff tool", () => {
           { action: "request_login", site: "example.com" },
           { sessionKey },
         );
-        await vi.advanceTimersByTimeAsync(200);
+        await vi.advanceTimersByTimeAsync(CLEAR_RECHECK_RETRY_DELAY_MS);
         const result = await resultPromise;
 
         expect(unscheduleSessionTurnsByTag).toHaveBeenCalledTimes(2);

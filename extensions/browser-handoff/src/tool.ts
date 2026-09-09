@@ -64,7 +64,7 @@ function nextRecheckDelayMs(previousCheckCount: number): number {
 // permanently stop the recheck chain -- handleStatus is the only place
 // that reschedules, so giving up on the first failure ends it for good.
 const CLEAR_RECHECK_RETRY_ATTEMPTS = 3;
-const CLEAR_RECHECK_RETRY_DELAY_MS = 200;
+export const CLEAR_RECHECK_RETRY_DELAY_MS = 200;
 
 function sleepBeforeRetry(ms: number): Promise<void> {
   return new Promise((resolve) => {
