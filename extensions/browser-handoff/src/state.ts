@@ -1,9 +1,15 @@
 // Browser Login Handoff state keyed by site, persisted through the plugin state store.
 export const BROWSER_HANDOFF_STATE_NAMESPACE = "handoffs";
 export const BROWSER_HANDOFF_STATE_MAX_ENTRIES = 512;
-// Anchor identity tokens observed at 15-minute expiry; give the human generous
-// slack to complete login/2FA before the handoff record is swept.
-export const BROWSER_HANDOFF_STATE_DEFAULT_TTL_MS = 60 * 60 * 1000;
+// A single handoff can legitimately run well past the Anchor sign-in link's
+// own 15-minute token expiry: boon-core's async profile-snapshot step alone
+// has been observed taking ~20 minutes after a real sign-in, on top of
+// however long the human takes with their own login/2FA. Kept above
+// tool.ts's MAX_TOTAL_WAIT_MS so that explicit, actionable "may have expired"
+// check always fires before this KV TTL silently sweeps the record out from
+// under a still-legitimate handoff (which otherwise dead-ends into "no
+// pending handoff found" without ever re-checking boon-core).
+export const BROWSER_HANDOFF_STATE_DEFAULT_TTL_MS = 4 * 60 * 60 * 1000;
 
 export type BrowserHandoffStatus = "pending" | "ready" | "failed";
 

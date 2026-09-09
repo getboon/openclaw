@@ -351,7 +351,7 @@ describe("browser-handoff tool", () => {
         );
         scheduleSessionTurn.mockClear();
 
-        vi.advanceTimersByTime(31 * 60_000); // past the 30-minute max wait
+        vi.advanceTimersByTime(181 * 60_000); // past the 180-minute max wait
         pollBrowserHandoffStatusMock.mockResolvedValue({ status: "pending" });
         const result = await executeBrowserHandoffTool(
           api,
@@ -434,6 +434,35 @@ describe("browser-handoff tool", () => {
         expect.objectContaining({ sessionKey: runSessionKey }),
       );
     });
+
+    it(
+      "retries clearing the previous schedule after a transient failure, instead of giving up on " +
+        "the whole recheck chain forever -- a live-observed failure mode where one failed cleanup " +
+        "call (e.g. the cron service being transiently unavailable) used to silently stop every " +
+        "future recheck for this handoff, with nothing ever trying again",
+      async () => {
+        requestBrowserLoginHandoffMock.mockResolvedValue({
+          handoffToken: "tok_123",
+          liveViewUrl: "https://live.example/view",
+        });
+        const scheduleSessionTurn = vi.fn().mockResolvedValue({ id: "job_1" });
+        const unscheduleSessionTurnsByTag = vi
+          .fn()
+          .mockResolvedValueOnce({ removed: 0, failed: 1 })
+          .mockResolvedValueOnce({ removed: 0, failed: 0 });
+        const api = createApi({ scheduleSessionTurn, unscheduleSessionTurnsByTag });
+
+        const result = await executeBrowserHandoffTool(
+          api,
+          { action: "request_login", site: "example.com" },
+          { sessionKey },
+        );
+
+        expect(unscheduleSessionTurnsByTag).toHaveBeenCalledTimes(2);
+        expect(scheduleSessionTurn).toHaveBeenCalledTimes(1);
+        expect(result.content[0].text).toContain("resumed automatically");
+      },
+    );
 
     it("does not reschedule and clears the schedule tag once the handoff fails", async () => {
       requestBrowserLoginHandoffMock.mockResolvedValue({
