@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/image-generation-core",
-  "version": "2026.6.11-boon.38",
+  "version": "2026.6.11-boon.39",
   "private": true,
   "description": "OpenClaw image generation runtime package",
   "type": "module",
