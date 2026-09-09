@@ -1499,7 +1499,7 @@ export function classifyProviderRuntimeFailureKind(
   // status": a bare-status Cloudflare JS-challenge interstitial or a plain
   // upstream 5xx CDN page also carries these markers but is legitimately the
   // existing upstream_html bucket, not this fork's specific auth-miscooldown
-  // bug (ENG-16835).
+  // bug.
   if ((status === 401 || status === 403) && message && isEdgeWafBlockPage(message)) {
     return "edge_blocked";
   }

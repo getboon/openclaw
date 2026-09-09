@@ -25,8 +25,8 @@ export function resolveAuthProfileFailureReason(params: {
   // reliability signal. Cascading it to a profile cooldown blocks every other
   // healthy session sharing the same auth profile and, when all profiles share
   // the same fault, takes down the entire provider for the configured backoff
-  // window (#77228). A CDN/WAF edge block (ENG-16835) is the same class of bug
-  // via a different path: it is a gateway-edge property, not evidence the auth
+  // window (#77228). A CDN/WAF edge block is the same class of bug via a
+  // different path: it is a gateway-edge property, not evidence the auth
   // profile itself is unhealthy, so it must not cool down/disable it either.
   if (
     params.policy === "local" ||

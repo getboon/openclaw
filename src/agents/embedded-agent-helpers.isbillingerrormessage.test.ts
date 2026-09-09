@@ -801,10 +801,10 @@ describe("edge/WAF HTML 429 handling (ENG-14852)", () => {
   });
 
   it("tags the edge 429 as upstream_html for observability", () => {
-    // The edge_blocked *kind* is scoped to 401/403 (see the ENG-16835 tests
-    // below) to avoid reclassifying a generic upstream 5xx/429 CDN page that
-    // happens to share a block-page marker; the 429 *reason* is still the
-    // fixed "timeout", not "rate_limit" — that's what ENG-14852 shipped.
+    // The edge_blocked *kind* is scoped to 401/403 (see the tests below) to
+    // avoid reclassifying a generic upstream 5xx/429 CDN page that happens to
+    // share a block-page marker; the 429 *reason* is still the fixed
+    // "timeout", not "rate_limit" — that's what already shipped here.
     expect(classifyProviderRuntimeFailureKind({ status: 429, message: EDGE_HTML_429 })).toBe(
       "upstream_html",
     );
@@ -820,10 +820,10 @@ describe("edge/WAF HTML 429 handling (ENG-14852)", () => {
   });
 
   it("classifies a truncated 403 block-page snippet as edge_blocked, not auth", () => {
-    // This is the production shape of ENG-16835's underlying incident: a
-    // Cloudflare WAF 403 relayed by boon-llm-gateway, truncated by the
-    // transport before `</html>` — must not be misread as an auth failure
-    // (which would cool down/disable an otherwise-healthy auth profile).
+    // This is the production shape of the underlying incident: a Cloudflare
+    // WAF 403 relayed by boon-llm-gateway, truncated by the transport before
+    // `</html>` — must not be misread as an auth failure (which would cool
+    // down/disable an otherwise-healthy auth profile).
     const truncated403 = "403 <!doctype html><html><head><title>Blocked</title></head><body>";
     expect(classifyFailoverReasonFromHttpStatus(403, truncated403)).toBe("edge_blocked");
     expect(classifyProviderRuntimeFailureKind({ status: 403, message: truncated403 })).toBe(

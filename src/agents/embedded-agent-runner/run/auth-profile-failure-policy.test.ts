@@ -127,7 +127,7 @@ describe("resolveAuthProfileFailureReason", () => {
     ).toBeNull();
   });
 
-  it("does not persist a CDN/WAF edge block as auth-profile health (ENG-16835)", () => {
+  it("does not persist a CDN/WAF edge block as auth-profile health", () => {
     // A gateway-edge WAF block is not evidence the auth profile itself is
     // unhealthy — it must not cool down/disable an otherwise-healthy profile.
     expect(

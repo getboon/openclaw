@@ -107,7 +107,7 @@ describe("resolveRunFailoverDecision", () => {
     });
   });
 
-  it("surfaces a prompt-stage edge block instead of rotating or falling back (ENG-16835)", () => {
+  it("surfaces a prompt-stage edge block instead of rotating or falling back", () => {
     // A CDN/WAF block is content-based and deterministic — the same request
     // blocks on every model in the ladder, so no amount of profile rotation
     // or fallback hopping recovers it. There is no allowFormatRetry-style
@@ -193,7 +193,7 @@ describe("resolveRunFailoverDecision", () => {
     });
   });
 
-  it("surfaces an assistant-stage edge block instead of rotating or falling back (ENG-16835)", () => {
+  it("surfaces an assistant-stage edge block instead of rotating or falling back", () => {
     expect(
       resolveRunFailoverDecision({
         stage: "assistant",

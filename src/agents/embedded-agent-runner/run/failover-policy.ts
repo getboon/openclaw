@@ -105,7 +105,10 @@ function isTerminalNonRetryableFailure(params: {
   failoverFailure: boolean;
   failoverReason: FailoverReason | null;
 }): boolean {
-  return isTerminalFormatFailure(params) || params.failoverReason === "edge_blocked";
+  return (
+    isTerminalFormatFailure(params) ||
+    (params.failoverFailure && params.failoverReason === "edge_blocked")
+  );
 }
 
 function shouldRotatePrompt(params: PromptDecisionParams): boolean {

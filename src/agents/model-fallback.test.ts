@@ -624,7 +624,7 @@ describe("runWithModelFallback", () => {
     }
   });
 
-  it("aborts the whole ladder on an edge block instead of walking remaining candidates (ENG-16835)", async () => {
+  it("aborts the whole ladder on an edge block instead of walking remaining candidates", async () => {
     // A CDN/WAF edge block is content-based: the same request body is blocked
     // at the gateway edge before any model-specific routing happens, so every
     // remaining candidate behind the same gateway would hit the identical
@@ -674,7 +674,7 @@ describe("runWithModelFallback", () => {
     ]);
   });
 
-  it("does not treat an edge-blocked candidate as a persistent auth issue (ENG-16835)", async () => {
+  it("does not treat an edge-blocked candidate as a persistent auth issue", async () => {
     // A CDN/WAF edge block must never be lumped in with "auth" — that would
     // write it into the auth-skip cache and cool down/disable an otherwise
     // healthy candidate on a single content-based block. Unlike the "auth"

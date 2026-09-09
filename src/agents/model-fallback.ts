@@ -1802,14 +1802,6 @@ async function runWithModelFallbackInternal<T>(
       if (isMissingAgentHarnessError(err)) {
         throw err;
       }
-      // A CDN/WAF edge block (ENG-16835) is content-based: the same request
-      // body is blocked at the gateway edge before any model-specific routing
-      // happens, so every remaining candidate hits the identical block. Abort
-      // the ladder here instead of burning through N more doomed candidates —
-      // same rationale as the non-provider-runtime-coordination check above.
-      if (describeFailoverError(err).reason === "edge_blocked") {
-        throw err;
-      }
       const normalized =
         coerceToFailoverError(err, {
           provider: candidate.provider,
@@ -1817,6 +1809,35 @@ async function runWithModelFallbackInternal<T>(
           sessionId: params.sessionId,
           lane: params.lane,
         }) ?? err;
+
+      // A CDN/WAF edge block is content-based: the same request body is
+      // blocked at the gateway edge before any model-specific routing happens,
+      // so every remaining candidate hits the identical block. Abort the
+      // ladder here instead of burning through N more doomed candidates —
+      // same rationale as the non-provider-runtime-coordination check above.
+      // nextCandidate is explicitly undefined (not candidates[i + 1]): the
+      // ladder is aborting here, not moving on, so this must record as the
+      // true chain-exhaustion event — fleet metrics, the Loki exhaustion
+      // alert, and fallback-step consumers all key off that outcome.
+      if (describeFailoverError(err).reason === "edge_blocked") {
+        await observeFailedCandidate({
+          attempts,
+          candidate,
+          error: normalized,
+          runId: params.runId,
+          sessionId: params.sessionId,
+          lane: params.lane,
+          requestedProvider: params.provider,
+          requestedModel: params.model,
+          attempt: i + 1,
+          total: candidates.length,
+          nextCandidate: undefined,
+          isPrimary,
+          requestedModelMatched: requestedModel,
+          fallbackConfigured: hasFallbackCandidates,
+        });
+        throw err;
+      }
 
       // LiveSessionModelSwitchError during fallback may point at a later
       // candidate that is already the active live-session selection.  Jump
