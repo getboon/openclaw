@@ -1810,15 +1810,9 @@ async function runWithModelFallbackInternal<T>(
           lane: params.lane,
         }) ?? err;
 
-      // A CDN/WAF edge block is content-based: the same request body is
-      // blocked at the gateway edge before any model-specific routing happens,
-      // so every remaining candidate hits the identical block. Abort the
-      // ladder here instead of burning through N more doomed candidates —
-      // same rationale as the non-provider-runtime-coordination check above.
-      // nextCandidate is explicitly undefined (not candidates[i + 1]): the
-      // ladder is aborting here, not moving on, so this must record as the
-      // true chain-exhaustion event — fleet metrics, the Loki exhaustion
-      // alert, and fallback-step consumers all key off that outcome.
+      // A CDN/WAF edge block is deterministic: every remaining candidate hits
+      // the same block, so abort the ladder immediately. nextCandidate is
+      // left undefined to record this as chain-exhaustion, not a normal hop.
       if (describeFailoverError(err).reason === "edge_blocked") {
         await observeFailedCandidate({
           attempts,
