@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.39
+
+Surfaces a swallowed `before_tool_call` hook failure to Sentry and the durable audit trace instead of only a bare "blocked" status, so the class of incident that produced ENG-19492 ("Thread tangled — tools aren't landing") is diagnosable after the fact.
+
+- **#209 (ENG-19492):** a `before_tool_call` hook that threw an unhandled exception was reported downstream only as the bare status `blocked`; the real error text reached only a local gateway log that rotates within ~2 days, so the customer-facing P0 on Egan Company's agent was effectively undiagnosable after the fact. The gateway now emits a `before_tool_call_hook_failed` observability hook — fired **only** on a genuine handler exception (`kind: "failure"`), never for a deliberate policy veto (loop-breaker/approval-required/plugin `block`) — which the bundled `sentry-monitor` pages on, and threads the real error text through `AgentDecisionTrace` as an optional `detail` field into boon-core's durable `audit_trace`. Non-hook pipeline failures (trusted-policy / approval / skill-workshop) are classified separately and do **not** fire the hook-failed signal or pollute its Sentry bucket. **Requires the boon-core companion `getboon/boon#14629` (already merged and live in production)**, which widens the `/api/v1/agent/callback` validator to accept the new `detail` field; without it a hook-failure callback would 400 and drop the whole turn's reply. The `detail` is bounded (500 chars, UTF-16-safe) and scrubbed by boon-core before persistence.
+- **#208:** legacy tool counts are derived from surfaced failures so per-turn tool accounting stays correct.
+- Base = `2026.6.11-boon.38`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.39` in lockstep. No other code changes; #208 and #209 were merged onto `boon` before this release. The fleet is currently pinned to `boon.36`, so a roll to `boon.39` also picks up the `boon.37` (#194–#198) and `boon.38` (#201, #202, #205) contents.
+
 ## 2026.6.11-boon.38
 
 Lets a channel plugin own the reply to a sub-agent completion so Boon web chat renders it like any other reply, keeps a `message` send issued alongside `sessions_yield` from being aborted, and carries the upstream fix for `reply session initialization conflicted` on threaded web chat.

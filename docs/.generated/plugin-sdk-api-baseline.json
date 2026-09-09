@@ -10489,7 +10489,7 @@
           "exportName": "PluginHookReplyDispatchContext",
           "kind": "type",
           "source": {
-            "line": 518,
+            "line": 520,
             "path": "src/plugins/hook-types.ts"
           }
         },
@@ -10498,7 +10498,7 @@
           "exportName": "PluginHookReplyDispatchEvent",
           "kind": "type",
           "source": {
-            "line": 495,
+            "line": 497,
             "path": "src/plugins/hook-types.ts"
           }
         },
@@ -10507,7 +10507,7 @@
           "exportName": "PluginHookReplyDispatchResult",
           "kind": "type",
           "source": {
-            "line": 533,
+            "line": 535,
             "path": "src/plugins/hook-types.ts"
           }
         },
@@ -10516,7 +10516,7 @@
           "exportName": "PluginHookReplyPayload",
           "kind": "type",
           "source": {
-            "line": 619,
+            "line": 621,
             "path": "src/plugins/hook-types.ts"
           }
         },
@@ -10525,7 +10525,7 @@
           "exportName": "PluginHookReplyPayloadSendingContext",
           "kind": "type",
           "source": {
-            "line": 620,
+            "line": 622,
             "path": "src/plugins/hook-types.ts"
           }
         },
@@ -10534,7 +10534,7 @@
           "exportName": "PluginHookReplyPayloadSendingEvent",
           "kind": "type",
           "source": {
-            "line": 606,
+            "line": 608,
             "path": "src/plugins/hook-types.ts"
           }
         },
@@ -10543,7 +10543,7 @@
           "exportName": "PluginHookReplyPayloadSendingResult",
           "kind": "type",
           "source": {
-            "line": 622,
+            "line": 624,
             "path": "src/plugins/hook-types.ts"
           }
         },
@@ -12155,7 +12155,7 @@
           "exportName": "PluginHookInboundClaimResult",
           "kind": "type",
           "source": {
-            "line": 457,
+            "line": 459,
             "path": "src/plugins/hook-types.ts"
           }
         },
@@ -14950,7 +14950,7 @@
           "exportName": "buildTtsSupplementMediaPayload",
           "kind": "function",
           "source": {
-            "line": 181,
+            "line": 190,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15004,7 +15004,7 @@
           "exportName": "getReplyPayloadToolFailureDigest",
           "kind": "function",
           "source": {
-            "line": 269,
+            "line": 278,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15013,7 +15013,7 @@
           "exportName": "getReplyPayloadTtsSupplement",
           "kind": "function",
           "source": {
-            "line": 136,
+            "line": 145,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15049,7 +15049,7 @@
           "exportName": "isFastModeAutoProgressPayload",
           "kind": "function",
           "source": {
-            "line": 98,
+            "line": 107,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15076,7 +15076,7 @@
           "exportName": "isReplyPayloadNonTerminalToolErrorWarning",
           "kind": "function",
           "source": {
-            "line": 264,
+            "line": 273,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15085,7 +15085,7 @@
           "exportName": "isReplyPayloadTtsSupplement",
           "kind": "function",
           "source": {
-            "line": 152,
+            "line": 161,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15094,7 +15094,7 @@
           "exportName": "markReplyPayloadAsTtsSupplement",
           "kind": "function",
           "source": {
-            "line": 159,
+            "line": 168,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15202,7 +15202,7 @@
           "exportName": "FAST_MODE_AUTO_PROGRESS_KIND",
           "kind": "const",
           "source": {
-            "line": 96,
+            "line": 105,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15256,7 +15256,7 @@
           "exportName": "ReplyPayloadTtsSupplement",
           "kind": "type",
           "source": {
-            "line": 103,
+            "line": 112,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
