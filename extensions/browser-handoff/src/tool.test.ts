@@ -435,12 +435,9 @@ describe("browser-handoff tool", () => {
       );
     });
 
-    it(
-      "retries clearing the previous schedule after a transient failure, instead of giving up on " +
-        "the whole recheck chain forever -- a live-observed failure mode where one failed cleanup " +
-        "call (e.g. the cron service being transiently unavailable) used to silently stop every " +
-        "future recheck for this handoff, with nothing ever trying again",
-      async () => {
+    it("retries clearing the previous schedule after a transient failure", async () => {
+      vi.useFakeTimers();
+      try {
         requestBrowserLoginHandoffMock.mockResolvedValue({
           handoffToken: "tok_123",
           liveViewUrl: "https://live.example/view",
@@ -452,17 +449,21 @@ describe("browser-handoff tool", () => {
           .mockResolvedValueOnce({ removed: 0, failed: 0 });
         const api = createApi({ scheduleSessionTurn, unscheduleSessionTurnsByTag });
 
-        const result = await executeBrowserHandoffTool(
+        const resultPromise = executeBrowserHandoffTool(
           api,
           { action: "request_login", site: "example.com" },
           { sessionKey },
         );
+        await vi.advanceTimersByTimeAsync(200);
+        const result = await resultPromise;
 
         expect(unscheduleSessionTurnsByTag).toHaveBeenCalledTimes(2);
         expect(scheduleSessionTurn).toHaveBeenCalledTimes(1);
         expect(result.content[0].text).toContain("resumed automatically");
-      },
-    );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
 
     it("does not reschedule and clears the schedule tag once the handoff fails", async () => {
       requestBrowserLoginHandoffMock.mockResolvedValue({

@@ -60,15 +60,9 @@ function nextRecheckDelayMs(previousCheckCount: number): number {
   return Math.min(delay, MAX_RECHECK_DELAY_MS);
 }
 
-// Live-observed failure mode: `clearScheduledRecheck` can report a failure
-// for reasons that have nothing to do with an actual overlapping schedule
-// (e.g. `unscheduleSessionTurnsByTag`'s underlying cron service being
-// transiently unavailable for one call) -- and scheduleRecheck used to give
-// up permanently on the very first such report, with nothing ever retrying.
-// Once that happened, the whole recheck chain went silent forever, since
-// handleStatus (the only place that reschedules) has no other trigger. A
-// few quick retries turn one transient hiccup into a non-event instead of a
-// dead handoff.
+// Retry failed cleanup briefly so a transient cron error does not
+// permanently stop the recheck chain -- handleStatus is the only place
+// that reschedules, so giving up on the first failure ends it for good.
 const CLEAR_RECHECK_RETRY_ATTEMPTS = 3;
 const CLEAR_RECHECK_RETRY_DELAY_MS = 200;
 
