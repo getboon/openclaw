@@ -43,17 +43,33 @@ export type BrowserHandoffToolContext = {
 
 // Recheck backoff: fast at first (a human might finish a plain login in
 // seconds), backing off because most of the wait is 2FA/CAPTCHA the human is
-// actively doing, not something worth polling tightly for. The 30-minute cap
-// matches the ticket's realistic "human got distracted or gave up" window,
-// not Anchor's own 15-minute token expiry (that's boon-core's concern).
+// actively doing, not something worth polling tightly for. The total-wait cap
+// matches Anchor's own default session max_duration (180 minutes, confirmed
+// against docs.anchorbrowser.io/advanced/session-timeout) rather than an
+// arbitrary "human gave up" guess: boon-core's async profile-snapshot step
+// has been observed taking ~20+ minutes on its own after a real sign-in, and
+// waiting past Anchor's own hard session cap has no upside anyway, since
+// that underlying session is gone regardless of what this cap says.
 const FIRST_RECHECK_DELAY_MS = 30_000;
 const MAX_RECHECK_DELAY_MS = 5 * 60_000;
 const RECHECK_BACKOFF_MULTIPLIER = 2;
-const MAX_TOTAL_WAIT_MS = 30 * 60_000;
+const MAX_TOTAL_WAIT_MS = 180 * 60_000;
 
 function nextRecheckDelayMs(previousCheckCount: number): number {
   const delay = FIRST_RECHECK_DELAY_MS * RECHECK_BACKOFF_MULTIPLIER ** previousCheckCount;
   return Math.min(delay, MAX_RECHECK_DELAY_MS);
+}
+
+// Retry failed cleanup briefly so a transient cron error does not
+// permanently stop the recheck chain -- handleStatus is the only place
+// that reschedules, so giving up on the first failure ends it for good.
+const CLEAR_RECHECK_RETRY_ATTEMPTS = 3;
+export const CLEAR_RECHECK_RETRY_DELAY_MS = 200;
+
+function sleepBeforeRetry(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 /**
@@ -93,7 +109,14 @@ async function scheduleRecheck(
   if (!sessionKey) {
     return false;
   }
-  const cleared = await clearScheduledRecheck(api, context, params.site);
+  let cleared = false;
+  for (let attempt = 1; attempt <= CLEAR_RECHECK_RETRY_ATTEMPTS; attempt++) {
+    cleared = await clearScheduledRecheck(api, context, params.site);
+    if (cleared || attempt === CLEAR_RECHECK_RETRY_ATTEMPTS) {
+      break;
+    }
+    await sleepBeforeRetry(CLEAR_RECHECK_RETRY_DELAY_MS);
+  }
   if (!cleared) {
     return false;
   }

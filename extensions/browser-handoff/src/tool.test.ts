@@ -26,7 +26,11 @@ vi.mock("openclaw/plugin-sdk/browser-profile-config", () => ({
 }));
 
 import { browserHandoffScheduleTag } from "./state.js";
-import { executeBrowserHandoffTool, executeBrowserHandoffToolFromArgs } from "./tool.js";
+import {
+  CLEAR_RECHECK_RETRY_DELAY_MS,
+  executeBrowserHandoffTool,
+  executeBrowserHandoffToolFromArgs,
+} from "./tool.js";
 
 const exampleComTag = browserHandoffScheduleTag("example.com");
 
@@ -351,7 +355,7 @@ describe("browser-handoff tool", () => {
         );
         scheduleSessionTurn.mockClear();
 
-        vi.advanceTimersByTime(31 * 60_000); // past the 30-minute max wait
+        vi.advanceTimersByTime(181 * 60_000); // past the 180-minute max wait
         pollBrowserHandoffStatusMock.mockResolvedValue({ status: "pending" });
         const result = await executeBrowserHandoffTool(
           api,
@@ -433,6 +437,36 @@ describe("browser-handoff tool", () => {
       expect(scheduleSessionTurn).toHaveBeenCalledWith(
         expect.objectContaining({ sessionKey: runSessionKey }),
       );
+    });
+
+    it("retries clearing the previous schedule after a transient failure", async () => {
+      vi.useFakeTimers();
+      try {
+        requestBrowserLoginHandoffMock.mockResolvedValue({
+          handoffToken: "tok_123",
+          liveViewUrl: "https://live.example/view",
+        });
+        const scheduleSessionTurn = vi.fn().mockResolvedValue({ id: "job_1" });
+        const unscheduleSessionTurnsByTag = vi
+          .fn()
+          .mockResolvedValueOnce({ removed: 0, failed: 1 })
+          .mockResolvedValueOnce({ removed: 0, failed: 0 });
+        const api = createApi({ scheduleSessionTurn, unscheduleSessionTurnsByTag });
+
+        const resultPromise = executeBrowserHandoffTool(
+          api,
+          { action: "request_login", site: "example.com" },
+          { sessionKey },
+        );
+        await vi.advanceTimersByTimeAsync(CLEAR_RECHECK_RETRY_DELAY_MS);
+        const result = await resultPromise;
+
+        expect(unscheduleSessionTurnsByTag).toHaveBeenCalledTimes(2);
+        expect(scheduleSessionTurn).toHaveBeenCalledTimes(1);
+        expect(result.content[0].text).toContain("resumed automatically");
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("does not reschedule and clears the schedule tag once the handoff fails", async () => {
