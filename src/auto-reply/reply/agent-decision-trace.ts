@@ -145,6 +145,7 @@ export function buildAgentDecisionTrace(params: {
   const recoveredEveryFailure =
     failedCalls > 0 &&
     blockedCalls === 0 &&
+    partialCalls === 0 &&
     params.toolSummary?.unrecoveredFailures === 0 &&
     hasSuccessfulTerminalMessage &&
     hasUsableAnswer;

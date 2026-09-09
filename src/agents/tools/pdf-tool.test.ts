@@ -928,6 +928,60 @@ describe("createPdfTool", () => {
     });
   });
 
+  it("adds the coverage warning to a single partial extraction prompt", async () => {
+    await withTempPdfAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, {
+        provider: "openai",
+        api: "openai-responses",
+        input: ["text"],
+      });
+      vi.spyOn(pdfExtractModule, "extractPdfContent").mockImplementation(
+        async ({ pageNumbers }) => {
+          const requestedPages = pageNumbers ?? [];
+          return {
+            text: "A-series sheets only",
+            images: [],
+            coverage: {
+              documentPageCount: 59,
+              requestedPages,
+              pagesProcessed: requestedPages,
+              complete: false,
+              textChars: 20,
+              textBytes: 20,
+              maxTextChars: 200_000,
+              truncationReasons: ["page_limit"],
+            },
+          };
+        },
+      );
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "I found architectural sheets." }],
+      } as never);
+
+      const cfg = {
+        agents: {
+          defaults: {
+            pdfModel: { primary: OPENAI_PDF_MODEL },
+            pdfMaxPages: 10,
+          },
+        },
+      } as OpenClawConfig;
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+
+      await tool.execute("t1", {
+        prompt: "Are there any electrical sheets?",
+        pdf: "/tmp/merged-set.pdf",
+      });
+
+      expect(completeMock).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(completeMock.mock.calls[0]?.[1])).toContain(
+        "must not claim that a sheet",
+      );
+    });
+  });
+
   it("passes password to PDF extraction fallback", async () => {
     await withTempPdfAgentDir(async (agentDir) => {
       await stubPdfToolInfra(agentDir, { provider: "openai", input: ["text"] });

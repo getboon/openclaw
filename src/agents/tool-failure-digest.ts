@@ -46,8 +46,9 @@ function resolveToolCounts(
   if (hasErroredFlags) {
     return {
       totalToolCount: toolMetas.length,
-      completedToolCount: toolMetas.filter((meta) => !meta.errored && meta.status !== "blocked")
-        .length,
+      completedToolCount: toolMetas.filter(
+        (meta) => !meta.errored && meta.status !== "blocked" && meta.status !== "partial",
+      ).length,
     };
   }
   // Current embedded and Codex collectors set per-call outcomes. This branch

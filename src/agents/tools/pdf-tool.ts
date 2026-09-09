@@ -450,7 +450,10 @@ async function runPdfPrompt(params: {
         }
       }
       if (extractions.length <= 1) {
-        const text = await analyzeExtractions(extractions, params.prompt);
+        const text = await analyzeExtractions(
+          extractions,
+          [params.prompt, buildCoverageInstruction(extractionResult.coverage)].join("\n\n"),
+        );
         return {
           text,
           provider,
