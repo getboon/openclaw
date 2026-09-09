@@ -352,6 +352,23 @@ describe("buildAgentDecisionTrace", () => {
 
     expect(trace.reason).toBe("tool_execution_partial");
   });
+
+  it("marks a partial tool result medium-confidence even without an error", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["pdf"],
+        failures: 0,
+        visibleTools: ["pdf"],
+        invocations: [{ name: "pdf", status: "partial" }],
+      },
+    });
+
+    expect(trace.disposition).toBe("completed");
+    expect(trace.reason).toBe("tool_execution_partial");
+    expect(trace.confidence).toBe("medium");
+    expect(trace.evidence).toEqual([{ kind: "tool_outcome", tool: "pdf", status: "partial" }]);
+  });
 });
 
 describe("attachAgentDecisionTrace", () => {

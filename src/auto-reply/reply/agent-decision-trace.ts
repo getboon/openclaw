@@ -11,7 +11,7 @@ type ToolSummary = {
   visibleTools?: string[];
   invocations?: Array<{
     name: string;
-    status: "ok" | "error" | "blocked";
+    status: "ok" | "partial" | "error" | "blocked";
     detail?: string;
   }>;
   /**
@@ -45,8 +45,12 @@ function normalizeTraceToolName(value: unknown): string | undefined {
   return name;
 }
 
-function normalizeTraceToolStatus(value: unknown): "ok" | "error" | "blocked" | undefined {
-  return value === "ok" || value === "error" || value === "blocked" ? value : undefined;
+function normalizeTraceToolStatus(
+  value: unknown,
+): "ok" | "partial" | "error" | "blocked" | undefined {
+  return value === "ok" || value === "partial" || value === "error" || value === "blocked"
+    ? value
+    : undefined;
 }
 
 /** Normalize + bound the pre-execution failure detail; undefined when empty. */
@@ -125,6 +129,7 @@ export function buildAgentDecisionTrace(params: {
     }) ?? [];
   const toolInvocations = allInvocations.slice(0, MAX_TRACE_ITEMS);
   const successfulCalls = allInvocations.filter((entry) => entry.status === "ok").length;
+  const partialCalls = allInvocations.filter((entry) => entry.status === "partial").length;
   const failedCalls = allInvocations.filter((entry) => entry.status === "error").length;
   const blockedCalls = allInvocations.filter((entry) => entry.status === "blocked").length;
   const permissionRequired =
@@ -159,7 +164,7 @@ export function buildAgentDecisionTrace(params: {
     };
   } else if (params.error) {
     decision = { confidence: "high", disposition: "failed", reason: "run_failed" };
-  } else if (failedCalls + blockedCalls > 0 && successfulCalls === 0) {
+  } else if (failedCalls + blockedCalls > 0 && successfulCalls + partialCalls === 0) {
     decision = {
       confidence: "high",
       disposition: "failed",
@@ -173,7 +178,7 @@ export function buildAgentDecisionTrace(params: {
       disposition: "completed",
       reason: "tool_execution_succeeded",
     };
-  } else if (failedCalls + blockedCalls > 0) {
+  } else if (failedCalls + blockedCalls + partialCalls > 0) {
     decision = {
       confidence: "medium",
       disposition: "completed",

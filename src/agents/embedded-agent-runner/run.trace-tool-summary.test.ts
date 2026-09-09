@@ -46,6 +46,22 @@ describe("buildTraceToolSummary", () => {
     });
   });
 
+  it("preserves a partial tool outcome without treating it as an error", () => {
+    expect(
+      buildTraceToolSummary({
+        visibleToolNames: ["pdf"],
+        toolMetas: [{ toolName: "pdf", status: "partial" }],
+        hadFailure: false,
+      }),
+    ).toEqual({
+      calls: 1,
+      tools: ["pdf"],
+      failures: 0,
+      visibleTools: ["pdf"],
+      invocations: [{ name: "pdf", status: "partial" }],
+    });
+  });
+
   it("returns undefined when neither tools were visible nor invoked", () => {
     expect(
       buildTraceToolSummary({

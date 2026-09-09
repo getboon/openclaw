@@ -224,7 +224,7 @@ export type AgentRuntimeReplyPayloadDelivery = {
   pin?: boolean | AgentRuntimeReplyPayloadDeliveryPin;
 };
 
-type AgentRuntimeDecisionTraceToolStatus = "ok" | "error" | "blocked";
+type AgentRuntimeDecisionTraceToolStatus = "ok" | "partial" | "error" | "blocked";
 
 type AgentRuntimeDecisionTrace = {
   schemaVersion: 1;

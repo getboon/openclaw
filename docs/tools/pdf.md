@@ -118,12 +118,19 @@ Fallback mode is used for non-native providers.
 
 Flow:
 
-1. Extract text from selected pages (up to `agents.defaults.pdfMaxPages`, default `20`).
-2. If extracted text length is below `200` chars, render selected pages to PNG images and include them.
-3. Send extracted content plus prompt to the selected model.
+1. Select pages up to `agents.defaults.pdfMaxPages` (default `20`).
+2. Extract them in bounded 10-page batches, preserving the document page count,
+   processed page numbers, text limits, and truncation reasons.
+3. If extracted text length is below `200` chars, render the batch to PNG images and include them.
+4. Analyze each batch independently and synthesize the batch findings into one answer.
 
 Fallback details:
 
+- Every fallback result starts with user-visible coverage such as
+  `PDF coverage: processed pages 1-59 of 59`.
+- If the page ceiling or an extraction limit leaves gaps, the result starts with
+  a partial-read warning, `details.status` is `partial`, and the model is
+  instructed not to make document-wide absence claims.
 - Page image extraction uses a pixel budget of `4,000,000`.
 - Encrypted PDFs can be opened with the top-level `password` parameter.
 - If the target model does not support image input and there is no extractable text, the tool errors.
@@ -162,6 +169,9 @@ Common `details` fields:
 - `model`: resolved model ref (`provider/model`)
 - `native`: `true` for native provider mode, `false` for fallback
 - `attempts`: fallback attempts that failed before success
+- `status`: `ok` or `partial` when extraction coverage is available
+- `coverage[]`: per-document page count, requested/processed pages, text
+  character and byte counts, completion flag, and truncation reasons
 
 Path fields:
 

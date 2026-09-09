@@ -428,7 +428,7 @@ type TraceToolSummaryView = {
   visibleTools?: string[];
   invocations?: Array<{
     name: string;
-    status: "ok" | "error" | "blocked";
+    status: "ok" | "partial" | "error" | "blocked";
     detail?: string;
   }>;
   /**

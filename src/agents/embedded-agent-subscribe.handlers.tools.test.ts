@@ -1715,6 +1715,33 @@ describe("handleToolExecutionEnd exec approval prompts", () => {
     expect(ctx.state.deterministicApprovalPromptSent).toBe(true);
   });
 
+  it("records structured partial tool results without turning them into failures", async () => {
+    const { ctx } = createTestContext();
+
+    await handleToolExecutionEnd(
+      ctx as never,
+      {
+        type: "tool_execution_end",
+        toolName: "pdf",
+        toolCallId: "tool-pdf-partial",
+        isError: false,
+        result: {
+          content: [{ type: "text", text: "Partial PDF read." }],
+          details: { status: "partial" },
+        },
+      } as never,
+    );
+
+    expect(ctx.state.toolMetas).toEqual([
+      expect.objectContaining({
+        toolName: "pdf",
+        errored: false,
+        status: "partial",
+      }),
+    ]);
+    expect(ctx.state.toolFailures).toEqual([]);
+  });
+
   it("emits the shared approver-DM notice when another approval client received the request", async () => {
     const { ctx } = createTestContext();
     const onToolResult = vi.fn();

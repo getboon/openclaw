@@ -39,7 +39,7 @@ const MAX_DIGEST_ENTRIES = 8;
 /** Derives an honest total/completed pair from explicit outcomes when present,
  * or from the surfaced failure records when a legacy producer omits outcomes. */
 function resolveToolCounts(
-  toolMetas: readonly { errored?: boolean; status?: "blocked" }[],
+  toolMetas: readonly { errored?: boolean; status?: "blocked" | "partial" }[],
   surfacedFailureCount: number,
 ): Pick<ToolFailureDigest, "totalToolCount" | "completedToolCount"> {
   const hasErroredFlags = toolMetas.some((meta) => meta.errored !== undefined);
@@ -70,7 +70,7 @@ function resolveToolCounts(
  */
 export function buildToolFailureDigest(params: {
   toolFailures: readonly (ToolErrorSummary & { retried?: boolean })[];
-  toolMetas: readonly { errored?: boolean; status?: "blocked" }[];
+  toolMetas: readonly { errored?: boolean; status?: "blocked" | "partial" }[];
   surfaceContext: ToolFailureSurfaceContext;
 }): ToolFailureDigest | undefined {
   const surfaced = params.toolFailures.filter(

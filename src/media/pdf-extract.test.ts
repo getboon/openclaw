@@ -20,6 +20,16 @@ describe("extractPdfContent", () => {
     extractDocumentContentMock.mockResolvedValue({
       text: "extracted pdf",
       images: [],
+      coverage: {
+        documentPageCount: 2,
+        requestedPages: [1, 2],
+        pagesProcessed: [1, 2],
+        complete: true,
+        textChars: 13,
+        textBytes: 13,
+        maxTextChars: 200_000,
+        truncationReasons: [],
+      },
       extractor: "pdf",
     });
 
@@ -30,7 +40,20 @@ describe("extractPdfContent", () => {
         maxPixels: 100,
         minTextChars: 10,
       }),
-    ).resolves.toEqual({ text: "extracted pdf", images: [] });
+    ).resolves.toEqual({
+      text: "extracted pdf",
+      images: [],
+      coverage: {
+        documentPageCount: 2,
+        requestedPages: [1, 2],
+        pagesProcessed: [1, 2],
+        complete: true,
+        textChars: 13,
+        textBytes: 13,
+        maxTextChars: 200_000,
+        truncationReasons: [],
+      },
+    });
     expect(extractDocumentContentMock).toHaveBeenCalledWith({
       buffer: Buffer.from("%PDF-1.4"),
       mimeType: "application/pdf",

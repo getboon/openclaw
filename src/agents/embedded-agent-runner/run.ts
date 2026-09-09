@@ -490,7 +490,7 @@ export function buildTraceToolSummary(params: {
     toolName: string;
     meta?: string;
     errored?: boolean;
-    status?: "blocked";
+    status?: "blocked" | "partial";
     detail?: string;
     asyncStarted?: boolean;
   }>;
@@ -527,8 +527,8 @@ export function buildTraceToolSummary(params: {
     visibleTools,
     invocations: toolMetas.map((entry) => {
       const status =
-        entry.status === "blocked"
-          ? ("blocked" as const)
+        entry.status === "blocked" || entry.status === "partial"
+          ? entry.status
           : entry.errored === true
             ? ("error" as const)
             : ("ok" as const);

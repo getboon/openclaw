@@ -708,6 +708,226 @@ describe("createPdfTool", () => {
     });
   });
 
+  it("reads a 59-page PDF in bounded batches and reports complete coverage", async () => {
+    await withTempPdfAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, {
+        provider: "openai",
+        api: "openai-responses",
+        input: ["text"],
+      });
+      const extractSpy = vi
+        .spyOn(pdfExtractModule, "extractPdfContent")
+        .mockImplementation(async ({ pageNumbers }) => {
+          const requestedPages = pageNumbers ?? [];
+          return {
+            text: `Sheets ${requestedPages.at(0)}-${requestedPages.at(-1)}`,
+            images: [],
+            coverage: {
+              documentPageCount: 59,
+              requestedPages,
+              pagesProcessed: requestedPages,
+              complete: requestedPages.length === 59,
+              textChars: 20,
+              textBytes: 20,
+              maxTextChars: 200_000,
+              truncationReasons: requestedPages.length === 59 ? [] : ["page_limit"],
+            },
+          };
+        });
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "E4.101 and S-301 are present." }],
+      } as never);
+
+      const cfg = {
+        agents: {
+          defaults: {
+            pdfModel: { primary: OPENAI_PDF_MODEL },
+            pdfMaxPages: 120,
+          },
+        },
+      } as OpenClawConfig;
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+
+      const result = await tool.execute("t1", {
+        prompt: "List every discipline and sheet.",
+        pdf: "/tmp/merged-set.pdf",
+      });
+
+      expect(extractSpy).toHaveBeenCalledTimes(6);
+      expect(extractSpy.mock.calls.map(([args]) => args.pageNumbers)).toEqual([
+        Array.from({ length: 10 }, (_, index) => index + 1),
+        Array.from({ length: 10 }, (_, index) => index + 11),
+        Array.from({ length: 10 }, (_, index) => index + 21),
+        Array.from({ length: 10 }, (_, index) => index + 31),
+        Array.from({ length: 10 }, (_, index) => index + 41),
+        Array.from({ length: 9 }, (_, index) => index + 51),
+      ]);
+      expect(completeMock).toHaveBeenCalledTimes(7);
+      expect(result.content).toEqual([
+        {
+          type: "text",
+          text: expect.stringContaining("PDF coverage: processed pages 1-59 of 59."),
+        },
+      ]);
+      expectFields(result.details, {
+        native: false,
+        status: "ok",
+        coverage: [
+          expect.objectContaining({
+            documentPageCount: 59,
+            pagesProcessed: Array.from({ length: 59 }, (_, index) => index + 1),
+            complete: true,
+            truncationReasons: [],
+          }),
+        ],
+      });
+    });
+  });
+
+  it("splits a dense batch when the extractor hits the text limit", async () => {
+    await withTempPdfAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, {
+        provider: "openai",
+        api: "openai-responses",
+        input: ["text"],
+      });
+      const extractSpy = vi
+        .spyOn(pdfExtractModule, "extractPdfContent")
+        .mockImplementation(async ({ pageNumbers }) => {
+          const requestedPages = pageNumbers ?? [];
+          const textLimited = requestedPages.length === 10;
+          return {
+            text: `Sheets ${requestedPages.at(0)}-${requestedPages.at(-1)}`,
+            images: [],
+            coverage: {
+              documentPageCount: 12,
+              requestedPages,
+              pagesProcessed: textLimited ? requestedPages.slice(0, 7) : requestedPages,
+              complete: !textLimited && requestedPages.length === 12,
+              textChars: textLimited ? 200_000 : 20,
+              textBytes: textLimited ? 200_000 : 20,
+              maxTextChars: 200_000,
+              truncationReasons: textLimited ? ["text_limit"] : ["page_limit"],
+            },
+          };
+        });
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "All requested sheets were reviewed." }],
+      } as never);
+
+      const cfg = {
+        agents: {
+          defaults: {
+            pdfModel: { primary: OPENAI_PDF_MODEL },
+            pdfMaxPages: 120,
+          },
+        },
+      } as OpenClawConfig;
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+
+      const result = await tool.execute("t1", {
+        prompt: "List every sheet.",
+        pdf: "/tmp/dense-set.pdf",
+      });
+
+      expect(extractSpy.mock.calls.map(([args]) => args.pageNumbers)).toEqual([
+        Array.from({ length: 10 }, (_, index) => index + 1),
+        [1, 2, 3, 4, 5],
+        [6, 7, 8, 9, 10],
+        [11, 12],
+      ]);
+      expectFields(result.details, {
+        status: "ok",
+        coverage: [
+          expect.objectContaining({
+            documentPageCount: 12,
+            pagesProcessed: Array.from({ length: 12 }, (_, index) => index + 1),
+            complete: true,
+            truncationReasons: [],
+          }),
+        ],
+      });
+    });
+  });
+
+  it("surfaces a partial read and forbids document-wide absence claims", async () => {
+    await withTempPdfAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, {
+        provider: "openai",
+        api: "openai-responses",
+        input: ["text"],
+      });
+      vi.spyOn(pdfExtractModule, "extractPdfContent").mockImplementation(
+        async ({ pageNumbers }) => {
+          const requestedPages = pageNumbers ?? [];
+          return {
+            text: "A-series sheets only",
+            images: [],
+            coverage: {
+              documentPageCount: 59,
+              requestedPages,
+              pagesProcessed: requestedPages,
+              complete: false,
+              textChars: 20,
+              textBytes: 20,
+              maxTextChars: 200_000,
+              truncationReasons: ["page_limit"],
+            },
+          };
+        },
+      );
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "I found architectural sheets." }],
+      } as never);
+
+      const cfg = {
+        agents: {
+          defaults: {
+            pdfModel: { primary: OPENAI_PDF_MODEL },
+            pdfMaxPages: 20,
+          },
+        },
+      } as OpenClawConfig;
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+
+      const result = await tool.execute("t1", {
+        prompt: "Are there any electrical sheets?",
+        pdf: "/tmp/merged-set.pdf",
+      });
+
+      expect(result.content).toEqual([
+        {
+          type: "text",
+          text: expect.stringContaining(
+            "Partial PDF read: processed pages 1-20 of 59. Do not infer that omitted sheets or terms are absent.",
+          ),
+        },
+      ]);
+      expectFields(result.details, {
+        native: false,
+        status: "partial",
+        coverage: [
+          expect.objectContaining({
+            documentPageCount: 59,
+            pagesProcessed: Array.from({ length: 20 }, (_, index) => index + 1),
+            complete: false,
+            truncationReasons: ["page_limit"],
+          }),
+        ],
+      });
+      const finalContext = completeMock.mock.calls.at(-1)?.[1] as
+        | { messages?: Array<{ content?: Array<{ text?: string }> }> }
+        | undefined;
+      expect(JSON.stringify(finalContext)).toContain("must not claim that a sheet");
+    });
+  });
+
   it("passes password to PDF extraction fallback", async () => {
     await withTempPdfAgentDir(async (agentDir) => {
       await stubPdfToolInfra(agentDir, { provider: "openai", input: ["text"] });
