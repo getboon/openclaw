@@ -80,7 +80,8 @@ function shouldEscalateRetryLimit(reason: FailoverReason | null): boolean {
     reason !== "timeout" &&
     reason !== "model_not_found" &&
     reason !== "format" &&
-    reason !== "session_expired",
+    reason !== "session_expired" &&
+    reason !== "edge_blocked",
   );
 }
 
@@ -94,11 +95,24 @@ function isTerminalFormatFailure(params: {
   );
 }
 
+// A CDN/WAF edge block is content-based and deterministic: the same request
+// body is blocked at the edge on every model in the ladder, so no amount of
+// rotating auth profiles or hopping fallback models can recover it. Terminal
+// alongside a format failure — surface the honest edge-block copy once
+// instead of burning the whole ladder on a guaranteed repeat.
+function isTerminalNonRetryableFailure(params: {
+  allowFormatRetry?: boolean;
+  failoverFailure: boolean;
+  failoverReason: FailoverReason | null;
+}): boolean {
+  return isTerminalFormatFailure(params) || params.failoverReason === "edge_blocked";
+}
+
 function shouldRotatePrompt(params: PromptDecisionParams): boolean {
   return (
     params.failoverFailure &&
     params.failoverReason !== "timeout" &&
-    !isTerminalFormatFailure(params)
+    !isTerminalNonRetryableFailure(params)
   );
 }
 
@@ -116,7 +130,7 @@ function isConcreteNonTimeoutAssistantFailure(params: AssistantDecisionParams): 
 }
 
 function shouldRotateAssistant(params: AssistantDecisionParams): boolean {
-  if (isTerminalFormatFailure(params)) {
+  if (isTerminalNonRetryableFailure(params)) {
     return false;
   }
   const timeoutFailure = isAssistantTimeoutFailure(params);
@@ -190,7 +204,11 @@ export function resolveRunFailoverDecision(params: RunFailoverDecisionParams): R
         reason: params.failoverReason,
       };
     }
-    if (params.fallbackConfigured && params.failoverFailure && !isTerminalFormatFailure(params)) {
+    if (
+      params.fallbackConfigured &&
+      params.failoverFailure &&
+      !isTerminalNonRetryableFailure(params)
+    ) {
       return {
         action: "fallback_model",
         reason: params.failoverReason ?? "unknown",
@@ -208,7 +226,7 @@ export function resolveRunFailoverDecision(params: RunFailoverDecisionParams): R
       reason: params.failoverReason,
     };
   }
-  if (isTerminalFormatFailure(params)) {
+  if (isTerminalNonRetryableFailure(params)) {
     return {
       action: "surface_error",
       reason: params.failoverReason,

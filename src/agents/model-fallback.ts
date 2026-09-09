@@ -1802,6 +1802,14 @@ async function runWithModelFallbackInternal<T>(
       if (isMissingAgentHarnessError(err)) {
         throw err;
       }
+      // A CDN/WAF edge block (ENG-16835) is content-based: the same request
+      // body is blocked at the gateway edge before any model-specific routing
+      // happens, so every remaining candidate hits the identical block. Abort
+      // the ladder here instead of burning through N more doomed candidates —
+      // same rationale as the non-provider-runtime-coordination check above.
+      if (describeFailoverError(err).reason === "edge_blocked") {
+        throw err;
+      }
       const normalized =
         coerceToFailoverError(err, {
           provider: candidate.provider,

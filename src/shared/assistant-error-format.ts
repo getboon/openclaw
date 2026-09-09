@@ -15,6 +15,15 @@ const HTML_CLOSE_RE = /<\/html>/i;
 const CLOUDFLARE_HTML_ERROR_CODES = new Set([521, 522, 523, 524, 525, 526, 530]);
 const STANDALONE_HTML_ERROR_HINT_RE =
   /\bcloudflare\b|cdn-cgi\/challenge-platform|challenge-error-text|enable javascript and cookies to continue|access denied|forbidden|service unavailable|bad gateway|web server is down|captcha|attention required/i;
+// A real CDN/WAF block page is several KB, but transports truncate the error
+// body before it reaches the classifier (e.g. the Anthropic Messages path
+// caps at a few hundred/thousand chars), so `</html>` is routinely truncated
+// away. This matches on markers that land in the first bytes of the page
+// instead of requiring a complete document, so a truncated block page is
+// still recognized as an edge block rather than falling through to "auth" or
+// "unclassified".
+const EDGE_WAF_BLOCK_MARKER_RE =
+  /<title>\s*blocked\s*<\/title>|sorry, you have been blocked|cdn-cgi\/|cf-ray\b/i;
 const GENERIC_PROVIDER_INTERNAL_ERROR_RE = /an error occurred while processing your request/i;
 const SUPPORT_REQUEST_ID_RE = /(?:request[\s_-]*id)\s*[:#]?\s*([a-z0-9][a-z0-9_-]{6,}[a-z0-9])/i;
 const GENERIC_PROVIDER_INTERNAL_ERROR_USER_MESSAGE =
@@ -133,6 +142,26 @@ export function isCloudflareOrHtmlErrorPage(raw: string): boolean {
   );
 }
 
+/**
+ * A recognized CDN/WAF block-page signature (Cloudflare "Blocked" title, ray
+ * ID, `cdn-cgi/` challenge path) in an HTML document that may be truncated
+ * before its closing tag. Deliberately does not require `HTML_CLOSE_RE` —
+ * unlike `isCloudflareOrHtmlErrorPage`, this is meant to match a snippet a
+ * transport has already cut short.
+ */
+export function isEdgeWafBlockPage(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return false;
+  }
+  const status = extractLeadingHttpStatus(trimmed);
+  const candidate = status ? status.rest : trimmed;
+  if (!HTML_ERROR_PREFIX_RE.test(candidate)) {
+    return false;
+  }
+  return EDGE_WAF_BLOCK_MARKER_RE.test(candidate);
+}
+
 export function isGenericProviderInternalError(raw: string): boolean {
   const trimmed = raw.trim();
   if (!trimmed) {
@@ -218,7 +247,9 @@ export function formatRawAssistantErrorForUi(raw?: string): string {
   }
 
   const leadingStatus = extractLeadingHttpStatus(trimmed);
-  const isHtmlChallenge = isCloudflareOrHtmlErrorPage(trimmed);
+  // isEdgeWafBlockPage catches a truncated block-page snippet that
+  // isCloudflareOrHtmlErrorPage's complete-document check would miss.
+  const isHtmlChallenge = isCloudflareOrHtmlErrorPage(trimmed) || isEdgeWafBlockPage(trimmed);
   if (leadingStatus && isHtmlChallenge) {
     return `The AI service is temporarily unavailable (HTTP ${leadingStatus.code}). Please try again in a moment.`;
   }
