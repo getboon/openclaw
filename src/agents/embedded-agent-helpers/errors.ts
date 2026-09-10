@@ -14,6 +14,7 @@ import {
   extractLeadingHttpStatus,
   formatRawAssistantErrorForUi,
   isCloudflareOrHtmlErrorPage,
+  isEdgeWafBlockPage,
   isGenericProviderInternalError,
   parseApiErrorInfo,
 } from "../../shared/assistant-error-format.js";
@@ -21,6 +22,7 @@ export {
   extractLeadingHttpStatus,
   formatRawAssistantErrorForUi,
   isCloudflareOrHtmlErrorPage,
+  isEdgeWafBlockPage,
   isGenericProviderInternalError,
   parseApiErrorInfo,
 } from "../../shared/assistant-error-format.js";
@@ -117,6 +119,7 @@ const TRIAL_EXHAUSTED_BUTTON_LABEL = "Upgrade plan";
 // above this gate under both audiences.
 type ConsumerCopyCategory =
   | "auth"
+  | "edge_blocked"
   | "rate_limit"
   | "timeout"
   | "billing"
@@ -126,6 +129,8 @@ type ConsumerCopyCategory =
   | "generic";
 const CONSUMER_ERROR_COPY: Record<ConsumerCopyCategory, string> = {
   auth: "I hit a sign-in problem reaching the AI service and couldn't finish that. Please try again in a moment.",
+  edge_blocked:
+    "A security filter in front of the AI service blocked that request, so I couldn't finish it. Please try again in a moment.",
   rate_limit:
     "The AI service is busy right now, so I couldn't finish that. Please try again shortly.",
   timeout:
@@ -153,6 +158,9 @@ function resolveConsumerCopyCategory(
   kind: ProviderRuntimeFailureKind,
   provider: string | undefined,
 ): ConsumerCopyCategory {
+  if (kind === "edge_blocked") {
+    return "edge_blocked";
+  }
   if (
     kind === "auth_scope" ||
     kind === "auth_refresh" ||
@@ -585,6 +593,13 @@ export type ProviderRuntimeFailureKind =
   | "auth_html"
   /** Plain provider HTTP 401 auth failure that should not leak raw text to chat users. */
   | "auth_invalid_token"
+  /**
+   * A CDN/WAF (Cloudflare, Render) edge block relayed by the gateway instead
+   * of a real provider response — content-based, so it recurs on every model
+   * in the fallback ladder. Not an auth problem: must not surface
+   * "re-authenticate" copy or cool down the auth profile.
+   */
+  | "edge_blocked"
   | "upstream_html"
   | "proxy"
   | "rate_limit"
@@ -719,16 +734,22 @@ function isHtmlErrorResponse(raw: string, status?: number): boolean {
 
 /**
  * A gateway/edge WAF (Cloudflare, Render) block: an HTML error page relayed by
- * the gateway instead of a real provider JSON error. Matches either a full HTML
- * document (`isHtmlErrorResponse`) or a Cloudflare challenge/block page hint
- * (`isCloudflareOrHtmlErrorPage`). Shared by the 429 classifier and the
- * client-side ride-out retry predicate so both key off the same edge signal.
+ * the gateway instead of a real provider JSON error. Matches a full HTML
+ * document (`isHtmlErrorResponse`), a Cloudflare challenge/block page hint
+ * (`isCloudflareOrHtmlErrorPage`), or a truncated block-page snippet
+ * (`isEdgeWafBlockPage` — see its doc comment on why truncation matters).
+ * Shared by the 429 classifier and the client-side ride-out retry predicate
+ * so both key off the same edge signal.
  */
 export function isEdgeBlockErrorBody(message: string | undefined, status?: number): boolean {
   if (!message) {
     return false;
   }
-  return isHtmlErrorResponse(message, status) || isCloudflareOrHtmlErrorPage(message);
+  return (
+    isHtmlErrorResponse(message, status) ||
+    isCloudflareOrHtmlErrorPage(message) ||
+    isEdgeWafBlockPage(message)
+  );
 }
 
 function isTransportHtmlErrorStatus(status: number | undefined): boolean {
@@ -1031,6 +1052,20 @@ function classifyFailoverClassificationFromHttpStatus(
     return toReasonClassification("rate_limit");
   }
   if (status === 401 || status === 403) {
+    // A CDN/WAF (Cloudflare, Render) edge block relayed as a 401/403 is not an
+    // auth failure — the same request body is blocked before it ever reaches
+    // the provider, so it recurs on every model in the ladder and re-auth
+    // cannot fix it. Check this ahead of auth_permanent/billing/auth so a
+    // block page never gets misread as one of those (and, downstream,
+    // cooldown-disables the auth profile — see model-fallback.ts
+    // isPersistentAuthIssue, which keys off this reason).
+    // Uses isEdgeWafBlockPage's narrow markers only, NOT the broader
+    // isHtmlErrorResponse/isCloudflareOrHtmlErrorPage — those also match a
+    // generic complete-HTML auth page with no WAF signature (still a genuine
+    // auth_html case) or a plain upstream 5xx gateway page misrouted here.
+    if (message && isEdgeWafBlockPage(message)) {
+      return toReasonClassification("edge_blocked");
+    }
     if (opts?.preserveProviderSignalClassification && messageClassification) {
       return messageClassification;
     }
@@ -1458,6 +1493,16 @@ export function classifyProviderRuntimeFailureKind(
   if (message && isProxyErrorMessage(message, status)) {
     return "proxy";
   }
+  // A recognized WAF/CDN block-page marker on a 401/403 names the failure
+  // honestly instead of guessing auth_html, regardless of truncation. Scoped
+  // to 401/403 (matching the failoverReason branch above) rather than "any
+  // status": a bare-status Cloudflare JS-challenge interstitial or a plain
+  // upstream 5xx CDN page also carries these markers but is legitimately the
+  // existing upstream_html bucket, not this fork's specific auth-miscooldown
+  // bug.
+  if ((status === 401 || status === 403) && message && isEdgeWafBlockPage(message)) {
+    return "edge_blocked";
+  }
   if (message && isHtmlErrorResponse(message, status)) {
     return status === 401 || status === 403 ? "auth_html" : "upstream_html";
   }
@@ -1654,6 +1699,14 @@ export function formatAssistantErrorText(
     return (
       "Authentication failed at the provider. " +
       "Re-authenticate and verify your provider credentials and account access."
+    );
+  }
+
+  if (providerRuntimeFailureKind === "edge_blocked") {
+    return (
+      "A CDN/WAF security filter in front of the LLM gateway blocked this request " +
+      "(not an authentication or credentials problem — re-authenticating will not help). " +
+      "Retry in a moment; if it persists, check the gateway's edge/WAF configuration."
     );
   }
 

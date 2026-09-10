@@ -801,9 +801,49 @@ describe("edge/WAF HTML 429 handling (ENG-14852)", () => {
   });
 
   it("tags the edge 429 as upstream_html for observability", () => {
+    // The edge_blocked *kind* is scoped to 401/403 (see the tests below) to
+    // avoid reclassifying a generic upstream 5xx/429 CDN page that happens to
+    // share a block-page marker; the 429 *reason* is still the fixed
+    // "timeout", not "rate_limit" — that's what already shipped here.
     expect(classifyProviderRuntimeFailureKind({ status: 429, message: EDGE_HTML_429 })).toBe(
       "upstream_html",
     );
+  });
+
+  it("classifies a truncated block-page snippet (no closing </html>) the same as a complete one", () => {
+    // The Anthropic Messages transport truncates the error body before it
+    // reaches the classifier, so a real Cloudflare block page never has an
+    // intact closing tag by the time it gets here. isEdgeBlockErrorBody must
+    // still recognize it from the marker alone.
+    const truncatedEdgeHtml429 = "429 <!doctype html><html><title>Blocked</title>";
+    expect(classifyFailoverReasonFromHttpStatus(429, truncatedEdgeHtml429)).toBe("timeout");
+  });
+
+  it("classifies a truncated 403 block-page snippet as edge_blocked, not auth", () => {
+    // This is the production shape of the underlying incident: a Cloudflare
+    // WAF 403 relayed by boon-llm-gateway, truncated by the transport before
+    // `</html>` — must not be misread as an auth failure (which would cool
+    // down/disable an otherwise-healthy auth profile).
+    const truncated403 = "403 <!doctype html><html><head><title>Blocked</title></head><body>";
+    expect(classifyFailoverReasonFromHttpStatus(403, truncated403)).toBe("edge_blocked");
+    expect(classifyProviderRuntimeFailureKind({ status: 403, message: truncated403 })).toBe(
+      "edge_blocked",
+    );
+  });
+
+  it("still classifies a generic complete-HTML 403 auth page as auth_html, not edge_blocked", () => {
+    // No block-page marker (title/cf-ray/cdn-cgi) present — this stays the
+    // existing auth_html/auth classification, unaffected by the new check.
+    const genericAuthHtml403 = "403 <!DOCTYPE html><html><body>Access denied</body></html>";
+    expect(classifyFailoverReasonFromHttpStatus(403, genericAuthHtml403)).toBe("auth");
+    expect(classifyProviderRuntimeFailureKind({ status: 403, message: genericAuthHtml403 })).toBe(
+      "auth_html",
+    );
+  });
+
+  it("still classifies a plain JSON 401/403 auth error as auth (no false-positive edge_blocked)", () => {
+    expect(classifyFailoverReasonFromHttpStatus(401, "invalid_api_key")).toBe("auth");
+    expect(classifyFailoverReasonFromHttpStatus(403, "permission_error")).toBe("auth");
   });
 });
 

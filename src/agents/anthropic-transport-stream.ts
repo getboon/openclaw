@@ -68,7 +68,13 @@ import {
 
 const CLAUDE_CODE_VERSION = "2.1.75";
 const ANTHROPIC_MESSAGES_ERROR_BODY_MAX_BYTES = 8 * 1024;
-const ANTHROPIC_MESSAGES_ERROR_BODY_MAX_CHARS = 400;
+// A CDN/WAF block page's identifying markers (e.g. Cloudflare's "Blocked"
+// title, cf-ray, cdn-cgi/) can sit well past 400 chars of boilerplate HTML
+// head/style content, so a short snippet silently degrades edge-block
+// detection to "unclassified". maxBytes (above) still bounds what is read
+// off the wire; this only raises how much of that read reaches the
+// classifier.
+const ANTHROPIC_MESSAGES_ERROR_BODY_MAX_CHARS = 2_000;
 const ANTHROPIC_MESSAGES_ERROR_BODY_READ_IDLE_TIMEOUT_MS = 10_000;
 const CLAUDE_CODE_TOOLS = [
   "Read",

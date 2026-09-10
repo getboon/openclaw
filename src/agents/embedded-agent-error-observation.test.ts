@@ -197,6 +197,7 @@ describe("buildApiErrorObservationFields", () => {
     expect(shouldSuppressRawErrorConsoleSuffix("auth_html")).toBe(true);
     expect(shouldSuppressRawErrorConsoleSuffix("auth_scope")).toBe(true);
     expect(shouldSuppressRawErrorConsoleSuffix("auth_refresh")).toBe(true);
+    expect(shouldSuppressRawErrorConsoleSuffix("edge_blocked")).toBe(true);
     expect(shouldSuppressRawErrorConsoleSuffix("timeout")).toBe(false);
     expect(shouldSuppressRawErrorConsoleSuffix(undefined)).toBe(false);
   });

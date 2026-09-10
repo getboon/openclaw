@@ -31,7 +31,11 @@ export type AgentRuntimePromptTrigger =
   | "overflow"
   | "user";
 
-/** Normalized failure reason used by model fallback classification. */
+/**
+ * Normalized failure reason used by model fallback classification. Mirrors
+ * `FailoverReason` (embedded-agent-helpers/types.ts) as this package's public,
+ * plugin-facing contract — keep the two in lockstep.
+ */
 export type AgentRuntimeFailoverReason =
   | "auth"
   | "auth_permanent"
@@ -45,6 +49,7 @@ export type AgentRuntimeFailoverReason =
   | "session_expired"
   | "empty_response"
   | "no_error_details"
+  | "edge_blocked"
   | "unclassified"
   | "unknown";
 

@@ -107,6 +107,27 @@ describe("resolveRunFailoverDecision", () => {
     });
   });
 
+  it("surfaces a prompt-stage edge block instead of rotating or falling back", () => {
+    // A CDN/WAF block is content-based and deterministic — the same request
+    // blocks on every model in the ladder, so no amount of profile rotation
+    // or fallback hopping recovers it. There is no allowFormatRetry-style
+    // escape hatch, unlike a format failure.
+    expect(
+      resolveRunFailoverDecision({
+        stage: "prompt",
+        aborted: false,
+        externalAbort: false,
+        fallbackConfigured: true,
+        failoverFailure: true,
+        failoverReason: "edge_blocked",
+        profileRotated: false,
+      }),
+    ).toEqual({
+      action: "surface_error",
+      reason: "edge_blocked",
+    });
+  });
+
   it("ignores stale classified assistant-side 429 text without error stopReason", () => {
     // Classifiers may see old assistant text in the transcript. Without an
     // actual failure signal, stale billing/rate-limit text is not failover.
@@ -169,6 +190,42 @@ describe("resolveRunFailoverDecision", () => {
     ).toEqual({
       action: "rotate_profile",
       reason: "format",
+    });
+  });
+
+  it("surfaces an assistant-stage edge block instead of rotating or falling back", () => {
+    expect(
+      resolveRunFailoverDecision({
+        stage: "assistant",
+        aborted: false,
+        externalAbort: false,
+        fallbackConfigured: true,
+        failoverFailure: true,
+        failoverReason: "edge_blocked",
+        timedOut: false,
+        idleTimedOut: false,
+        timedOutDuringCompaction: false,
+        timedOutDuringToolExecution: false,
+        profileRotated: false,
+      }),
+    ).toEqual({
+      action: "surface_error",
+      reason: "edge_blocked",
+    });
+  });
+
+  it("does not escalate an edge block to fallback_model at the retry-limit stage", () => {
+    // Even after the whole ladder has already been exhausted once, an edge
+    // block must not get one more fallback_model attempt — it is a terminal,
+    // content-based failure, not a replay-safe transient one.
+    expect(
+      resolveRunFailoverDecision({
+        stage: "retry_limit",
+        fallbackConfigured: true,
+        failoverReason: "edge_blocked",
+      }),
+    ).toEqual({
+      action: "return_error_payload",
     });
   });
 

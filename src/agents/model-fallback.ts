@@ -1810,6 +1810,29 @@ async function runWithModelFallbackInternal<T>(
           lane: params.lane,
         }) ?? err;
 
+      // A CDN/WAF edge block is deterministic: every remaining candidate hits
+      // the same block, so abort the ladder immediately. nextCandidate is
+      // left undefined to record this as chain-exhaustion, not a normal hop.
+      if (describeFailoverError(err).reason === "edge_blocked") {
+        await observeFailedCandidate({
+          attempts,
+          candidate,
+          error: normalized,
+          runId: params.runId,
+          sessionId: params.sessionId,
+          lane: params.lane,
+          requestedProvider: params.provider,
+          requestedModel: params.model,
+          attempt: i + 1,
+          total: candidates.length,
+          nextCandidate: undefined,
+          isPrimary,
+          requestedModelMatched: requestedModel,
+          fallbackConfigured: hasFallbackCandidates,
+        });
+        throw err;
+      }
+
       // LiveSessionModelSwitchError during fallback may point at a later
       // candidate that is already the active live-session selection.  Jump
       // there directly.  Stale same/earlier targets remain a known failover

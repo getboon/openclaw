@@ -348,7 +348,11 @@ describe("anthropic transport stream", () => {
     );
 
     expect(result.stopReason).toBe("error");
-    expect(result.errorMessage).toBe(`${"x".repeat(400)}…`);
+    // maxChars was raised from 400 to 2000 so a real CDN/WAF block-page
+    // marker, which can sit past the first few hundred bytes of boilerplate
+    // HTML, reliably reaches the classifier. maxBytes (8 KB, matching this
+    // fixture) still bounds what is read off the wire.
+    expect(result.errorMessage).toBe(`${"x".repeat(2_000)}…`);
     expect(pullCount).toBeGreaterThanOrEqual(2);
     expect(cancelCount).toBe(1);
   });
