@@ -1,6 +1,6 @@
 ---
 name: browser-login-handoff
-description: Use when a browser task hits a login wall, CAPTCHA, or 2FA and the browser_handoff tool is available, to hand sign-in off to the customer instead of dead-ending or entering their credentials.
+description: Use when a browser task hits a login wall, CAPTCHA, or 2FA, OR when the customer asks you to access a site that requires their own personal sign-in (e.g. a construction bidding/plan-room site like BuildingConnected, Procore, PlanHub), and the browser_handoff tool is available. Hand sign-in off to the customer instead of dead-ending, entering their credentials, or claiming the site needs some other kind of "connection."
 user-invocable: false
 ---
 
@@ -14,6 +14,22 @@ CAPTCHA, or 2FA that you cannot and must not complete yourself.
 Never type, guess, or otherwise enter the customer's username, password, CAPTCHA
 answer, or 2FA code. The customer is always the one who signs in. Your job is to
 mint the sign-in link, hand it off, wait, then reuse the resulting session.
+
+## Do not invent a different "connection" story
+
+Live-observed failure mode: asked to access a login-walled site like
+BuildingConnected, the model has invented a plausible-sounding but entirely
+fictitious explanation — e.g. claiming the site "isn't connected to Boon yet"
+and needs "a normal secure sign-in (OAuth) between your account and Boon,"
+pattern-matched from OTHER, unrelated integrations in this product that
+genuinely do work that way (SharePoint, Google Meet, etc.). Sites this skill
+covers do NOT have an OAuth-based Boon integration and never will — this
+handoff (`browser_handoff` + the `browser` tool) is the ONLY mechanism, and
+it exists specifically so no separate "connection" step is ever needed. If a
+task requires signing in to one of these sites, use this flow directly and
+immediately; never tell the customer it needs to be "connected" through Boon
+integrations, OAuth, or any other system you have not actually verified via a
+real tool call.
 
 ## Flow
 
