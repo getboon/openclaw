@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/lmstudio-provider",
-  "version": "2026.6.11-boon.39",
+  "version": "2026.6.11-boon.40",
   "private": true,
   "description": "OpenClaw LM Studio provider plugin",
   "type": "module",

@@ -1,18 +1,18 @@
 {
   "name": "@openclaw/mattermost",
-  "version": "2026.6.11-boon.39",
+  "version": "2026.6.11-boon.40",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/mattermost",
-      "version": "2026.6.11-boon.39",
+      "version": "2026.6.11-boon.40",
       "dependencies": {
         "ws": "8.21.0",
         "zod": "4.4.3"
       },
       "peerDependencies": {
-        "openclaw": ">=2026.6.11-boon.39"
+        "openclaw": ">=2026.6.11-boon.40"
       },
       "peerDependenciesMeta": {
         "openclaw": {

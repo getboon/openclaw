@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.40
+
+Stops a Cloudflare/WAF edge block from being misreported as an auth failure (which used to cool down a healthy auth profile and tell the customer to re-authenticate), and raises the browser-login handoff timeouts so a slow-but-healthy handoff no longer gets reported as expired.
+
+- **#213 (ENG-16835):** a Cloudflare/WAF edge block in front of `boon-llm-gateway` (e.g. `403 <title>Blocked</title>`) fell through to the `auth` classification, which surfaced misleading "re-authenticate your credentials" copy and, via `model-fallback.ts`'s persistent-auth-issue gate, disabled an otherwise-healthy auth profile — turning one blocked request into a sustained outage. The classifier now recognizes an edge block honestly (a named, non-retryable failure) before falling back to `auth`, and the fallback ladder stops immediately instead of walking every remaining model behind the same blocked gateway. Also fixes a latent defect where the edge-block body detector required a complete `</html>` tag that the Anthropic transport's 400-char error-body truncation never lets survive on a real (multi-KB) block page — silently making the already-shipped ENG-14852 429→timeout reclassification inert on the real gateway path; both the 403 and 429 truncated-body cases are now covered.
+- **#214:** the browser-login handoff recheck loop (Gmail, BuildingConnected, ...) used a 60-minute record TTL and a 30-minute total wait, both shorter than boon-core's async Anchor profile-snapshot step has been observed taking (~20 min) plus human sign-in time; once either expired, `action=status` dead-ended into a false "may have expired"/"not connected" report even when the backend profile was already `ready`. Both are raised to 4h TTL / 180min total wait to match Anchor's own default session `max_duration`. Separately, `scheduleRecheck` used to permanently stop rescheduling the moment a single `clearScheduledRecheck` call failed (even transiently); it now retries a few times before giving up.
+- Base = `2026.6.11-boon.39`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.40` in lockstep. No other code changes; #213 and #214 were merged onto `boon` after the boon.39 cut. The fleet is currently pinned to `boon.38`, so a roll to `boon.40` also picks up the `boon.39` (#208, #209) contents.
+
 ## 2026.6.11-boon.39
 
 Surfaces a swallowed `before_tool_call` hook failure to Sentry and the durable audit trace instead of only a bare "blocked" status, so the class of incident that produced ENG-19492 ("Thread tangled — tools aren't landing") is diagnosable after the fact.
