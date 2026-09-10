@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/azure-speech",
-  "version": "2026.6.11-boon.39",
+  "version": "2026.6.11-boon.40",
   "private": true,
   "description": "OpenClaw Azure Speech plugin",
   "type": "module",
