@@ -11,12 +11,17 @@ import { Type } from "typebox";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { complete } from "../../llm/stream.js";
 import type { Context } from "../../llm/types.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
   classifyMediaReferenceSource,
   normalizeMediaReferenceSource,
 } from "../../media/media-reference.js";
 import { extractPdfContent, type PdfExtractedContent } from "../../media/pdf-extract.js";
 import { loadWebMediaRaw } from "../../media/web-media.js";
+import type {
+  DocumentExtractionCoverage,
+  DocumentExtractionTruncationReason,
+} from "../../plugins/document-extractor-types.js";
 import { resolveUserPath } from "../../utils.js";
 import type { AuthProfileStore } from "../auth-profiles/types.js";
 import { optionalFiniteNumberSchema } from "../schema/typebox.js";
@@ -63,6 +68,19 @@ const DEFAULT_MAX_PAGES = 20;
 
 const PDF_MIN_TEXT_CHARS = 200;
 const PDF_MAX_PIXELS = 4_000_000;
+const PDF_EXTRACTION_BATCH_PAGES = 10;
+
+const log = createSubsystemLogger("agents/tools/pdf");
+
+type PdfExtractionChunk = PdfExtractedContent & {
+  filename: string;
+  pdfIndex: number;
+  chunkIndex: number;
+};
+
+type PdfCoverageSummary = DocumentExtractionCoverage & {
+  filename: string;
+};
 
 /**
  * Largest base64 payload we will inline into ONE native-provider request, per provider.
@@ -150,7 +168,7 @@ const CODEX_PDF_INSTRUCTIONS =
 
 function buildPdfExtractionContext(
   prompt: string,
-  extractions: PdfExtractedContent[],
+  extractions: Array<PdfExtractedContent | PdfExtractionChunk>,
   model?: { api?: string },
 ): Context {
   const content: Array<
@@ -158,10 +176,16 @@ function buildPdfExtractionContext(
   > = [];
 
   // Add extracted text and images
-  for (let i = 0; i < extractions.length; i++) {
-    const extraction = extractions[i];
+  for (const extraction of extractions) {
     if (extraction.text.trim()) {
-      const label = extractions.length > 1 ? `[PDF ${i + 1} text]\n` : "[PDF text]\n";
+      const extractionChunk = extraction as Partial<PdfExtractionChunk>;
+      const pages = extraction.coverage?.pagesProcessed;
+      const pageLabel = pages?.length ? ` pages ${formatPageRanges(pages)}` : "";
+      const filenameLabel = extractionChunk.filename ? ` ${extractionChunk.filename}` : "";
+      const label =
+        extractions.length > 1 || filenameLabel || pageLabel
+          ? `[PDF${filenameLabel}${pageLabel} text]\n`
+          : "[PDF text]\n";
       content.push({ type: "text", text: label + extraction.text });
     }
     for (const img of extraction.images) {
@@ -179,6 +203,113 @@ function buildPdfExtractionContext(
     ...(systemPrompt ? { systemPrompt } : {}),
     messages: [{ role: "user", content, timestamp: Date.now() }],
   };
+}
+
+function pageRange(start: number, end: number): number[] {
+  if (end < start) {
+    return [];
+  }
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+}
+
+function formatPageRanges(pages: readonly number[]): string {
+  const sorted = [...new Set(pages)].toSorted((a, b) => a - b);
+  if (sorted.length === 0) {
+    return "none";
+  }
+  const ranges: string[] = [];
+  let start = sorted[0];
+  let end = start;
+  for (const page of sorted.slice(1)) {
+    if (page === end + 1) {
+      end = page;
+      continue;
+    }
+    ranges.push(start === end ? String(start) : `${start}-${end}`);
+    start = page;
+    end = page;
+  }
+  ranges.push(start === end ? String(start) : `${start}-${end}`);
+  return ranges.join(", ");
+}
+
+function aggregatePdfCoverage(params: {
+  filename: string;
+  chunks: PdfExtractionChunk[];
+  maxPages: number;
+  requestedPages?: number[];
+}): PdfCoverageSummary | undefined {
+  const coverages = params.chunks.flatMap((chunk) => (chunk.coverage ? [chunk.coverage] : []));
+  const first = coverages[0];
+  if (!first) {
+    return undefined;
+  }
+  const documentPageCount = first.documentPageCount;
+  const requestedPages =
+    params.requestedPages ??
+    pageRange(1, Math.min(documentPageCount, Math.max(0, params.maxPages)));
+  const pagesProcessed = [
+    ...new Set(coverages.flatMap((coverage) => coverage.pagesProcessed)),
+  ].toSorted((a, b) => a - b);
+  const processedSet = new Set(pagesProcessed);
+  const truncationReasons = [
+    ...new Set(
+      coverages
+        .flatMap((coverage) => coverage.truncationReasons)
+        .filter((reason) => reason !== "page_limit"),
+    ),
+  ] as DocumentExtractionTruncationReason[];
+  if (requestedPages.length < documentPageCount) {
+    truncationReasons.unshift("page_limit");
+  }
+  const coverageComplete =
+    truncationReasons.length === 0 &&
+    requestedPages.length === documentPageCount &&
+    requestedPages.every((page) => processedSet.has(page));
+  return {
+    filename: params.filename,
+    documentPageCount,
+    requestedPages,
+    pagesProcessed,
+    complete: coverageComplete,
+    textChars: coverages.reduce((total, coverage) => total + coverage.textChars, 0),
+    textBytes: coverages.reduce((total, coverage) => total + coverage.textBytes, 0),
+    maxTextChars: coverages.reduce((total, coverage) => total + coverage.maxTextChars, 0),
+    truncationReasons,
+  };
+}
+
+function buildCoverageInstruction(coverage: readonly PdfCoverageSummary[]): string {
+  if (coverage.length === 0) {
+    return [
+      "PDF coverage accounting is unavailable for these extraction results.",
+      "You must not claim that a sheet, discipline, term, or item is absent from the document.",
+    ].join("\n");
+  }
+  const lines = coverage.map((entry) => {
+    const processed = formatPageRanges(entry.pagesProcessed);
+    return entry.complete
+      ? `${entry.filename}: all ${entry.documentPageCount} pages were processed (${processed}).`
+      : `${entry.filename}: only pages ${processed} of ${entry.documentPageCount} were processed.`;
+  });
+  const incomplete = coverage.some((entry) => !entry.complete);
+  return [
+    "PDF coverage accounting:",
+    ...lines,
+    incomplete
+      ? "Coverage is incomplete. You must not claim that a sheet, discipline, term, or item is absent from the document; state that unprocessed pages were not checked."
+      : "Coverage is complete across the requested documents.",
+  ].join("\n");
+}
+
+function formatCoverageResultText(text: string, coverage: readonly PdfCoverageSummary[]): string {
+  const lines = coverage.map((entry) => {
+    const processed = formatPageRanges(entry.pagesProcessed);
+    return entry.complete
+      ? `PDF coverage: processed pages ${processed} of ${entry.documentPageCount}.`
+      : `⚠️ Partial PDF read: processed pages ${processed} of ${entry.documentPageCount}. Do not infer that omitted sheets or terms are absent.`;
+  });
+  return `${lines.join("\n")}\n\n${text}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,13 +331,17 @@ async function runPdfPrompt(params: {
   pdfs: Array<{ buffer: Buffer; filename: string }>;
   password?: string;
   pageNumbers?: number[];
-  getExtractions: () => Promise<PdfExtractedContent[]>;
+  getExtractions: () => Promise<{
+    chunks: PdfExtractionChunk[];
+    coverage: PdfCoverageSummary[];
+  }>;
 }): Promise<{
   text: string;
   provider: string;
   model: string;
   native: boolean;
   attempts: Array<{ provider: string; model: string; error: string }>;
+  coverage?: PdfCoverageSummary[];
 }> {
   const effectiveCfg = applyImageModelConfigDefaults(params.cfg, params.pdfModelConfig);
 
@@ -215,8 +350,14 @@ async function runPdfPrompt(params: {
   const authStorage = discoverAuthStorage(params.agentDir);
   const modelRegistry = discoverModels(authStorage, params.agentDir, modelsOptions);
 
-  let extractionCache: PdfExtractedContent[] | null = null;
-  const getExtractions = async (): Promise<PdfExtractedContent[]> => {
+  let extractionCache: {
+    chunks: PdfExtractionChunk[];
+    coverage: PdfCoverageSummary[];
+  } | null = null;
+  const getExtractions = async (): Promise<{
+    chunks: PdfExtractionChunk[];
+    coverage: PdfCoverageSummary[];
+  }> => {
     if (!extractionCache) {
       extractionCache = await params.getExtractions();
     }
@@ -279,8 +420,27 @@ async function runPdfPrompt(params: {
         }
       }
 
-      const extractions = await getExtractions();
+      const extractionResult = await getExtractions();
+      const extractions = extractionResult.chunks;
       const hasImages = extractions.some((e) => e.images.length > 0);
+      const analyzeExtractions = async (
+        selectedExtractions: PdfExtractionChunk[],
+        analysisPrompt: string,
+      ): Promise<string> => {
+        const compatibleExtractions =
+          hasImages && !model.input?.includes("image")
+            ? selectedExtractions.map((extraction) => ({
+                ...extraction,
+                images: [],
+              }))
+            : selectedExtractions;
+        const context = buildPdfExtractionContext(analysisPrompt, compatibleExtractions, model);
+        const message = await complete(model, context, {
+          apiKey,
+          maxTokens: resolvePdfToolMaxTokens(model.maxTokens),
+        });
+        return coercePdfAssistantText({ message, provider, model: modelId });
+      };
       if (hasImages && !model.input?.includes("image")) {
         const hasText = extractions.some((e) => e.text.trim().length > 0);
         if (!hasText) {
@@ -288,26 +448,50 @@ async function runPdfPrompt(params: {
             `Model ${provider}/${modelId} does not support images and PDF has no extractable text.`,
           );
         }
-        const textOnlyExtractions: PdfExtractedContent[] = extractions.map((e) => ({
-          text: e.text,
-          images: [],
-        }));
-        const context = buildPdfExtractionContext(params.prompt, textOnlyExtractions, model);
-        const message = await complete(model, context, {
-          apiKey,
-          maxTokens: resolvePdfToolMaxTokens(model.maxTokens),
-        });
-        const text = coercePdfAssistantText({ message, provider, model: modelId });
-        return { text, provider, model: modelId, native: false };
+      }
+      if (extractions.length <= 1) {
+        const text = await analyzeExtractions(
+          extractions,
+          [params.prompt, buildCoverageInstruction(extractionResult.coverage)].join("\n\n"),
+        );
+        return {
+          text,
+          provider,
+          model: modelId,
+          native: false,
+          coverage: extractionResult.coverage,
+        };
       }
 
-      const context = buildPdfExtractionContext(params.prompt, extractions, model);
-      const message = await complete(model, context, {
-        apiKey,
-        maxTokens: resolvePdfToolMaxTokens(model.maxTokens),
-      });
-      const text = coercePdfAssistantText({ message, provider, model: modelId });
-      return { text, provider, model: modelId, native: false };
+      const chunkSummaries: PdfExtractionChunk[] = [];
+      for (const extraction of extractions) {
+        const chunkCoverage = extraction.coverage;
+        const chunkPrompt = [
+          params.prompt,
+          chunkCoverage
+            ? `This pass covers only pages ${formatPageRanges(chunkCoverage.pagesProcessed)} of ${chunkCoverage.documentPageCount}.`
+            : "This pass covers only one bounded chunk of the PDF.",
+          "Return grounded findings and page references from this chunk only. Do not make document-wide absence claims.",
+        ].join("\n\n");
+        const chunkText = await analyzeExtractions([extraction], chunkPrompt);
+        chunkSummaries.push({
+          ...extraction,
+          text: chunkText,
+          images: [],
+        });
+      }
+      const synthesisPrompt = [
+        params.prompt,
+        buildCoverageInstruction(extractionResult.coverage),
+      ].join("\n\n");
+      const text = await analyzeExtractions(chunkSummaries, synthesisPrompt);
+      return {
+        text,
+        provider,
+        model: modelId,
+        native: false,
+        coverage: extractionResult.coverage,
+      };
     },
   });
 
@@ -321,6 +505,7 @@ async function runPdfPrompt(params: {
       model: a.model,
       error: a.error,
     })),
+    ...(result.result.coverage ? { coverage: result.result.coverage } : {}),
   };
 }
 
@@ -540,21 +725,78 @@ export function createPdfTool(options?: {
 
       const pageNumbers = pagesRaw ? parsePageRange(pagesRaw, configuredMaxPages) : undefined;
 
-      const getExtractions = async (): Promise<PdfExtractedContent[]> => {
-        const extractedAll: PdfExtractedContent[] = [];
-        for (const pdf of loadedPdfs) {
-          const extracted = await extractPdfContent({
-            buffer: pdf.buffer,
+      const getExtractions = async (): Promise<{
+        chunks: PdfExtractionChunk[];
+        coverage: PdfCoverageSummary[];
+      }> => {
+        const chunks: PdfExtractionChunk[] = [];
+        const coverage: PdfCoverageSummary[] = [];
+        for (const [pdfIndex, pdf] of loadedPdfs.entries()) {
+          const firstRequestedPages = pageNumbers
+            ? pageNumbers.slice(0, PDF_EXTRACTION_BATCH_PAGES)
+            : pageRange(1, Math.min(PDF_EXTRACTION_BATCH_PAGES, configuredMaxPages));
+          let documentPageCount: number | undefined;
+          let nextChunkIndex = 0;
+          const extractBatch = async (requestedPages: number[]): Promise<PdfExtractionChunk[]> => {
+            const extracted = await extractPdfContent({
+              buffer: pdf.buffer,
+              maxPages: requestedPages.length,
+              maxPixels: PDF_MAX_PIXELS,
+              minTextChars: PDF_MIN_TEXT_CHARS,
+              ...(password ? { password } : {}),
+              pageNumbers: requestedPages,
+              config: options?.config,
+            });
+            documentPageCount ??= extracted.coverage?.documentPageCount;
+            if (
+              requestedPages.length > 1 &&
+              extracted.coverage?.truncationReasons.includes("text_limit")
+            ) {
+              const midpoint = Math.ceil(requestedPages.length / 2);
+              const left = await extractBatch(requestedPages.slice(0, midpoint));
+              const right = await extractBatch(requestedPages.slice(midpoint));
+              return [...left, ...right];
+            }
+            return [
+              {
+                ...extracted,
+                filename: pdf.filename,
+                pdfIndex,
+                chunkIndex: nextChunkIndex++,
+              },
+            ];
+          };
+          if (firstRequestedPages.length > 0) {
+            chunks.push(...(await extractBatch(firstRequestedPages)));
+          }
+          if (documentPageCount !== undefined) {
+            const allRequestedPages =
+              pageNumbers ??
+              pageRange(1, Math.min(documentPageCount, Math.max(0, configuredMaxPages)));
+            for (
+              let offset = PDF_EXTRACTION_BATCH_PAGES;
+              offset < allRequestedPages.length;
+              offset += PDF_EXTRACTION_BATCH_PAGES
+            ) {
+              chunks.push(
+                ...(await extractBatch(
+                  allRequestedPages.slice(offset, offset + PDF_EXTRACTION_BATCH_PAGES),
+                )),
+              );
+            }
+          }
+          const pdfChunks = chunks.filter((chunk) => chunk.pdfIndex === pdfIndex);
+          const summary = aggregatePdfCoverage({
+            filename: pdf.filename,
+            chunks: pdfChunks,
             maxPages: configuredMaxPages,
-            maxPixels: PDF_MAX_PIXELS,
-            minTextChars: PDF_MIN_TEXT_CHARS,
-            ...(password ? { password } : {}),
-            pageNumbers,
-            config: options?.config,
+            ...(pageNumbers ? { requestedPages: pageNumbers } : {}),
           });
-          extractedAll.push(extracted);
+          if (summary) {
+            coverage.push(summary);
+          }
         }
-        return extractedAll;
+        return { chunks, coverage };
       };
 
       const result = await runPdfPrompt({
@@ -587,7 +829,33 @@ export function createPdfTool(options?: {
               ),
             };
 
-      return buildTextToolResult(result, { native: result.native, ...pdfDetails });
+      if (!result.coverage || result.coverage.length === 0) {
+        return buildTextToolResult(result, { native: result.native, ...pdfDetails });
+      }
+      const partial = result.coverage.some((entry) => !entry.complete);
+      if (partial) {
+        for (const entry of result.coverage.filter((coverageEntry) => !coverageEntry.complete)) {
+          log.warn("pdf_coverage_partial", {
+            filename: entry.filename,
+            documentPageCount: entry.documentPageCount,
+            pagesProcessed: entry.pagesProcessed,
+            lastPageProcessed: entry.pagesProcessed.at(-1),
+            truncationReasons: entry.truncationReasons,
+            textChars: entry.textChars,
+            textBytes: entry.textBytes,
+            maxTextChars: entry.maxTextChars,
+          });
+        }
+      }
+      return buildTextToolResult(
+        { ...result, text: formatCoverageResultText(result.text, result.coverage) },
+        {
+          native: result.native,
+          ...pdfDetails,
+          status: partial ? "partial" : "ok",
+          coverage: result.coverage,
+        },
+      );
     },
   };
 }

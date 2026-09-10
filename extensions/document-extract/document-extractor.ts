@@ -2,8 +2,10 @@
 import type { PdfDocument, PdfEngine, PdfImage } from "clawpdf";
 import type {
   DocumentExtractedImage,
+  DocumentExtractionCoverage,
   DocumentExtractionRequest,
   DocumentExtractionResult,
+  DocumentExtractionTruncationReason,
   DocumentExtractorPlugin,
 } from "openclaw/plugin-sdk/document-extractor";
 
@@ -36,6 +38,60 @@ function toDocumentImage(image: PdfImage): DocumentExtractedImage {
 
 function isPdfPasswordError(err: unknown): boolean {
   return Boolean(err && typeof err === "object" && (err as { code?: unknown }).code === "password");
+}
+
+function pageRange(count: number): number[] {
+  return Array.from({ length: count }, (_, index) => index + 1);
+}
+
+function normalizedProcessedPages(
+  result: { pagesProcessed?: number[]; truncated?: { text?: boolean; images?: boolean } },
+  requestedPages: number[],
+): number[] {
+  if (Array.isArray(result.pagesProcessed)) {
+    return result.pagesProcessed.filter((page) => requestedPages.includes(page));
+  }
+  return requestedPages;
+}
+
+function buildCoverage(params: {
+  documentPageCount: number;
+  requestedPages: number[];
+  pagesProcessed: number[];
+  text: string;
+  textTruncated?: boolean;
+  imageTruncated?: boolean;
+  imageError?: boolean;
+}): DocumentExtractionCoverage {
+  const truncationReasons: DocumentExtractionTruncationReason[] = [];
+  if (params.requestedPages.length < params.documentPageCount) {
+    truncationReasons.push("page_limit");
+  }
+  if (params.textTruncated) {
+    truncationReasons.push("text_limit");
+  }
+  if (params.imageTruncated) {
+    truncationReasons.push("image_limit");
+  }
+  if (params.imageError) {
+    truncationReasons.push("image_error");
+  }
+  const processed = [...new Set(params.pagesProcessed)].toSorted((a, b) => a - b);
+  const processedSet = new Set(processed);
+  const complete =
+    truncationReasons.length === 0 &&
+    params.requestedPages.length === params.documentPageCount &&
+    params.requestedPages.every((page) => processedSet.has(page));
+  return {
+    documentPageCount: params.documentPageCount,
+    requestedPages: params.requestedPages,
+    pagesProcessed: processed,
+    complete,
+    textChars: params.text.length,
+    textBytes: Buffer.byteLength(params.text),
+    maxTextChars: MAX_EXTRACTED_TEXT_CHARS,
+    truncationReasons,
+  };
 }
 
 async function openPdfDocument(params: {
@@ -71,6 +127,7 @@ async function extractPdfContent(
           .filter((p) => Number.isInteger(p) && p >= 1 && p <= pdf.pageCount)
           .slice(0, request.maxPages)
       : undefined;
+    const requestedPages = pages ?? pageRange(Math.min(pdf.pageCount, request.maxPages));
     const pageSelection = pages ? { pages } : { maxPages: request.maxPages };
 
     const textResult = await pdf.extract({
@@ -79,9 +136,20 @@ async function extractPdfContent(
       maxTextChars: MAX_EXTRACTED_TEXT_CHARS,
     });
     const text = textResult.text;
+    const textPages = normalizedProcessedPages(textResult, requestedPages);
 
     if (text.trim().length >= request.minTextChars) {
-      return { text, images: [] };
+      return {
+        text,
+        images: [],
+        coverage: buildCoverage({
+          documentPageCount: pdf.pageCount,
+          requestedPages,
+          pagesProcessed: textPages,
+          text,
+          textTruncated: textResult.truncated?.text,
+        }),
+      };
     }
 
     try {
@@ -94,10 +162,33 @@ async function extractPdfContent(
           forms: true,
         },
       });
-      return { text, images: imageResult.images.map(toDocumentImage) };
+      const imagePages = normalizedProcessedPages(imageResult, requestedPages);
+      return {
+        text,
+        images: imageResult.images.map(toDocumentImage),
+        coverage: buildCoverage({
+          documentPageCount: pdf.pageCount,
+          requestedPages,
+          pagesProcessed: [...textPages, ...imagePages],
+          text,
+          textTruncated: textResult.truncated?.text,
+          imageTruncated: imageResult.truncated?.images,
+        }),
+      };
     } catch (err) {
       request.onImageExtractionError?.(err);
-      return { text, images: [] };
+      return {
+        text,
+        images: [],
+        coverage: buildCoverage({
+          documentPageCount: pdf.pageCount,
+          requestedPages,
+          pagesProcessed: textPages,
+          text,
+          textTruncated: textResult.truncated?.text,
+          imageError: true,
+        }),
+      };
     }
   } finally {
     pdf.destroy();

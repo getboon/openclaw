@@ -7,7 +7,7 @@ import type {
   ReplyPayloadDelivery,
 } from "../interactive/payload.js";
 
-export type AgentDecisionTraceToolStatus = "ok" | "error" | "blocked";
+export type AgentDecisionTraceToolStatus = "ok" | "partial" | "error" | "blocked";
 
 /** Bounded, user-visible execution facts. Never contains model reasoning or tool data. */
 export type AgentDecisionTrace = {

@@ -352,6 +352,43 @@ describe("buildAgentDecisionTrace", () => {
 
     expect(trace.reason).toBe("tool_execution_partial");
   });
+
+  it("never treats a partial call as recovered", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 3,
+        tools: ["exec", "pdf", "message"],
+        failures: 1,
+        visibleTools: ["exec", "pdf", "message"],
+        invocations: [
+          { name: "exec", status: "error" },
+          { name: "pdf", status: "partial" },
+          { name: "message", status: "ok" },
+        ],
+        unrecoveredFailures: 0,
+      },
+      payloads: [{ text: "The available pages were reviewed." }],
+    });
+
+    expect(trace.reason).toBe("tool_execution_partial");
+  });
+
+  it("marks a partial tool result medium-confidence even without an error", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["pdf"],
+        failures: 0,
+        visibleTools: ["pdf"],
+        invocations: [{ name: "pdf", status: "partial" }],
+      },
+    });
+
+    expect(trace.disposition).toBe("completed");
+    expect(trace.reason).toBe("tool_execution_partial");
+    expect(trace.confidence).toBe("medium");
+    expect(trace.evidence).toEqual([{ kind: "tool_outcome", tool: "pdf", status: "partial" }]);
+  });
 });
 
 describe("attachAgentDecisionTrace", () => {

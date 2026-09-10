@@ -158,4 +158,14 @@ describe("buildToolFailureDigest", () => {
     expect(digest?.completedToolCount).toBe(1);
     expect(digest?.totalToolCount).toBe(3);
   });
+
+  it("treats a partial call as not completed", () => {
+    const digest = buildToolFailureDigest({
+      toolFailures: [failure({ toolName: "write", mutatingAction: true })],
+      toolMetas: [{ errored: false }, { errored: false, status: "partial" }],
+      surfaceContext: { ...surfaceContext, hasUserFacingErrorReply: false },
+    });
+    expect(digest?.completedToolCount).toBe(1);
+    expect(digest?.totalToolCount).toBe(2);
+  });
 });
