@@ -1,17 +1,17 @@
 {
   "name": "@openclaw/tokenjuice",
-  "version": "2026.6.11-boon.41",
+  "version": "2026.6.11-boon.42",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/tokenjuice",
-      "version": "2026.6.11-boon.41",
+      "version": "2026.6.11-boon.42",
       "dependencies": {
         "tokenjuice": "0.8.1"
       },
       "peerDependencies": {
-        "openclaw": ">=2026.6.11-boon.41"
+        "openclaw": ">=2026.6.11-boon.42"
       },
       "peerDependenciesMeta": {
         "openclaw": {

@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.42
+
+Makes a failed tool step report what actually broke instead of a reasonless "exec (error)" — so QA (and the audit trace) can see the failing tool and a concrete, user-safe reason rather than nothing.
+
+- **#219 (ENG-19418):** when a tool the agent ran ended in error, the decision trace recorded the invocation as a bare `status: "error"` with no detail — the failing tool was named but carried no reason, and a failed `exec` step surfaced nothing a person could report. The trace summary now looks up the matching tool failure by name and attaches a **classified, user-safe reason** (the fixed-copy `classifyToolFailureReason` text, e.g. "not found" / "timed out") to an errored invocation; when a tool records more than one failure in the same turn the match is ambiguous, so the detail is **omitted** rather than risk attaching the wrong reason. The audit-decision-trace projection carries that detail through for `error` (and existing `blocked`) entries only. Separately, a failed command's progress line can now prefer the command's real stdout/stderr over the title-derived detail, **capped to 500 chars** (head preserved) so a large or unbounded output can't blow up the user-visible line; whitespace-only output falls back to the title. Companion boon-core serialization + redaction + UI coverage in getboon/boon#14787.
+- Base = `2026.6.11-boon.41`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.42` in lockstep. No plugin source changed between boon.41 and boon.42 (the only change is #219, in the gateway), so a gateway roll delivers the whole release — no `fleet-slack.sh` / `fleet-msteams.sh` / `fleet-diagnostics-prometheus.sh` pass is needed. The fleet is currently pinned to `boon.38`, so a roll to `boon.42` also picks up the `boon.39`–`boon.41` contents (#208/#209, #210/#217, #213/#214).
+
 ## 2026.6.11-boon.41
 
 Stops a long PDF that was only partially read from being answered as if the whole document had been read, and makes a cron delivery target the channel cannot address fail at delivery-resolution time with the channel's own error instead of silently black-holing the delivery.
