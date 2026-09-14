@@ -118,8 +118,12 @@ describe("buildChannelProgressDraftLine", () => {
     expect(line?.text).toContain("bash: false: command not found");
   });
 
-  it("caps oversized command output so the surfaced detail is bounded", () => {
-    const huge = "x".repeat(5000);
+  it("caps oversized command output to the first 500 chars (keeps the head, drops the tail)", () => {
+    // Distinguishable head/tail so the assertion catches a regression that
+    // truncated from the wrong end (e.g. kept the LAST 500 chars).
+    const head = "HEAD-marker-";
+    const tail = "-TAIL-marker";
+    const oversized = head + "x".repeat(600) + tail; // > 500 chars
     const line = buildChannelProgressDraftLine(
       {
         event: "command-output",
@@ -127,17 +131,22 @@ describe("buildChannelProgressDraftLine", () => {
         title: "command false",
         name: "exec",
         exitCode: 2,
-        output: huge,
+        output: oversized,
       },
       { commandText: "raw" },
     );
 
-    // 500-char cap (MAX_COMMAND_OUTPUT_DETAIL_CHARS) — bounded regardless of input size.
+    // 500-char cap (MAX_COMMAND_OUTPUT_DETAIL_CHARS): the surfaced detail is the
+    // first 500 chars verbatim — head preserved, tail dropped.
     expect(line).toBeDefined();
     const detail = line?.detail;
     expect(typeof detail).toBe("string");
+    expect(detail).toBe(oversized.slice(0, 500));
     expect((detail as string).length).toBe(500);
-    expect((detail as string).length).toBeLessThan(huge.length);
+    expect(detail as string).toContain(head);
+    expect(detail as string).not.toContain(tail);
+    expect(line?.text).toContain(head);
+    expect(line?.text).not.toContain(tail);
   });
 
   it("falls back to the title when output is absent (no regression)", () => {
