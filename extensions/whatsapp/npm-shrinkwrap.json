@@ -1,19 +1,19 @@
 {
   "name": "@openclaw/whatsapp",
-  "version": "2026.6.11-boon.40",
+  "version": "2026.6.11-boon.41",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/whatsapp",
-      "version": "2026.6.11-boon.40",
+      "version": "2026.6.11-boon.41",
       "dependencies": {
         "audio-decode": "2.2.3",
         "baileys": "7.0.0-rc13",
         "typebox": "1.1.39"
       },
       "peerDependencies": {
-        "openclaw": ">=2026.6.11-boon.40"
+        "openclaw": ">=2026.6.11-boon.41"
       },
       "peerDependenciesMeta": {
         "openclaw": {
