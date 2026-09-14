@@ -13,7 +13,12 @@ import type {
   StreamingMode,
   TextChunkMode,
 } from "../config/types.base.js";
+import { truncateUtf16Safe } from "../utils.js";
 import { asBoolean } from "../utils/boolean.js";
+
+// Upper bound on raw command output surfaced into a user-visible progress line,
+// so a caller supplying large stdout/stderr can't emit an unbounded value.
+const MAX_COMMAND_OUTPUT_DETAIL_CHARS = 500;
 
 export type {
   ChannelDeliveryStreamingConfig,
@@ -258,6 +263,17 @@ export type ChannelProgressDraftLineInput =
       name?: string;
       status?: string;
       exitCode?: number | null;
+      // Real command stdout/stderr, when the caller has it. Only consulted on a
+      // non-"completed" status (see buildCommandOutputProgressLine); absent is
+      // fully backward-compatible with every existing caller. The formatter caps
+      // it to MAX_COMMAND_OUTPUT_DETAIL_CHARS before surfacing, so the value put
+      // on the user-visible line is always bounded regardless of input size.
+      // NOTE: secret/path redaction is NOT done here (openclaw has no general
+      // redactor for arbitrary text). Whoever forwards this into a boon-core
+      // thinking-step `text` MUST also run it through boon-core's
+      // SensitiveDataRedactor (and stay under THINKING_MAX_PROSE_LENGTH), or the
+      // callback 400s — that ingestion boundary is the authoritative scrub.
+      output?: string;
     }
   | {
       event: "patch";
@@ -523,6 +539,28 @@ function buildCommandOutputProgressLine(
   }
   if (status === "completed") {
     return line;
+  }
+  // On failure, prefer real output over the title-derived detail when
+  // available. Never in "status"-only mode (that mode is deliberately
+  // title/output-free) or on success (handled above). Whitespace-only output is
+  // treated as absent so it can't blank out the title.
+  const rawOutput =
+    options?.commandText === "status" || !input.output?.trim() ? undefined : input.output;
+  // Cap the surfaced output so a caller supplying large stdout/stderr can't put
+  // an unbounded value into the user-visible line. This layer only bounds
+  // length; secret/path redaction of anything reaching a customer thread is
+  // enforced at the boon-core ingestion boundary (SensitiveDataRedactor).
+  const failureDetail = rawOutput
+    ? truncateUtf16Safe(rawOutput, MAX_COMMAND_OUTPUT_DETAIL_CHARS)
+    : undefined;
+  if (failureDetail) {
+    const statusLine = {
+      ...line,
+      detail: failureDetail,
+      text: formatToolAggregate(name, [status, failureDetail], { markdown: options?.markdown }),
+    };
+    setProgressDraftLineCorrelationKey(statusLine, correlationKey);
+    return statusLine;
   }
   if (!line.detail || line.detail === status) {
     const statusLine = {

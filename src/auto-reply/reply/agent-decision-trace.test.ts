@@ -86,20 +86,51 @@ describe("buildAgentDecisionTrace", () => {
     expect(trace.evidence[0]).not.toHaveProperty("detail");
   });
 
-  it("never attaches a stray detail to a non-blocked entry", () => {
+  it("never attaches a stray detail to an ok entry", () => {
     const trace = buildAgentDecisionTrace({
       toolSummary: {
-        calls: 2,
-        tools: ["exec", "message"],
-        visibleTools: ["exec", "message"],
-        invocations: [
-          { name: "exec", status: "ok", detail: "stray" },
-          { name: "message", status: "error", detail: "stray" },
-        ],
+        calls: 1,
+        tools: ["exec"],
+        visibleTools: ["exec"],
+        invocations: [{ name: "exec", status: "ok", detail: "stray" }],
       },
     });
     expect(trace.toolInvocations.every((entry) => !("detail" in entry))).toBe(true);
     expect(trace.evidence.every((entry) => !("detail" in entry))).toBe(true);
+  });
+
+  it("attaches a provided detail to an error entry (previously stripped)", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["message"],
+        visibleTools: ["message"],
+        invocations: [{ name: "message", status: "error", detail: "exited with an error" }],
+      },
+    });
+    expect(trace.toolInvocations[0]).toEqual({
+      name: "message",
+      status: "error",
+      detail: "exited with an error",
+    });
+    expect(trace.evidence[0]).toEqual({
+      kind: "tool_outcome",
+      tool: "message",
+      status: "error",
+      detail: "exited with an error",
+    });
+  });
+
+  it("omits detail on an error entry when none was provided", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["exec"],
+        visibleTools: ["exec"],
+        invocations: [{ name: "exec", status: "error" }],
+      },
+    });
+    expect(trace.toolInvocations[0]).toEqual({ name: "exec", status: "error" });
   });
 
   it("truncates an oversized detail to the bounded cap", () => {
