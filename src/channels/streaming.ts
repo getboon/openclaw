@@ -258,6 +258,15 @@ export type ChannelProgressDraftLineInput =
       name?: string;
       status?: string;
       exitCode?: number | null;
+      // ENG-19418 — real command stdout/stderr, when the caller has it. Only
+      // consulted on a non-"completed" status (see buildCommandOutputProgressLine);
+      // absent is fully backward-compatible with every existing caller.
+      // NOTE: this field is UNBOUNDED here — no producer exists in-repo yet (the
+      // anychat-boon-web forwarding is the deferred ENG-19418 follow-up). Whoever
+      // forwards this into a boon-core thinking-step `text` MUST truncate it
+      // (< the 4000-char THINKING_MAX_PROSE_LENGTH cap boon-core rejects past)
+      // AND run it through boon-core's SensitiveDataRedactor, or a callback 400s.
+      output?: string;
     }
   | {
       event: "patch";
@@ -523,6 +532,19 @@ function buildCommandOutputProgressLine(
   }
   if (status === "completed") {
     return line;
+  }
+  // ENG-19418 — on failure, prefer real output over the title-derived detail
+  // when available. Never in "status"-only mode (that mode is deliberately
+  // title/output-free) or on success (handled above).
+  const failureDetail = options?.commandText === "status" ? undefined : input.output;
+  if (failureDetail) {
+    const statusLine = {
+      ...line,
+      detail: failureDetail,
+      text: formatToolAggregate(name, [status, failureDetail], { markdown: options?.markdown }),
+    };
+    setProgressDraftLineCorrelationKey(statusLine, correlationKey);
+    return statusLine;
   }
   if (!line.detail || line.detail === status) {
     const statusLine = {

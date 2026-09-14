@@ -95,6 +95,74 @@ describe("buildChannelProgressDraftLine", () => {
     });
   });
 
+  it("prefers real output over the title when a command fails (ENG-19418)", () => {
+    const line = buildChannelProgressDraftLine(
+      {
+        event: "command-output",
+        toolCallId: "exec-2",
+        phase: "end",
+        title: "command false",
+        name: "exec",
+        exitCode: 2,
+        output: "bash: false: command not found",
+      },
+      { commandText: "raw" },
+    );
+
+    expect(line).toMatchObject({
+      kind: "command-output",
+      id: "exec-2",
+      detail: "bash: false: command not found",
+      status: "exit 2",
+    });
+    expect(line?.text).toContain("bash: false: command not found");
+  });
+
+  it("falls back to the title when output is absent (ENG-19418, no regression)", () => {
+    const line = buildChannelProgressDraftLine(
+      {
+        event: "command-output",
+        phase: "end",
+        title: "command false",
+        name: "exec",
+        exitCode: 2,
+      },
+      { commandText: "raw" },
+    );
+
+    expect(line).toMatchObject({ detail: "command false", status: "exit 2" });
+  });
+
+  it("does not use output on a successful command (ENG-19418, no regression)", () => {
+    const line = buildChannelProgressDraftLine({
+      event: "command-output",
+      phase: "end",
+      name: "exec",
+      exitCode: 0,
+      output: "should never appear on success",
+    });
+
+    expect(line).toMatchObject({ kind: "command-output", status: "completed" });
+    expect(line?.detail).toBeUndefined();
+  });
+
+  it("ignores output in status-only mode (ENG-19418, no regression)", () => {
+    const line = buildChannelProgressDraftLine(
+      {
+        event: "command-output",
+        phase: "end",
+        title: "command false",
+        name: "exec",
+        exitCode: 2,
+        output: "bash: false: command not found",
+      },
+      { commandText: "status" },
+    );
+
+    expect(line).toMatchObject({ detail: "exit 2", status: "exit 2" });
+    expect(line?.text).not.toContain("bash: false");
+  });
+
   it("keeps only command status in status-only progress lines", () => {
     const line = buildChannelProgressDraftLine(
       {

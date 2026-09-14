@@ -122,9 +122,13 @@ export function buildAgentDecisionTrace(params: {
       if (!name || !status) {
         return [];
       }
-      // Detail is only meaningful for a blocked (pre-execution-failure) entry; never
-      // attach a stray detail to an ok/error entry.
-      const detail = status === "blocked" ? normalizeTraceDetail(invocation.detail) : undefined;
+      // Detail is meaningful for a blocked (pre-execution-failure) or error
+      // (post-execution-failure, classified — ENG-19418) entry; never attach a
+      // stray detail to an ok/partial entry.
+      const detail =
+        status === "blocked" || status === "error"
+          ? normalizeTraceDetail(invocation.detail)
+          : undefined;
       return [{ name, status, ...(detail ? { detail } : {}) }];
     }) ?? [];
   const toolInvocations = allInvocations.slice(0, MAX_TRACE_ITEMS);

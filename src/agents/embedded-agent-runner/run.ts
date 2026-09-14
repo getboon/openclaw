@@ -144,6 +144,7 @@ import {
   suspendSession,
   type SessionSuspensionParams,
 } from "../session-suspension.js";
+import { classifyToolFailureReason, type ToolErrorSummary } from "../tool-error-summary.js";
 import { resolveToolLoopDetectionConfig } from "../tool-loop-detection-config.js";
 import { derivePromptTokens, normalizeUsage, type UsageLike } from "../usage.js";
 import { redactRunIdentifier, resolveRunWorkspaceDir } from "../workspace-run.js";
@@ -498,8 +499,17 @@ export function buildTraceToolSummary(params: {
   hadFailure: boolean;
   /**
    * Errored calls with recovery flags. Omit to keep the legacy disposition.
+   * ENG-19418 — widened to optionally expose the classifier-relevant fields
+   * too: the real runtime value here has always been `attempt.toolFailures`
+   * (`Array<ToolErrorSummary & {retried?}>`, see run/types.ts), this type just
+   * didn't surface them. All new fields stay optional so existing bare
+   * `{retried}` callers/tests remain valid.
    */
-  toolFailures?: readonly { retried?: boolean }[];
+  toolFailures?: ReadonlyArray<
+    Partial<Pick<ToolErrorSummary, "toolName" | "error" | "errorCode" | "timedOut">> & {
+      retried?: boolean;
+    }
+  >;
 }): ToolSummaryTrace | undefined {
   const toolMetas = params.toolMetas ?? [];
   const visibleTools = [...new Set(params.visibleToolNames ?? [])]
@@ -518,6 +528,16 @@ export function buildTraceToolSummary(params: {
     seen.add(toolName);
     tools.push(toolName);
   }
+  // ENG-19418 — for an error invocation, look up the matching failure by tool
+  // name and attach a classified, user-safe reason. Match is by name only (no
+  // per-call id exists on toolMetas/toolFailures at this layer): if the same
+  // tool is called twice in one turn and only one fails, the reason could
+  // attach to the wrong call — accepted, same class as the toolMetas.length-1
+  // limitation this module already documents.
+  const findMatchingFailureDetail = (toolName: string): string | undefined => {
+    const match = params.toolFailures?.find((failure) => failure.toolName === toolName);
+    return match ? classifyToolFailureReason(match)?.text : undefined;
+  };
   return {
     calls: toolMetas.length,
     tools,
@@ -536,9 +556,15 @@ export function buildTraceToolSummary(params: {
         name: entry.toolName,
         status,
       };
-      // Carry the pre-execution failure detail only for a blocked entry.
+      // Carry the pre-execution failure detail for a blocked entry (PR #209),
+      // or a classified failure reason for an error entry (ENG-19418).
       if (status === "blocked" && entry.detail) {
         invocation.detail = entry.detail;
+      } else if (status === "error") {
+        const detail = findMatchingFailureDetail(entry.toolName);
+        if (detail) {
+          invocation.detail = detail;
+        }
       }
       return invocation;
     }),

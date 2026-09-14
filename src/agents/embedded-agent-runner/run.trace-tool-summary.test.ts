@@ -96,6 +96,36 @@ describe("buildTraceToolSummary", () => {
     expect(summary?.invocations?.[0]).toEqual({ name: "message", status: "blocked" });
   });
 
+  it("attaches a classified detail to an error invocation when a matching toolFailure exists (ENG-19418)", () => {
+    const summary = buildTraceToolSummary({
+      visibleToolNames: ["exec"],
+      toolMetas: [{ toolName: "exec", errored: true }],
+      hadFailure: true,
+      toolFailures: [{ toolName: "exec", errorCode: "ENOENT" }],
+    });
+    expect(summary?.invocations).toEqual([{ name: "exec", status: "error", detail: "not found" }]);
+  });
+
+  it("omits detail on an error invocation when no toolFailures entry matches its name (ENG-19418)", () => {
+    const summary = buildTraceToolSummary({
+      visibleToolNames: ["exec"],
+      toolMetas: [{ toolName: "exec", errored: true }],
+      hadFailure: true,
+      toolFailures: [{ toolName: "sessions_spawn", errorCode: "ENOENT" }],
+    });
+    expect(summary?.invocations).toEqual([{ name: "exec", status: "error" }]);
+  });
+
+  it("omits detail on an error invocation when the matching toolFailure classifies to nothing (ENG-19418)", () => {
+    const summary = buildTraceToolSummary({
+      visibleToolNames: ["exec"],
+      toolMetas: [{ toolName: "exec", errored: true }],
+      hadFailure: true,
+      toolFailures: [{ toolName: "exec", error: "some totally unclassifiable failure text" }],
+    });
+    expect(summary?.invocations).toEqual([{ name: "exec", status: "error" }]);
+  });
+
   it("counts only the failures the runtime never marked retried", () => {
     // A successfully re-run step is retired so it cannot demote a finished
     // turn to "partial".
