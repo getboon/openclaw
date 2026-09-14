@@ -499,7 +499,7 @@ export function buildTraceToolSummary(params: {
   hadFailure: boolean;
   /**
    * Errored calls with recovery flags. Omit to keep the legacy disposition.
-   * ENG-19418 — widened to optionally expose the classifier-relevant fields
+   * Widened to optionally expose the classifier-relevant fields
    * too: the real runtime value here has always been `attempt.toolFailures`
    * (`Array<ToolErrorSummary & {retried?}>`, see run/types.ts), this type just
    * didn't surface them. All new fields stay optional so existing bare
@@ -528,13 +528,21 @@ export function buildTraceToolSummary(params: {
     seen.add(toolName);
     tools.push(toolName);
   }
-  // ENG-19418 — for an error invocation, look up the matching failure by tool
-  // name and attach a classified, user-safe reason. Match is by name only (no
-  // per-call id exists on toolMetas/toolFailures at this layer): if the same
-  // tool is called twice in one turn and only one fails, the reason could
-  // attach to the wrong call — accepted, same class as the toolMetas.length-1
-  // limitation this module already documents.
+  // For an error invocation, look up the matching failure by tool name and
+  // attach a classified, user-safe reason. There is no per-call id correlating
+  // a toolMeta to a toolFailure at this layer, so matching is by name; when a
+  // tool records more than one failure in the turn the mapping is ambiguous, so
+  // we omit the detail rather than risk attaching a reason to the wrong call.
+  const failureCountByTool = new Map<string, number>();
+  for (const failure of params.toolFailures ?? []) {
+    if (failure.toolName) {
+      failureCountByTool.set(failure.toolName, (failureCountByTool.get(failure.toolName) ?? 0) + 1);
+    }
+  }
   const findMatchingFailureDetail = (toolName: string): string | undefined => {
+    if ((failureCountByTool.get(toolName) ?? 0) !== 1) {
+      return undefined;
+    }
     const match = params.toolFailures?.find((failure) => failure.toolName === toolName);
     return match ? classifyToolFailureReason(match)?.text : undefined;
   };
@@ -557,7 +565,7 @@ export function buildTraceToolSummary(params: {
         status,
       };
       // Carry the pre-execution failure detail for a blocked entry (PR #209),
-      // or a classified failure reason for an error entry (ENG-19418).
+      // or a classified failure reason for an error entry.
       if (status === "blocked" && entry.detail) {
         invocation.detail = entry.detail;
       } else if (status === "error") {

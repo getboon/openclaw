@@ -99,7 +99,7 @@ describe("buildAgentDecisionTrace", () => {
     expect(trace.evidence.every((entry) => !("detail" in entry))).toBe(true);
   });
 
-  it("attaches a provided detail to an error entry (ENG-19418 — previously stripped)", () => {
+  it("attaches a provided detail to an error entry (previously stripped)", () => {
     const trace = buildAgentDecisionTrace({
       toolSummary: {
         calls: 1,
@@ -121,7 +121,7 @@ describe("buildAgentDecisionTrace", () => {
     });
   });
 
-  it("omits detail on an error entry when none was provided (ENG-19418)", () => {
+  it("omits detail on an error entry when none was provided", () => {
     const trace = buildAgentDecisionTrace({
       toolSummary: {
         calls: 1,

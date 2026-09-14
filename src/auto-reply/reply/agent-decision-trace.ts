@@ -123,7 +123,7 @@ export function buildAgentDecisionTrace(params: {
         return [];
       }
       // Detail is meaningful for a blocked (pre-execution-failure) or error
-      // (post-execution-failure, classified — ENG-19418) entry; never attach a
+      // (post-execution-failure, classified) entry; never attach a
       // stray detail to an ok/partial entry.
       const detail =
         status === "blocked" || status === "error"

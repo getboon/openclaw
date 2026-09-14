@@ -96,7 +96,7 @@ describe("buildTraceToolSummary", () => {
     expect(summary?.invocations?.[0]).toEqual({ name: "message", status: "blocked" });
   });
 
-  it("attaches a classified detail to an error invocation when a matching toolFailure exists (ENG-19418)", () => {
+  it("attaches a classified detail to an error invocation when a matching toolFailure exists", () => {
     const summary = buildTraceToolSummary({
       visibleToolNames: ["exec"],
       toolMetas: [{ toolName: "exec", errored: true }],
@@ -106,7 +106,7 @@ describe("buildTraceToolSummary", () => {
     expect(summary?.invocations).toEqual([{ name: "exec", status: "error", detail: "not found" }]);
   });
 
-  it("omits detail on an error invocation when no toolFailures entry matches its name (ENG-19418)", () => {
+  it("omits detail on an error invocation when no toolFailures entry matches its name", () => {
     const summary = buildTraceToolSummary({
       visibleToolNames: ["exec"],
       toolMetas: [{ toolName: "exec", errored: true }],
@@ -116,7 +116,7 @@ describe("buildTraceToolSummary", () => {
     expect(summary?.invocations).toEqual([{ name: "exec", status: "error" }]);
   });
 
-  it("omits detail on an error invocation when the matching toolFailure classifies to nothing (ENG-19418)", () => {
+  it("omits detail on an error invocation when the matching toolFailure classifies to nothing", () => {
     const summary = buildTraceToolSummary({
       visibleToolNames: ["exec"],
       toolMetas: [{ toolName: "exec", errored: true }],
@@ -124,6 +124,28 @@ describe("buildTraceToolSummary", () => {
       toolFailures: [{ toolName: "exec", error: "some totally unclassifiable failure text" }],
     });
     expect(summary?.invocations).toEqual([{ name: "exec", status: "error" }]);
+  });
+
+  it("omits detail when a tool records more than one failure in the turn (ambiguous match)", () => {
+    // Two exec failures with different reasons: name-only matching cannot tell
+    // which reason belongs to which errored call, so no detail is attached to
+    // either rather than risk showing the wrong one.
+    const summary = buildTraceToolSummary({
+      visibleToolNames: ["exec"],
+      toolMetas: [
+        { toolName: "exec", errored: true },
+        { toolName: "exec", errored: true },
+      ],
+      hadFailure: true,
+      toolFailures: [
+        { toolName: "exec", errorCode: "ENOENT" },
+        { toolName: "exec", timedOut: true },
+      ],
+    });
+    expect(summary?.invocations).toEqual([
+      { name: "exec", status: "error" },
+      { name: "exec", status: "error" },
+    ]);
   });
 
   it("counts only the failures the runtime never marked retried", () => {
