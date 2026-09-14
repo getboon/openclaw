@@ -1,19 +1,19 @@
 {
   "name": "@openclaw/zalouser",
-  "version": "2026.6.11-boon.41",
+  "version": "2026.6.11-boon.42",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/zalouser",
-      "version": "2026.6.11-boon.41",
+      "version": "2026.6.11-boon.42",
       "dependencies": {
         "typebox": "1.1.39",
         "zca-js": "2.1.2",
         "zod": "4.4.3"
       },
       "peerDependencies": {
-        "openclaw": ">=2026.6.11-boon.41"
+        "openclaw": ">=2026.6.11-boon.42"
       },
       "peerDependenciesMeta": {
         "openclaw": {

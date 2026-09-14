@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/novita-provider",
-  "version": "2026.6.11-boon.41",
+  "version": "2026.6.11-boon.42",
   "private": true,
   "description": "OpenClaw NovitaAI provider plugin",
   "type": "module",

@@ -1,19 +1,19 @@
 {
   "name": "@openclaw/feishu",
-  "version": "2026.6.11-boon.41",
+  "version": "2026.6.11-boon.42",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/feishu",
-      "version": "2026.6.11-boon.41",
+      "version": "2026.6.11-boon.42",
       "dependencies": {
         "@larksuiteoapi/node-sdk": "1.66.0",
         "typebox": "1.1.39",
         "zod": "4.4.3"
       },
       "peerDependencies": {
-        "openclaw": ">=2026.6.11-boon.41"
+        "openclaw": ">=2026.6.11-boon.42"
       },
       "peerDependenciesMeta": {
         "openclaw": {

@@ -1,12 +1,12 @@
 {
   "name": "@openclaw/sms",
-  "version": "2026.6.11-boon.41",
+  "version": "2026.6.11-boon.42",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/sms",
-      "version": "2026.6.11-boon.41",
+      "version": "2026.6.11-boon.42",
       "dependencies": {
         "zod": "4.4.3"
       }
