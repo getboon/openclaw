@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/google-meet",
-  "version": "2026.6.11-boon.40",
+  "version": "2026.6.11-boon.41",
   "description": "OpenClaw Google Meet participant plugin for joining calls through Chrome or Twilio transports.",
   "repository": {
     "type": "git",
@@ -16,7 +16,7 @@
     "openclaw": "workspace:*"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.6.11-boon.40"
+    "openclaw": ">=2026.6.11-boon.41"
   },
   "peerDependenciesMeta": {
     "openclaw": {
@@ -33,10 +33,10 @@
       "minHostVersion": ">=2026.4.20"
     },
     "compat": {
-      "pluginApi": ">=2026.6.11-boon.40"
+      "pluginApi": ">=2026.6.11-boon.41"
     },
     "build": {
-      "openclawVersion": "2026.6.11-boon.40"
+      "openclawVersion": "2026.6.11-boon.41"
     },
     "release": {
       "publishToClawHub": true,

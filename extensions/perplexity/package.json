@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/perplexity-plugin",
-  "version": "2026.6.11-boon.40",
+  "version": "2026.6.11-boon.41",
   "description": "OpenClaw Perplexity plugin.",
   "repository": {
     "type": "git",
@@ -21,10 +21,10 @@
       "minHostVersion": ">=2026.6.8"
     },
     "compat": {
-      "pluginApi": ">=2026.6.11-boon.40"
+      "pluginApi": ">=2026.6.11-boon.41"
     },
     "build": {
-      "openclawVersion": "2026.6.11-boon.40",
+      "openclawVersion": "2026.6.11-boon.41",
       "bundledDist": false
     },
     "release": {
