@@ -564,8 +564,8 @@ export function buildTraceToolSummary(params: {
         name: entry.toolName,
         status,
       };
-      // Carry the pre-execution failure detail for a blocked entry (PR #209),
-      // or a classified failure reason for an error entry.
+      // A blocked entry carries its pre-execution veto detail as-is; an error
+      // entry gets a classified, user-safe failure reason looked up by name.
       if (status === "blocked" && entry.detail) {
         invocation.detail = entry.detail;
       } else if (status === "error") {

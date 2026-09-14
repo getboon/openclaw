@@ -118,6 +118,28 @@ describe("buildChannelProgressDraftLine", () => {
     expect(line?.text).toContain("bash: false: command not found");
   });
 
+  it("caps oversized command output so the surfaced detail is bounded", () => {
+    const huge = "x".repeat(5000);
+    const line = buildChannelProgressDraftLine(
+      {
+        event: "command-output",
+        phase: "end",
+        title: "command false",
+        name: "exec",
+        exitCode: 2,
+        output: huge,
+      },
+      { commandText: "raw" },
+    );
+
+    // 500-char cap (MAX_COMMAND_OUTPUT_DETAIL_CHARS) — bounded regardless of input size.
+    expect(line).toBeDefined();
+    const detail = line?.detail;
+    expect(typeof detail).toBe("string");
+    expect((detail as string).length).toBe(500);
+    expect((detail as string).length).toBeLessThan(huge.length);
+  });
+
   it("falls back to the title when output is absent (no regression)", () => {
     const line = buildChannelProgressDraftLine(
       {
