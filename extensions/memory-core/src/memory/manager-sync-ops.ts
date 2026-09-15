@@ -63,6 +63,9 @@ import {
   publishMemoryDatabaseTables,
   readMemoryDatabaseRevision,
   removeMemoryDatabaseFiles,
+  listMemoryReindexShadowBaseNames,
+  measureMemoryReindexShadowBytes,
+  resolveNonNegativeNumberEnv,
 } from "./manager-db.js";
 import { isMemoryEmbeddingOperationError } from "./manager-embedding-errors.js";
 import {
@@ -2666,6 +2669,85 @@ export abstract class MemoryManagerSyncOps {
     return true;
   }
 
+  /**
+   * Bytes currently available on the volume holding `filePath`, or undefined when
+   * it cannot be determined. Undefined must be treated as "unknown", never as
+   * "plenty" -- callers fail open on purpose (a degraded index beats refusing to
+   * index at all), but they log it.
+   */
+  private resolveAvailableBytes(filePath: string, context: string): number | undefined {
+    const warnUnknown = (detail: string): undefined => {
+      // The doc contract above promises callers log this. They fail open on
+      // purpose, so without a line here the space guards can be silently inert on
+      // a host and nobody would know until the volume filled.
+      log.warn(
+        `memory reindex ${context}: cannot determine free space on the volume holding ` +
+          `${filePath} (${detail}); proceeding WITHOUT space protection for this attempt.`,
+      );
+      return undefined;
+    };
+    try {
+      // statfsSync returns numbers (bigints only with `{ bigint: true }`), so no
+      // Number() coercion here -- it was a no-op and the linter rejects it.
+      const stats = fsSync.statfsSync(path.dirname(filePath));
+      const available = stats.bavail * stats.bsize;
+      if (!Number.isFinite(available) || available < 0) {
+        return warnUnknown(`statfs returned bavail=${stats.bavail} bsize=${stats.bsize}`);
+      }
+      return available;
+    } catch (err) {
+      return warnUnknown((err as Error)?.message ?? String(err));
+    }
+  }
+
+  /**
+   * Free space a full reindex needs before it is allowed to start.
+   *
+   * A shadow rebuild is NOT a copy of the live file: it seeds the whole embedding
+   * cache, accumulates its own WAL, and then publishing writes a second large WAL
+   * against the live database WHILE the shadow still exists. Measured on a
+   * production host with a 9.37 GB live DB, one attempt occupied ~10-11 GB
+   * (shadow base 6.1-7.2 GB + shadow WAL ~3.9 GB).
+   *
+   * No fixed multiple of the live DB is a proven upper bound, so this deliberately
+   * does not claim to be one: it is a cheap early exit, and the runtime re-check
+   * before publish (`assertRuntimeSpaceBeforePublish`) is what actually prevents
+   * driving the volume to ENOSPC. Both are tunable; the multiplier defaults
+   * conservatively above the observed ratio.
+   */
+  private resolveReindexSpaceBudgetBytes(dbPath: string): number {
+    const multiplier = resolveNonNegativeNumberEnv("OPENCLAW_MEMORY_REINDEX_SPACE_MULTIPLIER", 2);
+    const reserveBytes = resolveNonNegativeNumberEnv(
+      "OPENCLAW_MEMORY_REINDEX_SPACE_RESERVE_BYTES",
+      2 * 1024 ** 3,
+    );
+    let dbBytes = 0;
+    try {
+      dbBytes = fsSync.statSync(dbPath).size;
+    } catch {}
+    return dbBytes * multiplier + reserveBytes;
+  }
+
+  /** Re-check free space mid-rebuild; throws to abort cleanly via the existing finally. */
+  private assertRuntimeSpaceBeforePublish(dbPath: string, tempDbPath: string): void {
+    const available = this.resolveAvailableBytes(dbPath, "runtime re-check");
+    if (available === undefined) {
+      return; // unknown: fail open (logged above); the preflight already ran
+    }
+    // Publishing needs room for a WAL against the live DB while the shadow still
+    // exists. Require at least the shadow's own current size as headroom.
+    const shadowBytes = measureMemoryReindexShadowBytes(dbPath);
+    const required = Math.max(shadowBytes, this.resolveReindexSpaceBudgetBytes(dbPath) / 4);
+    if (available < required) {
+      throw new Error(
+        `memory reindex aborted before publish: ${Math.round(available / 1e6)} MB free on the volume ` +
+          `holding ${dbPath}, needs ~${Math.round(required / 1e6)} MB to publish safely ` +
+          `(shadow ${tempDbPath} is ${Math.round(shadowBytes / 1e6)} MB). ` +
+          `Aborting leaves the existing index usable; the shadow is removed by the caller.`,
+      );
+    }
+  }
+
   private async runInPlaceReindex(params: {
     reason?: string;
     force?: boolean;
@@ -2709,6 +2791,73 @@ export abstract class MemoryManagerSyncOps {
     try {
       cleanupAgedMemoryReindexTempFiles(dbPath);
       reindexLock = acquireMemoryReindexLock(dbPath);
+
+      // One-shadow circuit breaker.
+      //
+      // The GC above runs BEFORE the lock is taken and collects abandoned shadows,
+      // so reaching here with a shadow still on disk means one could not be
+      // collected. Starting anyway stacks a second multi-GB shadow on top of the
+      // first -- which is exactly how a recoverable state became a full disk on the
+      // host this guard was written for (two ~10 GB shadows, 20 GB, ENOSPC).
+      //
+      // Keyed on the FILESYSTEM, not in-process state: an orphan exists precisely
+      // because the process holding that state was hard-killed.
+      let existingShadows: string[];
+      try {
+        existingShadows = listMemoryReindexShadowBaseNames(dbPath);
+      } catch (err) {
+        // Fail closed: an unscannable directory means we cannot PROVE no shadow is
+        // present, and proceeding on an unproven absence is the exact failure this
+        // breaker exists to prevent. Decline the way the guards below do rather
+        // than throwing, so a transient FS fault degrades the index instead of
+        // surfacing an error -- but never build.
+        log.warn(
+          `memory reindex refused: could not verify whether unreclaimed shadow databases ` +
+            `exist for ${dbPath} (${(err as Error)?.message ?? String(err)}). Declining rather ` +
+            `than risk stacking a second full-size rebuild. Leaving the current index in place.`,
+        );
+        this.markFailedFullReindexRetry({
+          memory: shouldRetryMemoryOnFailure,
+          sessions: shouldRetrySessionsOnFailure,
+        });
+        return;
+      }
+      if (existingShadows.length > 0) {
+        const shadowBytes = measureMemoryReindexShadowBytes(dbPath);
+        log.warn(
+          `memory reindex refused: ${existingShadows.length} unreclaimed shadow database(s) ` +
+            `(~${Math.round(shadowBytes / 1e6)} MB) already exist for ${dbPath} ` +
+            `[${existingShadows.join(", ")}]. Starting another would stack a second full-size ` +
+            `rebuild on top of them. Leaving the current index in place.`,
+        );
+        // `dirty = true` alone is not enough: it would let the next sync run an
+        // INCREMENTAL memory pass and skip sessions entirely, so the full rebuild
+        // this guard deferred would never actually happen. Use the same retry
+        // marking the failure path below uses. (No restoreReindexRetryState needed
+        // -- nothing has mutated retry state at this point in the run.)
+        this.markFailedFullReindexRetry({
+          memory: shouldRetryMemoryOnFailure,
+          sessions: shouldRetrySessionsOnFailure,
+        });
+        return;
+      }
+
+      // Free-space preflight. A degraded index beats a full disk, so this warns and
+      // declines rather than throwing.
+      const availableBytes = this.resolveAvailableBytes(dbPath, "preflight");
+      const budgetBytes = this.resolveReindexSpaceBudgetBytes(dbPath);
+      if (availableBytes !== undefined && availableBytes < budgetBytes) {
+        log.warn(
+          `memory reindex refused: ${Math.round(availableBytes / 1e6)} MB free on the volume ` +
+            `holding ${dbPath}, needs ~${Math.round(budgetBytes / 1e6)} MB for a full rebuild. ` +
+            `Leaving the current index in place rather than risking ENOSPC.`,
+        );
+        this.markFailedFullReindexRetry({
+          memory: shouldRetryMemoryOnFailure,
+          sessions: shouldRetrySessionsOnFailure,
+        });
+        return;
+      }
       const originalRevision = readMemoryDatabaseRevision(originalDb);
       tempDb = openMemoryDatabaseAtPath(tempDbPath, this.settings.store.vector.enabled);
       this.db = tempDb;
@@ -2785,6 +2934,10 @@ export abstract class MemoryManagerSyncOps {
 
       closeMemoryDatabase(tempDb);
       tempDbClosed = true;
+      // Another writer may have consumed the volume while this rebuild ran; a
+      // preflight cannot cover that. Abort cleanly instead of driving to ENOSPC --
+      // the `finally` below removes the shadow either way.
+      this.assertRuntimeSpaceBeforePublish(dbPath, tempDbPath);
       await publishMemoryDatabaseTables({
         targetDb: originalDb,
         sourcePath: tempDbPath,
