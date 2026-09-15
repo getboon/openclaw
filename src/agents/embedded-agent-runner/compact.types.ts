@@ -32,12 +32,10 @@ export type CompactEmbeddedAgentSessionParams = {
   /** Trusted sender id from inbound context for scoped message-tool discovery. */
   senderId?: string;
   /**
-   * Gateway-audience OBO (ENG-19115/ENG-19721). Carries boon-core's signed
-   * internal_test claim onto the compaction model call so the gateway can skip
-   * metering for a budget-exempt account (e.g. the trial canary) the same way
-   * it already does for the primary-turn call. Compaction builds its own model
-   * request independent of attempt.ts, so this must be threaded through
-   * separately — see compact.ts's use of it in the diagnostic model-call context.
+   * Gateway-audience OBO carried onto the compaction model call so the gateway
+   * can skip metering for a budget-exempt account. Compaction builds its own
+   * model request independent of the primary-turn path, so this must be
+   * threaded through separately — see compact.ts's diagnostic model-call context.
    */
   oboToken?: string;
   senderName?: string;

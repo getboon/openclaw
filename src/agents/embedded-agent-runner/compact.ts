@@ -1345,11 +1345,9 @@ async function compactEmbeddedAgentSessionDirectOnce(
               runId: diagnosticCompactionRunId,
               ...(params.sessionKey && { sessionKey: params.sessionKey }),
               sessionId: params.sessionId,
-              // Gateway-audience OBO (ENG-19115/ENG-19721) → x-boon-gateway-obo-token.
-              // Omit-when-absent, mirroring attempt.ts's primary-turn wiring — compaction
-              // is a separate call to the model and was never given this field, so a
-              // budget-exempt account (e.g. the trial canary) was billed as a normal
-              // customer for every compaction call.
+              // Gateway-audience OBO → x-boon-gateway-obo-token, omit-when-absent.
+              // Compaction is a separate model call from the primary turn, so this must
+              // be forwarded here too or a budget-exempt account gets billed for it.
               ...(params.oboToken && { oboToken: params.oboToken }),
               provider,
               model: modelId,

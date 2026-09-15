@@ -670,6 +670,7 @@ function buildCompactionContextEngineRuntimeContext(params: {
       skillsSnapshot: params.params.skillsSnapshot,
       senderIsOwner: params.params.senderIsOwner,
       senderId: params.params.senderId,
+      oboToken: params.params.oboToken,
       provider: params.params.provider,
       modelId: params.params.model,
       harnessRuntime: params.harnessRuntime,

@@ -41,11 +41,9 @@ type EmbeddedCompactionRuntimeContext = {
   skillsSnapshot?: SkillSnapshot;
   senderIsOwner?: boolean;
   senderId?: string;
-  // Gateway-audience OBO (ENG-19115/ENG-19721) → x-boon-gateway-obo-token on the
-  // compaction model call. Compaction is a SEPARATE model call from the primary
-  // turn (attempt.ts already threads this field there) — omitting it here meant
-  // every compaction call for a budget-exempt account (e.g. the trial canary)
-  // was billed as a normal customer call instead of being skipped.
+  // Gateway-audience OBO → x-boon-gateway-obo-token on the compaction model call.
+  // Compaction is a separate model call from the primary turn, so this must be
+  // forwarded independently or a budget-exempt account gets billed for it.
   oboToken?: string;
   provider?: string;
   runtimeProvider?: string;
