@@ -2558,6 +2558,10 @@ async function runEmbeddedAgentInternal(
                     config: params.config,
                     skillsSnapshot: params.skillsSnapshot,
                     senderId: params.senderId,
+                    // Gateway-audience OBO (ENG-19115/ENG-19721) → x-boon-gateway-obo-token
+                    // on the compaction model call. Same field/reasoning as the primary-turn
+                    // dispatch above — compaction is a separate call and was never wired.
+                    oboToken: params.oboToken,
                     provider,
                     modelId,
                     harnessRuntime: agentHarness.id,
@@ -2754,6 +2758,10 @@ async function runEmbeddedAgentInternal(
                     config: params.config,
                     skillsSnapshot: params.skillsSnapshot,
                     senderId: params.senderId,
+                    // Gateway-audience OBO (ENG-19115/ENG-19721) → x-boon-gateway-obo-token
+                    // on the compaction model call. Same field/reasoning as the primary-turn
+                    // dispatch above — compaction is a separate call and was never wired.
+                    oboToken: params.oboToken,
                     provider,
                     modelId,
                     harnessRuntime: agentHarness.id,
