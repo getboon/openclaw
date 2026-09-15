@@ -2558,6 +2558,9 @@ async function runEmbeddedAgentInternal(
                     config: params.config,
                     skillsSnapshot: params.skillsSnapshot,
                     senderId: params.senderId,
+                    // Gateway-audience OBO → x-boon-gateway-obo-token on the compaction
+                    // model call, same as the primary-turn dispatch above.
+                    oboToken: params.oboToken,
                     provider,
                     modelId,
                     harnessRuntime: agentHarness.id,
@@ -2754,6 +2757,9 @@ async function runEmbeddedAgentInternal(
                     config: params.config,
                     skillsSnapshot: params.skillsSnapshot,
                     senderId: params.senderId,
+                    // Gateway-audience OBO → x-boon-gateway-obo-token on the compaction
+                    // model call, same as the primary-turn dispatch above.
+                    oboToken: params.oboToken,
                     provider,
                     modelId,
                     harnessRuntime: agentHarness.id,
