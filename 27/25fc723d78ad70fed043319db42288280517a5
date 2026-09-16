@@ -1,0 +1,39 @@
+docs/cli/sessions.md
+  s_7d0556f27ab094::t_2c5c5c275c22c8 129
+docs/concepts/session.md
+  s_7d0556f27ab094::t_b925de86583c3c 130-133
+docs/reference/session-management-compaction.md
+  s_7d0556f27ab094::t_0ac8b9cd2f473b 90-94
+src/config/sessions/disk-budget.test.ts
+  s_7d0556f27ab094::t_7ce8d0371e3b5c 536,539
+src/config/sessions/store-maintenance.ts
+  s_7d0556f27ab094::t_ef346a4638cb0f 28-32,275-285,307-310
+src/config/sessions/store.pruning.integration.test.ts
+  s_7d0556f27ab094::t_d873c877e2dc8e 832,835-836,842-843,859,861
+src/config/sessions/store.pruning.test.ts
+  s_4f8183211d5737::t_eee8145ecd7c9a 63-64,73,75,265-284,419-463
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2725fc723d78ad70fed043319db42288280517a5",
+  "prompts": {},
+  "sessions": {
+    "s_4f8183211d5737": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f9e73089-2d0d-4469-b33b-ff703dbc33c2",
+        "model": "claude-opus-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    },
+    "s_7d0556f27ab094": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "53035b11-9bda-4f9b-a458-5f700353f2d5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
