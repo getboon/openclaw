@@ -1687,7 +1687,14 @@ async function sendSubagentAnnounceDirectly(params: {
       params.expectsCompletionMessage &&
       requiresMessageToolDelivery &&
       !hasGatewayAgentMessagingToolDeliveryEvidence(directAnnounceResponse) &&
-      !hasIntentionalSilentGatewayAgentPayload(directAnnounceResponse)
+      // A deliberate silent final exempts an ordinary completion, never a subagent
+      // one (ENG-20055): `acceptsIntentionalSilentCompletion` below already refuses
+      // silence for a subagent completion, so exempting it here only meant the
+      // child's finished work was dropped — the parent answers NO_REPLY, nothing is
+      // sent, and the turn still records `disposition: completed`. Thread 6985 lost
+      // a completed 53-feeder manifest exactly this way. For a subagent completion
+      // we fall through to the child-text fallback instead.
+      (!hasIntentionalSilentGatewayAgentPayload(directAnnounceResponse) || isSubagentCompletion)
     ) {
       if (hasFailedSubagentNoOutputCompletion(params.internalEvents)) {
         await notifySubagentNoOutputGiveUp({
