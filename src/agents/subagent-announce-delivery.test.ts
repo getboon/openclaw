@@ -1220,13 +1220,9 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
   });
 
   it("directly delivers direct-message subagent text when the announce agent only replies NO_REPLY", async () => {
-    // ENG-20055 — thread 6985 lost a finished 53-feeder manifest exactly here.
-    // The child completed, the parent was handed the result for delivery, and the
-    // parent answered with the silent token because it believed it had already
-    // replied. A silent final is already rejected for a subagent completion
-    // (`acceptsIntentionalSilentCompletion` excludes them), so the text fallback
-    // must run for it too — otherwise the child's work is dropped and the turn
-    // still reports `disposition: completed`.
+    // A silent final is already rejected for a subagent completion, so the child-text
+    // fallback must run for it too. Without this the child's finished work is dropped
+    // while the turn still reports success.
     const callGateway = createGatewayMock({
       result: {
         payloads: [{ text: "NO_REPLY" }],
@@ -1488,11 +1484,9 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
   });
 
   it("directly delivers direct-target subagent text when the announce agent only replies NO_REPLY", async () => {
-    // ENG-20055, second shape: a direct target recognised by the channel grammar rather
-    // than a DM prefix. It reaches the same message-tool delivery requirement, so the
-    // silent parent must not swallow the child there either. A SHARED channel is
-    // deliberately not covered: deliverTextCompletionDirect only fires for direct
-    // targets, so raw child text never lands in a group conversation.
+    // Second shape: a direct target recognized by the channel grammar rather than a DM
+    // prefix. It hits the same message-tool delivery requirement, so a silent parent
+    // must not swallow the child there either.
     registerDirectTargetTestChannel("qa-channel");
     const callGateway = createGatewayMock({
       result: {
