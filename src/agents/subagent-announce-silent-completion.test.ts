@@ -23,7 +23,7 @@ const callGatewayMock = vi.fn(async (request: unknown) => {
   return {};
 });
 
-const sendMessageMock = vi.fn(async () => ({ ok: true }));
+const sendMessageMock = vi.fn(async (_params: Record<string, unknown>) => ({ ok: true }));
 const loadSessionStoreMock = vi.fn((_storePath: string) => ({
   "agent:main:discord:dm:U123": {
     sessionId: "requester-session",
@@ -80,7 +80,7 @@ vi.mock("./subagent-announce-delivery.runtime.js", () => ({
     reason: "not_streaming" as const,
     gatewayHealth: "live" as const,
   }),
-  sendMessage: (params: unknown) => sendMessageMock(params as never),
+  sendMessage: ((params: Record<string, unknown>) => sendMessageMock(params)) as never,
   ...createSubagentAnnounceDeliveryRuntimeMock({
     callGateway: (request: unknown) => callGatewayMock(request),
     getRuntimeConfig: () => mockConfig,
@@ -114,7 +114,7 @@ describe("subagent completion with a silent parent reply", () => {
     callGatewayMock.mockClear();
     sendMessageMock.mockClear();
     deliveryTesting.setDepsForTest({
-      callGateway: (request: unknown) => callGatewayMock(request),
+      callGateway: ((request: unknown) => callGatewayMock(request)) as never,
       sendMessage: sendMessageMock as never,
       getRequesterSessionActivity: () => ({ sessionId: "requester-session", isActive: false }),
       getRuntimeConfig: () => mockConfig,
