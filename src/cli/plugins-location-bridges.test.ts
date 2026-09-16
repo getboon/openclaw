@@ -82,11 +82,11 @@ describe("listPersistedBundledPluginLocationBridges", () => {
   it("keeps persisted bundled relocations npm-first for launch", async () => {
     readPersistedInstalledPluginIndexMock.mockResolvedValue(
       makeIndex({
-        pluginId: "diagnostics-otel",
-        manifestPath: "/app/dist/extensions/diagnostics-otel/openclaw.plugin.json",
+        pluginId: "diagnostics-prometheus",
+        manifestPath: "/app/dist/extensions/diagnostics-prometheus/openclaw.plugin.json",
         manifestHash: "hash",
-        source: "/app/dist/extensions/diagnostics-otel/index.js",
-        rootDir: "/app/dist/extensions/diagnostics-otel",
+        source: "/app/dist/extensions/diagnostics-prometheus/index.js",
+        rootDir: "/app/dist/extensions/diagnostics-prometheus",
         origin: "bundled",
         enabled: true,
         startup: startupInfo,
@@ -94,13 +94,13 @@ describe("listPersistedBundledPluginLocationBridges", () => {
         packageInstall: {
           defaultChoice: "clawhub",
           clawhub: {
-            spec: "clawhub:@openclaw/diagnostics-otel",
-            packageName: "@openclaw/diagnostics-otel",
+            spec: "clawhub:@openclaw/diagnostics-prometheus",
+            packageName: "@openclaw/diagnostics-prometheus",
             exactVersion: false,
           },
           npm: {
-            spec: "@openclaw/diagnostics-otel",
-            packageName: "@openclaw/diagnostics-otel",
+            spec: "@openclaw/diagnostics-prometheus",
+            packageName: "@openclaw/diagnostics-prometheus",
             selectorKind: "none",
             exactVersion: false,
             pinState: "floating-without-integrity",
@@ -110,17 +110,17 @@ describe("listPersistedBundledPluginLocationBridges", () => {
       }),
     );
     loadPluginManifestRegistryForInstalledIndexMock.mockReturnValue(
-      makeRegistry("diagnostics-otel"),
+      makeRegistry("diagnostics-prometheus"),
     );
 
     await expect(listPersistedBundledPluginLocationBridges({})).resolves.toEqual([
       {
-        bundledPluginId: "diagnostics-otel",
-        pluginId: "diagnostics-otel",
+        bundledPluginId: "diagnostics-prometheus",
+        pluginId: "diagnostics-prometheus",
         preferredSource: "npm",
-        npmSpec: "@openclaw/diagnostics-otel",
-        clawhubSpec: "clawhub:@openclaw/diagnostics-otel",
-        channelIds: ["diagnostics-otel"],
+        npmSpec: "@openclaw/diagnostics-prometheus",
+        clawhubSpec: "clawhub:@openclaw/diagnostics-prometheus",
+        channelIds: ["diagnostics-prometheus"],
       },
     ]);
   });
@@ -128,11 +128,11 @@ describe("listPersistedBundledPluginLocationBridges", () => {
   it("uses official external catalog metadata when the persisted bundled row lacks npm metadata", async () => {
     readPersistedInstalledPluginIndexMock.mockResolvedValue(
       makeIndex({
-        pluginId: "diagnostics-otel",
-        manifestPath: "/app/dist/extensions/diagnostics-otel/openclaw.plugin.json",
+        pluginId: "diagnostics-prometheus",
+        manifestPath: "/app/dist/extensions/diagnostics-prometheus/openclaw.plugin.json",
         manifestHash: "hash",
-        source: "/app/dist/extensions/diagnostics-otel/index.js",
-        rootDir: "/app/dist/extensions/diagnostics-otel",
+        source: "/app/dist/extensions/diagnostics-prometheus/index.js",
+        rootDir: "/app/dist/extensions/diagnostics-prometheus",
         origin: "bundled",
         enabled: true,
         startup: startupInfo,
@@ -140,8 +140,8 @@ describe("listPersistedBundledPluginLocationBridges", () => {
         packageInstall: {
           defaultChoice: "clawhub",
           clawhub: {
-            spec: "clawhub:@openclaw/diagnostics-otel",
-            packageName: "@openclaw/diagnostics-otel",
+            spec: "clawhub:@openclaw/diagnostics-prometheus",
+            packageName: "@openclaw/diagnostics-prometheus",
             exactVersion: false,
           },
           warnings: [],
@@ -149,17 +149,17 @@ describe("listPersistedBundledPluginLocationBridges", () => {
       }),
     );
     loadPluginManifestRegistryForInstalledIndexMock.mockReturnValue(
-      makeRegistry("diagnostics-otel"),
+      makeRegistry("diagnostics-prometheus"),
     );
 
     await expect(listPersistedBundledPluginLocationBridges({})).resolves.toEqual([
       {
-        bundledPluginId: "diagnostics-otel",
-        pluginId: "diagnostics-otel",
+        bundledPluginId: "diagnostics-prometheus",
+        pluginId: "diagnostics-prometheus",
         preferredSource: "npm",
-        npmSpec: "@openclaw/diagnostics-otel",
-        clawhubSpec: "clawhub:@openclaw/diagnostics-otel",
-        channelIds: ["diagnostics-otel"],
+        npmSpec: "@openclaw/diagnostics-prometheus",
+        clawhubSpec: "clawhub:@openclaw/diagnostics-prometheus",
+        channelIds: ["diagnostics-prometheus"],
       },
     ]);
   });
@@ -196,11 +196,11 @@ describe("listPersistedBundledPluginRecoveryLocations", () => {
   it("includes exact packaged and legacy paths for disabled bundled records", async () => {
     readPersistedInstalledPluginIndexMock.mockResolvedValue(
       makeIndex({
-        pluginId: "diagnostics-otel",
-        manifestPath: "/app/dist/extensions/diagnostics-otel/openclaw.plugin.json",
+        pluginId: "diagnostics-prometheus",
+        manifestPath: "/app/dist/extensions/diagnostics-prometheus/openclaw.plugin.json",
         manifestHash: "hash",
-        source: "/app/dist/extensions/diagnostics-otel/index.js",
-        rootDir: "/app/dist/extensions/diagnostics-otel",
+        source: "/app/dist/extensions/diagnostics-prometheus/index.js",
+        rootDir: "/app/dist/extensions/diagnostics-prometheus",
         origin: "bundled",
         enabled: false,
         startup: startupInfo,
@@ -210,8 +210,11 @@ describe("listPersistedBundledPluginRecoveryLocations", () => {
 
     await expect(listPersistedBundledPluginRecoveryLocations({})).resolves.toEqual([
       {
-        pluginId: "diagnostics-otel",
-        loadPaths: ["/app/dist/extensions/diagnostics-otel", "/app/extensions/diagnostics-otel"],
+        pluginId: "diagnostics-prometheus",
+        loadPaths: [
+          "/app/dist/extensions/diagnostics-prometheus",
+          "/app/extensions/diagnostics-prometheus",
+        ],
       },
     ]);
   });
@@ -219,11 +222,11 @@ describe("listPersistedBundledPluginRecoveryLocations", () => {
   it("does not use a relative persisted bundled root as ownership proof", async () => {
     readPersistedInstalledPluginIndexMock.mockResolvedValue(
       makeIndex({
-        pluginId: "diagnostics-otel",
-        manifestPath: "extensions/diagnostics-otel/openclaw.plugin.json",
+        pluginId: "diagnostics-prometheus",
+        manifestPath: "extensions/diagnostics-prometheus/openclaw.plugin.json",
         manifestHash: "hash",
-        source: "extensions/diagnostics-otel/index.js",
-        rootDir: "extensions/diagnostics-otel",
+        source: "extensions/diagnostics-prometheus/index.js",
+        rootDir: "extensions/diagnostics-prometheus",
         origin: "bundled",
         enabled: true,
         startup: startupInfo,

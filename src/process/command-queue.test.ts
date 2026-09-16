@@ -1,4 +1,5 @@
 // Command queue tests cover bounded command execution and queue ordering.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 import { importFreshModule } from "openclaw/plugin-sdk/test-fixtures";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -992,5 +993,24 @@ describe("command queue", () => {
       blocker.resolve();
       commandQueueA.resetAllLanes();
     }
+  });
+
+  it("runs a queued task in the async context captured at enqueue", async () => {
+    const lane = `context-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const store = new AsyncLocalStorage<string>();
+    const blocker = createDeferred();
+    const first = store.run("first", () =>
+      enqueueCommandInLane(lane, async () => {
+        await blocker.promise;
+        return store.getStore();
+      }),
+    );
+    // Enqueued while the lane is busy, so it is dequeued from the first task's continuation.
+    const second = store.run("second", () =>
+      enqueueCommandInLane(lane, async () => store.getStore()),
+    );
+    blocker.resolve();
+    await expect(first).resolves.toBe("first");
+    await expect(second).resolves.toBe("second");
   });
 });

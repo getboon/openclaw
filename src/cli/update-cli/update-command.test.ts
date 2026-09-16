@@ -370,7 +370,7 @@ describe("collectMissingPluginInstallPayloads", () => {
 
   it("keeps disabled trusted official ClawHub records eligible for payload repair when requested", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-update-plugin-payload-"));
-    const missingDir = path.join(tmpDir, "state", "clawhub", "diagnostics-otel");
+    const missingDir = path.join(tmpDir, "state", "clawhub", "diagnostics-prometheus");
     try {
       await expect(
         collectMissingPluginInstallPayloads({
@@ -380,23 +380,23 @@ describe("collectMissingPluginInstallPayloads", () => {
           config: {
             plugins: {
               entries: {
-                "diagnostics-otel": {
+                "diagnostics-prometheus": {
                   enabled: false,
                 },
               },
             },
           },
           records: {
-            "diagnostics-otel": {
+            "diagnostics-prometheus": {
               source: "clawhub",
-              spec: "clawhub:@openclaw/diagnostics-otel@2026.5.3",
+              spec: "clawhub:@openclaw/diagnostics-prometheus@2026.5.3",
               installPath: missingDir,
             },
           },
         }),
       ).resolves.toEqual([
         {
-          pluginId: "diagnostics-otel",
+          pluginId: "diagnostics-prometheus",
           installPath: missingDir,
           reason: "missing-package-dir",
         },
