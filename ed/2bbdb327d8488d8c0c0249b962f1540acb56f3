@@ -1,0 +1,19 @@
+scripts/lib/official-external-plugin-catalog.json
+  s_bdbecec0b2d5b0::t_3976034b2408b9 35,37,323,386,425
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ed2bbdb327d8488d8c0c0249b962f1540acb56f3",
+  "prompts": {},
+  "sessions": {
+    "s_bdbecec0b2d5b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e12c774-ade0-4fec-bfe3-1be251f34711",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
