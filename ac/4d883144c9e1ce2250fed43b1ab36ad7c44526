@@ -1,0 +1,27 @@
+src/config/sessions/store.pruning.test.ts
+  s_7d0556f27ab094::t_a47b1eea8e2dd6 247-249
+docs/reference/session-management-compaction.md
+  s_7d0556f27ab094::t_011a318bf590a9 92
+src/config/sessions/store-maintenance.ts
+  s_7d0556f27ab094::t_92e6e38b36bddf 31-41,43
+docs/concepts/session.md
+  s_7d0556f27ab094::t_011a318bf590a9 132
+docs/cli/sessions.md
+  s_7d0556f27ab094::t_011a318bf590a9 129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ac4d883144c9e1ce2250fed43b1ab36ad7c44526",
+  "prompts": {},
+  "sessions": {
+    "s_7d0556f27ab094": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "53035b11-9bda-4f9b-a458-5f700353f2d5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
