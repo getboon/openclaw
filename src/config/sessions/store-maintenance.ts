@@ -316,14 +316,18 @@ export function isProtectedSessionMaintenanceEntry(
   if (isSyntheticSessionMaintenanceKey(sessionKey)) {
     return false;
   }
+  // Telegram forum topics are durable surfaces, not per-conversation threads, so they are
+  // checked BEFORE the thread branch: once the telegram plugin is loaded,
+  // `resolveLoadedSessionThreadInfo` reports a topic key as thread-keyed, which would otherwise
+  // subject a long-lived topic to the idle window and silently drop it.
+  if (isTelegramTopicSessionKey(sessionKey)) {
+    return true;
+  }
   if (parseSessionThreadInfoFast(sessionKey).threadId) {
     // Thread keys are minted per conversation on bot-shaped tenants, so protecting every one
     // forever grows the session index without bound. Only live threads stay durable; an idle
     // one rejoins the normal age/count/disk candidates instead of pinning a store entry.
     return isRecentlyActiveSessionMaintenanceEntry(entry);
-  }
-  if (isTelegramTopicSessionKey(sessionKey)) {
-    return true;
   }
   if (isExternalGroupOrChannelSessionKey(sessionKey)) {
     return true;

@@ -458,6 +458,23 @@ describe("isProtectedSessionMaintenanceEntry", () => {
     ).toBe(false);
   });
 
+  it("keeps protecting an idle telegram topic even when it resolves as thread-keyed", () => {
+    // Regression: once the telegram plugin is loaded, `resolveLoadedSessionThreadInfo` reports a
+    // forum-topic key as thread-keyed. The topic check must therefore run BEFORE the thread
+    // branch, or a long-idle topic loses durable protection and gets pruned. A bare process does
+    // not load plugins, so this is asserted directly against the ordering instead.
+    const topicKey = "agent:main:telegram:group:-100123:topic:77";
+    expect(isProtectedSessionMaintenanceEntry(topicKey, makeEntry(Date.now() - 400 * DAY_MS))).toBe(
+      true,
+    );
+    expect(
+      isProtectedSessionMaintenanceEntry(topicKey, {
+        ...makeEntry(Date.now()),
+        lastInteractionAt: Date.now() - 400 * DAY_MS,
+      }),
+    ).toBe(true);
+  });
+
   it("treats lastInteractionAt as authoritative over a bumped updatedAt", () => {
     const now = Date.now();
     const threadKey = "agent:main:slack:channel:C123:thread:1710000000.000100";
