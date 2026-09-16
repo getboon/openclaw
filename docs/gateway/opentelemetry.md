@@ -29,20 +29,12 @@ see [Logging](/logging).
 
 ## Quick start
 
-For packaged installs, install the plugin first:
-
-```bash
-openclaw plugins install clawhub:@openclaw/diagnostics-otel
-```
+The `diagnostics-otel` plugin ships inside the OpenClaw package and is enabled by
+default. It stays a no-op until `diagnostics.otel.enabled` is `true`, so the only
+setup is the `diagnostics.otel` config block:
 
 ```json5
 {
-  plugins: {
-    allow: ["diagnostics-otel"],
-    entries: {
-      "diagnostics-otel": { enabled: true },
-    },
-  },
   diagnostics: {
     enabled: true,
     otel: {
@@ -58,12 +50,6 @@ openclaw plugins install clawhub:@openclaw/diagnostics-otel
     },
   },
 }
-```
-
-You can also enable the plugin from the CLI:
-
-```bash
-openclaw plugins enable diagnostics-otel
 ```
 
 <Note>
@@ -354,6 +340,7 @@ Liveness warnings also emit:
 - `openclaw.session.stuck`
   - `openclaw.state`, `openclaw.ageMs`, `openclaw.queueDepth`
 - `openclaw.context.assembled`
+  - Spans from run start until the prompt context is assembled (session load, system prompt, context engine), so the time before the first model call is attributable.
   - `openclaw.prompt.size`, `openclaw.history.size`, `openclaw.context.tokens`, `openclaw.errorCategory` (no prompt, history, response, or session-key content)
 - `openclaw.tool.loop`
   - `openclaw.toolName`, `openclaw.outcome`, `openclaw.iterations`, `openclaw.errorCategory` (no loop messages, params, or tool output)
@@ -444,8 +431,8 @@ redacted by `logging.redactSensitive`. Full guide:
 }
 ```
 
-You can also leave `diagnostics-otel` out of `plugins.allow`, or run
-`openclaw plugins disable diagnostics-otel`.
+You can also run `openclaw plugins disable diagnostics-otel` to keep the plugin
+from loading at all.
 
 ## Related
 
