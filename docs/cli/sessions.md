@@ -126,7 +126,7 @@ openclaw sessions cleanup --json
 - `--enforce`: apply maintenance even when `session.maintenance.mode` is `warn`.
 - `--fix-missing`: remove entries whose transcript files are missing or header-only/empty, even if they would not normally age/count out yet.
 - `--fix-dm-scope`: when `session.dmScope` is `main`, retire stale peer-keyed direct-DM rows left behind by earlier `per-peer`, `per-channel-peer`, or `per-account-channel-peer` routing. Use `--dry-run` first; applying the cleanup removes those rows from `sessions.json` and preserves their transcripts as deleted archives.
-- `--active-key <key>`: protect a specific active key from disk-budget eviction. Durable external conversation pointers, such as group and channel sessions, are also kept by age/count/disk-budget maintenance, as are thread-scoped chat sessions that were active in the last 7 days.
+- `--active-key <key>`: protect a specific active key from disk-budget eviction. Durable external conversation pointers, such as group and channel sessions, are also kept by age/count/disk-budget maintenance, as are thread-scoped chat sessions that were active in the last 4 days.
 - `--agent <id>`: run cleanup for one configured agent store.
 - `--all-agents`: run cleanup for all configured agent stores.
 - `--store <path>`: run against a specific `sessions.json` file.

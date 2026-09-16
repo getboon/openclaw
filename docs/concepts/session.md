@@ -129,7 +129,7 @@ For production-sized `maxEntries` limits, Gateway runtime writes use a small hig
 
 Maintenance preserves durable external conversation pointers for group and
 channel sessions, and keeps thread-scoped chat sessions while they stay active
-(a thread idle for more than 7 days ages out with everything else). Synthetic
+(a thread idle for more than 4 days ages out with everything else). Synthetic
 cron, hook, heartbeat, ACP, and sub-agent entries are always allowed to age out.
 
 If you previously used direct-message isolation and later returned

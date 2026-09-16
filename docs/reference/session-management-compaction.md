@@ -89,7 +89,7 @@ Normal Gateway writes flow through a per-store session writer that serializes in
 
 Maintenance keeps durable external conversation pointers for group and channel
 sessions, and keeps thread-scoped chat sessions while they stay active; a thread
-idle for more than 7 days loses that protection so busy bot tenants cannot grow
+idle for more than 4 days loses that protection so busy bot tenants cannot grow
 the session index without bound. Synthetic runtime entries for cron, hooks,
 heartbeat, ACP, and sub-agents can always be removed when they exceed the
 configured age, count, or disk budget.

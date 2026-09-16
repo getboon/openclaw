@@ -244,7 +244,9 @@ describe("capEntryCount", () => {
     const now = Date.now();
     const threadKey = "agent:main:discord:channel:123456:thread:987654";
     const store = makeStore([
-      [threadKey, makeEntry(now - 5 * DAY_MS)],
+      // Inside the thread protection window: durability now tracks recent activity, so a thread
+      // idle past the window is deliberately NOT durable (see the idle-thread cases below).
+      [threadKey, makeEntry(now - 2 * DAY_MS)],
       ["oldest", makeEntry(now - 4 * DAY_MS)],
       ["old", makeEntry(now - 3 * DAY_MS)],
       ["recent", makeEntry(now - DAY_MS)],

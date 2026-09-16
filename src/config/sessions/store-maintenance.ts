@@ -28,8 +28,19 @@ const BATCHED_ENTRY_MAINTENANCE_SLACK_RATIO = 0.1;
 /**
  * How long a thread session keeps its durable-conversation protection after its last activity.
  * Not operator-configurable: change this constant, not `session.maintenance`.
+ *
+ * This is a protection window, NOT a size bound. Its job is to keep the protected set smaller
+ * than `session.maintenance.maxEntries`, because `capEntryCount` computes its removal budget as
+ * `max(0, maxEntries - preservedCount)` — once protection outgrows `maxEntries` the budget is
+ * zero and the operator's cap silently stops binding.
+ *
+ * Sizing: a tenant minting T threads/day protects `T * window` entries, so the window must stay
+ * under `maxEntries / T`. A bot-shaped tenant observed at ~108 threads/day (9 per run, every 2h)
+ * breaks even at 500/108 = 4.63 days; at 4 days it protects 432 < 500 and the cap governs again.
+ * Measured on a 2,669-entry store: 7 days left 759 entries / 20.3MB with a zero removal budget,
+ * 4 days left 500 entries / 13.3MB with the cap doing the trimming. Raise T and this must fall.
  */
-const THREAD_SESSION_PROTECTION_MAX_IDLE_MS = 7 * 24 * 60 * 60 * 1000;
+const THREAD_SESSION_PROTECTION_MAX_IDLE_MS = 4 * 24 * 60 * 60 * 1000;
 
 export type SessionMaintenanceWarning = {
   activeSessionKey: string;
