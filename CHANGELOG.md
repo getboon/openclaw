@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.11-boon.43
+
+Stops a finished sub-agent's work from being dropped when the parent answers the delivery turn with the silent token, and stops context compaction from billing a budget-exempt account.
+
+- **#222:** a sub-agent completed its task, reported the result to the parent, and the user saw nothing. On a `message_tool_only` target the parent answered the delivery run with the silent token instead of calling the message tool, so `sendSubagentAnnounceDirectly` skipped the child-text fallback and returned `visible_reply_missing` with nothing sent — no assistant row, no retry, and the turn still recorded `disposition: completed`, so no health signal noticed. `deliverSubagentAnnouncement` already refuses a silent final for a subagent completion (`acceptsIntentionalSilentCompletion` excludes them); the message-tool branch above it exempted **any** silent payload from the message-tool requirement, so the refusal dropped the child's work instead of delivering it. The exemption now applies only to non-subagent completions, so a silent parent falls through to the existing child-text fallback — unchanged, including its direct-target-only rule, so raw child text still never lands in a shared channel. The automatic-delivery path is deliberately untouched: six shipped tests require a private or stale-thread parent to count as delivered there.
+- **#221 (ENG-19721):** context compaction (context-overflow and mid-turn timeout recovery) builds its own model request, and the gateway-audience OBO token that exempts a budget-exempt account from billing was structurally absent from that path — not intermittently dropped. The trial canary's intermittent `trial_budget_exhausted` failures traced to compaction calls billing an account the primary turn correctly exempted. The token is now threaded through compaction's request construction and header attachment.
+- Base = `2026.6.11-boon.42`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.43` in lockstep. No plugin source changed between boon.42 and boon.43 (both changes are in the gateway), so a gateway roll delivers the whole release — no `fleet-slack.sh` / `fleet-msteams.sh` / `fleet-diagnostics-prometheus.sh` pass is needed.
+
 ## 2026.6.11-boon.42
 
 Makes a failed tool step report what actually broke instead of a reasonless "exec (error)" — so QA (and the audit trace) can see the failing tool and a concrete, user-safe reason rather than nothing.

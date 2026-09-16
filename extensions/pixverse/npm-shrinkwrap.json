@@ -1,14 +1,14 @@
 {
   "name": "@openclaw/pixverse-provider",
-  "version": "2026.6.11-boon.42",
+  "version": "2026.6.11-boon.43",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/pixverse-provider",
-      "version": "2026.6.11-boon.42",
+      "version": "2026.6.11-boon.43",
       "peerDependencies": {
-        "openclaw": ">=2026.6.11-boon.42"
+        "openclaw": ">=2026.6.11-boon.43"
       },
       "peerDependenciesMeta": {
         "openclaw": {
