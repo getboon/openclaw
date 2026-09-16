@@ -2193,6 +2193,12 @@ export class SessionManager {
       this.promptReleasedSideBranchParentId === undefined ? "active" : "side";
     let sawPersistedStateUpdate = false;
     let rawTailId: string | null = null;
+    // A merged row whose parent is unknown descends from transcript rows this
+    // manager never saw, so its own leaf is no longer the file's active leaf.
+    // Writing the restoring control then hides a peer run's whole turn.
+    let sawUnknownMergeParent = false;
+    const isKnownMergeParentId = (parentId: string | null): boolean =>
+      parentId === null || this.byId.has(parentId) || this.opaqueParentsById.has(parentId);
     for (const sourceEntry of entries) {
       if (sourceEntry.type === "prompt_released_opaque") {
         this.opaqueFileEntries.push({
@@ -2204,6 +2210,7 @@ export class SessionManager {
           rawTailId = leafEntry.id;
           const leafState = this.resolveOpaqueLeafControl(leafEntry);
           if (!leafState) {
+            sawUnknownMergeParent = true;
             this.invalidLeafControlIds.add(leafEntry.id);
             this.opaqueParentsById.set(
               leafEntry.id,
@@ -2221,6 +2228,9 @@ export class SessionManager {
         }
         const link = parseParentLinkedOpaqueEntry(sourceEntry.record);
         if (link) {
+          if (!isKnownMergeParentId(link.parentId)) {
+            sawUnknownMergeParent = true;
+          }
           this.opaqueParentsById.set(link.id, link.parentId);
           sideBranchParentId = link.id;
           persistedAppendParentId = link.id;
@@ -2234,6 +2244,11 @@ export class SessionManager {
       }
       if (sourceEntry.type === "label" && !this.byId.has(sourceEntry.targetId)) {
         throw new Error(`Entry ${sourceEntry.targetId} not found`);
+      }
+      // Global metadata resolves outside the active branch, so only transcript
+      // rows report branch drift.
+      if (sourceEntry.type === "message" && !isKnownMergeParentId(sourceEntry.parentId)) {
+        sawUnknownMergeParent = true;
       }
       const entry: PromptReleasedSessionEntry = {
         ...sourceEntry,
@@ -2270,6 +2285,7 @@ export class SessionManager {
       !this.shouldPersist ||
       !this.sessionFile ||
       !sawPersistedStateUpdate ||
+      sawUnknownMergeParent ||
       (persistedLeafId === this.leafId &&
         persistedAppendParentId === sideBranchParentId &&
         persistedAppendMode === "side")
