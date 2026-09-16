@@ -29,18 +29,12 @@ const BATCHED_ENTRY_MAINTENANCE_SLACK_RATIO = 0.1;
  * How long a thread session keeps its durable-conversation protection after its last activity.
  * Not operator-configurable: change this constant, not `session.maintenance`.
  *
- * This is a protection window, NOT a size bound. Its job is to keep the protected set smaller
- * than `session.maintenance.maxEntries`, because `capEntryCount` computes its removal budget as
- * `max(0, maxEntries - preservedCount)` — once protection outgrows `maxEntries` the budget is
- * zero and the operator's cap silently stops binding.
- *
- * Sizing: a tenant minting T threads/day protects `T * window` entries, so the window must stay
- * under `maxEntries / T`. A bot-shaped tenant observed at ~108 threads/day (9 per run, every 2h)
- * breaks even at 500/108 = 4.63 days; at 4 days it protects 432 < 500 and the cap governs again.
- * Measured on a 2,669-entry store: 7 days left 759 entries / 20.3MB with a zero removal budget,
- * 4 days left 500 entries / 13.3MB with the cap doing the trimming. Raise T and this must fall.
+ * This is a protection window, not a size bound: `capEntryCount` can only remove
+ * `maxEntries - preservedCount` entries, so once protection outgrows `maxEntries` the operator's
+ * cap silently stops binding. A tenant minting T threads/day protects `T * window` entries, so
+ * the window must stay below `maxEntries / T`.
  */
-const THREAD_SESSION_PROTECTION_MAX_IDLE_MS = 4 * 24 * 60 * 60 * 1000;
+export const THREAD_SESSION_PROTECTION_MAX_IDLE_MS = 4 * 24 * 60 * 60 * 1000;
 
 export type SessionMaintenanceWarning = {
   activeSessionKey: string;
@@ -284,10 +278,18 @@ function isSyntheticSessionMaintenanceKey(sessionKey: string): boolean {
 }
 
 function isRecentlyActiveSessionMaintenanceEntry(entry: SessionEntry | undefined): boolean {
-  // `lastInteractionAt` tracks real user/channel turns and survives preserve-activity merges
-  // that deliberately keep an older `updatedAt`, so recency is the newer of the two.
-  const lastActivityAt = Math.max(entry?.updatedAt ?? 0, entry?.lastInteractionAt ?? 0);
-  if (lastActivityAt <= 0) {
+  // `lastInteractionAt` is the documented idle-lifetime clock: only a real user/channel turn
+  // advances it. `updatedAt` also moves on transcript-append and marker writes, so treating the
+  // newer of the two as activity would keep a silent thread protected forever. Fall back to
+  // `updatedAt` only when the interaction stamp is absent — cron isolated runs delete it.
+  const interactionAt = entry?.lastInteractionAt;
+  const updatedAt = entry?.updatedAt;
+  const lastActivityAt = Number.isFinite(interactionAt)
+    ? (interactionAt as number)
+    : Number.isFinite(updatedAt)
+      ? (updatedAt as number)
+      : undefined;
+  if (lastActivityAt === undefined || lastActivityAt <= 0) {
     // No usable timestamp means staleness cannot be determined, so the entry stays protected.
     return true;
   }

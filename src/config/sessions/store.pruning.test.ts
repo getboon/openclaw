@@ -10,6 +10,7 @@ import {
 import {
   isProtectedSessionMaintenanceEntry,
   resolveMaintenanceConfigFromInput,
+  THREAD_SESSION_PROTECTION_MAX_IDLE_MS,
   resolveQuotaSuspensionEntryMaintenance,
   resolveSessionEntryMaintenanceHighWater,
 } from "./store-maintenance.js";
@@ -416,6 +417,69 @@ describe("isProtectedSessionMaintenanceEntry", () => {
         ...makeEntry(Date.now()),
         chatType: "channel",
       }),
+    ).toBe(true);
+  });
+
+  it("pins the protection window to a value below the entry cap", () => {
+    // Asserted absolutely, not relative to the constant: a relative assertion moves with the
+    // value and would stay green if the window were widened. Protection must stay under
+    // `maxEntries / threads-per-day` or `capEntryCount` loses its removal budget entirely.
+    expect(THREAD_SESSION_PROTECTION_MAX_IDLE_MS).toBe(4 * DAY_MS);
+    const threadKey = "agent:main:slack:channel:C123:thread:1710000000.000100";
+    const now = Date.now();
+    expect(isProtectedSessionMaintenanceEntry(threadKey, makeEntry(now - 3 * DAY_MS))).toBe(true);
+    expect(isProtectedSessionMaintenanceEntry(threadKey, makeEntry(now - 5 * DAY_MS))).toBe(false);
+  });
+
+  it("pins both edges of the thread protection window", () => {
+    const now = Date.now();
+    const threadKey = "agent:main:slack:channel:C123:thread:1710000000.000100";
+    const hour = 60 * 60 * 1000;
+    // Boundary cases, asserted against the constant rather than a literal: widening the window
+    // must fail here rather than silently re-protecting every idle thread.
+    expect(
+      isProtectedSessionMaintenanceEntry(
+        threadKey,
+        makeEntry(now - (THREAD_SESSION_PROTECTION_MAX_IDLE_MS - hour)),
+      ),
+    ).toBe(true);
+    expect(
+      isProtectedSessionMaintenanceEntry(
+        threadKey,
+        makeEntry(now - (THREAD_SESSION_PROTECTION_MAX_IDLE_MS + hour)),
+      ),
+    ).toBe(false);
+    // Same boundary via the interaction stamp, which is the authoritative clock.
+    expect(
+      isProtectedSessionMaintenanceEntry(threadKey, {
+        ...makeEntry(now),
+        lastInteractionAt: now - (THREAD_SESSION_PROTECTION_MAX_IDLE_MS + hour),
+      }),
+    ).toBe(false);
+  });
+
+  it("treats lastInteractionAt as authoritative over a bumped updatedAt", () => {
+    const now = Date.now();
+    const threadKey = "agent:main:slack:channel:C123:thread:1710000000.000100";
+    // A transcript-append or marker write bumps `updatedAt` without a user turn; that must not
+    // renew protection, or a silent thread stays pinned forever.
+    expect(
+      isProtectedSessionMaintenanceEntry(threadKey, {
+        ...makeEntry(now),
+        lastInteractionAt: now - 30 * DAY_MS,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps protecting a thread session whose timestamps are unusable", () => {
+    const threadKey = "agent:main:slack:channel:C123:thread:1710000000.000100";
+    // A non-finite persisted stamp must not read as "infinitely idle" and drop the entry.
+    expect(
+      isProtectedSessionMaintenanceEntry(threadKey, {
+        ...makeEntry(Date.now() - 400 * DAY_MS),
+        lastInteractionAt: Number.NaN,
+        updatedAt: Number.NaN,
+      } as SessionEntry),
     ).toBe(true);
   });
 
