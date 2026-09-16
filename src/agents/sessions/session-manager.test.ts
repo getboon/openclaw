@@ -1990,6 +1990,19 @@ describe("SessionManager.open", () => {
     const context = JSON.stringify(reopened.buildSessionContext());
     expect(context).toContain("A background task completed.");
     expect(context).toContain("the subagent finished");
+
+    // The next user turn descends from the peer run's turn, not from the yield marker.
+    const followUpId = reopened.appendMessage({
+      role: "user",
+      content: "what did the subagent report?",
+      timestamp: 6,
+    });
+    const followUp = reopened.getEntries().find((entry) => entry.id === followUpId);
+    expect(followUp?.parentId).toBe("peer-mirror");
+    const followUpContext = JSON.stringify(reopened.buildSessionContext());
+    expect(followUpContext).toContain("A background task completed.");
+    expect(followUpContext).toContain("the subagent finished");
+    expect(followUpContext).toContain("what did the subagent report?");
   });
 
   it("applies merged leaf controls across separate callbacks", async () => {
