@@ -1,0 +1,14 @@
+src/agents/subagent-announce-silent-completion.test.ts
+  h_b018692674290f 26,83,117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bb6619f8fcbced22202e84f805248ce61620f120",
+  "prompts": {},
+  "humans": {
+    "h_b018692674290f": {
+      "author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
