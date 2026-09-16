@@ -1,0 +1,30 @@
+src/logging/diagnostic-stability.ts
+  s_bdbecec0b2d5b0::t_2a4aa66c75a587 345
+src/logging/diagnostic-stability.test.ts
+  s_bdbecec0b2d5b0::t_8879b2393d4a87 227,252
+src/agents/embedded-agent-runner/run/attempt.ts
+  s_bdbecec0b2d5b0::t_8879b2393d4a87 4572
+extensions/diagnostics-otel/src/service.test.ts
+  s_bdbecec0b2d5b0::t_6a2b27ef4511ac 2721,2738-2741
+  s_bdbecec0b2d5b0::t_e72f7859a406ee 2735-2737
+extensions/diagnostics-otel/src/service.ts
+  s_bdbecec0b2d5b0::t_8879b2393d4a87 3076
+src/infra/diagnostic-events.ts
+  s_bdbecec0b2d5b0::t_8879b2393d4a87 649-650
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "03c69e93ccad23d235669fb3c6b37dd4a070daba",
+  "prompts": {},
+  "sessions": {
+    "s_bdbecec0b2d5b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e12c774-ade0-4fec-bfe3-1be251f34711",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
