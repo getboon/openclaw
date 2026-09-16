@@ -1,0 +1,23 @@
+src/plugins/manifest-registry.test.ts
+  s_bdbecec0b2d5b0::t_699a7dd528ff2c 722,724,728,730,732,734,739,741
+src/cli/update-cli/update-command.test.ts
+  s_bdbecec0b2d5b0::t_02f8c330a800d8 373,383,390,392,399
+src/plugins/update.test.ts
+  s_bdbecec0b2d5b0::t_699a7dd528ff2c 2292-2293,2295,2300-2301,2303,2306,2314,2325-2327,2329,2331,2334
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a518529049abcf515ae2648e924f62699da9354c",
+  "prompts": {},
+  "sessions": {
+    "s_bdbecec0b2d5b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e12c774-ade0-4fec-bfe3-1be251f34711",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
