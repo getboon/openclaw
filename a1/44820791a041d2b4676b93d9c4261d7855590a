@@ -1,0 +1,24 @@
+src/process/command-queue.test.ts
+  s_bdbecec0b2d5b0::t_08f401fef9035f 2,997-1008,1012-1014
+  s_bdbecec0b2d5b0::t_e72f7859a406ee 1009-1011
+  s_bdbecec0b2d5b0::t_8599b4a8f30dc4 1015
+src/process/command-queue.ts
+  s_bdbecec0b2d5b0::t_704439cb7d67e7 67-68,284-286
+  s_bdbecec0b2d5b0::t_9d3813e8fdc8c4 2,65-66,498
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a144820791a041d2b4676b93d9c4261d7855590a",
+  "prompts": {},
+  "sessions": {
+    "s_bdbecec0b2d5b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e12c774-ade0-4fec-bfe3-1be251f34711",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
