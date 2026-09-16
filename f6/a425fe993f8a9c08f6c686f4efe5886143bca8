@@ -1,0 +1,41 @@
+extensions/diagnostics-otel/openclaw.plugin.json
+  s_bdbecec0b2d5b0::t_d931709ee8c253 5
+scripts/lib/official-external-plugin-catalog.json
+  s_bdbecec0b2d5b0::t_0a25daf134a049 35-37,39-41,327-329,392,431
+src/cli/plugins-location-bridges.test.ts
+  s_bdbecec0b2d5b0::t_80483e967544db 85-86,88-89,97-98,102-103,113,118-119,121-123,131-132,134-135,143-144,152,157-158,160-162,199-200,202-203,213-217,225-226,228-229
+src/wizard/setup.official-plugins.test.ts
+  s_bdbecec0b2d5b0::t_0a25daf134a049 30,46,48-49,58-59
+  s_bdbecec0b2d5b0::t_d1eb67153d83a3 96-98,144-146,148-149
+docs/gateway/opentelemetry.md
+  s_bdbecec0b2d5b0::t_8879b2393d4a87 343
+  s_bdbecec0b2d5b0::t_0a25daf134a049 32-34,434-435
+package.json
+  s_bdbecec0b2d5b0::t_0a25daf134a049 1976-1986
+extensions/diagnostics-otel/package.json
+  s_bdbecec0b2d5b0::t_0a25daf134a049 5
+src/plugins/bundled-plugin-metadata.test.ts
+  s_bdbecec0b2d5b0::t_0a25daf134a049 64
+docs/plugins/reference/diagnostics-otel.md
+  s_bdbecec0b2d5b0::t_f37d37ba4737c8 15
+docs/plugins/plugin-inventory.md
+  s_bdbecec0b2d5b0::t_f37d37ba4737c8 54,84-85,182
+pnpm-lock.yaml
+  s_bdbecec0b2d5b0::t_7ecbb91a66dbac 103-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f6a425fe993f8a9c08f6c686f4efe5886143bca8",
+  "prompts": {},
+  "sessions": {
+    "s_bdbecec0b2d5b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e12c774-ade0-4fec-bfe3-1be251f34711",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
