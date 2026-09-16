@@ -1930,6 +1930,68 @@ describe("SessionManager.open", () => {
     expect(JSON.stringify(reopened.buildSessionContext())).not.toContain("side delivery");
   });
 
+  it("keeps a peer run's turn active when merging a later delivery mirror", async () => {
+    const dir = await makeTempDir();
+    const sessionManager = SessionManager.create(dir, dir);
+    sessionManager.appendMessage({ role: "user", content: "spawn a subagent", timestamp: 1 });
+    sessionManager.appendMessage(buildAssistantMessage("spawned"));
+    const yieldMarkerId = sessionManager.appendCustomMessageEntry(
+      "openclaw.sessions_yield",
+      "waiting for the subagent",
+      false,
+    );
+    const sessionFile = sessionManager.getSessionFile();
+    expect(sessionFile).toBeDefined();
+
+    // A second run on the same session file answers the subagent completion.
+    const peerTurn = [
+      {
+        type: "message" as const,
+        id: "peer-user",
+        parentId: yieldMarkerId,
+        timestamp: "2026-06-15T00:00:03.000Z",
+        message: { role: "user" as const, content: "A background task completed.", timestamp: 2 },
+      },
+      {
+        type: "message" as const,
+        id: "peer-reply",
+        parentId: "peer-user",
+        timestamp: "2026-06-15T00:00:04.000Z",
+        message: buildAssistantMessage("the subagent finished"),
+      },
+    ];
+    for (const entry of peerTurn) {
+      await fs.appendFile(sessionFile!, `${JSON.stringify(entry)}\n`, "utf8");
+    }
+
+    // The peer run's visible reply mirror is the only row this manager merges.
+    const mirrorEntry = {
+      type: "message" as const,
+      id: "peer-mirror",
+      parentId: "peer-reply",
+      timestamp: "2026-06-15T00:00:05.000Z",
+      message: {
+        ...buildAssistantMessage("the subagent finished"),
+        provider: "openclaw",
+        model: "delivery-mirror",
+      },
+    };
+    await fs.appendFile(sessionFile!, `${JSON.stringify(mirrorEntry)}\n`, "utf8");
+    sessionManager.mergePromptReleasedSessionEntries([mirrorEntry], { persistLeaf: true });
+
+    const records = (await fs.readFile(sessionFile!, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type?: string; targetId?: string | null });
+    expect(records.filter((record) => record.type === "leaf")).toEqual([]);
+
+    const reopened = SessionManager.open(sessionFile!, dir, dir);
+    expect(reopened.getLeafId()).not.toBe(yieldMarkerId);
+    const context = JSON.stringify(reopened.buildSessionContext());
+    expect(context).toContain("A background task completed.");
+    expect(context).toContain("the subagent finished");
+  });
+
   it("applies merged leaf controls across separate callbacks", async () => {
     const dir = await makeTempDir();
     const sessionManager = SessionManager.create(dir, dir);
