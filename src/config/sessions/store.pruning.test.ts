@@ -60,7 +60,8 @@ describe("pruneStaleEntries", () => {
     const now = Date.now();
     const store = makeStore([
       ["old", makeEntry(now - 31 * DAY_MS)],
-      ["agent:main:slack:channel:C123:thread:1710000000.000100", makeEntry(now - 31 * DAY_MS)],
+      ["agent:main:slack:channel:C123:thread:1710000000.000100", makeEntry(now - DAY_MS)],
+      ["agent:main:slack:channel:C123:thread:1710000000.000200", makeEntry(now - 31 * DAY_MS)],
       ["agent:main:telegram:group:-100123:topic:77", makeEntry(now - 31 * DAY_MS)],
       ["agent:main:slack:channel:C999", makeEntry(now - 31 * DAY_MS)],
       ["agent:main:telegram:group:-100123", { ...makeEntry(now - 31 * DAY_MS), chatType: "group" }],
@@ -69,8 +70,9 @@ describe("pruneStaleEntries", () => {
 
     const pruned = pruneStaleEntries(store, 30 * DAY_MS);
 
-    expect(pruned).toBe(1);
+    expect(pruned).toBe(2);
     expect(store.old).toBeUndefined();
+    expect(store["agent:main:slack:channel:C123:thread:1710000000.000200"]).toBeUndefined();
     expect(store).toHaveProperty("agent:main:slack:channel:C123:thread:1710000000.000100");
     expect(store).toHaveProperty("agent:main:telegram:group:-100123:topic:77");
     expect(store).toHaveProperty("agent:main:slack:channel:C999");
@@ -260,6 +262,26 @@ describe("capEntryCount", () => {
     expect(store.old).toBeUndefined();
   });
 
+  it("caps long-idle thread sessions while keeping live ones", () => {
+    const now = Date.now();
+    const idleThreadKey = "agent:main:discord:channel:123456:thread:111111";
+    const liveThreadKey = "agent:main:discord:channel:123456:thread:222222";
+    const store = makeStore([
+      [idleThreadKey, makeEntry(now - 30 * DAY_MS)],
+      [liveThreadKey, makeEntry(now - DAY_MS)],
+      ["recent", makeEntry(now - 2 * DAY_MS)],
+      ["newest", makeEntry(now)],
+    ]);
+
+    const evicted = capEntryCount(store, 3);
+
+    expect(evicted).toBe(1);
+    expect(store[idleThreadKey]).toBeUndefined();
+    expect(store).toHaveProperty(liveThreadKey);
+    expect(store).toHaveProperty("recent");
+    expect(store).toHaveProperty("newest");
+  });
+
   it("preserves runtime-provided pending subagent sessions when capping", () => {
     const now = Date.now();
     const childKey = "agent:main:subagent:child";
@@ -392,6 +414,51 @@ describe("isProtectedSessionMaintenanceEntry", () => {
         ...makeEntry(Date.now()),
         chatType: "channel",
       }),
+    ).toBe(true);
+  });
+
+  it("stops protecting thread sessions that went idle past the retention window", () => {
+    expect(
+      isProtectedSessionMaintenanceEntry(
+        "agent:main:slack:channel:C123:thread:1710000000.000100",
+        makeEntry(Date.now() - 31 * DAY_MS),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps protecting a thread session with recent activity", () => {
+    const now = Date.now();
+    expect(
+      isProtectedSessionMaintenanceEntry(
+        "agent:main:slack:channel:C123:thread:1710000000.000100",
+        makeEntry(now),
+      ),
+    ).toBe(true);
+    expect(
+      isProtectedSessionMaintenanceEntry("agent:main:slack:channel:C123:thread:1710000000.000100", {
+        ...makeEntry(now - 31 * DAY_MS),
+        lastInteractionAt: now - 60_000,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps protecting a thread session whose entry carries no timestamps", () => {
+    expect(
+      isProtectedSessionMaintenanceEntry(
+        "agent:main:slack:channel:C123:thread:1710000000.000100",
+        undefined,
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps protecting idle non-thread group and channel sessions", () => {
+    const idle = makeEntry(Date.now() - 400 * DAY_MS);
+    expect(isProtectedSessionMaintenanceEntry("agent:main:slack:channel:C999", idle)).toBe(true);
+    expect(
+      isProtectedSessionMaintenanceEntry("agent:main:telegram:group:-100123:topic:77", idle),
+    ).toBe(true);
+    expect(
+      isProtectedSessionMaintenanceEntry("agent:main:opaque", { ...idle, chatType: "group" }),
     ).toBe(true);
   });
 });

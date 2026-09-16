@@ -533,9 +533,10 @@ describe("enforceSessionDiskBudget", () => {
       const removableKey = "agent:main:subagent:old-worker";
       const activeKey = "agent:main:main";
       const store: Record<string, SessionEntry> = {
+        // Thread protection tracks recent activity, so this pointer must be live to stay durable.
         [protectedKey]: {
           sessionId: "protected-thread",
-          updatedAt: 1,
+          updatedAt: Date.now(),
           displayName: "p".repeat(2000),
         },
         [removableKey]: {

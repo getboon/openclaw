@@ -25,6 +25,11 @@ const DEFAULT_SESSION_DISK_BUDGET_HIGH_WATER_RATIO = 0.8;
 const STRICT_ENTRY_MAINTENANCE_MAX_ENTRIES = 49;
 const MIN_BATCHED_ENTRY_MAINTENANCE_SLACK = 25;
 const BATCHED_ENTRY_MAINTENANCE_SLACK_RATIO = 0.1;
+/**
+ * How long a thread session keeps its durable-conversation protection after its last activity.
+ * Not operator-configurable: change this constant, not `session.maintenance`.
+ */
+const THREAD_SESSION_PROTECTION_MAX_IDLE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type SessionMaintenanceWarning = {
   activeSessionKey: string;
@@ -267,6 +272,17 @@ function isSyntheticSessionMaintenanceKey(sessionKey: string): boolean {
   );
 }
 
+function isRecentlyActiveSessionMaintenanceEntry(entry: SessionEntry | undefined): boolean {
+  // `lastInteractionAt` tracks real user/channel turns and survives preserve-activity merges
+  // that deliberately keep an older `updatedAt`, so recency is the newer of the two.
+  const lastActivityAt = Math.max(entry?.updatedAt ?? 0, entry?.lastInteractionAt ?? 0);
+  if (lastActivityAt <= 0) {
+    // No usable timestamp means staleness cannot be determined, so the entry stays protected.
+    return true;
+  }
+  return Date.now() - lastActivityAt <= THREAD_SESSION_PROTECTION_MAX_IDLE_MS;
+}
+
 function isTelegramTopicSessionKey(sessionKey: string): boolean {
   const parsed = parseAgentSessionKey(sessionKey);
   const rest = normalizeLowercaseStringOrEmpty(parsed?.rest ?? sessionKey);
@@ -288,7 +304,10 @@ export function isProtectedSessionMaintenanceEntry(
     return false;
   }
   if (parseSessionThreadInfoFast(sessionKey).threadId) {
-    return true;
+    // Thread keys are minted per conversation on bot-shaped tenants, so protecting every one
+    // forever grows the session index without bound. Only live threads stay durable; an idle
+    // one rejoins the normal age/count/disk candidates instead of pinning a store entry.
+    return isRecentlyActiveSessionMaintenanceEntry(entry);
   }
   if (isTelegramTopicSessionKey(sessionKey)) {
     return true;

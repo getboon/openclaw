@@ -829,16 +829,18 @@ describe("Integration: saveSessionStore with pruning", () => {
     expect(loaded["session-74"]).toBeUndefined();
   });
 
-  it("explicit loadSessionStore maintenance preserves channel, thread, and topic session pointers", async () => {
+  it("explicit loadSessionStore maintenance preserves channel, live thread, and topic session pointers", async () => {
     const now = Date.now();
     const channelKey = "agent:main:slack:channel:C123";
-    const threadKey = "agent:main:discord:channel:123456:thread:987654";
+    const liveThreadKey = "agent:main:discord:channel:123456:thread:987654";
+    const idleThreadKey = "agent:main:discord:channel:123456:thread:987655";
     const topicKey = "agent:main:telegram:group:-100123:topic:77";
     const store = Object.fromEntries(
       Array.from({ length: 75 }, (_, index) => [`session-${index}`, makeEntry(now - index)]),
     );
     store[channelKey] = makeEntry(now - 99 * DAY_MS);
-    store[threadKey] = makeEntry(now - 100 * DAY_MS);
+    store[liveThreadKey] = makeEntry(now - DAY_MS);
+    store[idleThreadKey] = makeEntry(now - 100 * DAY_MS);
     store[topicKey] = makeEntry(now - 101 * DAY_MS);
     await fs.writeFile(storePath, JSON.stringify(store), "utf-8");
 
@@ -854,8 +856,9 @@ describe("Integration: saveSessionStore with pruning", () => {
 
     expect(Object.keys(loaded)).toHaveLength(50);
     expect(loaded).toHaveProperty(channelKey);
-    expect(loaded).toHaveProperty(threadKey);
+    expect(loaded).toHaveProperty(liveThreadKey);
     expect(loaded).toHaveProperty(topicKey);
+    expect(loaded[idleThreadKey]).toBeUndefined();
     expect(loaded["session-74"]).toBeUndefined();
   });
 
