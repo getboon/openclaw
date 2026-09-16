@@ -31,7 +31,8 @@ see [Logging](/logging).
 
 The `diagnostics-otel` plugin ships inside the OpenClaw package and is enabled by
 default. It stays a no-op until `diagnostics.otel.enabled` is `true`, so the only
-setup is the `diagnostics.otel` config block:
+setup is the `diagnostics.otel` config block. If `plugins.allow` is a restrictive
+list, add `diagnostics-otel` to it as well:
 
 ```json5
 {
