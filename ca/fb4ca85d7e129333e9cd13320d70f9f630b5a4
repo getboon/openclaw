@@ -1,0 +1,28 @@
+src/agents/subagent-announce-delivery.ts
+  s_7d0556f27ab094::t_3d843a6f57e9d0 1690-1697
+src/agents/subagent-announce-delivery.test.ts
+  s_7d0556f27ab094::t_a2cd6348d587f7 1222-1270,1488,1497-1502,1505-1506,1516-1531,1533-1538,1541,1543-1544
+  s_7d0556f27ab094::t_865ab58be72394 1489-1491,1494-1496
+  s_7d0556f27ab094::t_3f78436a19f3e9 1503-1504
+  s_7d0556f27ab094::t_b091bd51b1b0e9 1507-1509,1513-1515
+  s_7d0556f27ab094::t_02ad8dac9f37a0 1532
+  s_7d0556f27ab094::t_20d5122aae1be6 1539-1540
+  s_7d0556f27ab094::t_793076acec5942 1542
+  s_7d0556f27ab094::t_ddb71885773546 1492-1493,1510-1512
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cafb4ca85d7e129333e9cd13320d70f9f630b5a4",
+  "prompts": {},
+  "sessions": {
+    "s_7d0556f27ab094": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "53035b11-9bda-4f9b-a458-5f700353f2d5",
+        "model": "claude-opus-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
