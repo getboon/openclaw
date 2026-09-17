@@ -627,12 +627,14 @@ async function executeToolCallsSequential(
     );
     let finalized: FinalizedToolCallOutcome;
     if (preparation.kind === "immediate") {
-      finalized = {
+      finalized = await finalizeImmediateToolCall(
+        currentContext,
+        assistantMessage,
         toolCall,
-        result: preparation.result,
-        isError: preparation.isError,
-        executionStarted: false,
-      };
+        preparation,
+        config,
+        signal,
+      );
     } else {
       const executed = await executePreparedToolCall(preparation, signal, emit);
       finalized = await finalizeExecutedToolCall(
@@ -690,12 +692,14 @@ async function executeToolCallsParallel(
       resolvedToolCalls,
     );
     if (preparation.kind === "immediate") {
-      const finalized = {
+      const finalized = await finalizeImmediateToolCall(
+        currentContext,
+        assistantMessage,
         toolCall,
-        result: preparation.result,
-        isError: preparation.isError,
-        executionStarted: false,
-      } satisfies FinalizedToolCallOutcome;
+        preparation,
+        config,
+        signal,
+      );
       await emitToolExecutionEnd(finalized, emit);
       finalizedCalls.push(finalized);
       if (signal?.aborted) {
@@ -754,6 +758,8 @@ type ImmediateToolCallOutcome = {
 type ExecutedToolCallOutcome = {
   result: AgentToolResult<unknown>;
   isError: boolean;
+  /** False for outcomes produced before `tool.execute` ran. Defaults to true. */
+  executionStarted?: boolean;
 };
 
 type FinalizedToolCallOutcome = {
@@ -965,10 +971,34 @@ async function executePreparedToolCall(
   }
 }
 
+/**
+ * A tool call rejected before execution (unresolvable tool, unknown tool name,
+ * argument-validation failure, policy block) still completed, so `afterToolCall`
+ * must see it. Without this a call that never reached `tool.execute` was
+ * reported to no hook at all and nothing downstream could count it.
+ */
+async function finalizeImmediateToolCall(
+  currentContext: AgentContext,
+  assistantMessage: AssistantMessage,
+  toolCall: AgentToolCall,
+  immediate: ImmediateToolCallOutcome,
+  config: AgentLoopConfig,
+  signal: AbortSignal | undefined,
+): Promise<FinalizedToolCallOutcome> {
+  return await finalizeExecutedToolCall(
+    currentContext,
+    assistantMessage,
+    { toolCall, args: toolCall.arguments },
+    { result: immediate.result, isError: immediate.isError, executionStarted: false },
+    config,
+    signal,
+  );
+}
+
 async function finalizeExecutedToolCall(
   currentContext: AgentContext,
   assistantMessage: AssistantMessage,
-  prepared: PreparedToolCall,
+  prepared: Pick<PreparedToolCall, "toolCall" | "args">,
   executed: ExecutedToolCallOutcome,
   config: AgentLoopConfig,
   signal: AbortSignal | undefined,
@@ -985,6 +1015,7 @@ async function finalizeExecutedToolCall(
           args: prepared.args,
           result,
           isError,
+          executionStarted: executed.executionStarted !== false,
           context: currentContext,
         },
         signal,
@@ -1007,7 +1038,7 @@ async function finalizeExecutedToolCall(
     toolCall: prepared.toolCall,
     result,
     isError,
-    executionStarted: true,
+    executionStarted: executed.executionStarted !== false,
   };
 }
 

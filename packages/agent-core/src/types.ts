@@ -112,6 +112,11 @@ export interface AfterToolCallContext {
   result: AgentToolResult<unknown>;
   /** Whether the executed tool result is currently treated as an error. */
   isError: boolean;
+  /**
+   * False when the loop produced this result without ever running `tool.execute`
+   * (unresolvable tool, unknown tool name, argument-validation failure, policy block).
+   */
+  executionStarted: boolean;
   /** Current agent context at the time the tool call is finalized. */
   context: AgentContext;
 }

@@ -1,4 +1,5 @@
 // Verifies sessions_spawn model selection, thinking patching, and timeout defaults.
+import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
@@ -8,6 +9,7 @@ import {
   resolveSubagentModelAndThinkingPlan,
   splitModelRef,
 } from "./subagent-spawn-plan.js";
+import { resolveAgentTimeoutMs } from "./timeout.js";
 
 type SubagentModelPlan = ReturnType<typeof resolveSubagentModelAndThinkingPlan>;
 type OkSubagentModelPlan = Extract<SubagentModelPlan, { status: "ok" }>;
@@ -237,13 +239,33 @@ describe("subagent spawn model + thinking plan", () => {
     ).toBe(2);
   });
 
-  it("falls back to 0 when config omits the timeout", () => {
+  it("falls back to the general agent timeout when config omits the subagent timeout", () => {
     expect(
       resolveConfiguredSubagentRunTimeoutSeconds({
         cfg: createConfig({
           agents: { defaults: { subagents: { maxConcurrent: 8 } } },
         }),
       }),
-    ).toBe(0);
+    ).toBe(48 * 60 * 60);
+  });
+
+  // A subagent used to get its wall-clock bound from `agents.defaults.subagents
+  // .runTimeoutSeconds` only. With that key unset the resolver returned 0, which
+  // `resolveAgentTimeoutMs` reads as the explicit "no timeout" sentinel — so a
+  // fleet that set `agents.defaults.timeoutSeconds: 900` still ran its subagents
+  // with a ~24.8 day deadline.
+  it("inherits agents.defaults.timeoutSeconds so the run bound is not the no-timeout sentinel", () => {
+    const cfg = createConfig({ agents: { defaults: { timeoutSeconds: 900 } } });
+    const runTimeoutSeconds = resolveConfiguredSubagentRunTimeoutSeconds({ cfg });
+    expect(runTimeoutSeconds).toBe(900);
+    expect(resolveAgentTimeoutMs({ cfg, overrideSeconds: runTimeoutSeconds })).toBe(900_000);
+  });
+
+  it("still honors an explicit subagents.runTimeoutSeconds of 0 as no timeout", () => {
+    const cfg = createConfig({
+      agents: { defaults: { timeoutSeconds: 900, subagents: { runTimeoutSeconds: 0 } } },
+    });
+    expect(resolveConfiguredSubagentRunTimeoutSeconds({ cfg })).toBe(0);
+    expect(resolveAgentTimeoutMs({ cfg, overrideSeconds: 0 })).toBe(MAX_TIMER_TIMEOUT_MS);
   });
 });

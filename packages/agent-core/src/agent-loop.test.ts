@@ -1117,3 +1117,97 @@ describe("agentLoop thinking state", () => {
     expect(observedReasoning).toEqual(expected);
   });
 });
+
+describe("agentLoop not-executed tool calls", () => {
+  function makeAssistantMessage(content: AssistantMessage["content"]): AssistantMessage {
+    return {
+      role: "assistant",
+      content,
+      api: model.api,
+      provider: model.provider,
+      model: model.id,
+      usage: TEST_USAGE,
+      stopReason: content.some((item) => item.type === "toolCall") ? "toolUse" : "stop",
+      timestamp: 1,
+    };
+  }
+
+  function singleToolCallStreamFn(toolCall: { id: string; name: string }): StreamFn {
+    let turn = 0;
+    return () => {
+      turn += 1;
+      const stream = createAssistantMessageEventStream();
+      queueMicrotask(() => {
+        const message =
+          turn === 1
+            ? makeAssistantMessage([{ type: "toolCall", ...toolCall, arguments: {} }])
+            : makeAssistantMessage([{ type: "text", text: "done" }]);
+        stream.push({
+          type: "done",
+          reason: message.stopReason === "toolUse" ? "toolUse" : "stop",
+          message,
+        });
+        stream.end();
+      });
+      return stream;
+    };
+  }
+
+  const execTool: AgentTool = {
+    name: "exec",
+    label: "exec",
+    description: "exec",
+    parameters: Type.Object({ command: Type.String() }, { additionalProperties: false }),
+    execute: async () => ({ content: [{ type: "text", text: "ran" }] }),
+  };
+
+  it("reports a schema-validation failure to afterToolCall", async () => {
+    const seen: Array<{ name: string; isError: boolean; text: string }> = [];
+    const stream = agentLoop(
+      [{ role: "user", content: "hello", timestamp: 1 }],
+      { systemPrompt: "", messages: [], tools: [execTool] },
+      {
+        ...config,
+        afterToolCall: async ({ toolCall, result, isError }) => {
+          seen.push({
+            name: toolCall.name,
+            isError,
+            text: result.content.map((part) => ("text" in part ? part.text : "")).join(""),
+          });
+          return undefined;
+        },
+      },
+      undefined,
+      singleToolCallStreamFn({ id: "call-exec", name: "exec" }),
+    );
+
+    await collectEvents(stream);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ name: "exec", isError: true });
+    expect(seen[0]?.text).toContain("command");
+  });
+
+  it("reports an unresolvable tool name to afterToolCall", async () => {
+    const seen: string[] = [];
+    const stream = agentLoop(
+      [{ role: "user", content: "hello", timestamp: 1 }],
+      { systemPrompt: "", messages: [], tools: [execTool] },
+      {
+        ...config,
+        afterToolCall: async ({ toolCall, result }) => {
+          seen.push(
+            `${toolCall.name}:${result.content.map((part) => ("text" in part ? part.text : "")).join("")}`,
+          );
+          return undefined;
+        },
+      },
+      undefined,
+      singleToolCallStreamFn({ id: "call-ghost", name: "ghost" }),
+    );
+
+    await collectEvents(stream);
+
+    expect(seen).toEqual(["ghost:Tool ghost not found"]);
+  });
+});
