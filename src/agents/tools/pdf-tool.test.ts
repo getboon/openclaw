@@ -909,7 +909,7 @@ describe("createPdfTool", () => {
       vi.spyOn(pdfExtractModule, "extractPdfContent").mockImplementation(
         async ({ pageNumbers }) => {
           const thisCall = callIndex++;
-          await deferreds[thisCall]!.promise;
+          await deferreds[thisCall].promise;
           const requestedPages = pageNumbers ?? [];
           return {
             text: `Sheets ${requestedPages.at(0)}-${requestedPages.at(-1)}`,
@@ -959,14 +959,14 @@ describe("createPdfTool", () => {
       // multi-batch extraction (let alone the analysis phase) finishes.
       for (let batch = 0; batch < 5; batch++) {
         expect(onUpdateMock).toHaveBeenCalledTimes(batch);
-        deferreds[batch]!.resolve();
+        deferreds[batch].resolve();
         // Don't guess the microtask depth between the deferred resolving
         // and onUpdate firing -- poll until it happens (or the default
         // vi.waitFor timeout fails the test).
         await vi.waitFor(() => {
           expect(onUpdateMock).toHaveBeenCalledTimes(batch + 1);
         });
-        expect(onUpdateMock.mock.calls[batch]![0]).toMatchObject({
+        expect(onUpdateMock.mock.calls[batch][0]).toMatchObject({
           details: { status: "extracting" },
         });
       }
@@ -977,9 +977,9 @@ describe("createPdfTool", () => {
       // execute() settle and check the 6th extraction update landed where
       // expected, at index 5.
       expect(onUpdateMock).toHaveBeenCalledTimes(5);
-      deferreds[5]!.resolve();
+      deferreds[5].resolve();
       await executePromise;
-      expect(onUpdateMock.mock.calls[5]![0]).toMatchObject({
+      expect(onUpdateMock.mock.calls[5][0]).toMatchObject({
         details: { status: "extracting" },
       });
     });
