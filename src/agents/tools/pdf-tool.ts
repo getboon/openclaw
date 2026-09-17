@@ -764,6 +764,18 @@ export function createPdfTool(options?: {
               config: options?.config,
             });
             documentPageCount ??= extracted.coverage?.documentPageCount;
+            onUpdate?.({
+              content: [
+                {
+                  type: "text",
+                  text: `Extracted pages ${formatPageRanges(requestedPages)} of ${extracted.coverage?.documentPageCount ?? "?"}`,
+                },
+              ],
+              details: {
+                status: "extracting",
+                documentPageCount: extracted.coverage?.documentPageCount,
+              },
+            });
             if (
               requestedPages.length > 1 &&
               extracted.coverage?.truncationReasons.includes("text_limit")
