@@ -24,6 +24,7 @@ import type {
 } from "../../plugins/document-extractor-types.js";
 import { resolveUserPath } from "../../utils.js";
 import type { AuthProfileStore } from "../auth-profiles/types.js";
+import type { AgentToolUpdateCallback } from "../runtime/index.js";
 import { optionalFiniteNumberSchema } from "../schema/typebox.js";
 import { readFiniteNumberParam, ToolInputError } from "./common.js";
 import { coerceImageModelConfig, type ImageModelConfig } from "./image-tool.helpers.js";
@@ -331,6 +332,7 @@ async function runPdfPrompt(params: {
   pdfs: Array<{ buffer: Buffer; filename: string }>;
   password?: string;
   pageNumbers?: number[];
+  onUpdate?: AgentToolUpdateCallback;
   getExtractions: () => Promise<{
     chunks: PdfExtractionChunk[];
     coverage: PdfCoverageSummary[];
@@ -464,7 +466,7 @@ async function runPdfPrompt(params: {
       }
 
       const chunkSummaries: PdfExtractionChunk[] = [];
-      for (const extraction of extractions) {
+      for (const [chunkPosition, extraction] of extractions.entries()) {
         const chunkCoverage = extraction.coverage;
         const chunkPrompt = [
           params.prompt,
@@ -478,6 +480,20 @@ async function runPdfPrompt(params: {
           ...extraction,
           text: chunkText,
           images: [],
+        });
+        params.onUpdate?.({
+          content: [
+            {
+              type: "text",
+              text: `Read pages ${formatPageRanges(chunkCoverage?.pagesProcessed ?? [])} of ${chunkCoverage?.documentPageCount ?? "?"} (chunk ${chunkPosition + 1}/${extractions.length})`,
+            },
+          ],
+          details: {
+            status: "running",
+            chunkIndex: chunkPosition + 1,
+            totalChunks: extractions.length,
+            documentPageCount: chunkCoverage?.documentPageCount,
+          },
         });
       }
       const synthesisPrompt = [
@@ -572,7 +588,7 @@ export function createPdfTool(options?: {
     name: "pdf",
     description,
     parameters: PdfToolSchema,
-    execute: async (_toolCallId, args) => {
+    execute: async (_toolCallId, args, _signal, onUpdate) => {
       const record = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
 
       // MARK: - Normalize pdf + pdfs input
@@ -809,6 +825,7 @@ export function createPdfTool(options?: {
         pdfs: loadedPdfs.map((p) => ({ buffer: p.buffer, filename: p.filename })),
         ...(password ? { password } : {}),
         pageNumbers,
+        onUpdate,
         getExtractions,
       });
 

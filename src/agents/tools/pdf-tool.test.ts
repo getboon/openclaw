@@ -786,6 +786,85 @@ describe("createPdfTool", () => {
     });
   });
 
+  it("reports progress via onUpdate once per extraction chunk", async () => {
+    await withTempPdfAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, {
+        provider: "openai",
+        api: "openai-responses",
+        input: ["text"],
+      });
+      vi.spyOn(pdfExtractModule, "extractPdfContent").mockImplementation(
+        async ({ pageNumbers }) => {
+          const requestedPages = pageNumbers ?? [];
+          return {
+            text: `Sheets ${requestedPages.at(0)}-${requestedPages.at(-1)}`,
+            images: [],
+            coverage: {
+              documentPageCount: 59,
+              requestedPages,
+              pagesProcessed: requestedPages,
+              complete: requestedPages.length === 59,
+              textChars: 20,
+              textBytes: 20,
+              maxTextChars: 200_000,
+              truncationReasons: requestedPages.length === 59 ? [] : ["page_limit"],
+            },
+          };
+        },
+      );
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "E4.101 and S-301 are present." }],
+      } as never);
+
+      const cfg = {
+        agents: {
+          defaults: {
+            pdfModel: { primary: OPENAI_PDF_MODEL },
+            pdfMaxPages: 120,
+          },
+        },
+      } as OpenClawConfig;
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+      const onUpdateMock = vi.fn();
+
+      await tool.execute(
+        "t1",
+        { prompt: "List every discipline and sheet.", pdf: "/tmp/merged-set.pdf" },
+        undefined,
+        onUpdateMock,
+      );
+
+      // 6 chunks (59 pages / 10-page batches), one onUpdate call each — the
+      // final synthesis call is NOT inside the per-chunk loop and must not
+      // fire a 7th update.
+      expect(onUpdateMock).toHaveBeenCalledTimes(6);
+      expect(onUpdateMock.mock.calls[0][0]).toEqual({
+        content: [{ type: "text", text: "Read pages 1-10 of 59 (chunk 1/6)" }],
+        details: {
+          status: "running",
+          chunkIndex: 1,
+          totalChunks: 6,
+          documentPageCount: 59,
+        },
+      });
+      expect(onUpdateMock.mock.calls[5][0]).toEqual({
+        content: [{ type: "text", text: "Read pages 51-59 of 59 (chunk 6/6)" }],
+        details: {
+          status: "running",
+          chunkIndex: 6,
+          totalChunks: 6,
+          documentPageCount: 59,
+        },
+      });
+      // chunkIndex must be strictly increasing 1..6, in call order.
+      expect(onUpdateMock.mock.calls.map(([update]) => update.details.chunkIndex)).toEqual([
+        1, 2, 3, 4, 5, 6,
+      ]);
+    });
+  });
+
   it("splits a dense batch when the extractor hits the text limit", async () => {
     await withTempPdfAgentDir(async (agentDir) => {
       await stubPdfToolInfra(agentDir, {
