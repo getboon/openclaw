@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/twitch",
-  "version": "2026.6.11-boon.43",
+  "version": "2026.6.11-boon.44",
   "description": "OpenClaw Twitch channel plugin for chat and moderation workflows.",
   "repository": {
     "type": "git",
@@ -27,10 +27,10 @@
       "minHostVersion": ">=2026.4.10"
     },
     "compat": {
-      "pluginApi": ">=2026.6.11-boon.43"
+      "pluginApi": ">=2026.6.11-boon.44"
     },
     "build": {
-      "openclawVersion": "2026.6.11-boon.43"
+      "openclawVersion": "2026.6.11-boon.44"
     },
     "channel": {
       "id": "twitch",
