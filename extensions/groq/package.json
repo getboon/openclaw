@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/groq-provider",
-  "version": "2026.6.11-boon.43",
+  "version": "2026.6.11-boon.44",
   "description": "OpenClaw Groq media-understanding provider.",
   "repository": {
     "type": "git",
@@ -21,10 +21,10 @@
       "minHostVersion": ">=2026.6.8"
     },
     "compat": {
-      "pluginApi": ">=2026.6.11-boon.43"
+      "pluginApi": ">=2026.6.11-boon.44"
     },
     "build": {
-      "openclawVersion": "2026.6.11-boon.43",
+      "openclawVersion": "2026.6.11-boon.44",
       "bundledDist": false
     },
     "release": {
