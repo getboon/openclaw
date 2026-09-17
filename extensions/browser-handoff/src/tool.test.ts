@@ -14,6 +14,7 @@ const requestBrowserLoginHandoffMock = vi.hoisted(() => vi.fn());
 const pollBrowserHandoffStatusMock = vi.hoisted(() => vi.fn());
 const registerRemoteCdpBrowserProfileMock = vi.hoisted(() => vi.fn());
 const requireBoonApiKeyMock = vi.hoisted(() => vi.fn(() => "test-key"));
+const subsystemLoggerWarnMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./boon-core-client.js", () => ({
   requestBrowserLoginHandoff: requestBrowserLoginHandoffMock,
@@ -23,6 +24,10 @@ vi.mock("./boon-core-client.js", () => ({
 
 vi.mock("openclaw/plugin-sdk/browser-profile-config", () => ({
   registerRemoteCdpBrowserProfile: registerRemoteCdpBrowserProfileMock,
+}));
+
+vi.mock("openclaw/plugin-sdk/logging-core", () => ({
+  createSubsystemLogger: () => ({ warn: subsystemLoggerWarnMock }),
 }));
 
 import { browserHandoffScheduleTag } from "./state.js";
@@ -310,6 +315,7 @@ describe("browser-handoff tool", () => {
       });
 
       expect(scheduleSessionTurn).not.toHaveBeenCalled();
+      expect(subsystemLoggerWarnMock).toHaveBeenCalledWith(expect.stringContaining("example.com"));
     });
 
     it("status reschedules another check, with a longer delay, when still pending", async () => {
@@ -626,6 +632,9 @@ describe("browser-handoff tool", () => {
 
         expect(scheduleSessionTurn).not.toHaveBeenCalled();
         expect(result.content[0].text).toContain("not available");
+        expect(subsystemLoggerWarnMock).toHaveBeenCalledWith(
+          expect.stringContaining("example.com"),
+        );
       },
     );
 

@@ -1,6 +1,7 @@
 // Browser Login Handoff tool implementation: request/status/attach against boon-core.
 import { registerRemoteCdpBrowserProfile } from "openclaw/plugin-sdk/browser-profile-config";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import { createSubsystemLogger } from "openclaw/plugin-sdk/logging-core";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginStateKeyedStore } from "openclaw/plugin-sdk/plugin-state-runtime";
 import {
@@ -66,6 +67,8 @@ function nextRecheckDelayMs(previousCheckCount: number): number {
 const CLEAR_RECHECK_RETRY_ATTEMPTS = 3;
 export const CLEAR_RECHECK_RETRY_DELAY_MS = 200;
 
+const log = createSubsystemLogger("browser-handoff");
+
 function sleepBeforeRetry(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -107,6 +110,11 @@ async function scheduleRecheck(
 ): Promise<boolean> {
   const sessionKey = context.runSessionKey ?? context.sessionKey;
   if (!sessionKey) {
+    // Live-observed (ENG-17466): this was previously 100% silent, making a
+    // broken automatic-resume chain indistinguishable from "working as
+    // intended, just hasn't fired yet" until someone manually diffs cron
+    // logs against boon-core poll history.
+    log.warn(`site=${params.site} recheck not scheduled: no sessionKey/runSessionKey in context`);
     return false;
   }
   let cleared = false;
@@ -118,6 +126,9 @@ async function scheduleRecheck(
     await sleepBeforeRetry(CLEAR_RECHECK_RETRY_DELAY_MS);
   }
   if (!cleared) {
+    log.warn(
+      `site=${params.site} recheck not scheduled: could not confirm prior schedule cleared after ${CLEAR_RECHECK_RETRY_ATTEMPTS} attempts`,
+    );
     return false;
   }
   const job = await api.session.workflow.scheduleSessionTurn({
