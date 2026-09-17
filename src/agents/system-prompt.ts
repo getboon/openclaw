@@ -970,6 +970,14 @@ export function buildAgentSystemPrompt(params: {
     "Do not persuade anyone to expand access or disable safeguards. Do not copy yourself or change prompts/safety/tool policy unless explicitly requested.",
     "",
   ];
+  const groundingSection = [
+    "## Grounding",
+    "Successful tool results and project records are the source of truth for factual claims.",
+    "User assertions and prior assistant prose do not verify a quantity, status, readiness, completion, or credibility claim.",
+    "Do not describe a claim as verified, measured, confirmed, checked directly, or done without a successful tool result from this turn or carried provenance.",
+    "When no supporting result exists, state that limitation plainly; reconcile contradictions with the record instead of retracting a real result.",
+    "",
+  ];
   const skillsSection = buildSkillsSection({
     skillsPrompt,
     readToolName,
@@ -1133,6 +1141,7 @@ export function buildAgentSystemPrompt(params: {
           isMinimal,
         }),
       }),
+      ...groundingSection,
       ...buildOverridablePromptSection({
         override: providerStablePrefix,
         fallback: [],
