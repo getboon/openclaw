@@ -10,6 +10,7 @@ import {
 import {
   isProtectedSessionMaintenanceEntry,
   resolveMaintenanceConfigFromInput,
+  THREAD_SESSION_PROTECTION_MAX_IDLE_MS,
   resolveQuotaSuspensionEntryMaintenance,
   resolveSessionEntryMaintenanceHighWater,
 } from "./store-maintenance.js";
@@ -60,7 +61,8 @@ describe("pruneStaleEntries", () => {
     const now = Date.now();
     const store = makeStore([
       ["old", makeEntry(now - 31 * DAY_MS)],
-      ["agent:main:slack:channel:C123:thread:1710000000.000100", makeEntry(now - 31 * DAY_MS)],
+      ["agent:main:slack:channel:C123:thread:1710000000.000100", makeEntry(now - DAY_MS)],
+      ["agent:main:slack:channel:C123:thread:1710000000.000200", makeEntry(now - 31 * DAY_MS)],
       ["agent:main:telegram:group:-100123:topic:77", makeEntry(now - 31 * DAY_MS)],
       ["agent:main:slack:channel:C999", makeEntry(now - 31 * DAY_MS)],
       ["agent:main:telegram:group:-100123", { ...makeEntry(now - 31 * DAY_MS), chatType: "group" }],
@@ -69,8 +71,9 @@ describe("pruneStaleEntries", () => {
 
     const pruned = pruneStaleEntries(store, 30 * DAY_MS);
 
-    expect(pruned).toBe(1);
+    expect(pruned).toBe(2);
     expect(store.old).toBeUndefined();
+    expect(store["agent:main:slack:channel:C123:thread:1710000000.000200"]).toBeUndefined();
     expect(store).toHaveProperty("agent:main:slack:channel:C123:thread:1710000000.000100");
     expect(store).toHaveProperty("agent:main:telegram:group:-100123:topic:77");
     expect(store).toHaveProperty("agent:main:slack:channel:C999");
@@ -242,7 +245,9 @@ describe("capEntryCount", () => {
     const now = Date.now();
     const threadKey = "agent:main:discord:channel:123456:thread:987654";
     const store = makeStore([
-      [threadKey, makeEntry(now - 5 * DAY_MS)],
+      // Inside the thread protection window: durability now tracks recent activity, so a thread
+      // idle past the window is deliberately NOT durable (see the idle-thread cases below).
+      [threadKey, makeEntry(now - 2 * DAY_MS)],
       ["oldest", makeEntry(now - 4 * DAY_MS)],
       ["old", makeEntry(now - 3 * DAY_MS)],
       ["recent", makeEntry(now - DAY_MS)],
@@ -258,6 +263,26 @@ describe("capEntryCount", () => {
     expect(store).toHaveProperty("recent");
     expect(store.oldest).toBeUndefined();
     expect(store.old).toBeUndefined();
+  });
+
+  it("caps long-idle thread sessions while keeping live ones", () => {
+    const now = Date.now();
+    const idleThreadKey = "agent:main:discord:channel:123456:thread:111111";
+    const liveThreadKey = "agent:main:discord:channel:123456:thread:222222";
+    const store = makeStore([
+      [idleThreadKey, makeEntry(now - 30 * DAY_MS)],
+      [liveThreadKey, makeEntry(now - DAY_MS)],
+      ["recent", makeEntry(now - 2 * DAY_MS)],
+      ["newest", makeEntry(now)],
+    ]);
+
+    const evicted = capEntryCount(store, 3);
+
+    expect(evicted).toBe(1);
+    expect(store[idleThreadKey]).toBeUndefined();
+    expect(store).toHaveProperty(liveThreadKey);
+    expect(store).toHaveProperty("recent");
+    expect(store).toHaveProperty("newest");
   });
 
   it("preserves runtime-provided pending subagent sessions when capping", () => {
@@ -392,6 +417,131 @@ describe("isProtectedSessionMaintenanceEntry", () => {
         ...makeEntry(Date.now()),
         chatType: "channel",
       }),
+    ).toBe(true);
+  });
+
+  it("pins the protection window to a value below the entry cap", () => {
+    // Asserted absolutely, not relative to the constant: a relative assertion moves with the
+    // value and would stay green if the window were widened. Protection must stay under
+    // `maxEntries / threads-per-day` or `capEntryCount` loses its removal budget entirely.
+    expect(THREAD_SESSION_PROTECTION_MAX_IDLE_MS).toBe(4 * DAY_MS);
+    const threadKey = "agent:main:slack:channel:C123:thread:1710000000.000100";
+    const now = Date.now();
+    expect(isProtectedSessionMaintenanceEntry(threadKey, makeEntry(now - 3 * DAY_MS))).toBe(true);
+    expect(isProtectedSessionMaintenanceEntry(threadKey, makeEntry(now - 5 * DAY_MS))).toBe(false);
+  });
+
+  it("pins both edges of the thread protection window", () => {
+    const now = Date.now();
+    const threadKey = "agent:main:slack:channel:C123:thread:1710000000.000100";
+    const hour = 60 * 60 * 1000;
+    // Boundary cases, asserted against the constant rather than a literal: widening the window
+    // must fail here rather than silently re-protecting every idle thread.
+    expect(
+      isProtectedSessionMaintenanceEntry(
+        threadKey,
+        makeEntry(now - (THREAD_SESSION_PROTECTION_MAX_IDLE_MS - hour)),
+      ),
+    ).toBe(true);
+    expect(
+      isProtectedSessionMaintenanceEntry(
+        threadKey,
+        makeEntry(now - (THREAD_SESSION_PROTECTION_MAX_IDLE_MS + hour)),
+      ),
+    ).toBe(false);
+    // Same boundary via the interaction stamp, which is the authoritative clock.
+    expect(
+      isProtectedSessionMaintenanceEntry(threadKey, {
+        ...makeEntry(now),
+        lastInteractionAt: now - (THREAD_SESSION_PROTECTION_MAX_IDLE_MS + hour),
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps protecting an idle telegram topic even when it resolves as thread-keyed", () => {
+    // Regression: once the telegram plugin is loaded, `resolveLoadedSessionThreadInfo` reports a
+    // forum-topic key as thread-keyed. The topic check must therefore run BEFORE the thread
+    // branch, or a long-idle topic loses durable protection and gets pruned. A bare process does
+    // not load plugins, so this is asserted directly against the ordering instead.
+    const topicKey = "agent:main:telegram:group:-100123:topic:77";
+    expect(isProtectedSessionMaintenanceEntry(topicKey, makeEntry(Date.now() - 400 * DAY_MS))).toBe(
+      true,
+    );
+    expect(
+      isProtectedSessionMaintenanceEntry(topicKey, {
+        ...makeEntry(Date.now()),
+        lastInteractionAt: Date.now() - 400 * DAY_MS,
+      }),
+    ).toBe(true);
+  });
+
+  it("treats lastInteractionAt as authoritative over a bumped updatedAt", () => {
+    const now = Date.now();
+    const threadKey = "agent:main:slack:channel:C123:thread:1710000000.000100";
+    // A transcript-append or marker write bumps `updatedAt` without a user turn; that must not
+    // renew protection, or a silent thread stays pinned forever.
+    expect(
+      isProtectedSessionMaintenanceEntry(threadKey, {
+        ...makeEntry(now),
+        lastInteractionAt: now - 30 * DAY_MS,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps protecting a thread session whose timestamps are unusable", () => {
+    const threadKey = "agent:main:slack:channel:C123:thread:1710000000.000100";
+    // A non-finite persisted stamp must not read as "infinitely idle" and drop the entry.
+    expect(
+      isProtectedSessionMaintenanceEntry(threadKey, {
+        ...makeEntry(Date.now() - 400 * DAY_MS),
+        lastInteractionAt: Number.NaN,
+        updatedAt: Number.NaN,
+      } as SessionEntry),
+    ).toBe(true);
+  });
+
+  it("stops protecting thread sessions that went idle past the retention window", () => {
+    expect(
+      isProtectedSessionMaintenanceEntry(
+        "agent:main:slack:channel:C123:thread:1710000000.000100",
+        makeEntry(Date.now() - 31 * DAY_MS),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps protecting a thread session with recent activity", () => {
+    const now = Date.now();
+    expect(
+      isProtectedSessionMaintenanceEntry(
+        "agent:main:slack:channel:C123:thread:1710000000.000100",
+        makeEntry(now),
+      ),
+    ).toBe(true);
+    expect(
+      isProtectedSessionMaintenanceEntry("agent:main:slack:channel:C123:thread:1710000000.000100", {
+        ...makeEntry(now - 31 * DAY_MS),
+        lastInteractionAt: now - 60_000,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps protecting a thread session whose entry carries no timestamps", () => {
+    expect(
+      isProtectedSessionMaintenanceEntry(
+        "agent:main:slack:channel:C123:thread:1710000000.000100",
+        undefined,
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps protecting idle non-thread group and channel sessions", () => {
+    const idle = makeEntry(Date.now() - 400 * DAY_MS);
+    expect(isProtectedSessionMaintenanceEntry("agent:main:slack:channel:C999", idle)).toBe(true);
+    expect(
+      isProtectedSessionMaintenanceEntry("agent:main:telegram:group:-100123:topic:77", idle),
+    ).toBe(true);
+    expect(
+      isProtectedSessionMaintenanceEntry("agent:main:opaque", { ...idle, chatType: "group" }),
     ).toBe(true);
   });
 });
