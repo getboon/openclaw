@@ -24,6 +24,7 @@ import type {
 } from "../../plugins/document-extractor-types.js";
 import { resolveUserPath } from "../../utils.js";
 import type { AuthProfileStore } from "../auth-profiles/types.js";
+import type { AgentToolUpdateCallback } from "../runtime/index.js";
 import { optionalFiniteNumberSchema } from "../schema/typebox.js";
 import { readFiniteNumberParam, ToolInputError } from "./common.js";
 import { coerceImageModelConfig, type ImageModelConfig } from "./image-tool.helpers.js";
@@ -233,6 +234,24 @@ function formatPageRanges(pages: readonly number[]): string {
   return ranges.join(", ");
 }
 
+// Progress is best-effort UI state; a throwing subscriber must not fail
+// document processing. Keeps the same content/details shape the exec tool
+// established (see bash-tools.exec-runtime.ts's emitUpdate) rather than
+// switching to emitToolProgress's separate progress-field shape.
+function safeEmitUpdate(
+  onUpdate: AgentToolUpdateCallback | undefined,
+  payload: Parameters<AgentToolUpdateCallback>[0],
+): void {
+  if (!onUpdate) {
+    return;
+  }
+  try {
+    onUpdate(payload);
+  } catch {
+    // Progress is best-effort UI state; tool execution must not depend on subscribers.
+  }
+}
+
 function aggregatePdfCoverage(params: {
   filename: string;
   chunks: PdfExtractionChunk[];
@@ -331,6 +350,7 @@ async function runPdfPrompt(params: {
   pdfs: Array<{ buffer: Buffer; filename: string }>;
   password?: string;
   pageNumbers?: number[];
+  onUpdate?: AgentToolUpdateCallback;
   getExtractions: () => Promise<{
     chunks: PdfExtractionChunk[];
     coverage: PdfCoverageSummary[];
@@ -464,7 +484,7 @@ async function runPdfPrompt(params: {
       }
 
       const chunkSummaries: PdfExtractionChunk[] = [];
-      for (const extraction of extractions) {
+      for (const [chunkPosition, extraction] of extractions.entries()) {
         const chunkCoverage = extraction.coverage;
         const chunkPrompt = [
           params.prompt,
@@ -478,6 +498,20 @@ async function runPdfPrompt(params: {
           ...extraction,
           text: chunkText,
           images: [],
+        });
+        safeEmitUpdate(params.onUpdate, {
+          content: [
+            {
+              type: "text",
+              text: `Read pages ${formatPageRanges(chunkCoverage?.pagesProcessed ?? [])} of ${chunkCoverage?.documentPageCount ?? "?"} (chunk ${chunkPosition + 1}/${extractions.length})`,
+            },
+          ],
+          details: {
+            status: "running",
+            chunkIndex: chunkPosition + 1,
+            totalChunks: extractions.length,
+            documentPageCount: chunkCoverage?.documentPageCount,
+          },
         });
       }
       const synthesisPrompt = [
@@ -572,7 +606,7 @@ export function createPdfTool(options?: {
     name: "pdf",
     description,
     parameters: PdfToolSchema,
-    execute: async (_toolCallId, args) => {
+    execute: async (_toolCallId, args, _signal, onUpdate) => {
       const record = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
 
       // MARK: - Normalize pdf + pdfs input
@@ -748,6 +782,21 @@ export function createPdfTool(options?: {
               config: options?.config,
             });
             documentPageCount ??= extracted.coverage?.documentPageCount;
+            const pagesActuallyExtracted = extracted.coverage?.pagesProcessed ?? requestedPages;
+            const knownDocumentPageCount =
+              extracted.coverage?.documentPageCount ?? documentPageCount;
+            safeEmitUpdate(onUpdate, {
+              content: [
+                {
+                  type: "text",
+                  text: `Extracted pages ${formatPageRanges(pagesActuallyExtracted)} of ${knownDocumentPageCount ?? "?"}`,
+                },
+              ],
+              details: {
+                status: "extracting",
+                documentPageCount: knownDocumentPageCount,
+              },
+            });
             if (
               requestedPages.length > 1 &&
               extracted.coverage?.truncationReasons.includes("text_limit")
@@ -809,6 +858,7 @@ export function createPdfTool(options?: {
         pdfs: loadedPdfs.map((p) => ({ buffer: p.buffer, filename: p.filename })),
         ...(password ? { password } : {}),
         pageNumbers,
+        onUpdate,
         getExtractions,
       });
 
