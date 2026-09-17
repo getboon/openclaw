@@ -61,6 +61,7 @@ const EXPECTED_EMPTY_CONFIG_GATEWAY_STARTUP_PLUGIN_IDS = [
   "browser",
   "canvas",
   "device-pair",
+  "diagnostics-otel",
   "file-transfer",
   "memory-core",
   "phone-control",

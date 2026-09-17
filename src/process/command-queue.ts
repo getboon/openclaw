@@ -1,4 +1,5 @@
 // Command queue serializes and limits process execution for shared command lanes.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { diagnosticFailoverDetailSuffix } from "../infra/diagnostic-error-metadata.js";
 import {
   diagnosticLogger as diag,
@@ -61,6 +62,10 @@ export class GatewayDrainingError extends Error {
 
 type QueueEntry = {
   task: () => Promise<unknown>;
+  // A busy lane dequeues from the previous task's continuation, so the task would otherwise
+  // inherit that task's async context (diagnostic trace, session scope) instead of its enqueuer's.
+  // Optional only because entries queued by an older module copy sharing the global state lack it.
+  runInEnqueueContext?: ReturnType<typeof AsyncLocalStorage.snapshot>;
   resolve: (value: unknown) => void;
   reject: (reason?: unknown) => void;
   enqueuedAt: number;
@@ -276,7 +281,9 @@ function enqueueLaneEntry(state: LaneState, entry: QueueEntry): void {
 }
 
 async function runQueueEntryTask(lane: string, entry: QueueEntry): Promise<unknown> {
-  const taskPromise = Promise.resolve().then(entry.task);
+  const taskPromise = Promise.resolve().then(
+    () => entry.runInEnqueueContext?.(entry.task) ?? entry.task(),
+  );
   const taskTimeoutMs = normalizeTaskTimeoutMs(entry.taskTimeoutMs);
   if (taskTimeoutMs === undefined) {
     return await taskPromise;
@@ -488,6 +495,7 @@ export function enqueueCommandInLane<T>(
   return new Promise<T>((resolve, reject) => {
     enqueueLaneEntry(state, {
       task: () => task(),
+      runInEnqueueContext: AsyncLocalStorage.snapshot(),
       resolve: (value) => resolve(value as T),
       reject,
       enqueuedAt: Date.now(),

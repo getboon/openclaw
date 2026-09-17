@@ -65,6 +65,7 @@ const rootBundledPluginRuntimeDependencies = [
   "@grammyjs/transformer-throttler",
   "@homebridge/ciao",
   "@mozilla/readability",
+  "@opentelemetry/*",
   "@sentry/node",
   "@silvia-odwyer/photon-node",
   "@slack/bolt",
