@@ -2718,6 +2718,7 @@ describe("diagnostics-otel service", () => {
       promptImages: 1,
       contextTokenBudget: 128_000,
       reserveTokens: 4096,
+      durationMs: 1500,
       trace: {
         traceId: TRACE_ID,
         spanId: GRANDCHILD_SPAN_ID,
@@ -2731,6 +2732,13 @@ describe("diagnostics-otel service", () => {
     const contextOptions = contextCall?.[1];
     const runSpan = telemetryState.spans.find((span) => span.name === "openclaw.run");
     const runSpanId = runSpan?.spanContext.mock.results[0]?.value?.spanId;
+    const contextSpan = telemetryState.spans.find(
+      (span) => span.name === "openclaw.context.assembled",
+    );
+    const contextEndMs = contextSpan?.end.mock.calls[0]?.[0];
+    // The span covers run start -> prompt assembled, so pre-model setup time is attributable.
+    expect(contextEndMs).toBeTypeOf("number");
+    expect((contextEndMs as number) - (contextOptions?.startTime as number)).toBe(1500);
     expect(contextOptions?.attributes?.["openclaw.provider"]).toBe("openai");
     expect(contextOptions?.attributes?.["openclaw.model"]).toBe("gpt-5.4");
     expect(contextOptions?.attributes?.["openclaw.channel"]).toBe("webchat");

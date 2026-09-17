@@ -3073,7 +3073,7 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
         if (evt.reserveTokens !== undefined) {
           spanAttrs["openclaw.context.reserve_tokens"] = evt.reserveTokens;
         }
-        const span = spanWithDuration("openclaw.context.assembled", spanAttrs, 0, {
+        const span = spanWithDuration("openclaw.context.assembled", spanAttrs, evt.durationMs, {
           parentContext: activeTrustedParentContext(evt, metadata),
           endTimeMs: evt.ts,
         });

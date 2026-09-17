@@ -1,7 +1,6 @@
 // Optional bundled plugin cluster policy used by build and package scripts.
 const optionalBundledClusters = [
   "acpx",
-  "diagnostics-otel",
   "diffs",
   "googlechat",
   "memory-lancedb",

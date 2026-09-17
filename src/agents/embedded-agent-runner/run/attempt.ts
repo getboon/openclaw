@@ -4569,6 +4569,7 @@ export async function runEmbeddedAttempt(
             promptImages: imageResult.images.length,
             contextTokenBudget,
             reserveTokens,
+            durationMs: Date.now() - diagnosticRunStartedAt,
             trace: freezeDiagnosticTraceContext(createChildDiagnosticTraceContext(runTrace)),
           });
           params.onExecutionPhase?.({

@@ -719,26 +719,26 @@ describe("loadPluginManifestRegistry", () => {
     expect(registry.plugins[0]?.trustedOfficialInstall).toBe(true);
   });
 
-  it("marks official diagnostics-otel config paths trusted when the install record matches", () => {
+  it("marks official diagnostics-prometheus config paths trusted when the install record matches", () => {
     const dir = makeTempDir();
-    writeManifest(dir, { id: "diagnostics-otel", configSchema: { type: "object" } });
+    writeManifest(dir, { id: "diagnostics-prometheus", configSchema: { type: "object" } });
 
     const registry = loadPluginManifestRegistry({
       installRecords: {
-        "diagnostics-otel": {
+        "diagnostics-prometheus": {
           source: "npm",
-          spec: "@openclaw/diagnostics-otel",
+          spec: "@openclaw/diagnostics-prometheus",
           installPath: dir,
-          resolvedName: "@openclaw/diagnostics-otel",
+          resolvedName: "@openclaw/diagnostics-prometheus",
           resolvedVersion: "2026.5.18",
-          resolvedSpec: "@openclaw/diagnostics-otel@2026.5.18",
+          resolvedSpec: "@openclaw/diagnostics-prometheus@2026.5.18",
         },
       },
       candidates: [
         createPluginCandidate({
-          idHint: "diagnostics-otel",
+          idHint: "diagnostics-prometheus",
           rootDir: dir,
-          packageName: "@openclaw/diagnostics-otel",
+          packageName: "@openclaw/diagnostics-prometheus",
           origin: "config",
         }),
       ],

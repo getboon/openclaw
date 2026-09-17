@@ -130,16 +130,6 @@ describe("OpenClaw dual-published plugin metadata", () => {
       },
     },
     {
-      extensionId: "diagnostics-otel",
-      packageName: "@openclaw/diagnostics-otel",
-      install: {
-        clawhubSpec: "clawhub:@openclaw/diagnostics-otel",
-        defaultChoice: "npm",
-        minHostVersion: ">=2026.4.25",
-        npmSpec: "@openclaw/diagnostics-otel",
-      },
-    },
-    {
       extensionId: "diagnostics-prometheus",
       packageName: "@openclaw/diagnostics-prometheus",
       install: {

@@ -224,6 +224,7 @@ describe("diagnostic stability recorder", () => {
 
     emitDiagnosticEvent({
       type: "context.assembled",
+      durationMs: 25,
       runId: "run-secret",
       sessionId: "session-secret",
       provider: "openai",
@@ -248,6 +249,7 @@ describe("diagnostic stability recorder", () => {
 
     expectFields(snapshot.events[0], {
       type: "context.assembled",
+      durationMs: 25,
       provider: "openai",
       model: "gpt-5.4",
       channel: "telegram",

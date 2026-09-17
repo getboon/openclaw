@@ -69,24 +69,6 @@
       }
     },
     {
-      "name": "@openclaw/diagnostics-otel",
-      "description": "OpenClaw diagnostics OpenTelemetry exporter",
-      "source": "official",
-      "kind": "plugin",
-      "openclaw": {
-        "plugin": {
-          "id": "diagnostics-otel",
-          "label": "Diagnostics OpenTelemetry"
-        },
-        "install": {
-          "clawhubSpec": "clawhub:@openclaw/diagnostics-otel",
-          "npmSpec": "@openclaw/diagnostics-otel",
-          "defaultChoice": "npm",
-          "minHostVersion": ">=2026.4.25"
-        }
-      }
-    },
-    {
       "name": "@openclaw/diagnostics-prometheus",
       "description": "OpenClaw diagnostics Prometheus exporter",
       "source": "official",

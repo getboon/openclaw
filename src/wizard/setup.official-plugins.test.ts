@@ -26,8 +26,8 @@ describe("resolveOfficialPluginOnboardingInstallEntries", () => {
     const entries = resolveOfficialPluginOnboardingInstallEntries({ config: {} });
     const pluginIds = entries.map((entry) => entry.pluginId);
 
-    expect(pluginIds).toContain("diagnostics-otel");
     expect(pluginIds).toContain("diagnostics-prometheus");
+    expect(pluginIds).not.toContain("diagnostics-otel");
     expect(pluginIds).toContain("acpx");
     expect(pluginIds).toContain("tokenjuice");
     expect(pluginIds).not.toContain("brave");
@@ -43,10 +43,10 @@ describe("resolveOfficialPluginOnboardingInstallEntries", () => {
             acpx: { enabled: true },
           },
           installs: {
-            "diagnostics-otel": {
+            "diagnostics-prometheus": {
               source: "npm",
-              spec: "@openclaw/diagnostics-otel",
-              installPath: "/tmp/diagnostics-otel",
+              spec: "@openclaw/diagnostics-prometheus",
+              installPath: "/tmp/diagnostics-prometheus",
             },
           },
         },
@@ -55,8 +55,8 @@ describe("resolveOfficialPluginOnboardingInstallEntries", () => {
     const pluginIds = entries.map((entry) => entry.pluginId);
 
     expect(pluginIds).not.toContain("acpx");
-    expect(pluginIds).not.toContain("diagnostics-otel");
-    expect(pluginIds).toContain("diagnostics-prometheus");
+    expect(pluginIds).not.toContain("diagnostics-prometheus");
+    expect(pluginIds).toContain("tokenjuice");
   });
 });
 
@@ -93,7 +93,9 @@ describe("setupOfficialPluginInstalls", () => {
   });
 
   it("installs selected optional official plugins through the shared onboarding installer", async () => {
-    const multiselect = vi.fn(async (_params: WizardMultiSelectParams) => ["diagnostics-otel"]);
+    const multiselect = vi.fn(async (_params: WizardMultiSelectParams) => [
+      "diagnostics-prometheus",
+    ]);
     const prompter = createWizardPrompter({
       multiselect: multiselect as unknown as WizardPrompter["multiselect"],
     });
@@ -125,11 +127,6 @@ describe("setupOfficialPluginInstalls", () => {
           hint: "OpenClaw ACP runtime backend",
         },
         {
-          value: "diagnostics-otel",
-          label: "Diagnostics OpenTelemetry",
-          hint: "OpenClaw diagnostics OpenTelemetry exporter",
-        },
-        {
           value: "diagnostics-prometheus",
           label: "Diagnostics Prometheus",
           hint: "OpenClaw diagnostics Prometheus exporter",
@@ -144,12 +141,12 @@ describe("setupOfficialPluginInstalls", () => {
     expect(ensureOnboardingPluginInstalled).toHaveBeenCalledExactlyOnceWith({
       cfg: {},
       entry: {
-        pluginId: "diagnostics-otel",
-        label: "Diagnostics OpenTelemetry",
-        description: "OpenClaw diagnostics OpenTelemetry exporter",
+        pluginId: "diagnostics-prometheus",
+        label: "Diagnostics Prometheus",
+        description: "OpenClaw diagnostics Prometheus exporter",
         install: {
-          clawhubSpec: "clawhub:@openclaw/diagnostics-otel",
-          npmSpec: "@openclaw/diagnostics-otel",
+          clawhubSpec: "clawhub:@openclaw/diagnostics-prometheus",
+          npmSpec: "@openclaw/diagnostics-prometheus",
           defaultChoice: "npm",
           minHostVersion: ">=2026.4.25",
         },

@@ -342,6 +342,7 @@ function sanitizeDiagnosticEvent(event: DiagnosticEventPayload): DiagnosticStabi
       assignReasonCode(record, event.reason);
       break;
     case "context.assembled":
+      record.durationMs = event.durationMs;
       record.channel = event.channel;
       record.provider = event.provider;
       record.model = event.model;
