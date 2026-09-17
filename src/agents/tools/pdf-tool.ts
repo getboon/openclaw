@@ -234,6 +234,24 @@ function formatPageRanges(pages: readonly number[]): string {
   return ranges.join(", ");
 }
 
+// Progress is best-effort UI state; a throwing subscriber must not fail
+// document processing. Keeps the same content/details shape the exec tool
+// established (see bash-tools.exec-runtime.ts's emitUpdate) rather than
+// switching to emitToolProgress's separate progress-field shape.
+function safeEmitUpdate(
+  onUpdate: AgentToolUpdateCallback | undefined,
+  payload: Parameters<AgentToolUpdateCallback>[0],
+): void {
+  if (!onUpdate) {
+    return;
+  }
+  try {
+    onUpdate(payload);
+  } catch {
+    // Progress is best-effort UI state; tool execution must not depend on subscribers.
+  }
+}
+
 function aggregatePdfCoverage(params: {
   filename: string;
   chunks: PdfExtractionChunk[];
@@ -481,7 +499,7 @@ async function runPdfPrompt(params: {
           text: chunkText,
           images: [],
         });
-        params.onUpdate?.({
+        safeEmitUpdate(params.onUpdate, {
           content: [
             {
               type: "text",
@@ -764,16 +782,19 @@ export function createPdfTool(options?: {
               config: options?.config,
             });
             documentPageCount ??= extracted.coverage?.documentPageCount;
-            onUpdate?.({
+            const pagesActuallyExtracted = extracted.coverage?.pagesProcessed ?? requestedPages;
+            const knownDocumentPageCount =
+              extracted.coverage?.documentPageCount ?? documentPageCount;
+            safeEmitUpdate(onUpdate, {
               content: [
                 {
                   type: "text",
-                  text: `Extracted pages ${formatPageRanges(requestedPages)} of ${extracted.coverage?.documentPageCount ?? "?"}`,
+                  text: `Extracted pages ${formatPageRanges(pagesActuallyExtracted)} of ${knownDocumentPageCount ?? "?"}`,
                 },
               ],
               details: {
                 status: "extracting",
-                documentPageCount: extracted.coverage?.documentPageCount,
+                documentPageCount: knownDocumentPageCount,
               },
             });
             if (
