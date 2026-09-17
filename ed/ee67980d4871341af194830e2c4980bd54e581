@@ -1,0 +1,39 @@
+packages/agent-core/src/agent-loop.test.ts
+  s_6b402cb550dd6f::t_6350523234844b 1120-1213
+packages/agent-core/src/agent-loop.ts
+  s_6b402cb550dd6f::t_c6f0dee4daa203 630-632,634-637,695-697,699-702,761-762,974-997,1001,1018,1041
+packages/agent-core/src/types.ts
+  s_6b402cb550dd6f::t_bb5a9bf5f6b178 115-119
+src/agents/acp-spawn.test.ts
+  s_6b402cb550dd6f::t_0da31edf73e009 1018-1020,1061,1108,1152
+src/agents/agent-tools.before-tool-call.not-executed.test.ts
+  s_6b402cb550dd6f::t_8d10a285f5421e 1-79
+src/agents/agent-tools.before-tool-call.ts
+  s_6b402cb550dd6f::t_63803eed4ee843 1043-1114
+src/agents/embedded-agent-runner/run/attempt.ts
+  s_6b402cb550dd6f::t_8e7f06a31b0f2e 508,2581-2584
+src/agents/embedded-agent-runner/run/not-executed-tool-loop.test.ts
+  s_6b402cb550dd6f::t_0a1fb95e33825c 1-79
+src/agents/embedded-agent-runner/run/not-executed-tool-loop.ts
+  s_6b402cb550dd6f::t_d458759a47bd65 1-51
+src/agents/openclaw-tools.subagents.sessions-spawn.model.test.ts
+  s_6b402cb550dd6f::t_f5b80415fc6cb1 2,12,242,249-269
+src/agents/subagent-spawn-plan.ts
+  s_6b402cb550dd6f::t_72acf5901d1072 14,48-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "edee67980d4871341af194830e2c4980bd54e581",
+  "prompts": {},
+  "sessions": {
+    "s_6b402cb550dd6f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a0c8bd9-9f75-49b2-a51d-471f15bbf0f3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
