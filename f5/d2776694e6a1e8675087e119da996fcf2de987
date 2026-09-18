@@ -1,0 +1,21 @@
+src/agents/embedded-agent-runner/run/not-executed-tool-loop.test.ts
+  s_6b402cb550dd6f::t_9ec75a6cd50f3c 152
+src/agents/tool-loop-detection.ts
+  s_6b402cb550dd6f::t_78e073a2c69362 45-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f5d2776694e6a1e8675087e119da996fcf2de987",
+  "prompts": {},
+  "sessions": {
+    "s_6b402cb550dd6f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a0c8bd9-9f75-49b2-a51d-471f15bbf0f3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
