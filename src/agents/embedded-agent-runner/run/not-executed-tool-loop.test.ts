@@ -5,6 +5,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AfterToolCallContext, Agent } from "../../runtime/index.js";
+import { TOOL_LOOP_RUN_ENDED_NOTICE } from "../../tool-loop-detection.js";
 import { installNotExecutedToolLoopHook } from "./not-executed-tool-loop.js";
 
 const runNotExecutedToolCallHook = vi.hoisted(() => vi.fn());
@@ -75,5 +76,48 @@ describe("installNotExecutedToolLoopHook", () => {
     expect(result?.isError).toBe(true);
     expect(result?.content).toEqual([{ type: "text", text: "CRITICAL: stuck" }]);
     expect(result?.details).toMatchObject({ status: "blocked", deniedReason: "tool-loop" });
+  });
+
+  it("terminates the run after a bounded streak of consecutive blocked calls", async () => {
+    const agent = {} as unknown as Agent;
+    runNotExecutedToolCallHook.mockResolvedValue({ blocked: true, reason: "CRITICAL: stuck" });
+    installNotExecutedToolLoopHook({ agent, ctx: { sessionKey: "sess-1" } });
+
+    const terminates: (boolean | undefined)[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      terminates.push((await agent.afterToolCall?.(contextFor({})))?.terminate);
+    }
+
+    expect(terminates).toEqual([undefined, undefined, true]);
+  });
+
+  it("keeps blocking without terminating while the streak is unbroken by progress", async () => {
+    const agent = {} as unknown as Agent;
+    runNotExecutedToolCallHook.mockResolvedValue({ blocked: true, reason: "CRITICAL: stuck" });
+    installNotExecutedToolLoopHook({ agent, ctx: { sessionKey: "sess-1" } });
+
+    await agent.afterToolCall?.(contextFor({}));
+    await agent.afterToolCall?.(contextFor({}));
+    // A different tool call that actually executed is progress: the streak resets.
+    await agent.afterToolCall?.(contextFor({ executionStarted: true, isError: false }));
+    const afterReset = await agent.afterToolCall?.(contextFor({}));
+
+    expect(afterReset?.terminate).toBeUndefined();
+  });
+
+  it("explains the termination in the blocked tool result text", async () => {
+    const agent = {} as unknown as Agent;
+    runNotExecutedToolCallHook.mockResolvedValue({ blocked: true, reason: "CRITICAL: stuck" });
+    installNotExecutedToolLoopHook({ agent, ctx: { sessionKey: "sess-1" } });
+
+    await agent.afterToolCall?.(contextFor({}));
+    await agent.afterToolCall?.(contextFor({}));
+    const terminal = await agent.afterToolCall?.(contextFor({}));
+
+    expect(terminal?.terminate).toBe(true);
+    expect((terminal?.content?.[0] as { text: string })?.text).toContain("CRITICAL: stuck");
+    expect((terminal?.content?.[0] as { text: string })?.text).toContain(
+      TOOL_LOOP_RUN_ENDED_NOTICE,
+    );
   });
 });
