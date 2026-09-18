@@ -1158,7 +1158,7 @@ describe("agentLoop not-executed tool calls", () => {
     label: "exec",
     description: "exec",
     parameters: Type.Object({ command: Type.String() }, { additionalProperties: false }),
-    execute: async () => ({ content: [{ type: "text", text: "ran" }] }),
+    execute: async () => ({ content: [{ type: "text", text: "ran" }], details: {} }),
   };
 
   it("reports a schema-validation failure to afterToolCall", async () => {
