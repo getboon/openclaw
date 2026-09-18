@@ -6,6 +6,7 @@ import {
   resolveOutboundSessionRoute,
   type OutboundSessionRoute,
 } from "../../infra/outbound/outbound-session.js";
+import { unknownTargetError } from "../../infra/outbound/target-errors.js";
 import {
   resolveChannelTarget,
   type ResolvedMessagingTarget,
@@ -23,19 +24,39 @@ export async function resolveChannelTargetForDelivery(params: {
 }): Promise<{ ok: true; target: ResolvedMessagingTarget } | { ok: false; error: Error }> {
   // Delivery may be the first channel touch after startup; allow bootstrap so
   // plugin config and account metadata are available before target resolution.
-  resolveOutboundChannelPlugin({
+  const plugin = resolveOutboundChannelPlugin({
     channel: params.channel,
     cfg: params.cfg,
     allowBootstrap: true,
   });
   try {
-    return await resolveChannelTarget({
+    const resolved = await resolveChannelTarget({
       cfg: params.cfg,
       channel: params.channel,
       input: params.input,
       accountId: params.accountId,
       unknownTargetMode: "normalized",
     });
+    // A delivery target is operator-typed config, so an unresolved passthrough
+    // the channel's own grammar disowns is a misconfiguration: surface it here
+    // instead of deferring to a downstream contract check on another subsystem.
+    const looksLikeId = plugin?.messaging?.targetResolver?.looksLikeId;
+    if (
+      resolved.ok &&
+      resolved.target.resolutionSource === "normalized" &&
+      looksLikeId &&
+      !looksLikeId(params.input, resolved.target.to)
+    ) {
+      return {
+        ok: false,
+        error: unknownTargetError(
+          plugin?.meta?.label ?? params.channel,
+          params.input,
+          plugin?.messaging?.targetResolver?.hint,
+        ),
+      };
+    }
+    return resolved;
   } catch (err) {
     return {
       ok: false,

@@ -15,5 +15,13 @@ export type FailoverReason =
   | "session_expired"
   | "empty_response"
   | "no_error_details"
+  /**
+   * A CDN/WAF edge block (Cloudflare, Render) relayed by the gateway instead
+   * of a real provider response. Content-based and deterministic — the same
+   * request blocks on every model in the fallback ladder — so this is
+   * terminal (surface_error, never rotate_profile/fallback_model) and must
+   * never be treated like "auth" for auth-profile cooldown purposes.
+   */
+  | "edge_blocked"
   | "unclassified"
   | "unknown";

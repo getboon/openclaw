@@ -21,6 +21,11 @@
       "tracesSampleRate": {
         "type": "number",
         "description": "Sentry traces sample rate. Defaults to 0 (no performance tracing — error events only)."
+      },
+      "hooks": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Allow-list of lifecycle hooks to report. Unset reports every hook; an empty array reports none. Valid names: model_call_ended, agent_end, after_tool_call, message_sent, delivery_recovery_exhausted, subagent_ended, cron_changed, session_end. Unknown names are ignored."
       }
     }
   }

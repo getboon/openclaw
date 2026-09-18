@@ -1,9 +1,11 @@
 // Browser Login Handoff state keyed by site, persisted through the plugin state store.
 export const BROWSER_HANDOFF_STATE_NAMESPACE = "handoffs";
 export const BROWSER_HANDOFF_STATE_MAX_ENTRIES = 512;
-// Anchor identity tokens observed at 15-minute expiry; give the human generous
-// slack to complete login/2FA before the handoff record is swept.
-export const BROWSER_HANDOFF_STATE_DEFAULT_TTL_MS = 60 * 60 * 1000;
+// Kept above tool.ts's MAX_TOTAL_WAIT_MS: a handoff can legitimately take
+// well over an hour end-to-end, and this TTL silently sweeping the record
+// first would dead-end action=status into "no pending handoff found"
+// instead of ever re-checking boon-core.
+export const BROWSER_HANDOFF_STATE_DEFAULT_TTL_MS = 4 * 60 * 60 * 1000;
 
 export type BrowserHandoffStatus = "pending" | "ready" | "failed";
 

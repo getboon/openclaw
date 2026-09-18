@@ -645,12 +645,13 @@ function resumeSubagentRun(runId: string) {
   // reach the same verdict instead of re-running the announce.
   if (
     getDeliveryAttemptCount(entry) > 0 &&
-    entry.delivery?.lastDropReason === "subagent_no_output"
+    (entry.delivery?.lastDropReason === "subagent_no_output" ||
+      entry.delivery?.lastDropReason === "owner_terminal")
   ) {
     void finalizeResumedAnnounceGiveUp({
       runId,
       entry,
-      reason: "subagent_no_output",
+      reason: entry.delivery.lastDropReason,
     });
     return;
   }

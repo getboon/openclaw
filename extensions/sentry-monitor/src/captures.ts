@@ -7,7 +7,9 @@
 
 import type {
   PluginHookAfterToolCallEvent,
+  PluginHookAgentContext,
   PluginHookAgentEndEvent,
+  PluginHookBeforeToolCallFailedEvent,
   PluginHookCronChangedEvent,
   PluginHookDeliveryRecoveryExhaustedEvent,
   PluginHookMessageSentEvent,
@@ -94,6 +96,11 @@ export function buildModelCallEndedCapture(
 export function buildAgentEndCapture(
   event: PluginHookAgentEndEvent,
   host: string,
+  // Optional so every existing call site (and test) keeps working; the
+  // ids come from PluginHookAgentContext, which already carries sessionId/agentId —
+  // no change to `src/plugins/hook-types.ts`, which is upstream-owned and would add
+  // merge-conflict surface against the (far behind) upstream fork.
+  ctx?: Pick<PluginHookAgentContext, "sessionId" | "agentId">,
 ): SentryCapture | null {
   if (event.success) {
     return null;
@@ -101,12 +108,31 @@ export function buildAgentEndCapture(
   return {
     kind: "exception",
     message: event.error ?? "agent_end success=false",
-    tags: pruneTags({ hook: "agent_end", host }),
+    // run_id is a TAG, not just a context field. `contexts` is payload you can only
+    // read once you have already found the event; tags are indexed, so this is what
+    // makes an event findable BY the correlation id. run_id is boon-core's
+    // `dispatch_ref` — minted per turn, sent here as run_id / X-Request-Id, printed
+    // in the Slack stall alert, and tagged on boon-core's own Sentry events. Without
+    // it you could not SEARCH the fleet project for the box's side of a turn whose
+    // id you already had.
+    //
+    // pruneTags drops undefined/empty, so a run without these ids emits no empty
+    // facets. Tags do not affect grouping — `fingerprint` below is unchanged, so
+    // this cannot fragment existing issues.
+    tags: pruneTags({
+      hook: "agent_end",
+      host,
+      run_id: event.runId,
+      session_id: ctx?.sessionId,
+      agent_id: ctx?.agentId,
+    }),
     fingerprint: fingerprintOf(
       "agent_end",
       event.error ? normalizeFingerprintText(event.error) : "success=false",
     ),
-    contexts: { run: runContext(event.runId) },
+    // runContext has always taken a sessionId; every caller passed only runId, so
+    // the field was permanently undefined. It resolves the box's session file.
+    contexts: { run: runContext(event.runId, ctx?.sessionId) },
     extra: {
       duration_ms: event.durationMs,
       message_count: Array.isArray(event.messages) ? event.messages.length : undefined,
@@ -170,6 +196,39 @@ export function buildAfterToolCallCapture(
     fingerprint,
     contexts,
     extra,
+  };
+}
+
+/**
+ * A `before_tool_call` hook threw. Unlike `after_tool_call`, this hook is fired
+ * by the host ONLY on the `kind: "failure"` path — never for a deliberate policy
+ * veto — so there is deliberately no `denied`-style suppression branch here:
+ * every event that reaches this builder is a real, actionable defect. Never
+ * returns null.
+ */
+export function buildBeforeToolCallHookFailedCapture(
+  event: PluginHookBeforeToolCallFailedEvent,
+  host: string,
+): SentryCapture {
+  return {
+    kind: "exception",
+    message: event.error,
+    tags: pruneTags({
+      hook: "before_tool_call_hook_failed",
+      host,
+      tool: event.toolName,
+    }),
+    // Fingerprint by tool + normalized error so repeats of the same failure
+    // bucket into one issue, and different tools/errors never share a bucket.
+    fingerprint: fingerprintOf(
+      "before_tool_call_hook_failed",
+      event.toolName,
+      normalizeFingerprintText(event.error),
+    ),
+    // Correlate by the actual session id; keep the routing key under its own
+    // field rather than mislabeling it as `session_id`.
+    contexts: { run: runContext(event.runId, event.sessionId) },
+    extra: { tool_call_id: event.toolCallId, session_key: event.sessionKey },
   };
 }
 

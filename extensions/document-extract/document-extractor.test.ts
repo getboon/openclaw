@@ -104,19 +104,72 @@ describe("PDF document extractor", () => {
     expect(result).toEqual({
       text: "",
       images: [{ type: "image", data: "cG5n", mimeType: "image/png" }],
+      coverage: {
+        documentPageCount: 2,
+        requestedPages: [1, 2],
+        pagesProcessed: [1, 2],
+        complete: true,
+        textChars: 0,
+        textBytes: 0,
+        maxTextChars: 200_000,
+        truncationReasons: [],
+      },
     });
     expect(pdfDocument.destroy).toHaveBeenCalledTimes(1);
   });
 
   it("skips image fallback when enough text is extracted", async () => {
-    pdfDocument.extract.mockResolvedValueOnce({ text: "enough text", images: [] });
+    pdfDocument.extract.mockResolvedValueOnce({
+      text: "enough text",
+      images: [],
+      pagesProcessed: [1, 2],
+      truncated: { text: false, images: false },
+    });
     const extractor = createPdfDocumentExtractor();
 
     const result = await extractor.extract(request({ minTextChars: 5 }));
 
-    expect(result).toEqual({ text: "enough text", images: [] });
+    expect(result).toEqual({
+      text: "enough text",
+      images: [],
+      coverage: {
+        documentPageCount: 2,
+        requestedPages: [1, 2],
+        pagesProcessed: [1, 2],
+        complete: true,
+        textChars: 11,
+        textBytes: 11,
+        maxTextChars: 200_000,
+        truncationReasons: [],
+      },
+    });
     expect(pdfDocument.extract).toHaveBeenCalledTimes(1);
     expect(pdfDocument.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the exact clawpdf truncation boundary", async () => {
+    pdfDocument.pageCount = 59;
+    pdfDocument.extract.mockResolvedValueOnce({
+      text: "x".repeat(200_000),
+      images: [],
+      pagesProcessed: Array.from({ length: 17 }, (_, index) => index + 1),
+      truncated: { text: true, images: false },
+    });
+
+    const result = await createPdfDocumentExtractor().extract(
+      request({ maxPages: 20, minTextChars: 5 }),
+    );
+
+    expect(result?.coverage).toEqual({
+      documentPageCount: 59,
+      requestedPages: Array.from({ length: 20 }, (_, index) => index + 1),
+      pagesProcessed: Array.from({ length: 17 }, (_, index) => index + 1),
+      complete: false,
+      textChars: 200_000,
+      textBytes: 200_000,
+      maxTextChars: 200_000,
+      truncationReasons: ["page_limit", "text_limit"],
+    });
   });
 
   it("opens encrypted PDFs with the request password", async () => {
@@ -169,7 +222,14 @@ describe("PDF document extractor", () => {
 
     const result = await extractor.extract(request({ onImageExtractionError }));
 
-    expect(result).toEqual({ text: "short", images: [] });
+    expect(result).toEqual({
+      text: "short",
+      images: [],
+      coverage: expect.objectContaining({
+        complete: false,
+        truncationReasons: ["image_error"],
+      }),
+    });
     expect(onImageExtractionError).toHaveBeenCalledWith(failure);
     expect(pdfDocument.destroy).toHaveBeenCalledTimes(1);
   });

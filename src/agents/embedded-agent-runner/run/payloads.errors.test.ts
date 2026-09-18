@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { getReplyPayloadMetadata } from "../../../auto-reply/reply-payload.js";
 import { formatBillingErrorMessage } from "../../embedded-agent-helpers.js";
 import { makeAssistantMessageFixture } from "../../test-helpers/assistant-message-fixtures.js";
+import { TOOL_LOOP_RUN_ENDED_CODE, TOOL_LOOP_RUN_ENDED_NOTICE } from "../../tool-loop-detection.js";
 import {
   buildPayloads,
   expectSinglePayloadText,
@@ -715,6 +716,44 @@ describe("buildEmbeddedRunPayloads", () => {
     expectSingleToolErrorPayload(payloads, { title, absentDetail });
   });
 
+  it("does not surface a stale tool error when the turn yielded to a spawned subagent (ENG-19495)", () => {
+    // Repro of thread 2445: the agent's own incidental message-tool status update
+    // failed validation, then the agent spawned a subagent and yielded. The turn
+    // has no answer text (the subagent answers later) — this must NOT be reported
+    // to the user as a failure.
+    const payloads = buildPayloads({
+      yieldDetected: true,
+      hasAcceptedSessionSpawn: true,
+      runAborted: false, // yield forces runAborted=false and strips its synthetic aborted turn — not an abort
+      assistantTexts: [],
+      lastToolError: {
+        toolName: "message",
+        meta: "status update",
+        error: "Boon Web message sends require two to five valid suggested replies",
+      },
+    });
+    expect(payloads).toEqual([]);
+  });
+
+  it("still surfaces a tool error on a yield WITHOUT a spawned subagent (narrow gate) — ENG-19495", () => {
+    // A plain yield-to-wait has no continuation, so a genuine failure must still show.
+    const payloads = buildPayloads({
+      yieldDetected: true,
+      hasAcceptedSessionSpawn: false,
+      lastToolError: { toolName: "message", meta: "reply", error: "text required" },
+    });
+    expectSingleToolErrorPayload(payloads, { title: "Message" });
+  });
+
+  it("still surfaces a tool error on a normal (non-yield) turn even if a subagent was spawned — ENG-19495", () => {
+    const payloads = buildPayloads({
+      yieldDetected: false,
+      hasAcceptedSessionSpawn: true,
+      lastToolError: { toolName: "browser", error: "connection timeout" },
+    });
+    expectSingleToolErrorPayload(payloads, { title: "Browser" });
+  });
+
   it("shows mutating tool errors when assistant output claims success", () => {
     const payloads = buildPayloads({
       assistantTexts: ["Done."],
@@ -1194,6 +1233,58 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(warning?.text).not.toMatch(/redo that step/i);
   });
 
+  it("uses every surfaced failure when legacy tool metadata has no outcomes", () => {
+    const toolFailures = [
+      {
+        toolName: "write",
+        error: "permission denied",
+        mutatingAction: true,
+      },
+      {
+        toolName: "process",
+        error: "connection timed out",
+        timedOut: true,
+        mutatingAction: true,
+      },
+    ];
+    const payloads = buildPayloads({
+      assistantTexts: ["Here's the summary you asked for."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      currentAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      toolMetas: [
+        { toolName: "bash", meta: "run migration" },
+        { toolName: "write", meta: "config.json" },
+        { toolName: "process", meta: "worker" },
+      ],
+      lastToolError: toolFailures[1],
+      toolFailures,
+    });
+
+    const warning = payloads.find(
+      (payload) => getReplyPayloadMetadata(payload)?.nonTerminalToolErrorWarning === true,
+    );
+    expect(warning).toBeDefined();
+    expect(warning?.text).toContain("2 steps didn't finish");
+    expect(warning?.text).toContain("1 of 3 steps completed");
+    expect(warning?.text).not.toContain("2 of 3 steps completed");
+  });
+
+  it("does not emit a step note for legacy tool metadata without recorded failures", () => {
+    const payloads = buildPayloads({
+      assistantTexts: ["Everything completed successfully."],
+      lastAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      currentAssistant: { stopReason: "end_turn" } as unknown as AssistantMessage,
+      toolMetas: [{ toolName: "read" }, { toolName: "write" }],
+    });
+
+    expect(
+      payloads.some(
+        (payload) => getReplyPayloadMetadata(payload)?.nonTerminalToolErrorWarning === true,
+      ),
+    ).toBe(false);
+    expect(payloads.map((payload) => payload.text ?? "").join("\n")).not.toContain("didn't finish");
+  });
+
   it("wraps markdown-capable mutating tool warnings so mention-looking names stay inert", () => {
     const payloads = buildPayloads({
       lastToolError: {
@@ -1316,6 +1407,37 @@ describe("buildEmbeddedRunPayloads", () => {
     expectSingleToolErrorPayload(payloads, {
       title: "Browser",
       detail: "connection timeout",
+    });
+  });
+
+  it("surfaces the loop-guard run-termination reason without verbose", () => {
+    const payloads = buildPayloads({
+      lastToolError: {
+        toolName: "read",
+        errorCode: TOOL_LOOP_RUN_ENDED_CODE,
+        error: `CRITICAL: Called read with identical arguments and identical outcomes 20 times. Session execution blocked to prevent runaway loops. ${TOOL_LOOP_RUN_ENDED_NOTICE}`,
+      },
+      verboseLevel: "off",
+    });
+
+    expectSingleToolErrorPayload(payloads, {
+      title: "failed",
+      detail: TOOL_LOOP_RUN_ENDED_NOTICE,
+    });
+  });
+
+  it("keeps the raw-detail gate shut for a tool error that merely quotes the notice", () => {
+    const payloads = buildPayloads({
+      lastToolError: {
+        toolName: "read",
+        error: `remote said: ${TOOL_LOOP_RUN_ENDED_NOTICE}`,
+      },
+      verboseLevel: "off",
+    });
+
+    expectSingleToolErrorPayload(payloads, {
+      title: "failed",
+      absentDetail: TOOL_LOOP_RUN_ENDED_NOTICE,
     });
   });
 });

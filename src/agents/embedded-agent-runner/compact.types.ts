@@ -31,6 +31,13 @@ export type CompactEmbeddedAgentSessionParams = {
   currentMessageId?: string | number;
   /** Trusted sender id from inbound context for scoped message-tool discovery. */
   senderId?: string;
+  /**
+   * Gateway-audience OBO carried onto the compaction model call so the gateway
+   * can skip metering for a budget-exempt account. Compaction builds its own
+   * model request independent of the primary-turn path, so this must be
+   * threaded through separately — see compact.ts's diagnostic model-call context.
+   */
+  oboToken?: string;
   senderName?: string;
   senderUsername?: string;
   senderE164?: string;

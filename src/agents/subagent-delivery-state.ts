@@ -5,6 +5,7 @@
  */
 import type {
   PendingFinalDeliveryPayload,
+  SubagentAnnounceGiveUpReason,
   SubagentCompletionDeliveryState,
   SubagentCompletionState,
   SubagentExecutionState,
@@ -27,7 +28,7 @@ export type LegacySubagentRunRecord = SubagentRunRecord & {
   pendingFinalDeliveryLastError?: string | null;
   pendingFinalDeliveryPayload?: PendingFinalDeliveryPayload;
   deliverySuspendedAt?: number;
-  deliverySuspendedReason?: "retry-limit" | "expiry" | "subagent_no_output";
+  deliverySuspendedReason?: SubagentAnnounceGiveUpReason;
   deliveryDiscardedAt?: number;
   deliveryDiscardReason?: "expired" | "pressure-pruned";
   deliveryDiscardedPayloadSummary?: SubagentCompletionDeliveryState["discardedPayloadSummary"];

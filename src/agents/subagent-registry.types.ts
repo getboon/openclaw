@@ -58,6 +58,7 @@ export type SubagentCompletionDeliveryState = {
   enqueuedAt?: number;
   deliveredAt?: number;
   announcedAt?: number;
+  ownerChannel?: string;
   lastAttemptAt?: number;
   attemptCount?: number;
   lastError?: string | null;
@@ -65,7 +66,7 @@ export type SubagentCompletionDeliveryState = {
   steeringLeasedAt?: number;
   steeringInjectedAt?: number;
   suspendedAt?: number;
-  suspendedReason?: "retry-limit" | "expiry" | "subagent_no_output";
+  suspendedReason?: SubagentAnnounceGiveUpReason;
   discardedAt?: number;
   discardReason?: "expired" | "pressure-pruned";
   discardedPayloadSummary?: {
@@ -82,8 +83,15 @@ export type SubagentCompletionDeliveryState = {
     | "sink_unavailable"
     | "dedupe"
     | "waiting_for_requester_turn"
-    | "subagent_no_output";
+    | "subagent_no_output"
+    | "owner_terminal";
 };
+
+export type SubagentAnnounceGiveUpReason =
+  | "retry-limit"
+  | "expiry"
+  | "subagent_no_output"
+  | "owner_terminal";
 
 export type SubagentRunRecord = {
   runId: string;

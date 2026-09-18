@@ -127,9 +127,10 @@ in `enforce` mode and applies cleanup during maintenance. Set
 
 For production-sized `maxEntries` limits, Gateway runtime writes use a small high-water buffer and clean back down to the configured cap in batches. Session store reads do not prune or cap entries during Gateway startup. This avoids running full store cleanup on every startup or isolated cron session. `openclaw sessions cleanup --enforce` applies the cap immediately.
 
-Maintenance preserves durable external conversation pointers, including group
-sessions and thread-scoped chat sessions, while still allowing synthetic cron,
-hook, heartbeat, ACP, and sub-agent entries to age out.
+Maintenance preserves durable external conversation pointers for group and
+channel sessions, and keeps thread-scoped chat sessions while they stay active
+(a thread idle for more than 4 days ages out with everything else). Synthetic
+cron, hook, heartbeat, ACP, and sub-agent entries are always allowed to age out.
 
 If you previously used direct-message isolation and later returned
 `session.dmScope` to `main`, preview stale peer-keyed DM rows with

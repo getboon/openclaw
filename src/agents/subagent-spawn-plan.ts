@@ -11,6 +11,7 @@ import {
   resolveSubagentSpawnModelSelection,
 } from "./model-selection.js";
 import { resolveSubagentThinkingOverride } from "./subagent-spawn-thinking.js";
+import { resolveAgentTimeoutMs } from "./timeout.js";
 
 /** Splits a provider/model ref while preserving model-only refs. */
 export function splitModelRef(ref?: string) {
@@ -44,7 +45,11 @@ export function resolveConfiguredSubagentRunTimeoutSeconds(params: {
     typeof params.cfg?.agents?.defaults?.subagents?.runTimeoutSeconds === "number" &&
     Number.isFinite(params.cfg.agents.defaults.subagents.runTimeoutSeconds)
       ? Math.max(0, Math.floor(params.cfg.agents.defaults.subagents.runTimeoutSeconds))
-      : 0;
+      : // No subagent-specific bound configured: inherit the general agent run
+        // timeout. Falling back to 0 here meant "no timeout" (resolveAgentTimeoutMs
+        // reads 0 as the explicit no-timeout sentinel), so a deployment that set
+        // agents.defaults.timeoutSeconds still ran subagents unbounded.
+        Math.max(1, Math.floor(resolveAgentTimeoutMs({ cfg: params.cfg }) / 1000));
   return typeof params.runTimeoutSeconds === "number" && Number.isFinite(params.runTimeoutSeconds)
     ? Math.max(0, Math.floor(params.runTimeoutSeconds))
     : cfgSubagentTimeout;

@@ -73,7 +73,9 @@ export type EmbeddedAgentSubscribeState = {
     meta?: string;
     replaySafe?: boolean;
     errored?: boolean;
-    status?: "blocked";
+    status?: "blocked" | "partial";
+    /** Real pre-execution failure error text; set only for a kind:"failure" block. */
+    detail?: string;
     asyncStarted?: boolean;
     asyncTaskRunId?: string;
     asyncTaskId?: string;

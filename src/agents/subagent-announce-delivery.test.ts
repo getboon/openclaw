@@ -1273,6 +1273,51 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     );
   });
 
+  it("directly delivers direct-message subagent text when the announce agent only replies NO_REPLY", async () => {
+    // A silent final is already rejected for a subagent completion, so the child-text
+    // fallback must run for it too. Without this the child's finished work is dropped
+    // while the turn still reports success.
+    const callGateway = createGatewayMock({
+      result: {
+        payloads: [{ text: "NO_REPLY" }],
+      },
+    });
+    const sendMessage = createSendMessageMock();
+
+    const result = await deliverDiscordDirectMessageCompletion({
+      callGateway,
+      sendMessage,
+      internalEvents: [
+        {
+          type: "task_completion",
+          source: "subagent",
+          childSessionKey: "agent:worker:subagent:child",
+          childSessionId: "child-session-id",
+          announceType: "subagent task",
+          taskLabel: "feeder extraction",
+          status: "ok",
+          statusLabel: "completed successfully",
+          result: "child completion output",
+          replyInstruction: "Summarize the result.",
+        },
+      ],
+    });
+
+    expectRecordFields(result, {
+      delivered: true,
+      path: "direct",
+    });
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "discord",
+        accountId: "acct-1",
+        to: "dm:U123",
+        content: "child completion output",
+        idempotencyKey: "announce-dm-fallback-empty:text-direct",
+      }),
+    );
+  });
+
   it("directly delivers direct-message subagent text when the announce agent omits the result", async () => {
     const callGateway = createGatewayMock({
       result: {
@@ -1490,6 +1535,61 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       error: "completion agent did not produce a visible reply",
     });
     expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("directly delivers direct-target subagent text when the announce agent only replies NO_REPLY", async () => {
+    // Second shape: a direct target recognized by the channel grammar rather than a DM
+    // prefix. It hits the same message-tool delivery requirement, so a silent parent
+    // must not swallow the child there either.
+    registerDirectTargetTestChannel("qa-channel");
+    const callGateway = createGatewayMock({
+      result: {
+        payloads: [{ text: "NO_REPLY" }],
+      },
+    });
+    const sendMessage = createSendMessageMock();
+
+    const result = await deliverSlackChannelAnnouncement({
+      callGateway,
+      sendMessage,
+      sessionId: "requester-session-qa-silent",
+      isActive: false,
+      expectsCompletionMessage: true,
+      directIdempotencyKey: "announce-qa-fallback-silent",
+      requesterSessionKey: "agent:qa:subagent-direct-fallback:5678",
+      requesterOrigin: {
+        channel: "qa-channel",
+        to: "qa-operator",
+        accountId: "default",
+      },
+      internalEvents: [
+        {
+          type: "task_completion",
+          source: "subagent",
+          childSessionKey: "agent:worker:subagent:child",
+          childSessionId: "child-session-id",
+          announceType: "subagent task",
+          taskLabel: "feeder extraction",
+          status: "ok",
+          statusLabel: "completed successfully",
+          result: "child completion output",
+          replyInstruction: "Summarize the result.",
+        },
+      ],
+    });
+
+    expectRecordFields(result, {
+      delivered: true,
+      path: "direct",
+    });
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "qa-channel",
+        to: "qa-operator",
+        content: "child completion output",
+        idempotencyKey: "announce-qa-fallback-silent:text-direct",
+      }),
+    );
   });
 
   it("directly delivers unprefixed direct targets recognized by the channel grammar", async () => {

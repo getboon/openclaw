@@ -19,6 +19,10 @@ import {
 } from "../plugins/runtime.js";
 import { PluginApprovalResolutions } from "../plugins/types.js";
 import { runBeforeToolCallHook } from "./agent-tools.before-tool-call.js";
+import {
+  consumePreExecutionBlockedToolCall,
+  resetAdjustedParamsByToolCallIdForTests,
+} from "./agent-tools.before-tool-call.state.js";
 import { callGatewayTool } from "./tools/gateway.js";
 
 vi.mock("../plugins/hook-runner-global.js", async () => {
@@ -73,15 +77,25 @@ function requireBeforeToolCall(
 }
 
 describe("runBeforeToolCallHook — embedded mode approvals", () => {
-  let hookRunner: Pick<HookRunner, "hasHooks" | "runBeforeToolCall">;
+  let hookRunner: Pick<
+    HookRunner,
+    "hasHooks" | "runBeforeToolCall" | "runBeforeToolCallHookFailed"
+  >;
   let runBeforeToolCallMock: ReturnType<typeof vi.fn<HookRunner["runBeforeToolCall"]>>;
+  let runBeforeToolCallHookFailedMock: ReturnType<
+    typeof vi.fn<HookRunner["runBeforeToolCallHookFailed"]>
+  >;
 
   beforeEach(() => {
     resetGlobalHookRunner();
     runBeforeToolCallMock = vi.fn<HookRunner["runBeforeToolCall"]>();
+    runBeforeToolCallHookFailedMock = vi
+      .fn<HookRunner["runBeforeToolCallHookFailed"]>()
+      .mockResolvedValue(undefined);
     hookRunner = {
       hasHooks: vi.fn<HookRunner["hasHooks"]>().mockReturnValue(true),
       runBeforeToolCall: runBeforeToolCallMock,
+      runBeforeToolCallHookFailed: runBeforeToolCallHookFailedMock,
     };
     mockGetGlobalHookRunner.mockReturnValue(hookRunner as HookRunner);
     mockCallGatewayTool.mockReset();
@@ -92,6 +106,125 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
     setEmbeddedMode(false);
     setActivePluginRegistry(createEmptyPluginRegistry());
     resetGlobalHookRunner();
+    // The failure-path tests write to the module-level pre-execution-block Map
+    // via recordPreExecutionBlockedToolCall; clear it so no entry leaks between
+    // tests.
+    resetAdjustedParamsByToolCallIdForTests();
+  });
+
+  it("emits before_tool_call_hook_failed with the real error when a hook throws, and only then", async () => {
+    runBeforeToolCallMock.mockRejectedValueOnce(new Error("boom: explicit-route lookup failed"));
+
+    const result = await runBeforeToolCallHook({
+      toolName: "message",
+      params: { text: "hi" },
+      toolCallId: "tc-1",
+      ctx: { runId: "run-1" },
+    });
+
+    // `String(cause)` preserves the full stringified error (incl. the "Error: "
+    // prefix), exactly matching the pre-existing local log line — this is the
+    // real text that was previously discarded.
+    const expectedError = "Error: boom: explicit-route lookup failed";
+    expect(result.blocked).toBe(true);
+    expect((result as { kind?: string }).kind).toBe("failure");
+    expect((result as { detail?: string }).detail).toBe(expectedError);
+    expect(runBeforeToolCallHookFailedMock).toHaveBeenCalledTimes(1);
+    expect(runBeforeToolCallHookFailedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolName: "message",
+        toolCallId: "tc-1",
+        runId: "run-1",
+        error: expectedError,
+      }),
+      expect.objectContaining({ toolName: "message", runId: "run-1", toolCallId: "tc-1" }),
+    );
+  });
+
+  it("records the hook-failure detail so a thrown block still reaches toolMetas via the state map", async () => {
+    // Regression guard for the wrapper failure path: both wrapToolWithBeforeToolCallHook
+    // and the tool-definition adapter *throw* on a kind:"failure" block (they never
+    // call buildBlockedToolResult), so the detail must be recorded here in the catch
+    // to survive to consumePreExecutionBlockedToolCall -> toolMetas -> audit trace.
+    runBeforeToolCallMock.mockRejectedValueOnce(new Error("boom"));
+
+    await runBeforeToolCallHook({
+      toolName: "message",
+      params: {},
+      toolCallId: "tc-record",
+      ctx: { runId: "run-record" },
+    });
+
+    expect(consumePreExecutionBlockedToolCall("tc-record", "run-record")).toEqual({
+      blocked: true,
+      detail: "Error: boom",
+    });
+  });
+
+  it("bounds the recorded detail so a huge error string cannot retain unbounded memory in the map", async () => {
+    runBeforeToolCallMock.mockRejectedValueOnce(new Error("X".repeat(5000)));
+
+    const result = await runBeforeToolCallHook({
+      toolName: "message",
+      params: {},
+      toolCallId: "tc-huge",
+      ctx: { runId: "run-huge" },
+    });
+
+    // The returned outcome + log + Sentry keep the full text...
+    expect((result as { detail?: string }).detail?.length).toBeGreaterThan(4000);
+    // ...but the value held in the pending-call map is bounded (<= 1024 chars).
+    const consumed = consumePreExecutionBlockedToolCall("tc-huge", "run-huge");
+    expect(consumed.blocked).toBe(true);
+    expect(consumed.detail?.length).toBe(1024);
+  });
+
+  it("does not emit before_tool_call_hook_failed for a deliberate plugin veto", async () => {
+    runBeforeToolCallMock.mockResolvedValueOnce({ block: true, blockReason: "policy says no" });
+
+    const result = await runBeforeToolCallHook({
+      toolName: "message",
+      params: {},
+      toolCallId: "tc-2",
+      ctx: { runId: "run-1" },
+    });
+
+    expect(result.blocked).toBe(true);
+    expect((result as { kind?: string }).kind).toBe("veto");
+    expect((result as { detail?: string }).detail).toBeUndefined();
+    expect(runBeforeToolCallHookFailedMock).not.toHaveBeenCalled();
+  });
+
+  it("does not emit before_tool_call_hook_failed when a non-handler pipeline step throws", async () => {
+    // The try in runBeforeToolCallHook also covers pipeline work around the
+    // handler (trusted policy, approval, skill-workshop). A throw from any of
+    // those is a DIFFERENT fault class and must not pollute the hook-failed
+    // Sentry bucket. We stand in for that class with the earliest pipeline step
+    // — the hasHooks registry probe — which runs before the handler is ever
+    // invoked, so it exercises the outer catch with hookInvocationThrew=false.
+    vi.mocked(hookRunner.hasHooks).mockImplementationOnce(() => {
+      throw new Error("pipeline boom");
+    });
+
+    const result = await runBeforeToolCallHook({
+      toolName: "message",
+      params: { text: "hi" },
+      toolCallId: "tc-pipeline",
+      ctx: { runId: "run-1" },
+    });
+
+    // Still blocked, and the real detail is still recorded (graceful
+    // degradation + audit-trace diagnostics are unchanged for this class)...
+    expect(result.blocked).toBe(true);
+    expect((result as { kind?: string }).kind).toBe("failure");
+    expect((result as { detail?: string }).detail).toBe("Error: pipeline boom");
+    expect(consumePreExecutionBlockedToolCall("tc-pipeline", "run-1")).toEqual({
+      blocked: true,
+      detail: "Error: pipeline boom",
+    });
+    // ...but the hook-failed observability signal must NOT fire — the handler
+    // was never even reached.
+    expect(runBeforeToolCallHookFailedMock).not.toHaveBeenCalled();
   });
 
   it("blocks approval-required tools in embedded mode when no gateway approval route exists", async () => {

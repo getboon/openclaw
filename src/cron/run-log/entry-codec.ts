@@ -19,6 +19,7 @@ const CRON_FAILOVER_REASONS = new Set<FailoverReason>([
   "session_expired",
   "empty_response",
   "no_error_details",
+  "edge_blocked",
   "unclassified",
   "unknown",
 ]);

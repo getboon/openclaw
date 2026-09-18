@@ -646,6 +646,8 @@ export type DiagnosticContextAssembledEvent = DiagnosticBaseEvent & {
   promptImages: number;
   contextTokenBudget?: number;
   reserveTokens?: number;
+  /** Elapsed ms since run.started; exporters span it so pre-model setup time is attributable. */
+  durationMs: number;
 };
 
 export type DiagnosticMemoryUsage = {

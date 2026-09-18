@@ -301,13 +301,20 @@ function normalizeMemberRoleIds(value: TemplateContext["MemberRoleIds"]): string
   return roles.length > 0 ? roles : undefined;
 }
 
-function buildTemplateSenderContext(sessionCtx: TemplateContext) {
+function buildTemplateSenderContext(sessionCtx: TemplateContext, run: FollowupRun["run"]) {
   return {
     senderId: normalizeOptionalString(sessionCtx.SenderId),
     channelContext: sessionCtx.ChannelContext,
     senderName: normalizeOptionalString(sessionCtx.SenderName),
     senderUsername: normalizeOptionalString(sessionCtx.SenderUsername),
     senderE164: normalizeOptionalString(sessionCtx.SenderE164),
+    // Gateway-audience OBO → x-boon-gateway-obo-token (ENG-19115). Unlike the
+    // stable sender identity above, this is a FRESH per-turn token: get-reply-run
+    // reads it off the inbound ctx onto run.oboToken, and it never lives on the
+    // persisted sessionCtx. This builder feeds the PRIMARY-turn runEmbeddedAgent
+    // call (agent-runner-execution); sourcing identity only from sessionCtx here
+    // dropped the token even after #185/#190, so the header was never emitted.
+    oboToken: run.oboToken,
   };
 }
 
@@ -330,7 +337,7 @@ export function buildEmbeddedRunExecutionParams(params: {
     sessionCtx: params.sessionCtx,
     hasRepliedRef: params.hasRepliedRef,
   });
-  const senderContext = buildTemplateSenderContext(params.sessionCtx);
+  const senderContext = buildTemplateSenderContext(params.sessionCtx, params.run);
   const runBaseParams = buildEmbeddedRunBaseParams({
     run: params.run,
     provider: params.provider,

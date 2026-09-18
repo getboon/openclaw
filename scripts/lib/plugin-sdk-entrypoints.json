@@ -103,6 +103,7 @@
   "secret-provider-integration",
   "secret-file-runtime",
   "security-runtime",
+  "gateway-activity-runtime",
   "gateway-method-runtime",
   "gateway-runtime",
   "cli-runtime",

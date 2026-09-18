@@ -2,6 +2,7 @@
 // persistence, registry registration, and lifecycle event emission.
 import os from "node:os";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { authorizeOperatorScopesForMethod } from "../gateway/method-scopes.js";
 import {
   createSubagentSpawnTestConfig,
   expectPersistedRuntimeModel,
@@ -317,15 +318,33 @@ describe("spawnSubagentDirect seam flow", () => {
     expect(agentParams.cleanupBundleMcpOnRunEnd).toBe(true);
   });
 
-  it("dispatches spawned agent runs in process when a gateway context is available", async () => {
+  it("authorizes scope-less in-process child dispatch with synthetic write scope", async () => {
     hoisted.hasInProcessGatewayContextMock.mockReturnValue(true);
     hoisted.callGatewayMock.mockRejectedValue(new Error("unexpected websocket gateway call"));
-    hoisted.dispatchGatewayMethodInProcessMock.mockImplementation(async (method: string) => {
-      if (method === "agent") {
-        return { runId: "run-in-process" };
-      }
-      return { ok: true };
-    });
+    const scopedClient = { connect: { scopes: [] as string[] } };
+    hoisted.dispatchGatewayMethodInProcessMock.mockImplementation(
+      async (
+        method: string,
+        _params: Record<string, unknown>,
+        options?: { forceSyntheticClient?: boolean; syntheticScopes?: string[] },
+      ) => {
+        const selectedScopes = options?.forceSyntheticClient
+          ? (options.syntheticScopes ?? [])
+          : scopedClient.connect.scopes;
+        const authorization = authorizeOperatorScopesForMethod(method, selectedScopes);
+        if (!authorization.allowed) {
+          throw new Error(`missing scope: ${authorization.missingScope}`);
+        }
+        if (method === "agent") {
+          expect(options).toMatchObject({
+            forceSyntheticClient: true,
+            syntheticScopes: ["operator.write"],
+          });
+          return { runId: "run-in-process" };
+        }
+        return { ok: true };
+      },
+    );
 
     const result = await spawnSubagentDirect(
       {
@@ -346,6 +365,8 @@ describe("spawnSubagentDirect seam flow", () => {
         sessionKey: result.childSessionKey,
       }),
       expect.objectContaining({
+        forceSyntheticClient: true,
+        syntheticScopes: ["operator.write"],
         timeoutMs: expect.any(Number),
       }),
     );
@@ -924,7 +945,7 @@ describe("spawnSubagentDirect seam flow", () => {
     expect(requesterOrigin).not.toHaveProperty("threadId");
   });
 
-  it("pins admin-only methods to operator.admin and preserves least-privilege for others (#59428)", async () => {
+  it("pins agent startup to write scope and leaves unrelated methods default-deny (#59428)", async () => {
     const capturedCalls: Array<{ method?: string; scopes?: string[] }> = [];
 
     hoisted.callGatewayMock.mockImplementation(
@@ -956,17 +977,17 @@ describe("spawnSubagentDirect seam flow", () => {
     );
 
     expect(result.status).toBe("accepted");
-    expect(capturedCalls.length).toBeGreaterThan(0);
+    expect(capturedCalls).toEqual([
+      {
+        method: "agent",
+        scopes: ["operator.write"],
+      },
+    ]);
 
-    for (const call of capturedCalls) {
-      if (call.method === "sessions.patch" || call.method === "sessions.delete") {
-        // Admin-only methods must be pinned to operator.admin.
-        expect(call.scopes).toEqual(["operator.admin"]);
-      } else {
-        // Non-admin methods (e.g. "agent") must NOT be forced to admin scope.
-        expect(call.scopes).toBeUndefined();
-      }
-    }
+    expect(authorizeOperatorScopesForMethod("unrelated.method", ["operator.write"])).toEqual({
+      allowed: false,
+      missingScope: "operator.admin",
+    });
   });
 
   it("forwards normalized thinking to the agent run", async () => {

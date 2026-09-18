@@ -108,6 +108,18 @@ describe("resolveDeferredCleanupDecision", () => {
     expect(decision).toEqual({ kind: "give-up", reason: "subagent_no_output", retryCount: 1 });
   });
 
+  it("gives up after one attempt when the completion owner failed terminally", () => {
+    const decision = resolveDecision({
+      entry: makeEntry({
+        expectsCompletionMessage: true,
+        delivery: { status: "pending", attemptCount: 0, lastDropReason: "owner_terminal" },
+      }),
+      activeDescendantRuns: 0,
+    });
+
+    expect(decision).toEqual({ kind: "give-up", reason: "owner_terminal", retryCount: 1 });
+  });
+
   it("keeps retrying when the drop reason is a transient sink failure, not no-output", () => {
     const decision = resolveDecision({
       entry: makeEntry({

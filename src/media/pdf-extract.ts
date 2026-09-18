@@ -11,7 +11,7 @@ export type PdfExtractedImage = DocumentExtractedImage;
 /** Text and extracted image payloads returned by PDF extraction callers. */
 export type PdfExtractedContent = DocumentExtractionResult;
 
-/** Extracts PDF content through the configured document extractor and hides extractor metadata. */
+/** Extracts PDF content through the configured document extractor. */
 export async function extractPdfContent(params: {
   buffer: Buffer;
   maxPages: number;
@@ -43,5 +43,6 @@ export async function extractPdfContent(params: {
   return {
     text: extracted.text,
     images: extracted.images,
+    ...(extracted.coverage ? { coverage: extracted.coverage } : {}),
   };
 }

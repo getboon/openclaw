@@ -61,13 +61,20 @@ import {
   failTransportStream,
   finalizeTransportStream,
   mergeTransportHeaders,
+  preserveProvisioningSmokeSessionHeader,
   sanitizeNonEmptyTransportPayloadText,
   sanitizeTransportPayloadText,
 } from "./transport-stream-shared.js";
 
 const CLAUDE_CODE_VERSION = "2.1.75";
 const ANTHROPIC_MESSAGES_ERROR_BODY_MAX_BYTES = 8 * 1024;
-const ANTHROPIC_MESSAGES_ERROR_BODY_MAX_CHARS = 400;
+// A CDN/WAF block page's identifying markers (e.g. Cloudflare's "Blocked"
+// title, cf-ray, cdn-cgi/) can sit well past 400 chars of boilerplate HTML
+// head/style content, so a short snippet silently degrades edge-block
+// detection to "unclassified". maxBytes (above) still bounds what is read
+// off the wire; this only raises how much of that read reaches the
+// classifier.
+const ANTHROPIC_MESSAGES_ERROR_BODY_MAX_CHARS = 2_000;
 const ANTHROPIC_MESSAGES_ERROR_BODY_READ_IDLE_TIMEOUT_MS = 10_000;
 // Mirror the fetch sanitizer cap here because compatible routes such as Kimi
 // bypass that layer; without a parser-local guard, partial frames grow forever.
@@ -110,6 +117,17 @@ type AnthropicMessagesClient = {
     ): AsyncIterable<Record<string, unknown>>;
   };
 };
+
+function mergeAnthropicRequestHeaders(
+  baseHeaders: Record<string, string>,
+  modelHeaders: Record<string, string> | undefined,
+  ...optionHeaderSources: Array<Record<string, string> | undefined>
+): Record<string, string> | undefined {
+  return preserveProvisioningSmokeSessionHeader(
+    mergeTransportHeaders(baseHeaders, modelHeaders, ...optionHeaderSources),
+    modelHeaders,
+  );
+}
 
 function resolveAnthropicRequestModelId(model: AnthropicTransportModel): string {
   if (isDirectAnthropicModel(model) && /^anthropic\//i.test(model.id)) {
@@ -831,7 +849,7 @@ function createAnthropicTransportClient(params: {
         apiKey: null,
         authToken: apiKey,
         baseURL: model.baseUrl,
-        defaultHeaders: mergeTransportHeaders(
+        defaultHeaders: mergeAnthropicRequestHeaders(
           {
             accept: "application/json",
             "anthropic-dangerous-direct-browser-access": "true",
@@ -856,7 +874,7 @@ function createAnthropicTransportClient(params: {
         apiKey: null,
         authToken: apiKey,
         baseURL: model.baseUrl,
-        defaultHeaders: mergeTransportHeaders(
+        defaultHeaders: mergeAnthropicRequestHeaders(
           {
             accept: "application/json",
             "anthropic-dangerous-direct-browser-access": "true",
@@ -881,7 +899,7 @@ function createAnthropicTransportClient(params: {
         apiKey: null,
         authToken: apiKey,
         baseURL: model.baseUrl,
-        defaultHeaders: mergeTransportHeaders(
+        defaultHeaders: mergeAnthropicRequestHeaders(
           {
             accept: "application/json",
             "anthropic-dangerous-direct-browser-access": "true",
@@ -902,7 +920,7 @@ function createAnthropicTransportClient(params: {
     client: createAnthropicMessagesClient({
       apiKey,
       baseURL: model.baseUrl,
-      defaultHeaders: mergeTransportHeaders(
+      defaultHeaders: mergeAnthropicRequestHeaders(
         {
           accept: "application/json",
           "anthropic-dangerous-direct-browser-access": "true",

@@ -14,6 +14,10 @@ const MIN_SEVERITY = "high";
 export const BULK_ADVISORY_ERROR_BODY_MAX_CHARS = 4096;
 export const BULK_ADVISORY_RESPONSE_BODY_MAX_BYTES = 8 * 1024 * 1024;
 export const BULK_ADVISORY_REQUEST_TIMEOUT_MS = 60_000;
+/** One retry after a transient failure (timeout/network/5xx) — registry.npmjs.org's
+ *  bulk endpoint has been observed to time out on an otherwise-healthy request. */
+export const BULK_ADVISORY_MAX_ATTEMPTS = 2;
+export const BULK_ADVISORY_RETRY_DELAY_MS = 2_000;
 const MAX_TIMER_TIMEOUT_MS = 2_147_000_000;
 const SEVERITY_RANK = {
   info: 0,
@@ -40,6 +44,20 @@ const AUDIT_ADVISORY_VERSION_OVERRIDES = [
     unaffectedVersions: new Set(["2.2.1", "2.2.5"]),
   },
 ];
+
+/**
+ * Excluded from the bulk advisory *request* entirely (not just filtered from
+ * findings afterward) -- live-verified (2026-09-04): a bulk advisory request
+ * containing only "@a2ui/web_core" hangs registry.npmjs.org's endpoint
+ * indefinitely (confirmed twice, 15-20s+, zero bytes received), even though
+ * the package's own registry metadata resolves normally in under a second.
+ * This isn't payload-size related -- it reproduces with this single package
+ * alone -- and blocks security-fast on every PR that pulls it in as a
+ * production dependency (the canvas extension's a2ui bundle), not just ones
+ * that touch it. Remove once npm fixes the underlying advisory-lookup bug
+ * for this package.
+ */
+export const BULK_ADVISORY_EXCLUDED_PACKAGES = new Set(["@a2ui/web_core"]);
 
 export function normalizeAuditLevel(level) {
   const normalized = String(level ?? "").toLowerCase();
@@ -807,17 +825,19 @@ async function readBulkAdvisoryJson(response, maxBytes, options = {}) {
     options,
   );
   if (!text.trim()) {
-    throw new Error("Bulk advisory response body was empty");
+    throw Object.assign(new Error("Bulk advisory response body was empty"), {
+      code: "EEMPTYBODY",
+    });
   }
   return JSON.parse(text);
 }
 
-export async function fetchBulkAdvisories({
+async function fetchBulkAdvisoriesOnce({
   payload,
-  fetchImpl = fetch,
-  registryBaseUrl = resolveRegistryBaseUrl(),
-  responseBodyMaxBytes = resolveBulkAdvisoryResponseBodyMaxBytes(),
-  timeoutMs = resolveBulkAdvisoryRequestTimeoutMs(),
+  fetchImpl,
+  registryBaseUrl,
+  responseBodyMaxBytes,
+  timeoutMs,
 }) {
   const url = `${registryBaseUrl}${BULK_ADVISORY_PATH}`;
   return await withBulkAdvisoryTimeout({
@@ -838,8 +858,11 @@ export async function fetchBulkAdvisories({
         const bodyText = await readBoundedBulkAdvisoryErrorText(response, undefined, {
           timeoutPromise,
         });
-        throw new Error(
-          `Bulk advisory request failed (${response.status} ${response.statusText}): ${bodyText}`,
+        throw Object.assign(
+          new Error(
+            `Bulk advisory request failed (${response.status} ${response.statusText}): ${bodyText}`,
+          ),
+          { status: response.status },
         );
       }
 
@@ -849,6 +872,69 @@ export async function fetchBulkAdvisories({
       });
     },
   });
+}
+
+/**
+ * Deterministic failures (a 4xx rejection, a response over the size cap, a
+ * malformed JSON body) will fail identically on retry, so retrying them only
+ * adds a delayImpl(retryDelayMs) wait plus a duplicate request before
+ * reporting the same finding. Only timeouts, network errors, and 5xx
+ * responses are worth a retry.
+ */
+export function isRetryableBulkAdvisoryError(error) {
+  if (error?.code === "ETOOBIG" || error?.code === "EEMPTYBODY") {
+    return false;
+  }
+  if (error instanceof SyntaxError) {
+    return false;
+  }
+  if (typeof error?.status === "number") {
+    return error.status >= 500;
+  }
+  return true;
+}
+
+/**
+ * Retries once on a transient failure (timeout, network error, 5xx) before
+ * giving up — registry.npmjs.org's bulk advisory endpoint has been observed
+ * to time out on an otherwise-healthy request (two consecutive CI failures,
+ * same payload that had passed minutes earlier on an equivalent PR). A retry
+ * does not weaken the audit: a real advisory finding only surfaces once the
+ * request actually succeeds, so this only shortens the gap between "the
+ * registry hiccuped" and "the check passes," not what counts as a finding.
+ */
+export async function fetchBulkAdvisories({
+  payload,
+  fetchImpl = fetch,
+  registryBaseUrl = resolveRegistryBaseUrl(),
+  responseBodyMaxBytes = resolveBulkAdvisoryResponseBodyMaxBytes(),
+  timeoutMs = resolveBulkAdvisoryRequestTimeoutMs(),
+  maxAttempts = BULK_ADVISORY_MAX_ATTEMPTS,
+  retryDelayMs = BULK_ADVISORY_RETRY_DELAY_MS,
+  delayImpl = (ms) =>
+    new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    }),
+}) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await fetchBulkAdvisoriesOnce({
+        payload,
+        fetchImpl,
+        registryBaseUrl,
+        responseBodyMaxBytes,
+        timeoutMs,
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt >= maxAttempts || !isRetryableBulkAdvisoryError(error)) {
+        throw error;
+      }
+      await delayImpl(retryDelayMs);
+    }
+  }
+  throw lastError;
 }
 
 export async function runPnpmAuditProd({
@@ -863,10 +949,32 @@ export async function runPnpmAuditProd({
   const lockfileText = await readFile(lockfilePath, "utf8");
   const versionsByPackage = collectProdResolvedPackagesFromLockfile(lockfileText);
   const payload = createBulkAdvisoryPayload(versionsByPackage);
-  const payloadEntries = Object.entries(payload);
+  const excludedPackagesPresent = Object.keys(payload).filter((packageName) =>
+    BULK_ADVISORY_EXCLUDED_PACKAGES.has(packageName),
+  );
+  // Loud, not silent: excluding a package from the bulk request means it was
+  // NOT checked for advisories this run. A clean exit code must not read as
+  // "everything was audited" when that isn't true -- surface exactly what
+  // was skipped and why, every time it applies, so nobody mistakes a passing
+  // security-fast for full coverage.
+  for (const packageName of excludedPackagesPresent) {
+    stderr.write(
+      `SECURITY WARNING: "${packageName}" was not checked for advisories this run (excluded ` +
+        "from the bulk advisory request -- see BULK_ADVISORY_EXCLUDED_PACKAGES in " +
+        "scripts/pre-commit/pnpm-audit-prod.mjs for why).\n",
+    );
+  }
+  const payloadEntries = Object.entries(payload).filter(
+    ([packageName]) => !BULK_ADVISORY_EXCLUDED_PACKAGES.has(packageName),
+  );
 
   if (payloadEntries.length === 0) {
-    stdout.write("No production dependencies found in pnpm-lock.yaml.\n");
+    stdout.write(
+      excludedPackagesPresent.length > 0
+        ? "No production dependencies to audit: the only one(s) present were excluded from " +
+            "the bulk advisory request (see the SECURITY WARNING above).\n"
+        : "No production dependencies found in pnpm-lock.yaml.\n",
+    );
     return 0;
   }
 

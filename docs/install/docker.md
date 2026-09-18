@@ -204,25 +204,24 @@ That mounted source directory overrides the matching compiled
 ### Observability
 
 OpenTelemetry export is outbound from the Gateway container to your OTLP
-collector. It does not require a published Docker port. If you build the image
-locally and want the bundled OpenTelemetry exporter available inside the image,
-include its runtime dependencies:
+collector. It does not require a published Docker port.
+
+The `diagnostics-otel` plugin ships inside the image and is enabled by default,
+so no `OPENCLAW_EXTENSIONS` opt-in or ClawHub install is needed. It stays a
+no-op until `diagnostics.otel.enabled` is `true`. Point it at your collector
+either in config or through the compose environment:
 
 ```bash
-export OPENCLAW_EXTENSIONS="diagnostics-otel"
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector:4318"
 export OTEL_SERVICE_NAME="openclaw-gateway"
 ./scripts/docker/setup.sh
 ```
 
-Install the official `@openclaw/diagnostics-otel` plugin from ClawHub in
-packaged Docker installs before enabling export. Custom source-built images can
-still include the local plugin source with
-`OPENCLAW_EXTENSIONS=diagnostics-otel`. To enable export, allow and enable the
-`diagnostics-otel` plugin in config, then set
-`diagnostics.otel.enabled=true` or use the config example in [OpenTelemetry
-export](/gateway/opentelemetry). Collector auth headers are configured through
-`diagnostics.otel.headers`, not through Docker environment variables.
+Then set `diagnostics.otel.enabled=true` or use the config example in
+[OpenTelemetry export](/gateway/opentelemetry). Collector auth headers are
+configured through `diagnostics.otel.headers`, not through Docker environment
+variables. If `plugins.allow` is a restrictive list, add `diagnostics-otel` to
+it.
 
 Prometheus metrics use the already-published Gateway port. Install
 `clawhub:@openclaw/diagnostics-prometheus`, enable the

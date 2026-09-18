@@ -708,6 +708,479 @@ describe("createPdfTool", () => {
     });
   });
 
+  it("reads a 59-page PDF in bounded batches and reports complete coverage", async () => {
+    await withTempPdfAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, {
+        provider: "openai",
+        api: "openai-responses",
+        input: ["text"],
+      });
+      const extractSpy = vi
+        .spyOn(pdfExtractModule, "extractPdfContent")
+        .mockImplementation(async ({ pageNumbers }) => {
+          const requestedPages = pageNumbers ?? [];
+          return {
+            text: `Sheets ${requestedPages.at(0)}-${requestedPages.at(-1)}`,
+            images: [],
+            coverage: {
+              documentPageCount: 59,
+              requestedPages,
+              pagesProcessed: requestedPages,
+              complete: requestedPages.length === 59,
+              textChars: 20,
+              textBytes: 20,
+              maxTextChars: 200_000,
+              truncationReasons: requestedPages.length === 59 ? [] : ["page_limit"],
+            },
+          };
+        });
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "E4.101 and S-301 are present." }],
+      } as never);
+
+      const cfg = {
+        agents: {
+          defaults: {
+            pdfModel: { primary: OPENAI_PDF_MODEL },
+            pdfMaxPages: 120,
+          },
+        },
+      } as OpenClawConfig;
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+
+      const result = await tool.execute("t1", {
+        prompt: "List every discipline and sheet.",
+        pdf: "/tmp/merged-set.pdf",
+      });
+
+      expect(extractSpy).toHaveBeenCalledTimes(6);
+      expect(extractSpy.mock.calls.map(([args]) => args.pageNumbers)).toEqual([
+        Array.from({ length: 10 }, (_, index) => index + 1),
+        Array.from({ length: 10 }, (_, index) => index + 11),
+        Array.from({ length: 10 }, (_, index) => index + 21),
+        Array.from({ length: 10 }, (_, index) => index + 31),
+        Array.from({ length: 10 }, (_, index) => index + 41),
+        Array.from({ length: 9 }, (_, index) => index + 51),
+      ]);
+      expect(completeMock).toHaveBeenCalledTimes(7);
+      expect(result.content).toEqual([
+        {
+          type: "text",
+          text: expect.stringContaining("PDF coverage: processed pages 1-59 of 59."),
+        },
+      ]);
+      expectFields(result.details, {
+        native: false,
+        status: "ok",
+        coverage: [
+          expect.objectContaining({
+            documentPageCount: 59,
+            pagesProcessed: Array.from({ length: 59 }, (_, index) => index + 1),
+            complete: true,
+            truncationReasons: [],
+          }),
+        ],
+      });
+    });
+  });
+
+  it("reports progress via onUpdate once per extraction chunk", async () => {
+    await withTempPdfAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, {
+        provider: "openai",
+        api: "openai-responses",
+        input: ["text"],
+      });
+      vi.spyOn(pdfExtractModule, "extractPdfContent").mockImplementation(
+        async ({ pageNumbers }) => {
+          const requestedPages = pageNumbers ?? [];
+          return {
+            text: `Sheets ${requestedPages.at(0)}-${requestedPages.at(-1)}`,
+            images: [],
+            coverage: {
+              documentPageCount: 59,
+              requestedPages,
+              pagesProcessed: requestedPages,
+              complete: requestedPages.length === 59,
+              textChars: 20,
+              textBytes: 20,
+              maxTextChars: 200_000,
+              truncationReasons: requestedPages.length === 59 ? [] : ["page_limit"],
+            },
+          };
+        },
+      );
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "E4.101 and S-301 are present." }],
+      } as never);
+
+      const cfg = {
+        agents: {
+          defaults: {
+            pdfModel: { primary: OPENAI_PDF_MODEL },
+            pdfMaxPages: 120,
+          },
+        },
+      } as OpenClawConfig;
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+      const onUpdateMock = vi.fn();
+
+      await tool.execute(
+        "t1",
+        { prompt: "List every discipline and sheet.", pdf: "/tmp/merged-set.pdf" },
+        undefined,
+        onUpdateMock,
+      );
+
+      // 6 extraction batches + 6 analysis chunks (59 pages / 10-page
+      // batches) = 12 updates: the extraction-phase updates (one per
+      // extractPdfContent call, status:"extracting") fire first, in full,
+      // before any analysis-phase update (status:"running") — extraction
+      // for every batch completes before the per-chunk analysis loop
+      // starts. The final synthesis call is NOT inside either loop and
+      // must not fire a 13th update.
+      expect(onUpdateMock).toHaveBeenCalledTimes(12);
+
+      const extractionUpdates = onUpdateMock.mock.calls.slice(0, 6).map(([u]) => u);
+      const analysisUpdates = onUpdateMock.mock.calls.slice(6, 12).map(([u]) => u);
+
+      expect(extractionUpdates[0]).toEqual({
+        content: [{ type: "text", text: "Extracted pages 1-10 of 59" }],
+        details: { status: "extracting", documentPageCount: 59 },
+      });
+      expect(extractionUpdates[5]).toEqual({
+        content: [{ type: "text", text: "Extracted pages 51-59 of 59" }],
+        details: { status: "extracting", documentPageCount: 59 },
+      });
+      expect(extractionUpdates.every((u) => u.details.status === "extracting")).toBe(true);
+
+      expect(analysisUpdates[0]).toEqual({
+        content: [{ type: "text", text: "Read pages 1-10 of 59 (chunk 1/6)" }],
+        details: {
+          status: "running",
+          chunkIndex: 1,
+          totalChunks: 6,
+          documentPageCount: 59,
+        },
+      });
+      expect(analysisUpdates[5]).toEqual({
+        content: [{ type: "text", text: "Read pages 51-59 of 59 (chunk 6/6)" }],
+        details: {
+          status: "running",
+          chunkIndex: 6,
+          totalChunks: 6,
+          documentPageCount: 59,
+        },
+      });
+      // chunkIndex must be strictly increasing 1..6, in call order, within
+      // the analysis phase.
+      expect(analysisUpdates.map((u) => u.details.chunkIndex)).toEqual([1, 2, 3, 4, 5, 6]);
+    });
+  });
+
+  it("reports progress during extraction, before extraction as a whole completes", async () => {
+    await withTempPdfAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, {
+        provider: "openai",
+        api: "openai-responses",
+        input: ["text"],
+      });
+
+      // One deferred promise per expected extraction batch (59 pages / 10 =
+      // 6 batches). Each extractPdfContent call blocks until its own
+      // deferred is resolved, so the test can assert an onUpdate fired for
+      // batch N before batch N+1 is even allowed to start -- proving
+      // progress arrives DURING extraction (which is what actually resets
+      // the activity watchdog for a slow multi-batch extraction), not only
+      // after every batch has already finished.
+      const deferreds = Array.from({ length: 6 }, () => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => {
+          resolve = r;
+        });
+        return { promise, resolve };
+      });
+      let callIndex = 0;
+
+      vi.spyOn(pdfExtractModule, "extractPdfContent").mockImplementation(
+        async ({ pageNumbers }) => {
+          const thisCall = callIndex++;
+          await deferreds[thisCall].promise;
+          const requestedPages = pageNumbers ?? [];
+          return {
+            text: `Sheets ${requestedPages.at(0)}-${requestedPages.at(-1)}`,
+            images: [],
+            coverage: {
+              documentPageCount: 59,
+              requestedPages,
+              pagesProcessed: requestedPages,
+              complete: requestedPages.length === 59,
+              textChars: 20,
+              textBytes: 20,
+              maxTextChars: 200_000,
+              truncationReasons: requestedPages.length === 59 ? [] : ["page_limit"],
+            },
+          };
+        },
+      );
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "E4.101 and S-301 are present." }],
+      } as never);
+
+      const cfg = {
+        agents: {
+          defaults: {
+            pdfModel: { primary: OPENAI_PDF_MODEL },
+            pdfMaxPages: 120,
+          },
+        },
+      } as OpenClawConfig;
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+      const onUpdateMock = vi.fn();
+
+      const executePromise = tool.execute(
+        "t1",
+        { prompt: "List every discipline and sheet.", pdf: "/tmp/merged-set.pdf" },
+        undefined,
+        onUpdateMock,
+      );
+
+      // Batches 0..4: extraction is still strictly sequential (batch N+1's
+      // extractPdfContent doesn't even get called until batch N's resolves),
+      // and the analysis phase can't start until every extraction batch is
+      // done -- so resolving one batch at a time proves progress arrives
+      // incrementally, one update per batch, well before the whole
+      // multi-batch extraction (let alone the analysis phase) finishes.
+      for (let batch = 0; batch < 5; batch++) {
+        expect(onUpdateMock).toHaveBeenCalledTimes(batch);
+        deferreds[batch].resolve();
+        // Don't guess the microtask depth between the deferred resolving
+        // and onUpdate firing -- poll until it happens (or the default
+        // vi.waitFor timeout fails the test).
+        await vi.waitFor(() => {
+          expect(onUpdateMock).toHaveBeenCalledTimes(batch + 1);
+        });
+        expect(onUpdateMock.mock.calls[batch][0]).toMatchObject({
+          details: { status: "extracting" },
+        });
+      }
+
+      // Resolving the last (6th) extraction batch also unblocks the entire
+      // analysis phase in the same tick (nothing else gates it), so there is
+      // no meaningful "exactly 6" moment to catch here -- just let the whole
+      // execute() settle and check the 6th extraction update landed where
+      // expected, at index 5.
+      expect(onUpdateMock).toHaveBeenCalledTimes(5);
+      deferreds[5].resolve();
+      await executePromise;
+      expect(onUpdateMock.mock.calls[5][0]).toMatchObject({
+        details: { status: "extracting" },
+      });
+    });
+  });
+
+  it("splits a dense batch when the extractor hits the text limit", async () => {
+    await withTempPdfAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, {
+        provider: "openai",
+        api: "openai-responses",
+        input: ["text"],
+      });
+      const extractSpy = vi
+        .spyOn(pdfExtractModule, "extractPdfContent")
+        .mockImplementation(async ({ pageNumbers }) => {
+          const requestedPages = pageNumbers ?? [];
+          const textLimited = requestedPages.length === 10;
+          return {
+            text: `Sheets ${requestedPages.at(0)}-${requestedPages.at(-1)}`,
+            images: [],
+            coverage: {
+              documentPageCount: 12,
+              requestedPages,
+              pagesProcessed: textLimited ? requestedPages.slice(0, 7) : requestedPages,
+              complete: !textLimited && requestedPages.length === 12,
+              textChars: textLimited ? 200_000 : 20,
+              textBytes: textLimited ? 200_000 : 20,
+              maxTextChars: 200_000,
+              truncationReasons: textLimited ? ["text_limit"] : ["page_limit"],
+            },
+          };
+        });
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "All requested sheets were reviewed." }],
+      } as never);
+
+      const cfg = {
+        agents: {
+          defaults: {
+            pdfModel: { primary: OPENAI_PDF_MODEL },
+            pdfMaxPages: 120,
+          },
+        },
+      } as OpenClawConfig;
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+
+      const result = await tool.execute("t1", {
+        prompt: "List every sheet.",
+        pdf: "/tmp/dense-set.pdf",
+      });
+
+      expect(extractSpy.mock.calls.map(([args]) => args.pageNumbers)).toEqual([
+        Array.from({ length: 10 }, (_, index) => index + 1),
+        [1, 2, 3, 4, 5],
+        [6, 7, 8, 9, 10],
+        [11, 12],
+      ]);
+      expectFields(result.details, {
+        status: "ok",
+        coverage: [
+          expect.objectContaining({
+            documentPageCount: 12,
+            pagesProcessed: Array.from({ length: 12 }, (_, index) => index + 1),
+            complete: true,
+            truncationReasons: [],
+          }),
+        ],
+      });
+    });
+  });
+
+  it("surfaces a partial read and forbids document-wide absence claims", async () => {
+    await withTempPdfAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, {
+        provider: "openai",
+        api: "openai-responses",
+        input: ["text"],
+      });
+      vi.spyOn(pdfExtractModule, "extractPdfContent").mockImplementation(
+        async ({ pageNumbers }) => {
+          const requestedPages = pageNumbers ?? [];
+          return {
+            text: "A-series sheets only",
+            images: [],
+            coverage: {
+              documentPageCount: 59,
+              requestedPages,
+              pagesProcessed: requestedPages,
+              complete: false,
+              textChars: 20,
+              textBytes: 20,
+              maxTextChars: 200_000,
+              truncationReasons: ["page_limit"],
+            },
+          };
+        },
+      );
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "I found architectural sheets." }],
+      } as never);
+
+      const cfg = {
+        agents: {
+          defaults: {
+            pdfModel: { primary: OPENAI_PDF_MODEL },
+            pdfMaxPages: 20,
+          },
+        },
+      } as OpenClawConfig;
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+
+      const result = await tool.execute("t1", {
+        prompt: "Are there any electrical sheets?",
+        pdf: "/tmp/merged-set.pdf",
+      });
+
+      expect(result.content).toEqual([
+        {
+          type: "text",
+          text: expect.stringContaining(
+            "Partial PDF read: processed pages 1-20 of 59. Do not infer that omitted sheets or terms are absent.",
+          ),
+        },
+      ]);
+      expectFields(result.details, {
+        native: false,
+        status: "partial",
+        coverage: [
+          expect.objectContaining({
+            documentPageCount: 59,
+            pagesProcessed: Array.from({ length: 20 }, (_, index) => index + 1),
+            complete: false,
+            truncationReasons: ["page_limit"],
+          }),
+        ],
+      });
+      const finalContext = completeMock.mock.calls.at(-1)?.[1] as
+        | { messages?: Array<{ content?: Array<{ text?: string }> }> }
+        | undefined;
+      expect(JSON.stringify(finalContext)).toContain("must not claim that a sheet");
+    });
+  });
+
+  it("adds the coverage warning to a single partial extraction prompt", async () => {
+    await withTempPdfAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, {
+        provider: "openai",
+        api: "openai-responses",
+        input: ["text"],
+      });
+      vi.spyOn(pdfExtractModule, "extractPdfContent").mockImplementation(
+        async ({ pageNumbers }) => {
+          const requestedPages = pageNumbers ?? [];
+          return {
+            text: "A-series sheets only",
+            images: [],
+            coverage: {
+              documentPageCount: 59,
+              requestedPages,
+              pagesProcessed: requestedPages,
+              complete: false,
+              textChars: 20,
+              textBytes: 20,
+              maxTextChars: 200_000,
+              truncationReasons: ["page_limit"],
+            },
+          };
+        },
+      );
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "I found architectural sheets." }],
+      } as never);
+
+      const cfg = {
+        agents: {
+          defaults: {
+            pdfModel: { primary: OPENAI_PDF_MODEL },
+            pdfMaxPages: 10,
+          },
+        },
+      } as OpenClawConfig;
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+
+      await tool.execute("t1", {
+        prompt: "Are there any electrical sheets?",
+        pdf: "/tmp/merged-set.pdf",
+      });
+
+      expect(completeMock).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(completeMock.mock.calls[0]?.[1])).toContain(
+        "must not claim that a sheet",
+      );
+    });
+  });
+
   it("passes password to PDF extraction fallback", async () => {
     await withTempPdfAgentDir(async (agentDir) => {
       await stubPdfToolInfra(agentDir, { provider: "openai", input: ["text"] });

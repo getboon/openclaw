@@ -755,6 +755,51 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(callerOptions.headers).toEqual({ "X-Custom": "kept" });
   });
 
+  it("preserves a preexisting smoke session header over ordinary attribution", async () => {
+    async function* stream() {
+      yield { type: "text", text: "ok" };
+    }
+    const capturedOptions: Array<Parameters<StreamFn>[2]> = [];
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      ((
+        _model: Parameters<StreamFn>[0],
+        _context: Parameters<StreamFn>[1],
+        options: Parameters<StreamFn>[2],
+      ) => {
+        capturedOptions.push(options);
+        return stream();
+      }) as unknown as StreamFn,
+      {
+        runId: "run-smoke",
+        sessionId: "thread-42",
+        provider: "anthropic",
+        model: "claude",
+        trace: createDiagnosticTraceContext({
+          traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+          spanId: "00f067aa0ba902b7",
+          traceFlags: "01",
+        }),
+        nextCallId: () => "call-smoke",
+      },
+    );
+
+    await drain(
+      wrapped({} as never, {} as never, {
+        headers: {
+          "X-Boon-Session-ID": "provisioning-smoke-run",
+        },
+      }) as unknown as AsyncIterable<unknown>,
+    );
+
+    const headers = readRecordField(
+      requireRecord(capturedOptions[0], "captured stream options"),
+      "headers",
+      "captured stream headers",
+    );
+    expect(headers["X-Boon-Session-ID"]).toBe("provisioning-smoke-run");
+    expect(headers["x-boon-session-id"]).toBeUndefined();
+  });
+
   it("omits Boon usage headers when ctx has neither session nor sender", async () => {
     async function* stream() {
       yield { type: "text", text: "ok" };

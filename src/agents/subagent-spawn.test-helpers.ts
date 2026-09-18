@@ -129,6 +129,7 @@ export function expectPersistedRuntimeModel(params: {
 export async function loadSubagentSpawnModuleForTest(params: {
   callGatewayMock: MockFn;
   dispatchGatewayMethodInProcessMock?: MockFn;
+  dispatchGatewayMethodInProcessImpl?: typeof import("../gateway/server-plugins.js").dispatchGatewayMethodInProcess;
   hasInProcessGatewayContextMock?: MockFn;
   getRuntimeConfig?: () => Record<string, unknown>;
   loadSessionStoreMock?: MockFn;
@@ -212,8 +213,9 @@ export async function loadSubagentSpawnModuleForTest(params: {
 
   vi.doMock("./subagent-spawn.runtime.js", () => ({
     callGateway: (opts: unknown) => params.callGatewayMock(opts),
-    dispatchGatewayMethodInProcess: (...args: unknown[]) =>
-      params.dispatchGatewayMethodInProcessMock?.(...args),
+    dispatchGatewayMethodInProcess:
+      params.dispatchGatewayMethodInProcessImpl ??
+      ((...args: unknown[]) => params.dispatchGatewayMethodInProcessMock?.(...args)),
     hasInProcessGatewayContext: () => Boolean(params.hasInProcessGatewayContextMock?.()),
     buildSubagentSystemPrompt: () => "system-prompt",
     forkSessionEntryFromParent:
@@ -257,6 +259,7 @@ export async function loadSubagentSpawnModuleForTest(params: {
     DEFAULT_SUBAGENT_MAX_CHILDREN_PER_AGENT: 5,
     DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH: 3,
     ADMIN_SCOPE: "operator.admin",
+    WRITE_SCOPE: "operator.write",
     AGENT_LANE_SUBAGENT: "subagent",
     getRuntimeConfig: () =>
       params.getRuntimeConfig?.() ??

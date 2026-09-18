@@ -245,6 +245,48 @@ describe("anthropic transport stream", () => {
     );
   });
 
+  it("preserves an explicit smoke session over runtime attribution", async () => {
+    const model = makeAnthropicTransportModel({
+      headers: { "X-Boon-Session-ID": "provisioning-smoke-session" },
+    });
+
+    await runTransportStream(
+      model,
+      {
+        messages: [{ role: "user", content: "hello" }],
+      } as AnthropicStreamContext,
+      {
+        apiKey: "sk-ant-api",
+        headers: { "x-boon-session-id": "ordinary-session" },
+      } as AnthropicStreamOptions,
+    );
+
+    expect(latestAnthropicRequestHeaders().get("x-boon-session-id")).toBe(
+      "provisioning-smoke-session",
+    );
+  });
+
+  it("keeps ordinary runtime attribution ahead of an ordinary model session", async () => {
+    const model = makeAnthropicTransportModel({
+      headers: { "X-Boon-Session-ID": "ordinary-model-session" },
+    });
+
+    await runTransportStream(
+      model,
+      {
+        messages: [{ role: "user", content: "hello" }],
+      } as AnthropicStreamContext,
+      {
+        apiKey: "sk-ant-api",
+        headers: { "x-boon-session-id": "ordinary-runtime-session" },
+      } as AnthropicStreamOptions,
+    );
+
+    expect(latestAnthropicRequestHeaders().get("x-boon-session-id")).toBe(
+      "ordinary-runtime-session",
+    );
+  });
+
   it("uses bearer auth for Microsoft Foundry Anthropic transport requests", async () => {
     const model = makeAnthropicTransportModel({
       provider: "microsoft-foundry",
@@ -306,7 +348,11 @@ describe("anthropic transport stream", () => {
     );
 
     expect(result.stopReason).toBe("error");
-    expect(result.errorMessage).toBe(`${"x".repeat(400)}…`);
+    // maxChars was raised from 400 to 2000 so a real CDN/WAF block-page
+    // marker, which can sit past the first few hundred bytes of boilerplate
+    // HTML, reliably reaches the classifier. maxBytes (8 KB, matching this
+    // fixture) still bounds what is read off the wire.
+    expect(result.errorMessage).toBe(`${"x".repeat(2_000)}…`);
     expect(pullCount).toBeGreaterThanOrEqual(2);
     expect(cancelCount).toBe(1);
   });

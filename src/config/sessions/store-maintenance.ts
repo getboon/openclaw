@@ -25,6 +25,16 @@ const DEFAULT_SESSION_DISK_BUDGET_HIGH_WATER_RATIO = 0.8;
 const STRICT_ENTRY_MAINTENANCE_MAX_ENTRIES = 49;
 const MIN_BATCHED_ENTRY_MAINTENANCE_SLACK = 25;
 const BATCHED_ENTRY_MAINTENANCE_SLACK_RATIO = 0.1;
+/**
+ * How long a thread session keeps its durable-conversation protection after its last activity.
+ * Not operator-configurable: change this constant, not `session.maintenance`.
+ *
+ * This is a protection window, not a size bound: `capEntryCount` can only remove
+ * `maxEntries - preservedCount` entries, so once protection outgrows `maxEntries` the operator's
+ * cap silently stops binding. A tenant minting T threads/day protects `T * window` entries, so
+ * the window must stay below `maxEntries / T`.
+ */
+export const THREAD_SESSION_PROTECTION_MAX_IDLE_MS = 4 * 24 * 60 * 60 * 1000;
 
 export type SessionMaintenanceWarning = {
   activeSessionKey: string;
@@ -267,6 +277,25 @@ function isSyntheticSessionMaintenanceKey(sessionKey: string): boolean {
   );
 }
 
+function isRecentlyActiveSessionMaintenanceEntry(entry: SessionEntry | undefined): boolean {
+  // `lastInteractionAt` is the documented idle-lifetime clock: only a real user/channel turn
+  // advances it. `updatedAt` also moves on transcript-append and marker writes, so treating the
+  // newer of the two as activity would keep a silent thread protected forever. Fall back to
+  // `updatedAt` only when the interaction stamp is absent — cron isolated runs delete it.
+  const interactionAt = entry?.lastInteractionAt;
+  const updatedAt = entry?.updatedAt;
+  const lastActivityAt = Number.isFinite(interactionAt)
+    ? (interactionAt as number)
+    : Number.isFinite(updatedAt)
+      ? (updatedAt as number)
+      : undefined;
+  if (lastActivityAt === undefined || lastActivityAt <= 0) {
+    // No usable timestamp means staleness cannot be determined, so the entry stays protected.
+    return true;
+  }
+  return Date.now() - lastActivityAt <= THREAD_SESSION_PROTECTION_MAX_IDLE_MS;
+}
+
 function isTelegramTopicSessionKey(sessionKey: string): boolean {
   const parsed = parseAgentSessionKey(sessionKey);
   const rest = normalizeLowercaseStringOrEmpty(parsed?.rest ?? sessionKey);
@@ -287,11 +316,18 @@ export function isProtectedSessionMaintenanceEntry(
   if (isSyntheticSessionMaintenanceKey(sessionKey)) {
     return false;
   }
-  if (parseSessionThreadInfoFast(sessionKey).threadId) {
-    return true;
-  }
+  // Telegram forum topics are durable surfaces, not per-conversation threads, so they are
+  // checked BEFORE the thread branch: once the telegram plugin is loaded,
+  // `resolveLoadedSessionThreadInfo` reports a topic key as thread-keyed, which would otherwise
+  // subject a long-lived topic to the idle window and silently drop it.
   if (isTelegramTopicSessionKey(sessionKey)) {
     return true;
+  }
+  if (parseSessionThreadInfoFast(sessionKey).threadId) {
+    // Thread keys are minted per conversation on bot-shaped tenants, so protecting every one
+    // forever grows the session index without bound. Only live threads stay durable; an idle
+    // one rejoins the normal age/count/disk candidates instead of pinning a store entry.
+    return isRecentlyActiveSessionMaintenanceEntry(entry);
   }
   if (isExternalGroupOrChannelSessionKey(sessionKey)) {
     return true;

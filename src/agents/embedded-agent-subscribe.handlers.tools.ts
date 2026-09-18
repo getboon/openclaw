@@ -1186,7 +1186,8 @@ export async function handleToolExecutionEnd(
       ? (startData.args as Record<string, unknown>)
       : {};
   const adjustedArgs = consumeAdjustedParamsForToolCall(toolCallId, runId);
-  const executionPrevented = consumePreExecutionBlockedToolCall(toolCallId, runId);
+  const { blocked: executionPrevented, detail: preExecutionBlockDetail } =
+    consumePreExecutionBlockedToolCall(toolCallId, runId);
   const structuredReplaySafe = consumeStructuredReplaySafeToolCall(toolCallId, runId);
   const startArgs =
     adjustedArgs && typeof adjustedArgs === "object"
@@ -1206,6 +1207,15 @@ export async function handleToolExecutionEnd(
   const attemptedPotentialSideEffect = !callSummary.replaySafe && executionStarted;
   const meta = callSummary.meta;
   const asyncStarted = !isToolError && isAsyncStartedToolResult(sanitizedResult);
+  const partialResult =
+    !isToolError &&
+    sanitizedResult !== null &&
+    typeof sanitizedResult === "object" &&
+    "details" in sanitizedResult &&
+    sanitizedResult.details !== null &&
+    typeof sanitizedResult.details === "object" &&
+    "status" in sanitizedResult.details &&
+    sanitizedResult.details.status === "partial";
   const asyncTaskIds = asyncStarted ? readAsyncStartedTaskIds(sanitizedResult) : {};
   ctx.state.toolMetas.push({
     toolName,
@@ -1215,7 +1225,14 @@ export async function handleToolExecutionEnd(
     // only successfully-completed tools, even when multiple calls errored in
     // the turn (cubic P2 follow-up).
     errored: isToolError,
-    ...(approvalUnavailable || !executionStarted ? { status: "blocked" as const } : {}),
+    ...(approvalUnavailable || !executionStarted
+      ? { status: "blocked" as const }
+      : partialResult
+        ? { status: "partial" as const }
+        : {}),
+    // real pre-execution failure detail, present for any thrown pre-execution
+    // failure (before_tool_call handler or surrounding pipeline), never a veto.
+    ...(preExecutionBlockDetail ? { detail: preExecutionBlockDetail } : {}),
     ...(asyncStarted ? { asyncStarted: true, ...asyncTaskIds } : {}),
   });
   const acceptedSessionSpawn =

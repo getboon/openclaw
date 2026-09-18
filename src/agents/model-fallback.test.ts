@@ -624,6 +624,126 @@ describe("runWithModelFallback", () => {
     }
   });
 
+  it("aborts the whole ladder on an edge block instead of walking remaining candidates", async () => {
+    // A CDN/WAF edge block is content-based: the same request body is blocked
+    // at the gateway edge before any model-specific routing happens, so every
+    // remaining candidate behind the same gateway would hit the identical
+    // block. Walking the rest of the ladder would only add latency for a
+    // guaranteed repeat, so this aborts immediately — "google" must never run.
+    const cfg = makeCfg({
+      agents: {
+        defaults: {
+          model: {
+            primary: "openai/gpt-5.4",
+            fallbacks: ["anthropic/claude-opus-4-7", "google/gemini-3.1-pro-preview"],
+          },
+        },
+      },
+    });
+    const run = vi.fn(async (provider: string, model: string) => {
+      if (provider === "openai") {
+        throw new FailoverError("primary rate limited", {
+          provider,
+          model,
+          reason: "rate_limit",
+        });
+      }
+      if (provider === "anthropic") {
+        throw new FailoverError("fallback edge blocked", {
+          provider,
+          model,
+          reason: "edge_blocked",
+        });
+      }
+      return "ok";
+    });
+
+    await expect(
+      runWithModelFallback({
+        cfg,
+        provider: "openai",
+        model: "gpt-5.4",
+        sessionId: "session:edge-blocked-abort",
+        run,
+      }),
+    ).rejects.toThrow("fallback edge blocked");
+
+    expect(run.mock.calls.map(([provider, model]) => `${provider}/${model}`)).toEqual([
+      "openai/gpt-5.4",
+      "anthropic/claude-opus-4-7",
+    ]);
+  });
+
+  it("does not treat an edge-blocked candidate as a persistent auth issue", async () => {
+    // A CDN/WAF edge block must never be lumped in with "auth" — that would
+    // write it into the auth-skip cache and cool down/disable an otherwise
+    // healthy candidate on a single content-based block. Unlike the "auth"
+    // case above, the second turn must re-attempt the same candidate rather
+    // than silently skipping it from a stale cache entry.
+    const previous = process.env.OPENCLAW_FALLBACK_SKIP_TTL_MS;
+    process.env.OPENCLAW_FALLBACK_SKIP_TTL_MS = "60000";
+    try {
+      const cfg = makeCfg({
+        agents: {
+          defaults: {
+            model: {
+              primary: "openai/gpt-5.4",
+              fallbacks: ["anthropic/claude-opus-4-7"],
+            },
+          },
+        },
+      });
+      const run = vi.fn(async (provider: string, model: string) => {
+        if (provider === "openai") {
+          throw new FailoverError("primary rate limited", {
+            provider,
+            model,
+            reason: "rate_limit",
+          });
+        }
+        throw new FailoverError("fallback edge blocked", {
+          provider,
+          model,
+          reason: "edge_blocked",
+        });
+      });
+
+      await expect(
+        runWithModelFallback({
+          cfg,
+          provider: "openai",
+          model: "gpt-5.4",
+          sessionId: "session:edge-blocked-skip",
+          run,
+        }),
+      ).rejects.toThrow("fallback edge blocked");
+      await expect(
+        runWithModelFallback({
+          cfg,
+          provider: "openai",
+          model: "gpt-5.4",
+          sessionId: "session:edge-blocked-skip",
+          run,
+        }),
+      ).rejects.toThrow("fallback edge blocked");
+
+      // "anthropic" is attempted fresh on both turns — no skip-cache entry
+      // from the first turn silently disabled it for the second.
+      expect(run.mock.calls.map(([provider, model]) => `${provider}/${model}`)).toEqual([
+        "openai/gpt-5.4",
+        "anthropic/claude-opus-4-7",
+        "openai/gpt-5.4",
+        "anthropic/claude-opus-4-7",
+      ]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OPENCLAW_FALLBACK_SKIP_TTL_MS;
+      } else {
+        process.env.OPENCLAW_FALLBACK_SKIP_TTL_MS = previous;
+      }
+    }
+  });
+
   it("skips auth store bootstrap when no auth profile sources exist", async () => {
     authSourceCheckMock.hasAnyAuthProfileStoreSource.mockReturnValue(false);
     const run = vi.fn().mockResolvedValueOnce("ok");

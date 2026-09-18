@@ -84,7 +84,9 @@ async function waitForFile(filePath) {
 }
 
 async function writeJsonFile(filePath, value) {
-  // The parent treats file existence as the readiness signal, so publish atomically.
+  // The parent treats file existence as the readiness signal, so publish
+  // atomically; PID-suffix the temp name so concurrent children in the same
+  // directory can't collide on the same temp path.
   const tempPath = filePath + "." + process.pid + ".tmp";
   await fs.writeFile(tempPath, \`\${JSON.stringify(value, null, 2)}\\n\`, "utf8");
   await fs.rename(tempPath, filePath);

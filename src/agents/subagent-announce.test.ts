@@ -33,6 +33,7 @@ const queueEmbeddedAgentMessageWithOutcomeMock = vi.fn(
 const waitForEmbeddedAgentRunEndMock = vi.fn(
   async (_sessionId: string, _timeoutMs?: number) => true,
 );
+const deliverSubagentAnnouncementArgsMock = vi.hoisted(() => vi.fn());
 let mockConfig: ReturnType<(typeof import("../config/config.js"))["getRuntimeConfig"]> = {
   session: {
     mainKey: "main",
@@ -105,6 +106,7 @@ vi.mock("./subagent-announce-delivery.js", () => ({
     requesterSessionOrigin?: { provider?: string; channel?: string };
     bestEffortDeliver?: boolean;
   }) => {
+    deliverSubagentAnnouncementArgsMock(params);
     // The delivery mock preserves the key branch: active Discord requester
     // sessions are steered in-process, while inactive/direct paths call agent.
     const store = loadSessionStoreMock("/tmp/sessions.json") as Record<string, unknown>;
@@ -197,6 +199,10 @@ vi.mock("./subagent-announce.registry.runtime.js", () => subagentRegistryRuntime
 import { defaultRuntime } from "../runtime.js";
 import { applySubagentWaitOutcome } from "./subagent-announce-output.js";
 import { runSubagentAnnounceFlow } from "./subagent-announce.js";
+import {
+  registerSubagentCompletionOwner,
+  resetSubagentCompletionOwnersForTest,
+} from "./subagent-completion-owner.js";
 
 function requireQueuedMessageCall() {
   const call = queueEmbeddedAgentMessageWithOutcomeMock.mock.calls[0];
@@ -212,6 +218,24 @@ function requireAgentCall() {
     throw new Error("expected agent call");
   }
   return call;
+}
+
+async function runCompletionFixture(overrides: Record<string, unknown> = {}) {
+  return await runSubagentAnnounceFlow({
+    childSessionKey: "agent:main:subagent:fixture",
+    childRunId: "run-channel-isolation-fixture",
+    requesterSessionKey: "agent:main:main",
+    requesterDisplayKey: "main",
+    requesterOrigin: { channel: "telegram", to: "-100123" },
+    task: "deliver completion",
+    timeoutMs: 10,
+    cleanup: "keep",
+    waitForCompletion: false,
+    outcome: { status: "ok" },
+    roundOneReply: "done",
+    expectsCompletionMessage: true,
+    ...overrides,
+  });
 }
 
 describe("subagent wait outcome timing", () => {
@@ -241,7 +265,9 @@ describe("subagent wait outcome timing", () => {
 
 describe("subagent announce seam flow", () => {
   beforeEach(() => {
+    resetSubagentCompletionOwnersForTest();
     agentSpy.mockClear();
+    deliverSubagentAnnouncementArgsMock.mockClear();
     sessionsDeleteSpy.mockClear();
     callGatewayMock.mockReset().mockImplementation(async (req: unknown) => {
       const typed = req as AgentCallRequest;
@@ -518,6 +544,258 @@ describe("subagent announce seam flow", () => {
     expect(agentCall.params?.accountId).toBe("bot-123");
     expect(agentCall.params?.to).toBe("-1001234567890");
   });
+
+  it("uses a registered completion owner before legacy delivery", async () => {
+    const deliver = vi.fn(async () => ({ status: "delivered" as const, deliveredAt: 42 }));
+    const accepts = vi.fn(() => true);
+    const registration = registerSubagentCompletionOwner({
+      channel: "anychat-boon-web",
+      accepts,
+      deliver,
+    });
+
+    const onDeliveryResult = vi.fn();
+    const didAnnounce = await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:anychat",
+      childRunId: "run-anychat-owner",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "anychat-boon-web", to: "thread-1", threadId: "1" },
+      task: "deliver completion",
+      timeoutMs: 10,
+      cleanup: "keep",
+      waitForCompletion: false,
+      outcome: { status: "ok" },
+      roundOneReply: "done",
+      expectsCompletionMessage: true,
+      onDeliveryResult,
+    });
+
+    expect(didAnnounce).toBe(true);
+    expect(accepts).toHaveBeenCalledOnce();
+    expect(deliver).toHaveBeenCalledOnce();
+    expect(agentSpy).not.toHaveBeenCalled();
+    expect(onDeliveryResult).toHaveBeenCalledWith(
+      expect.objectContaining({ delivered: true, path: "owner", ownerChannel: "anychat-boon-web" }),
+    );
+    registration.dispose();
+  });
+
+  it("returns owner pending without legacy delivery", async () => {
+    const deliver = vi.fn(async () => ({ status: "pending" as const, error: "busy" }));
+    registerSubagentCompletionOwner({
+      channel: "anychat-boon-web",
+      accepts: () => true,
+      deliver,
+    });
+
+    const onDeliveryResult = vi.fn();
+    const didAnnounce = await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:anychat",
+      childRunId: "run-anychat-owner-pending",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "anychat-boon-web", to: "thread-1", threadId: "1" },
+      task: "deliver completion",
+      timeoutMs: 10,
+      cleanup: "keep",
+      waitForCompletion: false,
+      outcome: { status: "ok" },
+      roundOneReply: "done",
+      expectsCompletionMessage: true,
+      onDeliveryResult,
+    });
+
+    expect(didAnnounce).toBe(false);
+    expect(deliver).toHaveBeenCalledOnce();
+    expect(agentSpy).not.toHaveBeenCalled();
+    expect(onDeliveryResult).toHaveBeenCalledWith(
+      expect.objectContaining({ delivered: false, path: "owner", error: "busy" }),
+    );
+  });
+
+  it("uses legacy delivery when the owner declines the request", async () => {
+    const deliver = vi.fn(async () => ({ status: "delivered" as const }));
+    registerSubagentCompletionOwner({
+      channel: "anychat-boon-web",
+      accepts: () => false,
+      deliver,
+    });
+
+    const didAnnounce = await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:anychat",
+      childRunId: "run-anychat-owner-declined",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "anychat-boon-web", to: "thread-1", threadId: "1" },
+      task: "deliver completion",
+      timeoutMs: 10,
+      cleanup: "keep",
+      waitForCompletion: false,
+      outcome: { status: "ok" },
+      roundOneReply: "done",
+      expectsCompletionMessage: true,
+    });
+
+    expect(didAnnounce).toBe(true);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(agentSpy).toHaveBeenCalledOnce();
+  });
+
+  it("returns owner failure without legacy delivery", async () => {
+    registerSubagentCompletionOwner({
+      channel: "anychat-boon-web",
+      accepts: () => true,
+      deliver: async () => ({ status: "failed", retryable: false, error: "callback failed" }),
+    });
+
+    const onDeliveryResult = vi.fn();
+    const didAnnounce = await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:anychat",
+      childRunId: "run-anychat-owner-failed",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "anychat-boon-web", to: "thread-1", threadId: "1" },
+      task: "deliver completion",
+      timeoutMs: 10,
+      cleanup: "keep",
+      waitForCompletion: false,
+      outcome: { status: "ok" },
+      roundOneReply: "done",
+      expectsCompletionMessage: true,
+      onDeliveryResult,
+    });
+
+    expect(didAnnounce).toBe(false);
+    expect(agentSpy).not.toHaveBeenCalled();
+    expect(onDeliveryResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        delivered: false,
+        path: "owner",
+        terminal: true,
+        reason: "visible_reply_missing",
+      }),
+    );
+  });
+
+  it("falls back when the owner does not handle the completion", async () => {
+    registerSubagentCompletionOwner({
+      channel: "anychat-boon-web",
+      accepts: () => true,
+      deliver: async () => ({ status: "not_handled" }),
+    });
+
+    const didAnnounce = await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:anychat",
+      childRunId: "run-anychat-owner-fallback",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "anychat-boon-web", to: "thread-1", threadId: "1" },
+      task: "deliver completion",
+      timeoutMs: 10,
+      cleanup: "keep",
+      waitForCompletion: false,
+      outcome: { status: "ok" },
+      roundOneReply: "done",
+      expectsCompletionMessage: true,
+    });
+
+    expect(didAnnounce).toBe(true);
+    expect(agentSpy).toHaveBeenCalledOnce();
+  });
+
+  it("returns unavailable for a durable owner claim", async () => {
+    const onDeliveryResult = vi.fn();
+    const didAnnounce = await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:anychat",
+      childRunId: "run-anychat-owner-unavailable",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "anychat-boon-web", to: "thread-1", threadId: "1" },
+      task: "deliver completion",
+      timeoutMs: 10,
+      cleanup: "keep",
+      waitForCompletion: false,
+      outcome: { status: "ok" },
+      roundOneReply: "done",
+      expectsCompletionMessage: true,
+      claimedOwnerChannel: "anychat-boon-web",
+      onDeliveryResult,
+    });
+
+    expect(didAnnounce).toBe(false);
+    expect(agentSpy).not.toHaveBeenCalled();
+    expect(onDeliveryResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "owner",
+        error: "completion owner unavailable: anychat-boon-web",
+      }),
+    );
+  });
+
+  it("keeps legacy announce params byte-identical when no owner is registered", async () => {
+    await runCompletionFixture();
+    const legacyParams = deliverSubagentAnnouncementArgsMock.mock.calls[0]?.[0];
+    expect(legacyParams).toBeDefined();
+
+    resetSubagentCompletionOwnersForTest();
+    const accepts = vi.fn(() => true);
+    registerSubagentCompletionOwner({
+      channel: "anychat-boon-web",
+      accepts,
+      deliver: vi.fn(async () => ({ status: "delivered" as const })),
+    });
+    deliverSubagentAnnouncementArgsMock.mockClear();
+
+    await runCompletionFixture();
+    expect(accepts).not.toHaveBeenCalled();
+    expect(deliverSubagentAnnouncementArgsMock.mock.calls[0]?.[0]).toEqual(legacyParams);
+  });
+
+  it("never calls the owner when the requester is a subagent", async () => {
+    const accepts = vi.fn(() => true);
+    registerSubagentCompletionOwner({
+      channel: "telegram",
+      accepts,
+      deliver: vi.fn(async () => ({ status: "delivered" as const })),
+    });
+
+    await runCompletionFixture({ requesterSessionKey: "agent:main:subagent:orchestrator" });
+
+    expect(accepts).not.toHaveBeenCalled();
+    expect(deliverSubagentAnnouncementArgsMock).toHaveBeenCalledOnce();
+  });
+
+  it("never calls the owner when expectsCompletionMessage is false", async () => {
+    const accepts = vi.fn(() => true);
+    registerSubagentCompletionOwner({
+      channel: "telegram",
+      accepts,
+      deliver: vi.fn(async () => ({ status: "delivered" as const })),
+    });
+
+    await runCompletionFixture({ expectsCompletionMessage: false });
+
+    expect(accepts).not.toHaveBeenCalled();
+    expect(deliverSubagentAnnouncementArgsMock).toHaveBeenCalledOnce();
+  });
+
+  it.each(["slack", "telegram", "msteams", "discord"] as const)(
+    "routes %s completions through legacy delivery with another owner registered",
+    async (channel) => {
+      const accepts = vi.fn(() => true);
+      registerSubagentCompletionOwner({
+        channel: "anychat-boon-web",
+        accepts,
+        deliver: vi.fn(async () => ({ status: "delivered" as const })),
+      });
+
+      await runCompletionFixture({ requesterOrigin: { channel, to: "target" } });
+
+      expect(accepts).not.toHaveBeenCalled();
+      expect(deliverSubagentAnnouncementArgsMock).toHaveBeenCalledOnce();
+    },
+  );
 
   it("logs direct completion announce delivery failures through the gateway log path", async () => {
     const logSpy = vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});

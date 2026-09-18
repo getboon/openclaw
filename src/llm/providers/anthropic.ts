@@ -19,6 +19,7 @@ import {
   splitSystemPromptCacheBoundary,
   stripSystemPromptCacheBoundary,
 } from "../../agents/system-prompt-cache-boundary.js";
+import { isProvisioningSmokeHeaderName } from "../../agents/transport-stream-shared.js";
 import {
   omitFoundryBearerCredentialHeaders,
   usesFoundryBearerAuth,
@@ -238,16 +239,61 @@ export interface AnthropicOptions extends StreamOptions {
   client?: Anthropic;
 }
 
-function mergeHeaders(
+export function mergeAnthropicHeaders(
   ...headerSources: (Record<string, string | null> | undefined)[]
 ): Record<string, string | null> {
   const merged: Record<string, string | null> = {};
+  const headerNamesByLowerKey = new Map<string, string>();
   for (const headers of headerSources) {
     if (headers) {
-      Object.assign(merged, headers);
+      for (const [key, value] of Object.entries(headers)) {
+        const normalizedKey = key.toLowerCase();
+        const previousKey = headerNamesByLowerKey.get(normalizedKey);
+        if (previousKey && previousKey !== key) {
+          delete merged[previousKey];
+        }
+        merged[key] = value;
+        headerNamesByLowerKey.set(normalizedKey, key);
+      }
     }
   }
   return merged;
+}
+
+// Mirrors transport-stream-shared.ts's preserveProvisioningSmokeSessionHeader
+// (reasserting every X-Boon-Session-ID / X-Boon-Provisioning-Smoke-* header
+// together, not just the session id — see that file's comment for why a
+// single-header reassertion isn't enough). Kept as a separate implementation
+// here, not a shared import, because this file's headers are
+// Record<string, string | null> (Anthropic's client uses a null value to
+// mean "omit this header", e.g. the cloudflare branch's `Authorization:
+// null`) while the shared version is `Record<string, string>` only; only the
+// header-name predicate itself has no type dependency and is imported.
+function preserveProvisioningSmokeSessionHeader(
+  headers: Record<string, string | null>,
+  modelHeaders: Record<string, string> | undefined,
+): Record<string, string | null> {
+  const hasSmokeSession = Object.entries(modelHeaders ?? {}).some(
+    ([key, value]) =>
+      key.toLowerCase() === "x-boon-session-id" && value.startsWith("provisioning-smoke-"),
+  );
+  if (!hasSmokeSession) {
+    return headers;
+  }
+  const smokeHeaders = Object.fromEntries(
+    Object.entries(modelHeaders ?? {}).filter(([key]) => isProvisioningSmokeHeaderName(key)),
+  );
+  return mergeAnthropicHeaders(headers, smokeHeaders);
+}
+
+function mergeAnthropicHeadersPreservingSmokeSession(
+  modelHeaders: Record<string, string> | undefined,
+  ...headerSources: (Record<string, string | null> | undefined)[]
+): Record<string, string | null> {
+  return preserveProvisioningSmokeSessionHeader(
+    mergeAnthropicHeaders(...headerSources),
+    modelHeaders,
+  );
 }
 
 interface ServerSentEvent {
@@ -909,7 +955,8 @@ function createClient(
       authToken: null,
       baseURL: resolveCloudflareBaseUrl(model),
       dangerouslyAllowBrowser: true,
-      defaultHeaders: mergeHeaders(
+      defaultHeaders: mergeAnthropicHeadersPreservingSmokeSession(
+        model.headers,
         {
           accept: "application/json",
           "anthropic-dangerous-direct-browser-access": "true",
@@ -931,7 +978,8 @@ function createClient(
       authToken: apiKey,
       baseURL: model.baseUrl,
       dangerouslyAllowBrowser: true,
-      defaultHeaders: mergeHeaders(
+      defaultHeaders: mergeAnthropicHeadersPreservingSmokeSession(
+        model.headers,
         {
           accept: "application/json",
           "anthropic-dangerous-direct-browser-access": "true",
@@ -952,7 +1000,8 @@ function createClient(
       authToken: apiKey,
       baseURL: model.baseUrl,
       dangerouslyAllowBrowser: true,
-      defaultHeaders: mergeHeaders(
+      defaultHeaders: mergeAnthropicHeadersPreservingSmokeSession(
+        omitFoundryBearerCredentialHeaders(model.headers),
         {
           accept: "application/json",
           "anthropic-dangerous-direct-browser-access": "true",
@@ -974,7 +1023,8 @@ function createClient(
       authToken: apiKey,
       baseURL: model.baseUrl,
       dangerouslyAllowBrowser: true,
-      defaultHeaders: mergeHeaders(
+      defaultHeaders: mergeAnthropicHeadersPreservingSmokeSession(
+        model.headers,
         {
           accept: "application/json",
           "anthropic-dangerous-direct-browser-access": "true",
@@ -1000,7 +1050,8 @@ function createClient(
     authToken: null,
     baseURL: model.baseUrl,
     dangerouslyAllowBrowser: true,
-    defaultHeaders: mergeHeaders(
+    defaultHeaders: mergeAnthropicHeadersPreservingSmokeSession(
+      model.headers,
       {
         accept: "application/json",
         "anthropic-dangerous-direct-browser-access": "true",

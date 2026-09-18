@@ -305,6 +305,43 @@ describe("agent-runner-utils", () => {
     });
   });
 
+  // ENG-19115: the gateway-audience OBO is a fresh per-turn token that get-reply-run
+  // puts on run.oboToken (from the inbound ctx). It never lives on the persisted
+  // sessionCtx, so the primary-turn sender context must source it from `run` —
+  // sourcing identity only from sessionCtx silently dropped it and the
+  // x-boon-gateway-obo-token header was never emitted.
+  it("carries run.oboToken into the primary-turn sender context", () => {
+    const run = makeRun({ oboToken: "obo-signed-token" });
+
+    const resolved = buildEmbeddedRunExecutionParams({
+      run,
+      sessionCtx: { Provider: "boon-web", To: "thread-1", SenderId: "sender-1" },
+      hasRepliedRef: undefined,
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      runId: "run-1",
+    });
+
+    expect(resolved.senderContext.oboToken).toBe("obo-signed-token");
+    // Stable identity keeps coming from the session context alongside it.
+    expect(resolved.senderContext.senderId).toBe("sender-1");
+  });
+
+  it("leaves oboToken undefined in the sender context when the run has none", () => {
+    const resolved = buildEmbeddedRunExecutionParams({
+      run: makeRun({}),
+      // Even a stray OboToken on the persisted session context must not be used:
+      // a persisted OBO would be stale (5-min TTL) and is not the per-turn token.
+      sessionCtx: { Provider: "boon-web", To: "thread-1", OboToken: "stale-persisted" },
+      hasRepliedRef: undefined,
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      runId: "run-1",
+    });
+
+    expect(resolved.senderContext.oboToken).toBeUndefined();
+  });
+
   it("prefers OriginatingChannel over Provider for messageProvider", () => {
     const run = makeRun({ agentAccountId: "work", chatType: "group" });
 

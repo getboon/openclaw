@@ -2431,21 +2431,21 @@ describe("updateNpmInstalledPlugins", () => {
   it("updates disabled trusted official ClawHub installs through the catalog spec", async () => {
     installPluginFromClawHubMock.mockResolvedValue(
       createSuccessfulClawHubUpdateResult({
-        pluginId: "diagnostics-otel",
-        targetDir: "/tmp/diagnostics-otel",
+        pluginId: "diagnostics-prometheus",
+        targetDir: "/tmp/diagnostics-prometheus",
         version: "2026.5.4",
-        clawhubPackage: "@openclaw/diagnostics-otel",
+        clawhubPackage: "@openclaw/diagnostics-prometheus",
       }),
     );
 
     const config = createClawHubInstallConfig({
-      pluginId: "diagnostics-otel",
-      installPath: "/tmp/diagnostics-otel",
+      pluginId: "diagnostics-prometheus",
+      installPath: "/tmp/diagnostics-prometheus",
       clawhubUrl: "https://clawhub.ai",
-      clawhubPackage: "@openclaw/diagnostics-otel",
+      clawhubPackage: "@openclaw/diagnostics-prometheus",
       clawhubFamily: "code-plugin",
       clawhubChannel: "official",
-      spec: "clawhub:@openclaw/diagnostics-otel@2026.5.3",
+      spec: "clawhub:@openclaw/diagnostics-prometheus@2026.5.3",
     });
     const result = await updateNpmInstalledPlugins({
       config: {
@@ -2453,7 +2453,7 @@ describe("updateNpmInstalledPlugins", () => {
         plugins: {
           ...config.plugins,
           entries: {
-            "diagnostics-otel": {
+            "diagnostics-prometheus": {
               enabled: false,
               config: { preserved: true },
             },
@@ -2464,16 +2464,16 @@ describe("updateNpmInstalledPlugins", () => {
       syncOfficialPluginInstalls: true,
     });
 
-    expect(clawHubInstallCall()?.spec).toBe("clawhub:@openclaw/diagnostics-otel");
-    expect(clawHubInstallCall()?.expectedPluginId).toBe("diagnostics-otel");
-    expectRecordFields(result.config.plugins?.installs?.["diagnostics-otel"], {
+    expect(clawHubInstallCall()?.spec).toBe("clawhub:@openclaw/diagnostics-prometheus");
+    expect(clawHubInstallCall()?.expectedPluginId).toBe("diagnostics-prometheus");
+    expectRecordFields(result.config.plugins?.installs?.["diagnostics-prometheus"], {
       source: "clawhub",
-      spec: "clawhub:@openclaw/diagnostics-otel",
+      spec: "clawhub:@openclaw/diagnostics-prometheus",
       version: "2026.5.4",
-      clawhubPackage: "@openclaw/diagnostics-otel",
+      clawhubPackage: "@openclaw/diagnostics-prometheus",
       clawhubChannel: "official",
     });
-    expect(result.config.plugins?.entries?.["diagnostics-otel"]).toEqual({
+    expect(result.config.plugins?.entries?.["diagnostics-prometheus"]).toEqual({
       enabled: false,
       config: { preserved: true },
     });

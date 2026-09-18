@@ -117,8 +117,15 @@ export type ToolSummaryTrace = {
   /** Bounded per-call outcomes; arguments and result bodies are intentionally excluded. */
   invocations?: Array<{
     name: string;
-    status: "ok" | "error" | "blocked";
+    status: "ok" | "partial" | "error" | "blocked";
+    /** Real error text for a blocked pre-execution-failure call; absent otherwise. */
+    detail?: string;
   }>;
+  /**
+   * Errored calls still unresolved when the turn ended. `undefined` means the
+   * producer does not track recovery and preserves the existing disposition.
+   */
+  unrecoveredFailures?: number;
 };
 
 type CompletionTrace = {

@@ -46,6 +46,22 @@ describe("buildTraceToolSummary", () => {
     });
   });
 
+  it("preserves a partial tool outcome without treating it as an error", () => {
+    expect(
+      buildTraceToolSummary({
+        visibleToolNames: ["pdf"],
+        toolMetas: [{ toolName: "pdf", status: "partial" }],
+        hadFailure: false,
+      }),
+    ).toEqual({
+      calls: 1,
+      tools: ["pdf"],
+      failures: 0,
+      visibleTools: ["pdf"],
+      invocations: [{ name: "pdf", status: "partial" }],
+    });
+  });
+
   it("returns undefined when neither tools were visible nor invoked", () => {
     expect(
       buildTraceToolSummary({
@@ -54,5 +70,129 @@ describe("buildTraceToolSummary", () => {
         hadFailure: false,
       }),
     ).toBeUndefined();
+  });
+
+  it("carries hook-failure detail on a blocked invocation, but not on ok/error", () => {
+    const summary = buildTraceToolSummary({
+      visibleToolNames: ["message"],
+      toolMetas: [
+        { toolName: "exec", errored: false, detail: "stray" },
+        { toolName: "message", status: "blocked", detail: "Error: kaboom" },
+      ],
+      hadFailure: true,
+    });
+    expect(summary?.invocations).toEqual([
+      { name: "exec", status: "ok" },
+      { name: "message", status: "blocked", detail: "Error: kaboom" },
+    ]);
+  });
+
+  it("omits detail on a blocked invocation that never set it (a plain veto)", () => {
+    const summary = buildTraceToolSummary({
+      visibleToolNames: [],
+      toolMetas: [{ toolName: "message", status: "blocked" }],
+      hadFailure: true,
+    });
+    expect(summary?.invocations?.[0]).toEqual({ name: "message", status: "blocked" });
+  });
+
+  it("attaches a classified detail to an error invocation when a matching toolFailure exists", () => {
+    const summary = buildTraceToolSummary({
+      visibleToolNames: ["exec"],
+      toolMetas: [{ toolName: "exec", errored: true }],
+      hadFailure: true,
+      toolFailures: [{ toolName: "exec", errorCode: "ENOENT" }],
+    });
+    expect(summary?.invocations).toEqual([{ name: "exec", status: "error", detail: "not found" }]);
+  });
+
+  it("omits detail on an error invocation when no toolFailures entry matches its name", () => {
+    const summary = buildTraceToolSummary({
+      visibleToolNames: ["exec"],
+      toolMetas: [{ toolName: "exec", errored: true }],
+      hadFailure: true,
+      toolFailures: [{ toolName: "sessions_spawn", errorCode: "ENOENT" }],
+    });
+    expect(summary?.invocations).toEqual([{ name: "exec", status: "error" }]);
+  });
+
+  it("omits detail on an error invocation when the matching toolFailure classifies to nothing", () => {
+    const summary = buildTraceToolSummary({
+      visibleToolNames: ["exec"],
+      toolMetas: [{ toolName: "exec", errored: true }],
+      hadFailure: true,
+      toolFailures: [{ toolName: "exec", error: "some totally unclassifiable failure text" }],
+    });
+    expect(summary?.invocations).toEqual([{ name: "exec", status: "error" }]);
+  });
+
+  it("omits detail when a tool records more than one failure in the turn (ambiguous match)", () => {
+    // Two exec failures with different reasons: name-only matching cannot tell
+    // which reason belongs to which errored call, so no detail is attached to
+    // either rather than risk showing the wrong one.
+    const summary = buildTraceToolSummary({
+      visibleToolNames: ["exec"],
+      toolMetas: [
+        { toolName: "exec", errored: true },
+        { toolName: "exec", errored: true },
+      ],
+      hadFailure: true,
+      toolFailures: [
+        { toolName: "exec", errorCode: "ENOENT" },
+        { toolName: "exec", timedOut: true },
+      ],
+    });
+    expect(summary?.invocations).toEqual([
+      { name: "exec", status: "error" },
+      { name: "exec", status: "error" },
+    ]);
+  });
+
+  it("counts only the failures the runtime never marked retried", () => {
+    // A successfully re-run step is retired so it cannot demote a finished
+    // turn to "partial".
+    const summary = buildTraceToolSummary({
+      visibleToolNames: ["exec"],
+      toolMetas: [
+        { toolName: "exec", errored: true },
+        { toolName: "exec", errored: false },
+        { toolName: "sessions_spawn", errored: true },
+      ],
+      hadFailure: true,
+      toolFailures: [{ retried: true }, {}],
+    });
+
+    expect(summary?.unrecoveredFailures).toBe(1);
+    // Per-call outcomes stay untouched: both errors remain visible as evidence.
+    expect(summary?.invocations).toEqual([
+      { name: "exec", status: "error" },
+      { name: "exec", status: "ok" },
+      { name: "sessions_spawn", status: "error" },
+    ]);
+  });
+
+  it("reports zero unrecovered failures once every error was retried", () => {
+    expect(
+      buildTraceToolSummary({
+        visibleToolNames: ["exec"],
+        toolMetas: [
+          { toolName: "exec", errored: true },
+          { toolName: "exec", errored: false },
+        ],
+        hadFailure: true,
+        toolFailures: [{ retried: true }],
+      })?.unrecoveredFailures,
+    ).toBe(0);
+  });
+
+  it("omits the recovery count for producers that do not track failures", () => {
+    // Producers without a failure list keep the existing disposition.
+    expect(
+      buildTraceToolSummary({
+        visibleToolNames: ["exec"],
+        toolMetas: [{ toolName: "exec", errored: true }],
+        hadFailure: true,
+      }),
+    ).not.toHaveProperty("unrecoveredFailures");
   });
 });

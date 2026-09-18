@@ -5,7 +5,12 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { sanitizeForLog } from "../../../packages/terminal-core/src/ansi.js";
-import { FAST_MODE_AUTO_PROGRESS_KIND, type ReplyPayload } from "../../auto-reply/reply-payload.js";
+import {
+  FAST_MODE_AUTO_PROGRESS_KIND,
+  isReplyPayloadNonTerminalToolErrorWarning,
+  type ReplyPayload,
+} from "../../auto-reply/reply-payload.js";
+import { RETRY_NUDGE_TEXT } from "../../auto-reply/reply/commands-retry.js";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
 import { SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import { getRuntimeConfigSnapshot } from "../../config/config.js";
@@ -39,6 +44,7 @@ import type { CommandQueueEnqueueOptions } from "../../process/command-queue.typ
 import { createAgentHarnessTaskRuntimeScope } from "../../tasks/agent-harness-task-runtime-scope.js";
 import { resolveUserPath } from "../../utils.js";
 import { isMarkdownCapableMessageChannel } from "../../utils/message-channel.js";
+import { hasAcceptedSessionSpawn } from "../accepted-session-spawn.js";
 import {
   retireSessionMcpRuntime,
   retireSessionMcpRuntimeForSessionKey,
@@ -138,6 +144,7 @@ import {
   suspendSession,
   type SessionSuspensionParams,
 } from "../session-suspension.js";
+import { classifyToolFailureReason, type ToolErrorSummary } from "../tool-error-summary.js";
 import { resolveToolLoopDetectionConfig } from "../tool-loop-detection-config.js";
 import { derivePromptTokens, normalizeUsage, type UsageLike } from "../usage.js";
 import { redactRunIdentifier, resolveRunWorkspaceDir } from "../workspace-run.js";
@@ -221,6 +228,7 @@ import {
   resolveRunLivenessState,
   shouldRetryMissingAssistantTurn,
   shouldRetrySilentErrorAssistantTurn,
+  shouldRetryUnfinishedSteps,
   shouldTreatEmptyAssistantReplyAsSilent,
 } from "./run/incomplete-turn.js";
 import type { RunEmbeddedAgentParams } from "./run/params.js";
@@ -483,11 +491,25 @@ export function buildTraceToolSummary(params: {
     toolName: string;
     meta?: string;
     errored?: boolean;
-    status?: "blocked";
+    status?: "blocked" | "partial";
+    detail?: string;
     asyncStarted?: boolean;
   }>;
   visibleToolNames?: readonly string[];
   hadFailure: boolean;
+  /**
+   * Errored calls with recovery flags. Omit to keep the legacy disposition.
+   * Widened to optionally expose the classifier-relevant fields
+   * too: the real runtime value here has always been `attempt.toolFailures`
+   * (`Array<ToolErrorSummary & {retried?}>`, see run/types.ts), this type just
+   * didn't surface them. All new fields stay optional so existing bare
+   * `{retried}` callers/tests remain valid.
+   */
+  toolFailures?: ReadonlyArray<
+    Partial<Pick<ToolErrorSummary, "toolName" | "error" | "errorCode" | "timedOut">> & {
+      retried?: boolean;
+    }
+  >;
 }): ToolSummaryTrace | undefined {
   const toolMetas = params.toolMetas ?? [];
   const visibleTools = [...new Set(params.visibleToolNames ?? [])]
@@ -506,6 +528,24 @@ export function buildTraceToolSummary(params: {
     seen.add(toolName);
     tools.push(toolName);
   }
+  // For an error invocation, look up the matching failure by tool name and
+  // attach a classified, user-safe reason. There is no per-call id correlating
+  // a toolMeta to a toolFailure at this layer, so matching is by name; when a
+  // tool records more than one failure in the turn the mapping is ambiguous, so
+  // we omit the detail rather than risk attaching a reason to the wrong call.
+  const failureCountByTool = new Map<string, number>();
+  for (const failure of params.toolFailures ?? []) {
+    if (failure.toolName) {
+      failureCountByTool.set(failure.toolName, (failureCountByTool.get(failure.toolName) ?? 0) + 1);
+    }
+  }
+  const findMatchingFailureDetail = (toolName: string): string | undefined => {
+    if ((failureCountByTool.get(toolName) ?? 0) !== 1) {
+      return undefined;
+    }
+    const match = params.toolFailures?.find((failure) => failure.toolName === toolName);
+    return match ? classifyToolFailureReason(match)?.text : undefined;
+  };
   return {
     calls: toolMetas.length,
     tools,
@@ -513,15 +553,34 @@ export function buildTraceToolSummary(params: {
     // outcomes now flow through `invocations` for the audit projection.
     failures: params.hadFailure ? 1 : 0,
     visibleTools,
-    invocations: toolMetas.map((entry) => ({
-      name: entry.toolName,
-      status:
-        entry.status === "blocked"
-          ? ("blocked" as const)
+    invocations: toolMetas.map((entry) => {
+      const status =
+        entry.status === "blocked" || entry.status === "partial"
+          ? entry.status
           : entry.errored === true
             ? ("error" as const)
-            : ("ok" as const),
-    })),
+            : ("ok" as const);
+      const invocation: NonNullable<ToolSummaryTrace["invocations"]>[number] = {
+        name: entry.toolName,
+        status,
+      };
+      // A blocked entry carries its pre-execution veto detail as-is; an error
+      // entry gets a classified, user-safe failure reason looked up by name.
+      if (status === "blocked" && entry.detail) {
+        invocation.detail = entry.detail;
+      } else if (status === "error") {
+        const detail = findMatchingFailureDetail(entry.toolName);
+        if (detail) {
+          invocation.detail = detail;
+        }
+      }
+      return invocation;
+    }),
+    ...(params.toolFailures
+      ? {
+          unrecoveredFailures: params.toolFailures.filter((failure) => !failure.retried).length,
+        }
+      : {}),
   };
 }
 
@@ -1584,6 +1643,9 @@ async function runEmbeddedAgentInternal(
 
       const MAX_TIMEOUT_COMPACTION_ATTEMPTS = 2;
       const MAX_OVERFLOW_COMPACTION_ATTEMPTS = 3;
+      // ENG-18893: matches booneval's own proven nudge cap (agent-regression
+      // scenarios' `nudge.max: 2`) so prod and eval retry the same amount.
+      const MAX_UNFINISHED_STEPS_RETRY_ATTEMPTS = 2;
       const MAX_RUN_LOOP_ITERATIONS = resolveMaxRunRetryIterations(
         profileCandidates.length,
         params.config,
@@ -1605,6 +1667,7 @@ async function runEmbeddedAgentInternal(
       let reasoningOnlyRetryAttempts = 0;
       let emptyResponseRetryAttempts = 0;
       let compactionContinuationRetryAttempts = 0;
+      let unfinishedStepsRetryAttempts = 0;
       let beforeAgentFinalizeRevisionAttempts = 0;
       let sameModelIdleTimeoutRetries = 0;
       // Cost-runaway breaker for #76293. State lives at the run-loop level
@@ -1656,6 +1719,7 @@ async function runEmbeddedAgentInternal(
       let reasoningOnlyRetryInstruction: string | null = null;
       let emptyResponseRetryInstruction: string | null = null;
       let compactionContinuationRetryInstruction: string | null = null;
+      let unfinishedStepsRetryInstruction: string | null = null;
       let nextAttemptPromptOverride: string | null = null;
       let rateLimitProfileRotations = 0;
       let timeoutCompactionAttempts = 0;
@@ -1960,6 +2024,7 @@ async function runEmbeddedAgentInternal(
             reasoningOnlyRetryInstruction,
             emptyResponseRetryInstruction,
             compactionContinuationRetryInstruction,
+            unfinishedStepsRetryInstruction,
           ].filter(
             (value): value is string => typeof value === "string" && value.trim().length > 0,
           );
@@ -2069,6 +2134,7 @@ async function runEmbeddedAgentInternal(
           const rawAttempt = await runEmbeddedAttemptWithBackend({
             sessionId: activeSessionId,
             sessionKey: resolvedSessionKey,
+            modelRequestHeaders: params.modelRequestHeaders,
             promptCacheKey: params.promptCacheKey,
             sandboxSessionKey: params.sandboxSessionKey,
             trigger: params.trigger,
@@ -2089,6 +2155,10 @@ async function runEmbeddedAgentInternal(
             senderName: params.senderName,
             senderUsername: params.senderUsername,
             senderE164: params.senderE164,
+            // Gateway-audience OBO (ENG-19115) → attempt.ts → x-boon-gateway-obo-token.
+            // The attempt params are an explicit copy of the run params; omitting the
+            // field here is why attempt.ts's params.oboToken was always undefined.
+            oboToken: params.oboToken,
             approvalReviewerDeviceId: params.approvalReviewerDeviceId,
             currentChannelId: params.currentChannelId,
             chatId: params.chatId,
@@ -2488,6 +2558,9 @@ async function runEmbeddedAgentInternal(
                     config: params.config,
                     skillsSnapshot: params.skillsSnapshot,
                     senderId: params.senderId,
+                    // Gateway-audience OBO → x-boon-gateway-obo-token on the compaction
+                    // model call, same as the primary-turn dispatch above.
+                    oboToken: params.oboToken,
                     provider,
                     modelId,
                     harnessRuntime: agentHarness.id,
@@ -2684,6 +2757,9 @@ async function runEmbeddedAgentInternal(
                     config: params.config,
                     skillsSnapshot: params.skillsSnapshot,
                     senderId: params.senderId,
+                    // Gateway-audience OBO → x-boon-gateway-obo-token on the compaction
+                    // model call, same as the primary-turn dispatch above.
+                    oboToken: params.oboToken,
                     provider,
                     modelId,
                     harnessRuntime: agentHarness.id,
@@ -3616,6 +3692,8 @@ async function runEmbeddedAgentInternal(
             agentId: params.agentId,
             runId: params.runId,
             runAborted: aborted,
+            yieldDetected: attempt.yieldDetected === true,
+            hasAcceptedSessionSpawn: hasAcceptedSessionSpawn(attempt.acceptedSessionSpawns),
             didSendDeterministicApprovalPrompt: attempt.didSendDeterministicApprovalPrompt,
             heartbeatToolResponse: attempt.heartbeatToolResponse,
           });
@@ -3670,6 +3748,7 @@ async function runEmbeddedAgentInternal(
             toolMetas: attempt.toolMetas,
             visibleToolNames: attempt.visibleToolNames,
             hadFailure: Boolean(attempt.lastToolError),
+            toolFailures: attempt.toolFailures,
           });
           const failureSignal = resolveEmbeddedRunFailureSignal({
             trigger: params.trigger,
@@ -3897,7 +3976,39 @@ async function runEmbeddedAgentInternal(
             postCompactionGuard.armPostCompaction();
             continue;
           }
+          // Neither reasoning-only nor empty-response fired this iteration (both
+          // `continue` above when they do), so any value they're still holding is
+          // stale from an earlier iteration — clear all four alongside each other
+          // so a later iteration's prompt additions can never mix a no-longer-
+          // applicable instruction in with whichever retry actually fires next.
+          reasoningOnlyRetryInstruction = null;
+          emptyResponseRetryInstruction = null;
           compactionContinuationRetryInstruction = null;
+          unfinishedStepsRetryInstruction = null;
+          if (
+            shouldRetryUnfinishedSteps({
+              aborted,
+              externalAbort,
+              timedOut,
+              hasNonTerminalToolErrorWarning: (payloadsWithToolMedia ?? []).some((payload) =>
+                isReplyPayloadNonTerminalToolErrorWarning(payload),
+              ),
+              hasCommittedMutation:
+                hasMessagingToolDeliveryEvidence(attempt) ||
+                hasAcceptedSessionSpawn(attempt.acceptedSessionSpawns) ||
+                (attempt.successfulCronAdds ?? 0) > 0,
+              retryAttempts: unfinishedStepsRetryAttempts,
+              maxRetryAttempts: MAX_UNFINISHED_STEPS_RETRY_ATTEMPTS,
+            })
+          ) {
+            unfinishedStepsRetryAttempts += 1;
+            unfinishedStepsRetryInstruction = RETRY_NUDGE_TEXT;
+            log.warn(
+              `unfinished steps detected: runId=${params.runId} sessionId=${params.sessionId} ` +
+                `provider=${activeErrorContext.provider}/${activeErrorContext.model} — retrying ${unfinishedStepsRetryAttempts}/${MAX_UNFINISHED_STEPS_RETRY_ATTEMPTS} with continuation nudge`,
+            );
+            continue;
+          }
           if (reasoningOnlyRetriesExhausted && !finalAssistantVisibleText) {
             log.warn(
               `reasoning-only retries exhausted: runId=${params.runId} sessionId=${params.sessionId} ` +
@@ -4079,6 +4190,7 @@ async function runEmbeddedAgentInternal(
             reasoningOnlyRetryInstruction = null;
             emptyResponseRetryInstruction = null;
             compactionContinuationRetryInstruction = null;
+            unfinishedStepsRetryInstruction = null;
             log.warn(
               `before_agent_finalize requested one more pass: ` +
                 `runId=${params.runId} sessionId=${params.sessionId} ` +

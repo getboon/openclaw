@@ -22,6 +22,7 @@ const HOOK_NAMES = [
   "model_call_ended",
   "agent_end",
   "after_tool_call",
+  "before_tool_call_hook_failed",
   "message_sent",
   "delivery_recovery_exhausted",
   "subagent_ended",
@@ -50,7 +51,13 @@ function makeApi(pluginConfig?: Record<string, unknown>) {
 describe("registerSentryMonitor", () => {
   // Snapshot every env var the plugin reads so a test can set them without
   // leaking into sibling tests or inheriting a value from the real shell.
-  const ENV_KEYS = ["BOON_SENTRY_DSN", "BOON_SKILLS_REF", "DEPLOY_WAVE", "WAVE"] as const;
+  const ENV_KEYS = [
+    "BOON_SENTRY_DSN",
+    "BOON_SKILLS_REF",
+    "DEPLOY_WAVE",
+    "WAVE",
+    "BOON_TENANT_ACCOUNT_ID",
+  ] as const;
   const saved: Record<string, string | undefined> = {};
 
   beforeEach(() => {
@@ -81,7 +88,7 @@ describe("registerSentryMonitor", () => {
     expect(registerRuntimeLifecycle).not.toHaveBeenCalled();
   });
 
-  it("activates from a plugin-config dsn: inits Sentry and registers all eight hooks plus flush", () => {
+  it("activates from a plugin-config dsn: inits Sentry and registers all nine hooks plus flush", () => {
     const { api, on, registerRuntimeLifecycle, info } = makeApi({
       dsn: "https://abc@o1.ingest.sentry.io/1",
     });
@@ -185,6 +192,78 @@ describe("registerSentryMonitor", () => {
     });
     // An abandoned crash-ambiguous send always reports (never null).
     expect(Sentry.captureException).toHaveBeenCalledTimes(2);
+    fire("before_tool_call_hook_failed", {
+      toolName: "message",
+      toolCallId: "tc1",
+      runId: "r",
+      error: "hook crashed",
+    });
+    // A before_tool_call hook failure always reports (never null).
+    expect(Sentry.captureException).toHaveBeenCalledTimes(3);
+  });
+
+  // Multi-tenant hosts share one hostname, so the tenant id is the only stable
+  // identity available to a capture.
+  it("sets a trial_account_id tag from BOON_TENANT_ACCOUNT_ID", () => {
+    process.env.BOON_TENANT_ACCOUNT_ID = "131";
+    const { api } = makeApi({ dsn: "https://k@o.ingest.sentry.io/1" });
+
+    registerSentryMonitor(api);
+
+    expect(Sentry.setTags).toHaveBeenCalledWith(
+      expect.objectContaining({ trial_account_id: "131" }),
+    );
+  });
+
+  it("omits the trial_account_id tag when the env var is unset (paid hosts unchanged)", () => {
+    const { api } = makeApi({ dsn: "https://k@o.ingest.sentry.io/1" });
+
+    registerSentryMonitor(api);
+
+    expect(Sentry.setTags).not.toHaveBeenCalled();
+  });
+
+  // Lets a noisy host report only turn- and delivery-level outcomes instead of
+  // every per-tool failure the agent already handles itself.
+  it("registers only the allow-listed hooks when config.hooks is set", () => {
+    const { api, on } = makeApi({
+      dsn: "https://k@o.ingest.sentry.io/1",
+      hooks: ["agent_end", "message_sent"],
+    });
+
+    registerSentryMonitor(api);
+
+    expect(on.mock.calls.map((c) => c[0]).toSorted()).toEqual(["agent_end", "message_sent"]);
+  });
+
+  it("registers all nine hooks when config.hooks is absent (default unchanged)", () => {
+    const { api, on } = makeApi({ dsn: "https://k@o.ingest.sentry.io/1" });
+
+    registerSentryMonitor(api);
+
+    expect(on.mock.calls.map((c) => c[0]).toSorted()).toEqual(HOOK_NAMES.toSorted());
+  });
+
+  // An empty array is a real operator intent ("report nothing") and must not be
+  // confused with "unset" — `??`/length checks that treat [] as absent would
+  // silently re-enable every hook on the noisiest tenant class.
+  it("registers no hooks when config.hooks is an empty array", () => {
+    const { api, on } = makeApi({ dsn: "https://k@o.ingest.sentry.io/1", hooks: [] });
+
+    registerSentryMonitor(api);
+
+    expect(on).not.toHaveBeenCalled();
+  });
+
+  it("ignores an unknown hook name in the allow-list rather than throwing", () => {
+    const { api, on } = makeApi({
+      dsn: "https://k@o.ingest.sentry.io/1",
+      hooks: ["agent_end", "not_a_real_hook"],
+    });
+
+    registerSentryMonitor(api);
+
+    expect(on.mock.calls.map((c) => c[0])).toEqual(["agent_end"]);
   });
 
   it("flushes Sentry with a 2s timeout on cleanup", async () => {

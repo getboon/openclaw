@@ -57,7 +57,11 @@ import {
   resolveAnnounceRetryDelayMs,
   safeRemoveAttachmentsDir,
 } from "./subagent-registry-helpers.js";
-import type { PendingFinalDeliveryPayload, SubagentRunRecord } from "./subagent-registry.types.js";
+import type {
+  PendingFinalDeliveryPayload,
+  SubagentAnnounceGiveUpReason,
+  SubagentRunRecord,
+} from "./subagent-registry.types.js";
 import { resolveSubagentRunDeadlineMs } from "./subagent-run-timeout.js";
 import { deleteSubagentSessionForCleanup } from "./subagent-session-cleanup.js";
 
@@ -216,6 +220,9 @@ export function createSubagentRegistryLifecycleController(params: {
     const deliveryState = ensureDeliveryState(entry);
     if (typeof delivery.enqueuedAt === "number") {
       deliveryState.enqueuedAt ??= delivery.enqueuedAt;
+    }
+    if (delivery.path === "owner") {
+      deliveryState.ownerChannel = delivery.ownerChannel;
     }
     if (delivery.delivered) {
       const deliveredAt =
@@ -580,7 +587,7 @@ export function createSubagentRegistryLifecycleController(params: {
   const suspendPendingFinalDelivery = (args: {
     runId: string;
     entry: SubagentRunRecord;
-    reason: "retry-limit" | "expiry" | "subagent_no_output";
+    reason: SubagentAnnounceGiveUpReason;
     error?: string;
   }) => {
     markPendingFinalDelivery({
@@ -621,7 +628,7 @@ export function createSubagentRegistryLifecycleController(params: {
   const finalizeResumedAnnounceGiveUp = async (giveUpParams: {
     runId: string;
     entry: SubagentRunRecord;
-    reason: "retry-limit" | "expiry" | "subagent_no_output";
+    reason: SubagentAnnounceGiveUpReason;
   }) => {
     if (shouldSuspendPendingFinalDelivery(giveUpParams.entry)) {
       suspendPendingFinalDelivery({
@@ -1061,8 +1068,12 @@ export function createSubagentRegistryLifecycleController(params: {
         spawnMode: pendingPayload.spawnMode,
         expectsCompletionMessage: pendingPayload.expectsCompletionMessage,
         wakeOnDescendantSettle: pendingPayload.wakeOnDescendantSettle === true,
+        claimedOwnerChannel: entry.delivery?.ownerChannel,
         onDeliveryResult: (delivery) => {
           recordAnnounceDeliveryResult(entry, delivery);
+          if (delivery.path === "owner") {
+            params.persist();
+          }
           if (delivery.delivered) {
             const deliveryState = ensureDeliveryState(entry);
             if (deliveryState.lastError !== undefined) {
@@ -1080,6 +1091,10 @@ export function createSubagentRegistryLifecycleController(params: {
           // instead of scheduling futile retries.
           if (delivery.reason === "subagent_no_output") {
             ensureDeliveryState(entry).lastDropReason = "subagent_no_output";
+          }
+          if (delivery.path === "owner" && delivery.terminal) {
+            ensureDeliveryState(entry).lastDropReason = "owner_terminal";
+            params.persist();
           }
           latestDeliveryError = formatAnnounceDeliveryError(delivery);
           if (ensureDeliveryState(entry).lastError !== latestDeliveryError) {

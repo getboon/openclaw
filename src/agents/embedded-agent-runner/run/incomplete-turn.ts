@@ -365,6 +365,47 @@ export function shouldRetryMissingAssistantTurn(params: {
   return !resolveAttemptReplayMetadata(params.attempt).hadPotentialSideEffects;
 }
 
+/**
+ * ENG-18893: silently retries once more (same session, `/retry`'s own nudge
+ * text) when a real reply landed but `payloads.ts` classified an unrecovered
+ * exec-class tool failure as non-terminal — the same condition that would
+ * otherwise surface "N steps didn't finish" plus a manual Retry button. Bounded
+ * by `maxRetryAttempts` (matches booneval's own proven nudge cap) so a
+ * persistently-failing step can't loop forever.
+ */
+export function shouldRetryUnfinishedSteps(params: {
+  aborted: boolean;
+  externalAbort: boolean;
+  timedOut: boolean;
+  hasNonTerminalToolErrorWarning: boolean;
+  /**
+   * True only when a messaging-tool send, cron add, or session spawn already
+   * committed this turn — re-prompting with "redo it" risks the model
+   * replaying that specific mutation, with no human in the loop to catch the
+   * duplicate (unlike a manual Retry click). Deliberately narrower than the
+   * broad `hadPotentialSideEffects` flag the other sibling checks use: that
+   * flag is also true for the mere PRESENCE of an unreplayable tool call
+   * (every `exec`/`bash`/`process` invocation, replay-safe or not — see
+   * `tool-replay-safety.ts`), which is unconditionally true for every attempt
+   * this retry exists to handle (`isRecoverableExecClassToolName`) and would
+   * make the guard fire 100% of the time, defeating the retry entirely.
+   */
+  hasCommittedMutation: boolean;
+  retryAttempts: number;
+  maxRetryAttempts: number;
+}): boolean {
+  if (params.aborted || params.externalAbort || params.timedOut) {
+    return false;
+  }
+  if (params.hasCommittedMutation) {
+    return false;
+  }
+  if (!params.hasNonTerminalToolErrorWarning) {
+    return false;
+  }
+  return params.retryAttempts < params.maxRetryAttempts;
+}
+
 function joinAssistantTexts(assistantTexts?: readonly string[]): string {
   return (assistantTexts ?? []).join("\n\n").trim();
 }

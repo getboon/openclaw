@@ -83,6 +83,7 @@ describe("before_tool_call loop detection behavior", () => {
   let hookRunner: {
     hasHooks: ReturnType<typeof vi.fn>;
     runBeforeToolCall: ReturnType<typeof vi.fn>;
+    runBeforeToolCallHookFailed: ReturnType<typeof vi.fn>;
   };
   const enabledLoopDetectionContext = {
     agentId: "main",
@@ -102,6 +103,7 @@ describe("before_tool_call loop detection behavior", () => {
     hookRunner = {
       hasHooks: vi.fn(),
       runBeforeToolCall: vi.fn(),
+      runBeforeToolCallHookFailed: vi.fn(),
     };
     mockGetGlobalHookRunner.mockReturnValue(hookRunner as any);
     hookRunner.hasHooks.mockReturnValue(false);
@@ -1005,6 +1007,7 @@ describe("before_tool_call requireApproval handling", () => {
   let hookRunner: {
     hasHooks: ReturnType<typeof vi.fn>;
     runBeforeToolCall: ReturnType<typeof vi.fn>;
+    runBeforeToolCallHookFailed: ReturnType<typeof vi.fn>;
   };
   const mockCallGateway = vi.mocked(callGatewayTool);
 
@@ -1048,6 +1051,7 @@ describe("before_tool_call requireApproval handling", () => {
     hookRunner = {
       hasHooks: vi.fn((hookName: string) => hookName === "before_tool_call"),
       runBeforeToolCall: vi.fn(),
+      runBeforeToolCallHookFailed: vi.fn(),
     };
     mockGetGlobalHookRunner.mockReturnValue(hookRunner as any);
     // Keep the global singleton aligned as a fallback in case another setup path

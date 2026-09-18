@@ -1346,6 +1346,10 @@ async function compactEmbeddedAgentSessionDirectOnce(
               runId: diagnosticCompactionRunId,
               ...(params.sessionKey && { sessionKey: params.sessionKey }),
               sessionId: params.sessionId,
+              // Gateway-audience OBO → x-boon-gateway-obo-token, omit-when-absent.
+              // Compaction is a separate model call from the primary turn, so this must
+              // be forwarded here too or a budget-exempt account gets billed for it.
+              ...(params.oboToken && { oboToken: params.oboToken }),
               provider,
               model: modelId,
               api: effectiveModel.api,

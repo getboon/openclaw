@@ -4,7 +4,7 @@
  * Completion handoff and requester-visible replies use this to choose between
  * steering a subagent and directly delivering a message, with phase evidence.
  */
-type SubagentDeliveryPath = "steered" | "direct" | "none";
+type SubagentDeliveryPath = "steered" | "direct" | "owner" | "none";
 /** Stable reasons an announcement delivery can fail without throwing. */
 export type SubagentAnnounceDeliveryFailureReason =
   | "completion_handoff_pending"
@@ -23,6 +23,7 @@ export type SubagentAnnounceDeliveryResult = {
   delivered: boolean;
   path: SubagentDeliveryPath;
   deliveredAt?: number;
+  ownerChannel?: string;
   enqueuedAt?: number;
   reason?: SubagentAnnounceDeliveryFailureReason;
   error?: string;

@@ -52,6 +52,7 @@ import {
   type ToolFailureDigest,
   type ToolFailureDigestEntry,
 } from "../../tool-failure-digest.js";
+import { TOOL_LOOP_RUN_ENDED_CODE } from "../../tool-loop-detection.js";
 
 type ToolMetaEntry = { toolName: string; meta?: string; errored?: boolean };
 type ToolErrorWarningPolicy = {
@@ -130,6 +131,14 @@ function shouldIncludeToolErrorDetails(params: {
   verboseLevel?: VerboseLevel;
 }): boolean {
   if (isVerboseToolDetailEnabled(params.verboseLevel)) {
+    return true;
+  }
+  // A loop guard that ENDED the run is the one failure whose text the user must
+  // see by default: it is fixed authored copy (not leaked tool output), and the
+  // bare "<tool> failed" badge would otherwise blame the tool for a run the
+  // agent stopped on purpose. Gated on the structured code, never on the notice
+  // text — a tool error that merely quotes it must not open this gate.
+  if (params.lastToolError.errorCode === TOOL_LOOP_RUN_ENDED_CODE) {
     return true;
   }
   if (!isExecLikeToolName(params.lastToolError.toolName)) {
@@ -234,6 +243,8 @@ function resolveToolErrorWarningPolicy(params: {
   isHeartbeatTrigger?: boolean;
   sessionKey: string;
   verboseLevel?: VerboseLevel;
+  /** ENG-19495 — a yield-to-a-spawned-subagent turn is a deliberate handoff, not a failure. */
+  yieldHandoff?: boolean;
 }): ToolErrorWarningPolicy {
   let toolErrorWarningOverride: boolean | undefined;
   let dynamicToolErrorWarningsDisabled = false;
@@ -248,10 +259,10 @@ function resolveToolErrorWarningPolicy(params: {
     verboseLevel: dynamicToolErrorWarningsDisabled ? "off" : params.verboseLevel,
   });
   const suppressToolErrorWarnings = toolErrorWarningOverride === true;
-  // These two are turn-wide overrides, not per-failure decisions — they must
+  // These are turn-wide overrides, not per-failure decisions — they must
   // win before any failure-shape check runs, and the digest builder applies
   // them the same way (as a single upfront gate) for the same reason.
-  if (suppressToolErrorWarnings || params.suppressToolErrors) {
+  if (suppressToolErrorWarnings || params.suppressToolErrors || params.yieldHandoff) {
     return { showWarning: false, includeDetails };
   }
   return {
@@ -301,6 +312,10 @@ export function buildEmbeddedRunPayloads(params: {
   agentId?: string;
   runId?: string;
   runAborted?: boolean;
+  /** ENG-19495 — true when this attempt ended via the sessions_yield tool. */
+  yieldDetected?: boolean;
+  /** ENG-19495 — true when this attempt spawned a subagent (a continuation exists). */
+  hasAcceptedSessionSpawn?: boolean;
   didSendDeterministicApprovalPrompt?: boolean;
   heartbeatToolResponse?: HeartbeatToolResponse;
 }): ReplyPayload[] {
@@ -639,6 +654,7 @@ export function buildEmbeddedRunPayloads(params: {
       isHeartbeatTrigger: params.isHeartbeatTrigger,
       sessionKey: params.sessionKey,
       verboseLevel: params.verboseLevel,
+      yieldHandoff: params.yieldDetected === true && params.hasAcceptedSessionSpawn === true,
     });
 
     // Surface mutating failures unless the assistant explicitly acknowledged the failed action.

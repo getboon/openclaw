@@ -100,7 +100,7 @@ async function loadFreshAfterToolCallModulesForTest() {
   }));
   vi.doMock("./agent-tools.before-tool-call.state.js", () => ({
     consumeAdjustedParamsForToolCall: beforeToolCallMocks.consumeAdjustedParamsForToolCall,
-    consumePreExecutionBlockedToolCall: vi.fn(() => false),
+    consumePreExecutionBlockedToolCall: vi.fn(() => ({ blocked: false })),
     consumeStructuredReplaySafeToolCall: vi.fn(() => false),
   }));
   vi.doMock("./agent-tools.before-tool-call.js", () => ({
@@ -110,7 +110,7 @@ async function loadFreshAfterToolCallModulesForTest() {
       details: { status: "blocked", deniedReason: "plugin-before-tool-call", reason },
     }),
     consumeAdjustedParamsForToolCall: beforeToolCallMocks.consumeAdjustedParamsForToolCall,
-    consumePreExecutionBlockedToolCall: vi.fn(() => false),
+    consumePreExecutionBlockedToolCall: vi.fn(() => ({ blocked: false })),
     recordAdjustedParamsForToolCall: beforeToolCallMocks.recordAdjustedParamsForToolCall,
     recordStructuredReplayTrustForToolCall:
       beforeToolCallMocks.recordStructuredReplayTrustForToolCall,

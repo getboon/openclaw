@@ -1,5 +1,13 @@
+import type { SubagentCompletionOwner } from "../../agents/subagent-completion-owner.js";
 // Plugin runtime types describe activated plugin capabilities exposed to core execution.
 import type { PluginRuntimeCore, RuntimeLogger } from "./types-core.js";
+
+export type {
+  SubagentCompletionOwner,
+  SubagentCompletionRequest,
+  SubagentCompletionResult,
+  SubagentCompletionRoute,
+} from "../../agents/subagent-completion-owner.js";
 
 export type { RuntimeLogger };
 
@@ -79,6 +87,7 @@ export type RuntimeNodeInvokeParams = {
 /** Trusted in-process runtime surface injected into native plugins. */
 export type PluginRuntime = PluginRuntimeCore & {
   subagent: {
+    registerCompletionOwner: (owner: SubagentCompletionOwner) => { dispose: () => void };
     run: (params: SubagentRunParams) => Promise<SubagentRunResult>;
     waitForRun: (params: SubagentWaitParams) => Promise<SubagentWaitResult>;
     getSessionMessages: (

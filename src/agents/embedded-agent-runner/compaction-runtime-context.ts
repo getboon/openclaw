@@ -41,6 +41,10 @@ type EmbeddedCompactionRuntimeContext = {
   skillsSnapshot?: SkillSnapshot;
   senderIsOwner?: boolean;
   senderId?: string;
+  // Gateway-audience OBO → x-boon-gateway-obo-token on the compaction model call.
+  // Compaction is a separate model call from the primary turn, so this must be
+  // forwarded independently or a budget-exempt account gets billed for it.
+  oboToken?: string;
   provider?: string;
   runtimeProvider?: string;
   model?: string;
@@ -256,6 +260,7 @@ export function buildEmbeddedCompactionRuntimeContext(params: {
   skillsSnapshot?: SkillSnapshot;
   senderIsOwner?: boolean;
   senderId?: string | null;
+  oboToken?: string | null;
   provider?: string | null;
   modelId?: string | null;
   harnessRuntime?: string | null;
@@ -300,6 +305,7 @@ export function buildEmbeddedCompactionRuntimeContext(params: {
     skillsSnapshot: params.skillsSnapshot,
     senderIsOwner: params.senderIsOwner,
     senderId: params.senderId ?? undefined,
+    oboToken: params.oboToken ?? undefined,
     provider: resolved.provider,
     runtimeProvider: resolved.runtimeProvider,
     model: resolved.model,

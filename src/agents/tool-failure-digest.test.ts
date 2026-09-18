@@ -67,6 +67,34 @@ describe("buildToolFailureDigest", () => {
     ]);
   });
 
+  it("derives legacy completed counts from every surfaced failure", () => {
+    const digest = buildToolFailureDigest({
+      toolFailures: [
+        failure({ toolName: "write", mutatingAction: true }),
+        failure({ toolName: "process", error: "connection timed out", timedOut: true }),
+      ],
+      toolMetas: [{}, {}, {}],
+      surfaceContext,
+    });
+
+    expect(digest?.totalToolCount).toBe(3);
+    expect(digest?.completedToolCount).toBe(1);
+  });
+
+  it("infers a legacy total when failure records outnumber tool metadata", () => {
+    const digest = buildToolFailureDigest({
+      toolFailures: [
+        failure({ toolName: "write", mutatingAction: true }),
+        failure({ toolName: "process", error: "connection timed out", timedOut: true }),
+      ],
+      toolMetas: [],
+      surfaceContext,
+    });
+
+    expect(digest?.totalToolCount).toBe(2);
+    expect(digest?.completedToolCount).toBe(0);
+  });
+
   it("drops entries the shared suppression predicate silences (sessions_send)", () => {
     const digest = buildToolFailureDigest({
       toolFailures: [failure({ toolName: "sessions_send" }), failure({ toolName: "exec" })],
@@ -129,5 +157,15 @@ describe("buildToolFailureDigest", () => {
     });
     expect(digest?.completedToolCount).toBe(1);
     expect(digest?.totalToolCount).toBe(3);
+  });
+
+  it("treats a partial call as not completed", () => {
+    const digest = buildToolFailureDigest({
+      toolFailures: [failure({ toolName: "write", mutatingAction: true })],
+      toolMetas: [{ errored: false }, { errored: false, status: "partial" }],
+      surfaceContext: { ...surfaceContext, hasUserFacingErrorReply: false },
+    });
+    expect(digest?.completedToolCount).toBe(1);
+    expect(digest?.totalToolCount).toBe(2);
   });
 });

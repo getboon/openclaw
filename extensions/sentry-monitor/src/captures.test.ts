@@ -1,6 +1,7 @@
 import type {
   PluginHookAfterToolCallEvent,
   PluginHookAgentEndEvent,
+  PluginHookBeforeToolCallFailedEvent,
   PluginHookCronChangedEvent,
   PluginHookMessageSentEvent,
   PluginHookModelCallEndedEvent,
@@ -11,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAfterToolCallCapture,
   buildAgentEndCapture,
+  buildBeforeToolCallHookFailedCapture,
   buildCronChangedCapture,
   buildMessageSentCapture,
   buildModelCallEndedCapture,
@@ -163,6 +165,77 @@ describe("buildAgentEndCapture", () => {
     expect(buildAgentEndCapture({ messages: [], success: false }, HOST)?.message).toBe(
       "agent_end success=false",
     );
+  });
+
+  // run_id is boon-core's `dispatch_ref`: minted per turn, sent to the box as
+  // run_id / X-Request-Id, printed in the Slack stall alert, and tagged on
+  // boon-core's own Sentry events. It was only ever in `contexts` here, which
+  // Sentry does not index — so given a dispatch_ref from an alert you could not
+  // SEARCH the fleet project for the box's side of the same turn. Promoting it
+  // to a tag closes that round trip.
+  it("tags run_id so an event can be found BY the correlation id, not just read after", () => {
+    const capture = buildAgentEndCapture(
+      { messages: [], success: false, error: "boom", runId: "r9" } as PluginHookAgentEndEvent,
+      HOST,
+    );
+    expect(capture?.tags).toMatchObject({ hook: "agent_end", host: HOST, run_id: "r9" });
+  });
+
+  it("tags session_id and agent_id from the hook context", () => {
+    // The ids come from PluginHookAgentContext, which already carries them — no
+    // upstream hook-type change needed, which matters because the fork is far
+    // behind upstream and `src/plugins/hook-types.ts` is upstream-owned.
+    const capture = buildAgentEndCapture(
+      { messages: [], success: false, error: "boom", runId: "r9" } as PluginHookAgentEndEvent,
+      HOST,
+      { sessionId: "thread-1529", agentId: "main" },
+    );
+    expect(capture?.tags).toMatchObject({
+      run_id: "r9",
+      session_id: "thread-1529",
+      agent_id: "main",
+    });
+  });
+
+  it("populates session_id in the run context, whose slot already existed", () => {
+    // runContext(runId, sessionId, callId) has always taken a sessionId; every
+    // caller passed only runId, so the field was permanently undefined.
+    const capture = buildAgentEndCapture(
+      { messages: [], success: false, error: "boom", runId: "r9" } as PluginHookAgentEndEvent,
+      HOST,
+      { sessionId: "thread-1529" },
+    );
+    expect(capture?.contexts?.run).toEqual({
+      run_id: "r9",
+      session_id: "thread-1529",
+      call_id: undefined,
+    });
+  });
+
+  it("omits correlation tags entirely when the ids are absent", () => {
+    // pruneTags drops undefined/empty; an empty-string tag would still create a
+    // searchable facet in Sentry, which is worse than the tag being absent.
+    const capture = buildAgentEndCapture(
+      { messages: [], success: false, error: "boom" } as PluginHookAgentEndEvent,
+      HOST,
+    );
+    expect(capture?.tags).toEqual({ hook: "agent_end", host: HOST });
+  });
+
+  it("does not change the fingerprint, so existing issues do not fragment", () => {
+    // Sentry groups on fingerprint, not tags. Adding tags to a live capture must
+    // not split an existing issue into two.
+    const withCtx = buildAgentEndCapture(
+      { messages: [], success: false, error: "boom", runId: "r9" } as PluginHookAgentEndEvent,
+      HOST,
+      { sessionId: "thread-1529", agentId: "main" },
+    );
+    const withoutCtx = buildAgentEndCapture(
+      { messages: [], success: false, error: "boom", runId: "r9" } as PluginHookAgentEndEvent,
+      HOST,
+    );
+    expect(withCtx?.fingerprint).toEqual(withoutCtx?.fingerprint);
+    expect(withCtx?.fingerprint).toEqual(["agent_end", "boom"]);
   });
 });
 
@@ -486,5 +559,55 @@ describe("buildSessionEndCapture", () => {
       expect(capture?.extra?.message_count).toBe(3);
       expect(capture?.fingerprint).toEqual(["session_end", "unknown"]);
     }
+  });
+});
+
+describe("buildBeforeToolCallHookFailedCapture", () => {
+  function event(
+    overrides: Partial<PluginHookBeforeToolCallFailedEvent> = {},
+  ): PluginHookBeforeToolCallFailedEvent {
+    return { toolName: "message", toolCallId: "tc1", runId: "r1", error: "boom", ...overrides };
+  }
+
+  it("always captures as an exception — this hook never fires for a deliberate veto", () => {
+    const capture = buildBeforeToolCallHookFailedCapture(event(), HOST);
+    expect(capture.kind).toBe("exception");
+    expect(capture.message).toBe("boom");
+    expect(capture.tags.tool).toBe("message");
+    expect(capture.tags.hook).toBe("before_tool_call_hook_failed");
+    expect(capture.tags.host).toBe(HOST);
+    expect(capture.extra?.tool_call_id).toBe("tc1");
+    expect(capture.contexts?.run?.run_id).toBe("r1");
+  });
+
+  it("fingerprints by tool + normalized error so repeats of the same failure bucket together", () => {
+    const a = buildBeforeToolCallHookFailedCapture(event({ error: "boom at line 42" }), HOST);
+    const b = buildBeforeToolCallHookFailedCapture(event({ error: "boom at line 99" }), HOST);
+    expect(a.fingerprint).toEqual(b.fingerprint);
+    expect(a.fingerprint[0]).toBe("before_tool_call_hook_failed");
+  });
+
+  it("keeps distinct tools in distinct buckets", () => {
+    const msg = buildBeforeToolCallHookFailedCapture(event({ toolName: "message" }), HOST);
+    const exec = buildBeforeToolCallHookFailedCapture(event({ toolName: "exec" }), HOST);
+    expect(msg.fingerprint).not.toEqual(exec.fingerprint);
+  });
+
+  it("correlates by the real session_id and keeps the routing key separate", () => {
+    const capture = buildBeforeToolCallHookFailedCapture(
+      event({ sessionId: "sess-123", sessionKey: "agent:main:slack:channel:c1:thread:t1" }),
+      HOST,
+    );
+    expect(capture.contexts?.run?.session_id).toBe("sess-123");
+    expect(capture.extra?.session_key).toBe("agent:main:slack:channel:c1:thread:t1");
+  });
+
+  it("omits session_id from the run context when no sessionId is present", () => {
+    const capture = buildBeforeToolCallHookFailedCapture(
+      event({ sessionId: undefined, runId: undefined }),
+      HOST,
+    );
+    // runContext returns undefined when it has no ids at all.
+    expect(capture.contexts?.run?.session_id).toBeUndefined();
   });
 });

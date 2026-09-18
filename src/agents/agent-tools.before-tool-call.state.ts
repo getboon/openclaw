@@ -4,7 +4,12 @@
  * normalized payload selected by hook processing.
  */
 export const adjustedParamsByToolCallId = new Map<string, unknown>();
-export const preExecutionBlockedToolCallIds = new Set<string>();
+// Value is the optional pre-execution failure detail: present for ANY thrown
+// pre-execution failure — the before_tool_call handler itself, OR surrounding
+// pipeline processing (trusted policy / approval / skill-workshop) — and
+// undefined for a plain policy veto (which records no detail). Map (was a Set)
+// so the detail rides alongside the blocked key.
+export const preExecutionBlockedToolCallIds = new Map<string, string | undefined>();
 export const structuredReplaySafeToolCallIds = new Set<string>();
 
 export function buildAdjustedParamsKey(params: { runId?: string; toolCallId: string }): string {
@@ -29,12 +34,22 @@ export function peekAdjustedParamsForToolCall(toolCallId: string, runId?: string
   return params === undefined ? undefined : structuredClone(params);
 }
 
-/** Consume whether policy prevented the target tool from starting. */
-export function consumePreExecutionBlockedToolCall(toolCallId: string, runId?: string): boolean {
+/**
+ * Consume whether policy prevented the target tool from starting, plus any
+ * pre-execution failure detail. `detail` is set for ANY thrown pre-execution
+ * failure — the before_tool_call handler itself, or surrounding pipeline
+ * processing (trusted policy / approval / skill-workshop) — and is undefined
+ * for a plain policy veto (kind:"veto"), which records no detail.
+ */
+export function consumePreExecutionBlockedToolCall(
+  toolCallId: string,
+  runId?: string,
+): { blocked: boolean; detail?: string } {
   const key = buildAdjustedParamsKey({ runId, toolCallId });
   const blocked = preExecutionBlockedToolCallIds.has(key);
+  const detail = preExecutionBlockedToolCallIds.get(key);
   preExecutionBlockedToolCallIds.delete(key);
-  return blocked;
+  return { blocked, ...(detail ? { detail } : {}) };
 }
 
 export function recordStructuredReplaySafeToolCall(toolCallId: string, runId?: string): void {

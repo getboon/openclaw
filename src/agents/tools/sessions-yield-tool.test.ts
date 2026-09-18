@@ -44,6 +44,13 @@ describe("sessions_yield tool", () => {
     expect(onYield).toHaveBeenCalledWith("Waiting for fact-checker");
   });
 
+  it("executes sequentially so sibling tool calls finish before the yield abort", () => {
+    // The run abort fired by onYield rejects every other tool still running in
+    // the same batch; sequential mode makes the loop finish siblings first.
+    const tool = createSessionsYieldTool({ sessionId: "test-session", onYield: vi.fn() });
+    expect(tool.executionMode).toBe("sequential");
+  });
+
   it("returns error without onYield callback", async () => {
     const tool = createSessionsYieldTool({ sessionId: "test-session" });
     const result = await tool.execute("call-1", {});

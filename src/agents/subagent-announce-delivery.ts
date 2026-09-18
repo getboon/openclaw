@@ -1693,7 +1693,10 @@ async function sendSubagentAnnounceDirectly(params: {
       params.expectsCompletionMessage &&
       requiresMessageToolDelivery &&
       !hasGatewayAgentMessagingToolDeliveryEvidence(directAnnounceResponse) &&
-      !hasIntentionalSilentGatewayAgentPayload(directAnnounceResponse)
+      // Intentional silence exempts an ordinary completion, never a subagent one:
+      // a silent parent over a finished child must continue to the child-text
+      // fallback, or the child's work is dropped with the turn reporting success.
+      (!hasIntentionalSilentGatewayAgentPayload(directAnnounceResponse) || isSubagentCompletion)
     ) {
       if (hasFailedSubagentNoOutputCompletion(params.internalEvents)) {
         await notifySubagentNoOutputGiveUp({

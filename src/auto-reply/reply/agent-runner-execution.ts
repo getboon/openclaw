@@ -2644,6 +2644,7 @@ export async function runAgentTurnWithFallback(params: {
                   runEmbeddedAgent({
                     ...embeddedContext,
                     lifecycleGeneration,
+                    modelRequestHeaders: params.opts?.modelRequestHeaders,
                     allowGatewaySubagentBinding: true,
                     trigger: params.isHeartbeat ? "heartbeat" : "user",
                     groupId: resolveGroupSessionKey(params.sessionCtx)?.id,

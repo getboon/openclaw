@@ -43,17 +43,33 @@ export type BrowserHandoffToolContext = {
 
 // Recheck backoff: fast at first (a human might finish a plain login in
 // seconds), backing off because most of the wait is 2FA/CAPTCHA the human is
-// actively doing, not something worth polling tightly for. The 30-minute cap
-// matches the ticket's realistic "human got distracted or gave up" window,
-// not Anchor's own 15-minute token expiry (that's boon-core's concern).
+// actively doing, not something worth polling tightly for. The total-wait cap
+// matches Anchor's own default session max_duration (180 minutes, confirmed
+// against docs.anchorbrowser.io/advanced/session-timeout) rather than an
+// arbitrary "human gave up" guess: boon-core's async profile-snapshot step
+// has been observed taking ~20+ minutes on its own after a real sign-in, and
+// waiting past Anchor's own hard session cap has no upside anyway, since
+// that underlying session is gone regardless of what this cap says.
 const FIRST_RECHECK_DELAY_MS = 30_000;
 const MAX_RECHECK_DELAY_MS = 5 * 60_000;
 const RECHECK_BACKOFF_MULTIPLIER = 2;
-const MAX_TOTAL_WAIT_MS = 30 * 60_000;
+const MAX_TOTAL_WAIT_MS = 180 * 60_000;
 
 function nextRecheckDelayMs(previousCheckCount: number): number {
   const delay = FIRST_RECHECK_DELAY_MS * RECHECK_BACKOFF_MULTIPLIER ** previousCheckCount;
   return Math.min(delay, MAX_RECHECK_DELAY_MS);
+}
+
+// Retry failed cleanup briefly so a transient cron error does not
+// permanently stop the recheck chain -- handleStatus is the only place
+// that reschedules, so giving up on the first failure ends it for good.
+const CLEAR_RECHECK_RETRY_ATTEMPTS = 3;
+export const CLEAR_RECHECK_RETRY_DELAY_MS = 200;
+
+function sleepBeforeRetry(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 /**
@@ -73,6 +89,16 @@ function nextRecheckDelayMs(previousCheckCount: number): number {
  * schedules (e.g. a manual status check racing the scheduled one). If that
  * cleanup can't confirm the old job is gone, skip scheduling a replacement
  * rather than risk two overlapping rechecks firing.
+ *
+ * Live-observed failure mode this message wording guards against: a resumed
+ * model can pattern-match "if it's still pending, end your turn without
+ * replying" against its OWN recent context (it just told the customer
+ * moments ago that sign-in hadn't come through) and skip the actual
+ * browser_handoff status call entirely, answering from memory instead of
+ * checking again -- silently breaking the whole recheck chain, since
+ * `handleStatus` (the only place that reschedules) never runs. The message
+ * is deliberately blunt about this: call the tool now, don't answer from
+ * memory, base the reply only on this turn's fresh result.
  */
 async function scheduleRecheck(
   api: OpenClawPluginApi,
@@ -83,17 +109,28 @@ async function scheduleRecheck(
   if (!sessionKey) {
     return false;
   }
-  const cleared = await clearScheduledRecheck(api, context, params.site);
+  let cleared = false;
+  for (let attempt = 1; attempt <= CLEAR_RECHECK_RETRY_ATTEMPTS; attempt++) {
+    cleared = await clearScheduledRecheck(api, context, params.site);
+    if (cleared || attempt === CLEAR_RECHECK_RETRY_ATTEMPTS) {
+      break;
+    }
+    await sleepBeforeRetry(CLEAR_RECHECK_RETRY_DELAY_MS);
+  }
   if (!cleared) {
     return false;
   }
   const job = await api.session.workflow.scheduleSessionTurn({
     sessionKey,
     message: [
-      `Check the browser login handoff status for "${params.site}" (call browser_handoff with`,
-      `action="status"). This check runs silently — if the result is ready, failed, or expired,`,
-      `use the message tool (action="send") to tell the customer; only end your turn without`,
-      `replying if it's still pending.`,
+      `Automated recheck — not a customer message. Whatever you already believe about`,
+      `"${params.site}" from earlier in this conversation is stale by now; you have no current`,
+      `information until you get a fresh answer. Your only job this turn is to call`,
+      `browser_handoff with action="status" and site="${params.site}" and read its actual result —`,
+      `do not skip this call or answer from memory.`,
+      `This check runs silently: once you have that fresh result, if it says ready, failed, or`,
+      `expired, use the message tool (action="send") to tell the customer now; if it says pending,`,
+      `end your turn without sending anything — do not explain, do not apologize, just stop.`,
     ].join(" "),
     delayMs: params.delayMs,
     deleteAfterRun: true,
@@ -374,10 +411,28 @@ function readAction(raw: Record<string, unknown>): "request_login" | "status" | 
   throw new Error('browser_handoff: action must be one of "request_login", "status", "attach"');
 }
 
+// Model-supplied, and gets interpolated directly into scheduled-turn and
+// reply prompt text (schedule-recheck's message, the request_login reply,
+// status/error text) -- a value containing quotes, newlines, or
+// instruction-like text there is a prompt-injection surface. `site` is
+// documented as a hostname (e.g. "app.procore.com"), so reject anything
+// that isn't shaped like one, rather than trying to escape it at every
+// interpolation site.
+// `(?=.{1,253}$)` bounds the TOTAL length (the real DNS hostname limit) --
+// without it, each label is individually capped at 63 characters but an
+// arbitrary number of valid labels could still produce an unbounded
+// string, which then gets embedded in prompts and used to build state/
+// schedule keys.
+const HOSTNAME_PATTERN =
+  /^(?=.{1,253}$)[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
 function readSite(raw: Record<string, unknown>): string {
   const site = typeof raw.site === "string" ? raw.site.trim() : "";
   if (!site) {
     throw new Error("browser_handoff: site is required");
+  }
+  if (!HOSTNAME_PATTERN.test(site)) {
+    throw new Error('browser_handoff: site must look like a hostname (e.g. "app.example.com")');
   }
   return site;
 }

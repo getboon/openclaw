@@ -18,6 +18,78 @@
 
 - Version alignment with core OpenClaw release numbers.
 
+## 2026.6.11-boon.45
+
+### Changes
+
+- Version alignment with core OpenClaw release numbers.
+
+## 2026.6.11-boon.44
+
+### Changes
+
+- Version alignment with core OpenClaw release numbers.
+
+## 2026.6.11-boon.43
+
+### Changes
+
+- Version alignment with core OpenClaw release numbers.
+
+## 2026.6.11-boon.42
+
+### Changes
+
+- Version alignment with core OpenClaw release numbers.
+
+## 2026.6.11-boon.41
+
+### Changes
+
+- Version alignment with core OpenClaw release numbers.
+
+## 2026.6.11-boon.40
+
+### Changes
+
+- Version alignment with core OpenClaw release numbers.
+
+## 2026.6.11-boon.39
+
+### Changes
+
+- Version alignment with core OpenClaw release numbers.
+
+## 2026.6.11-boon.38
+
+### Changes
+
+- Version alignment with core OpenClaw release numbers.
+
+## 2026.6.11-boon.37
+
+### Changes
+
+- Version alignment with core OpenClaw release numbers.
+
+## 2026.6.11-boon.36
+
+### Changes
+
+- Version alignment with core OpenClaw release numbers.
+
+## 2026.6.11-boon.35
+
+### Changes
+
+- Version alignment with core OpenClaw release numbers.
+
+## 2026.6.11-boon.34
+
+### Changes
+
+- Version alignment with core OpenClaw release numbers.
+
 ## 2026.6.11
 
 ### Changes

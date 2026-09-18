@@ -503,7 +503,9 @@ import {
   isMidTurnPrecheckSignal,
   type MidTurnPrecheckRequest,
 } from "./midturn-precheck.js";
+import { applyModelRequestHeaders } from "./model-request-headers.js";
 import { normalizeToolMetas } from "./normalize-tool-metas.js";
+import { installNotExecutedToolLoopHook } from "./not-executed-tool-loop.js";
 import {
   PREEMPTIVE_OVERFLOW_ERROR_TEXT,
   buildPrePromptContextBudgetStatus,
@@ -2527,7 +2529,7 @@ export async function runEmbeddedAttempt(
           agentDir,
           authStorage: params.authStorage,
           modelRegistry: params.modelRegistry,
-          model: params.model,
+          model: applyModelRequestHeaders(params.model, params.modelRequestHeaders),
           thinkingLevel: mapThinkingLevel(params.thinkLevel),
           tools: sessionToolAllowlist,
           customTools: allCustomTools,
@@ -2576,6 +2578,10 @@ export async function runEmbeddedAttempt(
       };
       setActiveSessionSystemPrompt(systemPromptText);
       let didDeliverSourceReplyViaMessageTool = false;
+      installNotExecutedToolLoopHook({
+        agent: activeSession.agent,
+        ctx: catalogToolHookContext,
+      });
       installMessageToolOnlyTerminalHook({
         agent: activeSession.agent,
         sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
@@ -4572,6 +4578,7 @@ export async function runEmbeddedAttempt(
             promptImages: imageResult.images.length,
             contextTokenBudget,
             reserveTokens,
+            durationMs: Date.now() - diagnosticRunStartedAt,
             trace: freezeDiagnosticTraceContext(createChildDiagnosticTraceContext(runTrace)),
           });
           params.onExecutionPhase?.({

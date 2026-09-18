@@ -2529,6 +2529,7 @@ describe("short-term dreaming trigger", () => {
 
     const narrativeMessages = [{ role: "assistant", content: "A diary entry." }];
     const subagent = {
+      registerCompletionOwner: vi.fn(() => ({ dispose: vi.fn() })),
       run: vi.fn(async (_params: { model?: string }) => ({ runId: "narrative-run-1" })),
       waitForRun: vi.fn(async () => ({ status: "ok" as const })),
       getSessionMessages: vi.fn(async () => ({

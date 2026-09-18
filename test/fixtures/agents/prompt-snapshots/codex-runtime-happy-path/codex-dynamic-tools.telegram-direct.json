@@ -125,7 +125,7 @@
     "type": "function"
   },
   {
-    "description": "End current turn. Use after spawning subagents; results arrive as next message.",
+    "description": "End current turn. Use after spawning subagents; results arrive as next message. Call this last: tool calls issued after it in the same turn are not executed.",
     "inputSchema": {
       "properties": {
         "message": {

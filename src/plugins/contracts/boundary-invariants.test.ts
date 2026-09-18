@@ -38,6 +38,7 @@ const BUNDLED_TYPED_HOOK_REGISTRATION_GUARDS = {
   "extensions/sentry-monitor/src/register.ts": [
     "after_tool_call",
     "agent_end",
+    "before_tool_call_hook_failed",
     "cron_changed",
     "delivery_recovery_exhausted",
     "message_sent",
