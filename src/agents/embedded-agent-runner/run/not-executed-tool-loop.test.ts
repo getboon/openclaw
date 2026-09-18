@@ -149,7 +149,7 @@ describe("installNotExecutedToolLoopHook", () => {
     expect(result?.details).toMatchObject({ status: "blocked", deniedReason: "tool-loop" });
   });
 
-  it("counts a never-executed failure a previous hook relabelled as a success", async () => {
+  it("counts a never-executed failure that a previous hook relabelled as a success", async () => {
     const agent = {
       afterToolCall: vi.fn(async () => ({ isError: false })),
     } as unknown as Agent;

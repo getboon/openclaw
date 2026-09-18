@@ -42,11 +42,11 @@ export const UNKNOWN_TOOL_THRESHOLD = 10;
 export const CRITICAL_THRESHOLD = 20;
 export const GLOBAL_CIRCUIT_BREAKER_THRESHOLD = 30;
 /**
- * Appended to the blocked tool result that ENDS a run (not merely blocks a
- * call), and the marker the reply builder keys on to let that one reason past
- * the raw-detail gate: this text is fixed authored copy, never leaked tool
- * output, and it is the only explanation the user gets for why the agent
- * stopped early.
+ * Appended to the reason on the blocked tool result that ENDS a run (not merely
+ * blocks a call). User-facing copy only: it is fixed authored text, never leaked
+ * tool output, and it is the only explanation the user gets for why the agent
+ * stopped early. It is NOT what the reply builder keys on — see
+ * `TOOL_LOOP_RUN_ENDED_CODE`.
  */
 export const TOOL_LOOP_RUN_ENDED_NOTICE =
   "Ending this run: the model kept repeating a blocked tool call and made no progress.";
