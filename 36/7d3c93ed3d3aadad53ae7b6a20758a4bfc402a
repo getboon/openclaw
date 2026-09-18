@@ -1,0 +1,19 @@
+CHANGELOG.md
+  s_6b402cb550dd6f::t_631f2038a30422 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "367d3c93ed3d3aadad53ae7b6a20758a4bfc402a",
+  "prompts": {},
+  "sessions": {
+    "s_6b402cb550dd6f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a0c8bd9-9f75-49b2-a51d-471f15bbf0f3",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
