@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  claimGoogleChatApprovalCardBinding,
   clearGoogleChatApprovalCardBindingsForTest,
   getGoogleChatApprovalCardBinding,
   registerGoogleChatManualApprovalFollowupSuppression,
@@ -187,6 +188,57 @@ describe("Google Chat approval card action registry", () => {
         `/approve ${firstApprovalId} allow-once`,
       ),
     ).toBe(false);
+  });
+
+  it("keeps a re-registered token's in-flight claim marker so a second claim reports in-flight, not a fresh claim", () => {
+    const firstToken = "token-first";
+    registerGoogleChatApprovalCardBinding({
+      token: firstToken,
+      accountId: "default",
+      approvalId: "approval-first",
+      approvalKind: "exec",
+      decision: "allow-once",
+      allowedDecisions: ["allow-once", "deny"],
+      spaceName: "spaces/AAA",
+      messageName: "spaces/AAA/messages/msg-1",
+      expiresAtMs: Date.now() + 60_000,
+    });
+
+    // Simulate a user click starting a still-in-flight resolution.
+    expect(claimGoogleChatApprovalCardBinding(firstToken)).toMatchObject({ kind: "claimed" });
+
+    // Evict the binding via LRU pressure while that resolution is still running.
+    for (let i = 1; i <= 1024; i += 1) {
+      registerGoogleChatApprovalCardBinding({
+        token: `token-fill-${i}`,
+        accountId: "default",
+        approvalId: `approval-fill-${i}`,
+        approvalKind: "exec",
+        decision: "allow-once",
+        allowedDecisions: ["allow-once", "deny"],
+        spaceName: "spaces/AAA",
+        messageName: `spaces/AAA/messages/msg-${i}`,
+        expiresAtMs: Date.now() + 60_000,
+      });
+    }
+    expect(getGoogleChatApprovalCardBinding(firstToken)).toBeNull();
+
+    // The same card gets resent (same token) before the original resolution completes.
+    registerGoogleChatApprovalCardBinding({
+      token: firstToken,
+      accountId: "default",
+      approvalId: "approval-first",
+      approvalKind: "exec",
+      decision: "allow-once",
+      allowedDecisions: ["allow-once", "deny"],
+      spaceName: "spaces/AAA",
+      messageName: "spaces/AAA/messages/msg-1",
+      expiresAtMs: Date.now() + 60_000,
+    });
+
+    // A second click on the re-bound token must not race the still-running
+    // first resolution -- it must report in-flight, not claim a fresh one.
+    expect(claimGoogleChatApprovalCardBinding(firstToken)).toEqual({ kind: "in-flight" });
   });
 
   it("keeps the suppression when another live binding still covers the approval", () => {
