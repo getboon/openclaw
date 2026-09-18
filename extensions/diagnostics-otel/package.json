@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/diagnostics-otel",
-  "version": "2026.6.11-boon.44",
+  "version": "2026.6.11-boon.45",
   "description": "OpenClaw diagnostics OpenTelemetry exporter for metrics, traces, and logs.",
   "private": true,
   "repository": {
@@ -29,10 +29,10 @@
       "./index.ts"
     ],
     "compat": {
-      "pluginApi": ">=2026.6.11-boon.44"
+      "pluginApi": ">=2026.6.11-boon.45"
     },
     "build": {
-      "openclawVersion": "2026.6.11-boon.44"
+      "openclawVersion": "2026.6.11-boon.45"
     }
   }
 }
