@@ -283,6 +283,9 @@ function createAfterToolCallContext(params: {
       },
     },
     isError: params.isError ?? false,
+    // These fixtures all model a tool that ran; the never-executed path has its
+    // own suite in not-executed-tool-loop.test.ts.
+    executionStarted: true,
     context: {
       systemPrompt: "",
       messages: [],

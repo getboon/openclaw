@@ -106,12 +106,21 @@ export interface AfterToolCallContext {
   assistantMessage: AssistantMessage;
   /** The raw tool call block from `assistantMessage.content`. */
   toolCall: AgentToolCall;
-  /** Validated tool arguments for the target tool schema. */
+  /**
+   * Tool arguments validated against the target tool schema — but only when
+   * `executionStarted` is true. When it is false validation never completed
+   * (or never ran), so these are the raw arguments the model emitted.
+   */
   args: unknown;
   /** The executed tool result before unknown `afterToolCall` overrides are applied. */
   result: AgentToolResult<unknown>;
   /** Whether the executed tool result is currently treated as an error. */
   isError: boolean;
+  /**
+   * False when the loop produced this result without ever running `tool.execute`
+   * (unresolvable tool, unknown tool name, argument-validation failure, policy block).
+   */
+  executionStarted: boolean;
   /** Current agent context at the time the tool call is finalized. */
   context: AgentContext;
 }

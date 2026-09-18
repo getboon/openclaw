@@ -1015,6 +1015,9 @@ describe("spawnAcpDirect", () => {
       runtimeOptions: {
         model: "openai/gpt-5.4",
         thinking: "high",
+        // Subagents now inherit agents.defaults.timeoutSeconds (48h default here),
+        // clamped to the ACP runtime max, instead of running unbounded.
+        timeoutSeconds: 24 * 60 * 60,
       },
     });
     expect(initInput.sessionKey).toMatch(/^agent:codex:acp:/);
@@ -1055,6 +1058,7 @@ describe("spawnAcpDirect", () => {
       runtimeOptions: {
         model: "openai/gpt-5.4",
         thinking: "high",
+        timeoutSeconds: 24 * 60 * 60,
       },
     });
   });
@@ -1101,6 +1105,7 @@ describe("spawnAcpDirect", () => {
       runtimeOptions: {
         model: "openai/gpt-5.5",
         thinking: "low",
+        timeoutSeconds: 24 * 60 * 60,
       },
     });
   });
@@ -1144,6 +1149,7 @@ describe("spawnAcpDirect", () => {
       runtimeOptions: {
         model: "anthropic/claude-sonnet-4-6",
         thinking: "adaptive",
+        timeoutSeconds: 24 * 60 * 60,
       },
     });
   });

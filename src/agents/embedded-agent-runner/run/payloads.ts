@@ -52,6 +52,7 @@ import {
   type ToolFailureDigest,
   type ToolFailureDigestEntry,
 } from "../../tool-failure-digest.js";
+import { TOOL_LOOP_RUN_ENDED_CODE } from "../../tool-loop-detection.js";
 
 type ToolMetaEntry = { toolName: string; meta?: string; errored?: boolean };
 type ToolErrorWarningPolicy = {
@@ -130,6 +131,14 @@ function shouldIncludeToolErrorDetails(params: {
   verboseLevel?: VerboseLevel;
 }): boolean {
   if (isVerboseToolDetailEnabled(params.verboseLevel)) {
+    return true;
+  }
+  // A loop guard that ENDED the run is the one failure whose text the user must
+  // see by default: it is fixed authored copy (not leaked tool output), and the
+  // bare "<tool> failed" badge would otherwise blame the tool for a run the
+  // agent stopped on purpose. Gated on the structured code, never on the notice
+  // text — a tool error that merely quotes it must not open this gate.
+  if (params.lastToolError.errorCode === TOOL_LOOP_RUN_ENDED_CODE) {
     return true;
   }
   if (!isExecLikeToolName(params.lastToolError.toolName)) {

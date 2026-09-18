@@ -505,6 +505,7 @@ import {
 } from "./midturn-precheck.js";
 import { applyModelRequestHeaders } from "./model-request-headers.js";
 import { normalizeToolMetas } from "./normalize-tool-metas.js";
+import { installNotExecutedToolLoopHook } from "./not-executed-tool-loop.js";
 import {
   PREEMPTIVE_OVERFLOW_ERROR_TEXT,
   buildPrePromptContextBudgetStatus,
@@ -2577,6 +2578,10 @@ export async function runEmbeddedAttempt(
       };
       setActiveSessionSystemPrompt(systemPromptText);
       let didDeliverSourceReplyViaMessageTool = false;
+      installNotExecutedToolLoopHook({
+        agent: activeSession.agent,
+        ctx: catalogToolHookContext,
+      });
       installMessageToolOnlyTerminalHook({
         agent: activeSession.agent,
         sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,

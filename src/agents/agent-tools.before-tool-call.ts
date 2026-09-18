@@ -914,6 +914,8 @@ export function buildBlockedToolResult(params: {
   reason: string;
   deniedReason?: HookBlockedReason;
   detail?: string;
+  /** Emitted as `details.code`, the field tool-result readers lift into `ToolErrorSummary.errorCode`. */
+  errorCode?: string;
   toolCallId?: string;
   runId?: string;
 }) {
@@ -924,6 +926,7 @@ export function buildBlockedToolResult(params: {
       status: "blocked",
       deniedReason: params.deniedReason ?? "plugin-before-tool-call",
       reason: params.reason,
+      ...(params.errorCode ? { code: params.errorCode } : {}),
       // real pre-execution failure error text, present only for a kind:"failure" block.
       ...(params.detail ? { detail: params.detail } : {}),
     },
@@ -1038,6 +1041,75 @@ async function recordLoopOutcome(args: {
   if (recordedOutcome) {
     args.ctx.onToolOutcome?.(recordedOutcome);
   }
+}
+
+/**
+ * Report a tool call the agent loop rejected BEFORE execution (unknown tool
+ * name, argument-validation failure, resolver error) to the loop detector.
+ * Those never reach the wrapped `tool.execute`, so no other hook observes them.
+ *
+ * Detection is forced on here for the same reason the provider-stream
+ * unknown-tool guard is (see `resolveUnknownToolGuardThreshold`): a call that
+ * never executed made objectively zero progress, so there is no false-positive
+ * surface and containment must not depend on the opt-in `loopDetection.enabled`.
+ */
+export async function runNotExecutedToolCallHook(args: {
+  toolName: string;
+  params: unknown;
+  toolCallId?: string;
+  error: unknown;
+  ctx?: HookContext;
+}): Promise<{ blocked: boolean; reason?: string }> {
+  if (!args.ctx?.sessionKey && !args.ctx?.sessionId) {
+    return { blocked: false };
+  }
+  const toolName = normalizeToolName(args.toolName || "tool");
+  const ctx: HookContext = {
+    ...args.ctx,
+    loopDetection: { ...args.ctx.loopDetection, enabled: true },
+  };
+  try {
+    const { getDiagnosticSessionState, logToolLoopAction, detectToolCallLoop } =
+      await loadBeforeToolCallRuntime();
+    const sessionState = getDiagnosticSessionState({
+      sessionKey: ctx.sessionKey,
+      sessionId: ctx.sessionId,
+    });
+    const loopResult = detectToolCallLoop(
+      sessionState,
+      toolName,
+      args.params,
+      ctx.loopDetection,
+      ctx.runId ? { runId: ctx.runId } : undefined,
+    );
+    if (loopResult.stuck && loopResult.level === "critical") {
+      log.error(`Blocking ${toolName} due to critical loop: ${loopResult.message}`);
+      logToolLoopAction({
+        sessionKey: ctx.sessionKey,
+        sessionId: ctx.sessionId,
+        toolName,
+        level: "critical",
+        action: "block",
+        detector: loopResult.detector,
+        count: loopResult.count,
+        message: loopResult.message,
+        pairedToolName: loopResult.pairedToolName,
+      });
+      // Deliberately not recorded: a block is not progress, so the streak must
+      // stay at the threshold rather than reset (mirrors `isLoopVetoResult`).
+      return { blocked: true, reason: loopResult.message };
+    }
+  } catch (err) {
+    log.warn(`not-executed tool loop detection failed: tool=${toolName} error=${String(err)}`);
+  }
+  await recordLoopOutcome({
+    ctx,
+    toolName,
+    toolParams: args.params,
+    toolCallId: args.toolCallId,
+    error: args.error,
+  });
+  return { blocked: false };
 }
 
 /** Run the full before_tool_call policy chain for a pending tool call. */
