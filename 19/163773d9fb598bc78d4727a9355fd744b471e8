@@ -1,0 +1,43 @@
+docs/gateway/config-tools.md
+  s_6b402cb550dd6f::t_79be0724228785 472
+docs/tools/subagents.md
+  s_6b402cb550dd6f::t_d4dc975dafc73e 144
+packages/agent-core/src/agent-loop.test.ts
+  s_6b402cb550dd6f::t_4e1d9c6b326bd7 1165-1166,1172,1176,1189,1194,1200-1204,1214
+packages/agent-core/src/types.ts
+  s_6b402cb550dd6f::t_09c5996e733e3d 109-113
+src/agents/agent-tools.before-tool-call.not-executed.test.ts
+  s_6b402cb550dd6f::t_31e69616498735 4,17-18,20
+src/agents/agent-tools.before-tool-call.ts
+  s_6b402cb550dd6f::t_eaa43ba0843a7e 917-918,929,1048-1049
+src/agents/embedded-agent-runner/run/not-executed-tool-loop.test.ts
+  s_6b402cb550dd6f::t_80ceda71a9481c 8,94,123-173
+src/agents/embedded-agent-runner/run/not-executed-tool-loop.ts
+  s_6b402cb550dd6f::t_3fb19f87909658 13,20-22,44-63,66,72,77,84
+src/agents/embedded-agent-runner/run/payloads.errors.test.ts
+  s_6b402cb550dd6f::t_4612d1f5cb1de9 8,1397,1408-1422
+src/agents/embedded-agent-runner/run/payloads.ts
+  s_6b402cb550dd6f::t_b61b485eb82efb 55,139-141
+src/agents/subagent-spawn.ts
+  s_6b402cb550dd6f::t_779f0b53d874e9 1129-1131
+src/agents/tool-loop-detection.ts
+  s_6b402cb550dd6f::t_2b0e6eeb194d02 53-58
+src/config/types.agent-defaults.ts
+  s_6b402cb550dd6f::t_48825ce2ca81c1 532
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "19163773d9fb598bc78d4727a9355fd744b471e8",
+  "prompts": {},
+  "sessions": {
+    "s_6b402cb550dd6f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a0c8bd9-9f75-49b2-a51d-471f15bbf0f3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
