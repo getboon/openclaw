@@ -542,9 +542,11 @@ describe("codex provider", () => {
       onboardingScopes: ["text-inference"],
     });
     const authResult = await authChoice?.run({} as never);
+    // Onboarding runs before live discovery can confirm GPT-5.6 access, so the
+    // default must stay on gpt-5.5 (always available), not the newest model.
     expectRecordFields(authResult, {
       profiles: [],
-      defaultModel: "codex/gpt-5.6-sol",
+      defaultModel: "codex/gpt-5.5",
     });
   });
 

@@ -33,7 +33,14 @@ const DEFAULT_DISCOVERY_TIMEOUT_MS = 2500;
 const LIVE_DISCOVERY_ENV = "OPENCLAW_CODEX_DISCOVERY_LIVE";
 const MODEL_DISCOVERY_PAGE_LIMIT = 100;
 const CODEX_APP_SERVER_SETUP_METHOD_ID = "app-server";
-const CODEX_DEFAULT_MODEL_REF = `${CODEX_PROVIDER_ID}/${FALLBACK_CODEX_MODELS[0].id}`;
+// Onboarding picks this before any live discovery can confirm GPT-5.6 access,
+// so it must stay on a model every Codex account can actually use -- not
+// FALLBACK_CODEX_MODELS[0], which is the newest (and access-gated) model.
+const CODEX_ONBOARDING_DEFAULT_MODEL_ID = "gpt-5.5";
+const codexOnboardingDefaultModel =
+  FALLBACK_CODEX_MODELS.find((model) => model.id === CODEX_ONBOARDING_DEFAULT_MODEL_ID) ??
+  FALLBACK_CODEX_MODELS[0];
+const CODEX_DEFAULT_MODEL_REF = `${CODEX_PROVIDER_ID}/${codexOnboardingDefaultModel.id}`;
 const codexCatalogLog = createSubsystemLogger("codex/catalog");
 const CODEX_REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
 

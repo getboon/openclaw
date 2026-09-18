@@ -114,10 +114,11 @@ gh workflow run full-release-validation.yml \
 ```
 
 For immutable workflow proof on a moving `main`, use
-`pnpm ci:full-release --sha <release-sha>`. Its canonical `release-ci/*` ref
-keeps exact-target evidence reuse enabled after proving the workflow commit is
-still on trusted `main` lineage. Pass `-f reuse_evidence=false` only when the
-operator intentionally needs a fresh full run.
+`OPENCLAW_RELEASE_REPO=getboon/openclaw pnpm ci:full-release --sha <release-sha>`.
+Its canonical `release-ci/*` ref keeps exact-target evidence reuse enabled
+after proving the workflow commit is still on trusted `main` lineage. Pass
+`-f reuse_evidence=false` only when the operator intentionally needs a fresh
+full run.
 
 Use `release_profile=stable` unless the operator explicitly asks for the broad advisory provider/media matrix. Stable and full profiles force the release soak; the beta profile may opt in with `run_release_soak=true`. Use narrow `rerun_group` after focused fixes.
 Publish with `openclaw-release-publish.yml` using `release_profile=from-validation`

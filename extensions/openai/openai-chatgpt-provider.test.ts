@@ -119,6 +119,32 @@ describe("OpenAI provider Codex transport hooks", () => {
     },
   );
 
+  it.each(["gpt-5.6-sol-oai", "gpt-5.6-terra-oai", "gpt-5.6-luna-oai"])(
+    "resolves suffixed Codex variant %s through the same GPT-5.6 transport",
+    (modelId) => {
+      const provider = buildOpenAIProvider();
+
+      const model = provider.resolveDynamicModel?.({
+        provider: "openai",
+        modelId,
+        authProfileMode: "oauth",
+        modelRegistry: { find: () => null },
+      } as never);
+
+      expect(model).toMatchObject({
+        provider: "openai",
+        id: modelId,
+        api: "openai-chatgpt-responses",
+        baseUrl: "https://chatgpt.com/backend-api/codex",
+        input: ["text", "image"],
+        contextWindow: 372_000,
+        contextTokens: 272_000,
+        maxTokens: 128_000,
+        thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" },
+      });
+    },
+  );
+
   it.each([
     { name: "fills a missing map", thinkingLevelMap: undefined, expectedOff: null },
     { name: "preserves explicit overrides", thinkingLevelMap: { off: "low" }, expectedOff: "low" },

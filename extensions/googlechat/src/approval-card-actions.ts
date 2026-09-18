@@ -110,6 +110,35 @@ export function readGoogleChatApprovalActionToken(event: GoogleChatEvent): strin
   return normalizeOptionalString(params[GOOGLECHAT_APPROVAL_TOKEN_PARAM]) ?? null;
 }
 
+// approvalCardBindings and manualApprovalFollowupSuppressions are independent
+// maps with independent size caps, keyed differently (token vs approvalId). A
+// plain pruneMapToMaxSize on the bindings map can evict a token whose
+// suppression entry survives -- leaving that approval unreachable via the
+// (now-unknown) card token AND silently suppressed as manual /approve text.
+// Evict bindings one at a time and drop the matching suppression only when no
+// other live binding still covers that approvalId.
+function pruneApprovalCardBindingsAndOrphanedSuppressions(): void {
+  while (approvalCardBindings.size > GOOGLECHAT_APPROVAL_CARD_BINDING_MAX_ENTRIES) {
+    const oldest = approvalCardBindings.entries().next();
+    if (oldest.done) {
+      break;
+    }
+    const [evictedToken, evictedBinding] = oldest.value;
+    approvalCardBindings.delete(evictedToken);
+    approvalCardResolvingTokens.delete(evictedToken);
+    const key = manualApprovalFollowupSuppressionKey(evictedBinding.approvalId);
+    if (!key) {
+      continue;
+    }
+    const stillBound = Array.from(approvalCardBindings.values()).some(
+      (binding) => manualApprovalFollowupSuppressionKey(binding.approvalId) === key,
+    );
+    if (!stillBound) {
+      manualApprovalFollowupSuppressions.delete(key);
+    }
+  }
+}
+
 export function registerGoogleChatApprovalCardBinding(
   binding: GoogleChatApprovalCardBinding,
 ): boolean {
@@ -120,7 +149,7 @@ export function registerGoogleChatApprovalCardBinding(
     approvalCardBindings.delete(binding.token);
   }
   approvalCardBindings.set(binding.token, binding);
-  pruneMapToMaxSize(approvalCardBindings, GOOGLECHAT_APPROVAL_CARD_BINDING_MAX_ENTRIES);
+  pruneApprovalCardBindingsAndOrphanedSuppressions();
   registerGoogleChatManualApprovalFollowupSuppression({
     approvalId: binding.approvalId,
     approvalKind: binding.approvalKind,

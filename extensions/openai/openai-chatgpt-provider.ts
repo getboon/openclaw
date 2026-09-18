@@ -236,7 +236,7 @@ function resolveCodexForwardCompatModel(ctx: ProviderResolveDynamicModelContext)
   const lower = normalizeLowercaseStringOrEmpty(trimmedModelId);
   const synthBaseUrl = ctx.providerConfig?.baseUrl ?? OPENAI_CODEX_BASE_URL;
 
-  if (OPENAI_CODEX_GPT_56_MODEL_IDS.some((modelId) => modelId === lower)) {
+  if (matchesExactOrPrefix(lower, OPENAI_CODEX_GPT_56_MODEL_IDS)) {
     const model = ctx.modelRegistry.find(PROVIDER_ID, trimmedModelId) as
       | ProviderRuntimeModel
       | undefined;
@@ -639,8 +639,7 @@ export function buildOpenAICodexProviderHooks(): Pick<
       if (!isOpenAIOrLegacyCodexProvider(ctx.provider)) {
         return false;
       }
-      const id = ctx.modelId.trim().toLowerCase();
-      return [
+      return matchesExactOrPrefix(ctx.modelId, [
         ...OPENAI_CODEX_GPT_56_MODEL_IDS,
         OPENAI_CODEX_GPT_55_MODEL_ID,
         OPENAI_CODEX_GPT_55_PRO_MODEL_ID,
@@ -648,7 +647,7 @@ export function buildOpenAICodexProviderHooks(): Pick<
         OPENAI_CODEX_GPT_54_PRO_MODEL_ID,
         OPENAI_CODEX_GPT_54_MINI_MODEL_ID,
         OPENAI_CODEX_GPT_53_SPARK_MODEL_ID,
-      ].includes(id);
+      ]);
     },
     ...buildOpenAIResponsesProviderHooks(),
     resolveReasoningOutputMode: () => "native",
