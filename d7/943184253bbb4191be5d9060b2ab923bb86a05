@@ -1,0 +1,21 @@
+packages/agent-core/src/agent-loop.test.ts
+  s_6b402cb550dd6f::t_266d15164f0970 1161
+src/agents/embedded-agent-runner/run/message-tool-terminal.test.ts
+  s_6b402cb550dd6f::t_212b63679c968e 286-288
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d7943184253bbb4191be5d9060b2ab923bb86a05",
+  "prompts": {},
+  "sessions": {
+    "s_6b402cb550dd6f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a0c8bd9-9f75-49b2-a51d-471f15bbf0f3",
+        "model": "claude-opus-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
