@@ -10,19 +10,16 @@ import {
   runNotExecutedToolCallHook,
 } from "../../agent-tools.before-tool-call.js";
 import type { Agent } from "../../runtime/index.js";
-import { TOOL_LOOP_RUN_ENDED_NOTICE } from "../../tool-loop-detection.js";
+import { TOOL_LOOP_RUN_ENDED_CODE, TOOL_LOOP_RUN_ENDED_NOTICE } from "../../tool-loop-detection.js";
 
 /**
  * Consecutive blocked never-executed calls tolerated before the run is ended.
  *
  * Blocking alone does not bound the run: every blocked call is still a full
  * model turn, so a provider that keeps re-emitting the same invalid call burns
- * turns until the run timeout — an E2E against a never-varying stub measured
- * over a thousand model turns with every one of them blocked. Ending the run is
- * the only real bound, mirroring the always-on unknown-tool guard, which stops
- * a run whose tool calls can never make progress. Three, not one: the first
- * block is the first time the model is told to stop, so it gets two more turns
- * to answer without the tool or call a different one before the run is cut.
+ * turns until the run timeout. Ending the run is the only real bound. Three,
+ * not one: the first block is the first time the model is told to stop, so it
+ * gets two more turns to answer without the tool or call a different one.
  */
 const BLOCKED_STREAK_TERMINATE_THRESHOLD = 3;
 
@@ -44,29 +41,47 @@ export function installNotExecutedToolLoopHook(params: { agent: Agent; ctx: Hook
   // the block lasts (a block is not progress, so it never advances or resets).
   let blockedStreak = 0;
   params.agent.afterToolCall = async (context, signal) => {
-    const hookResult = await previousAfterToolCall?.(context, signal);
-    const isError = hookResult?.isError ?? context.isError;
-    if (context.executionStarted || !isError || signal?.aborted) {
+    // The hook this one wraps is extension code: it can throw, and it can
+    // relabel a pre-execution failure as a success. Either would silently
+    // restore the unbounded loop, so every decision below reads `context` —
+    // the loop's own pre-execution verdict — and the observation still runs
+    // when that hook threw. A throw is re-raised unchanged unless the call is
+    // blocked, in which case containment wins.
+    let hookResult: Awaited<ReturnType<NonNullable<Agent["afterToolCall"]>>>;
+    let hookFailure: { error: unknown } | undefined;
+    try {
+      hookResult = await previousAfterToolCall?.(context, signal);
+    } catch (error) {
+      hookFailure = { error };
+    }
+    const passThroughPreviousHook = () => {
+      if (hookFailure) {
+        throw hookFailure.error;
+      }
+      return hookResult;
+    };
+    if (context.executionStarted || !context.isError || signal?.aborted) {
       // A call that actually ran, or any non-error outcome, is progress.
       blockedStreak = 0;
-      return hookResult;
+      return passThroughPreviousHook();
     }
     const outcome = await runNotExecutedToolCallHook({
       toolName: context.toolCall.name,
       params: context.toolCall.arguments,
       toolCallId: context.toolCall.id,
-      error: toolResultText(hookResult?.content ?? context.result.content),
+      error: toolResultText(context.result.content),
       ctx: params.ctx,
     });
     if (!outcome.blocked || !outcome.reason) {
       blockedStreak = 0;
-      return hookResult;
+      return passThroughPreviousHook();
     }
     blockedStreak += 1;
     const terminate = blockedStreak >= BLOCKED_STREAK_TERMINATE_THRESHOLD;
     const blocked = buildBlockedToolResult({
       reason: terminate ? `${outcome.reason} ${TOOL_LOOP_RUN_ENDED_NOTICE}` : outcome.reason,
       deniedReason: "tool-loop",
+      ...(terminate ? { errorCode: TOOL_LOOP_RUN_ENDED_CODE } : {}),
       toolCallId: context.toolCall.id,
       ...(params.ctx.runId ? { runId: params.ctx.runId } : {}),
     });

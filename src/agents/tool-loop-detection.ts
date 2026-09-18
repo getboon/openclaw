@@ -50,6 +50,12 @@ export const GLOBAL_CIRCUIT_BREAKER_THRESHOLD = 30;
  */
 export const TOOL_LOOP_RUN_ENDED_NOTICE =
   "Ending this run: the model kept repeating a blocked tool call and made no progress.";
+/**
+ * Structured marker for the same event, carried in the blocked result's
+ * `details.code` (and so in `ToolErrorSummary.errorCode`). Consumers key on
+ * this, never on the notice text, which a tool's own error output could quote.
+ */
+export const TOOL_LOOP_RUN_ENDED_CODE = "tool_loop_run_ended";
 const DEFAULT_LOOP_DETECTION_CONFIG = {
   enabled: false,
   historySize: TOOL_CALL_HISTORY_SIZE,

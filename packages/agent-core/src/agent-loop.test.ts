@@ -1162,16 +1162,18 @@ describe("agentLoop not-executed tool calls", () => {
   };
 
   it("reports a schema-validation failure to afterToolCall", async () => {
-    const seen: Array<{ name: string; isError: boolean; text: string }> = [];
+    const seen: Array<{ name: string; isError: boolean; text: string; executionStarted: boolean }> =
+      [];
     const stream = agentLoop(
       [{ role: "user", content: "hello", timestamp: 1 }],
       { systemPrompt: "", messages: [], tools: [execTool] },
       {
         ...config,
-        afterToolCall: async ({ toolCall, result, isError }) => {
+        afterToolCall: async ({ toolCall, result, isError, executionStarted }) => {
           seen.push({
             name: toolCall.name,
             isError,
+            executionStarted,
             text: result.content.map((part) => ("text" in part ? part.text : "")).join(""),
           });
           return undefined;
@@ -1184,21 +1186,22 @@ describe("agentLoop not-executed tool calls", () => {
     await collectEvents(stream);
 
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toMatchObject({ name: "exec", isError: true });
+    expect(seen[0]).toMatchObject({ name: "exec", isError: true, executionStarted: false });
     expect(seen[0]?.text).toContain("command");
   });
 
   it("reports an unresolvable tool name to afterToolCall", async () => {
-    const seen: string[] = [];
+    const seen: Array<{ label: string; executionStarted: boolean }> = [];
     const stream = agentLoop(
       [{ role: "user", content: "hello", timestamp: 1 }],
       { systemPrompt: "", messages: [], tools: [execTool] },
       {
         ...config,
-        afterToolCall: async ({ toolCall, result }) => {
-          seen.push(
-            `${toolCall.name}:${result.content.map((part) => ("text" in part ? part.text : "")).join("")}`,
-          );
+        afterToolCall: async ({ toolCall, result, executionStarted }) => {
+          seen.push({
+            label: `${toolCall.name}:${result.content.map((part) => ("text" in part ? part.text : "")).join("")}`,
+            executionStarted,
+          });
           return undefined;
         },
       },
@@ -1208,6 +1211,6 @@ describe("agentLoop not-executed tool calls", () => {
 
     await collectEvents(stream);
 
-    expect(seen).toEqual(["ghost:Tool ghost not found"]);
+    expect(seen).toEqual([{ label: "ghost:Tool ghost not found", executionStarted: false }]);
   });
 });

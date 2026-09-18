@@ -1,9 +1,7 @@
 /**
  * A tool call the agent loop rejects BEFORE execution (schema-validation
  * failure, unknown tool name) never reaches the wrapped `tool.execute`, so the
- * tool-loop detector used to never see it. A gateway that seals a transport
- * error into a schema-valid `tool_use` with empty arguments therefore looped
- * unbounded (ENG-20206). These cover the not-executed reporting path.
+ * tool-loop detector cannot see it unless this path reports it.
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import {
@@ -16,8 +14,10 @@ import { CRITICAL_THRESHOLD } from "./tool-loop-detection.js";
 const VALIDATION_ERROR =
   'Validation failed for tool "exec":\n  - command: must have required properties command\nReceived arguments: {}';
 
+// Deliberately leaves loop detection disabled: the hook force-enables it, and a
+// context that pre-enables it would pass even if that force-enable regressed.
 function ctxFor(sessionKey: string) {
-  return { agentId: "main", sessionKey, loopDetection: { enabled: true } };
+  return { agentId: "main", sessionKey, loopDetection: { enabled: false } };
 }
 
 describe("runNotExecutedToolCallHook", () => {

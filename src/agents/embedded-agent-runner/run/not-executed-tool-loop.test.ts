@@ -5,7 +5,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AfterToolCallContext, Agent } from "../../runtime/index.js";
-import { TOOL_LOOP_RUN_ENDED_NOTICE } from "../../tool-loop-detection.js";
+import { TOOL_LOOP_RUN_ENDED_CODE, TOOL_LOOP_RUN_ENDED_NOTICE } from "../../tool-loop-detection.js";
 import { installNotExecutedToolLoopHook } from "./not-executed-tool-loop.js";
 
 const runNotExecutedToolCallHook = vi.hoisted(() => vi.fn());
@@ -91,7 +91,7 @@ describe("installNotExecutedToolLoopHook", () => {
     expect(terminates).toEqual([undefined, undefined, true]);
   });
 
-  it("keeps blocking without terminating while the streak is unbroken by progress", async () => {
+  it("resets the blocked streak on progress and keeps blocking without terminating", async () => {
     const agent = {} as unknown as Agent;
     runNotExecutedToolCallHook.mockResolvedValue({ blocked: true, reason: "CRITICAL: stuck" });
     installNotExecutedToolLoopHook({ agent, ctx: { sessionKey: "sess-1" } });
@@ -119,5 +119,56 @@ describe("installNotExecutedToolLoopHook", () => {
     expect((terminal?.content?.[0] as { text: string })?.text).toContain(
       TOOL_LOOP_RUN_ENDED_NOTICE,
     );
+  });
+
+  it("observes a never-executed failure even when the previous hook throws", async () => {
+    const agent = {
+      afterToolCall: vi.fn(async () => {
+        throw new Error("extension exploded");
+      }),
+    } as unknown as Agent;
+    installNotExecutedToolLoopHook({ agent, ctx: { sessionKey: "sess-1" } });
+
+    await expect(agent.afterToolCall?.(contextFor({}))).rejects.toThrow("extension exploded");
+
+    expect(runNotExecutedToolCallHook).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks a critical loop even when the previous hook throws", async () => {
+    const agent = {
+      afterToolCall: vi.fn(async () => {
+        throw new Error("extension exploded");
+      }),
+    } as unknown as Agent;
+    runNotExecutedToolCallHook.mockResolvedValue({ blocked: true, reason: "CRITICAL: stuck" });
+    installNotExecutedToolLoopHook({ agent, ctx: { sessionKey: "sess-1" } });
+
+    const result = await agent.afterToolCall?.(contextFor({}));
+
+    expect(result?.isError).toBe(true);
+    expect(result?.details).toMatchObject({ status: "blocked", deniedReason: "tool-loop" });
+  });
+
+  it("counts a never-executed failure a previous hook relabelled as a success", async () => {
+    const agent = {
+      afterToolCall: vi.fn(async () => ({ isError: false })),
+    } as unknown as Agent;
+    installNotExecutedToolLoopHook({ agent, ctx: { sessionKey: "sess-1" } });
+
+    await agent.afterToolCall?.(contextFor({}));
+
+    expect(runNotExecutedToolCallHook).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks the terminating blocked result with the structured run-ended code", async () => {
+    const agent = {} as unknown as Agent;
+    runNotExecutedToolCallHook.mockResolvedValue({ blocked: true, reason: "CRITICAL: stuck" });
+    installNotExecutedToolLoopHook({ agent, ctx: { sessionKey: "sess-1" } });
+
+    await agent.afterToolCall?.(contextFor({}));
+    await agent.afterToolCall?.(contextFor({}));
+    const terminal = await agent.afterToolCall?.(contextFor({}));
+
+    expect(terminal?.details).toMatchObject({ code: TOOL_LOOP_RUN_ENDED_CODE });
   });
 });

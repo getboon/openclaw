@@ -1126,9 +1126,9 @@ export async function spawnSubagentDirect(
   const hookRunner = subagentSpawnDeps.getGlobalHookRunner();
   const cfg = loadSubagentConfig();
 
-  // When agent omits runTimeoutSeconds, use the config default.
-  // Falls back to 0 (no timeout) if config key is also unset,
-  // preserving current behavior for existing deployments.
+  // When agent omits runTimeoutSeconds, use the config default; if that key is
+  // unset too, inherit the general agent run timeout. Only an explicit 0 means
+  // no timeout.
   const runTimeoutSeconds = resolveConfiguredSubagentRunTimeoutSeconds({
     cfg,
     runTimeoutSeconds: params.runTimeoutSeconds,

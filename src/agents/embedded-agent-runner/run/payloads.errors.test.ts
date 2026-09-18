@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { getReplyPayloadMetadata } from "../../../auto-reply/reply-payload.js";
 import { formatBillingErrorMessage } from "../../embedded-agent-helpers.js";
 import { makeAssistantMessageFixture } from "../../test-helpers/assistant-message-fixtures.js";
-import { TOOL_LOOP_RUN_ENDED_NOTICE } from "../../tool-loop-detection.js";
+import { TOOL_LOOP_RUN_ENDED_CODE, TOOL_LOOP_RUN_ENDED_NOTICE } from "../../tool-loop-detection.js";
 import {
   buildPayloads,
   expectSinglePayloadText,
@@ -1394,6 +1394,7 @@ describe("buildEmbeddedRunPayloads", () => {
     const payloads = buildPayloads({
       lastToolError: {
         toolName: "read",
+        errorCode: TOOL_LOOP_RUN_ENDED_CODE,
         error: `CRITICAL: Called read with identical arguments and identical outcomes 20 times. Session execution blocked to prevent runaway loops. ${TOOL_LOOP_RUN_ENDED_NOTICE}`,
       },
       verboseLevel: "off",
@@ -1402,6 +1403,21 @@ describe("buildEmbeddedRunPayloads", () => {
     expectSingleToolErrorPayload(payloads, {
       title: "failed",
       detail: TOOL_LOOP_RUN_ENDED_NOTICE,
+    });
+  });
+
+  it("keeps the raw-detail gate shut for a tool error that merely quotes the notice", () => {
+    const payloads = buildPayloads({
+      lastToolError: {
+        toolName: "read",
+        error: `remote said: ${TOOL_LOOP_RUN_ENDED_NOTICE}`,
+      },
+      verboseLevel: "off",
+    });
+
+    expectSingleToolErrorPayload(payloads, {
+      title: "failed",
+      absentDetail: TOOL_LOOP_RUN_ENDED_NOTICE,
     });
   });
 });

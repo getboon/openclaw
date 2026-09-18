@@ -914,6 +914,8 @@ export function buildBlockedToolResult(params: {
   reason: string;
   deniedReason?: HookBlockedReason;
   detail?: string;
+  /** Emitted as `details.code`, the field tool-result readers lift into `ToolErrorSummary.errorCode`. */
+  errorCode?: string;
   toolCallId?: string;
   runId?: string;
 }) {
@@ -924,6 +926,7 @@ export function buildBlockedToolResult(params: {
       status: "blocked",
       deniedReason: params.deniedReason ?? "plugin-before-tool-call",
       reason: params.reason,
+      ...(params.errorCode ? { code: params.errorCode } : {}),
       // real pre-execution failure error text, present only for a kind:"failure" block.
       ...(params.detail ? { detail: params.detail } : {}),
     },
@@ -1042,11 +1045,8 @@ async function recordLoopOutcome(args: {
 
 /**
  * Report a tool call the agent loop rejected BEFORE execution (unknown tool
- * name, argument-validation failure, resolver error). Those never reach the
- * wrapped `tool.execute`, so neither `runBeforeToolCallHook` nor
- * `recordLoopOutcome` ever observes them and the loop detector cannot count
- * them — a provider that keeps re-emitting the same invalid call loops
- * unbounded.
+ * name, argument-validation failure, resolver error) to the loop detector.
+ * Those never reach the wrapped `tool.execute`, so no other hook observes them.
  *
  * Detection is forced on here for the same reason the provider-stream
  * unknown-tool guard is (see `resolveUnknownToolGuardThreshold`): a call that

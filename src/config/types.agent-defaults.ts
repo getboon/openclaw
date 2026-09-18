@@ -529,7 +529,7 @@ export type AgentDefaultsConfig = {
     model?: AgentModelConfig;
     /** Default thinking level for spawned sub-agents (e.g. "off", "low", "medium", "high"). */
     thinking?: string;
-    /** Default run timeout in seconds for spawned sub-agents (0 = no timeout). */
+    /** Default run timeout in seconds for spawned sub-agents (explicit 0 = no timeout; unset inherits `agents.defaults.timeoutSeconds`). */
     runTimeoutSeconds?: number;
     /** Gateway timeout in ms for sub-agent announce delivery calls (default: 120000). */
     announceTimeoutMs?: number;
