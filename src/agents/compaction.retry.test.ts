@@ -141,6 +141,58 @@ describe("compaction retry integration", () => {
     expect(mockGenerateSummary).toHaveBeenCalledTimes(3);
   });
 
+  it("stops waiting out the backoff and does not rerun the operation once the caller aborts mid-delay", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+
+    mockGenerateSummary.mockRejectedValueOnce(new Error("Provider-side disconnect"));
+
+    const promise = retryAsync(() => invokeGenerateSummary(controller.signal), {
+      attempts: 3,
+      minDelayMs: 5000,
+      maxDelayMs: 5000,
+      label: "compaction/generateSummary",
+      signal: controller.signal,
+    });
+    // Attach the rejection assertion before advancing timers so nothing
+    // observes an unhandled rejection in the gap between reject and await.
+    const assertion = expect(promise).rejects.toThrow("Provider-side disconnect");
+
+    // Abort partway through the scheduled backoff, before the timer fires.
+    await vi.advanceTimersByTimeAsync(1000);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+
+    await assertion;
+    // The retry never reran generateSummary with an already-aborted signal.
+    expect(mockGenerateSummary).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
+  });
+
+  it("applies the backoff delay normally when no abort happens", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+
+    mockGenerateSummary
+      .mockRejectedValueOnce(new Error("Transient error"))
+      .mockResolvedValueOnce("Recovered");
+
+    const promise = retryAsync(() => invokeGenerateSummary(controller.signal), {
+      attempts: 3,
+      minDelayMs: 500,
+      maxDelayMs: 500,
+      label: "compaction/generateSummary",
+      signal: controller.signal,
+    });
+
+    await vi.runAllTimersAsync();
+    await expect(promise).resolves.toBe("Recovered");
+    expect(mockGenerateSummary).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
+  });
+
   it("should apply exponential backoff", async () => {
     vi.useFakeTimers();
 

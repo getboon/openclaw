@@ -925,8 +925,12 @@ describe("CodexAppServerEventProjector", () => {
 
     expect(result.aborted).toBe(false);
     expect(result.assistantTexts).toEqual([]);
+    // ENG-18810: explain-mode's generic branch returns the fixed "run command"
+    // copy instead of the compacted raw command line (which would leak cwd/pipe
+    // internals into customer-facing surfaces), so this no-visible-answer-guard
+    // case no longer surfaces "workspace" in the meta text.
     expect(result.toolMetas).toEqual([
-      expect.objectContaining({ toolName: "bash", meta: expect.stringContaining("workspace") }),
+      expect.objectContaining({ toolName: "bash", meta: "run command" }),
     ]);
   });
 
@@ -3509,7 +3513,11 @@ describe("CodexAppServerEventProjector", () => {
     const toolProgressText = onToolResult.mock.calls
       .map(([payload]) => (payload as { text?: string }).text ?? "")
       .join("\n");
-    expect(toolProgressText).toContain("log_activity.sh");
+    // ENG-18810: explain-mode's generic branch returns the fixed "run command"
+    // copy instead of leaking the raw script path/name into customer-facing
+    // progress text -- the leak this test's own name warns against.
+    expect(toolProgressText).toContain("run command");
+    expect(toolProgressText).not.toContain("log_activity.sh");
 
     const result = projector.buildResult(buildEmptyToolTelemetry());
     expect(result.messagesSnapshot.some((message) => message.role === "toolResult")).toBe(true);

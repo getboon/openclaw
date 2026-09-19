@@ -480,6 +480,21 @@ describe("registerPluginCommand", () => {
     });
   });
 
+  it("matches plugin slash commands when users insert whitespace after the slash", () => {
+    registerPluginCommand("device-pair", {
+      name: "pair",
+      description: "Pair command",
+      acceptsArgs: true,
+      handler: async () => ({ text: "ok" }),
+    });
+
+    expectCommandMatch("/ pair qr", {
+      name: "pair",
+      pluginId: "device-pair",
+      args: "qr",
+    });
+  });
+
   it("supports provider-specific native command aliases", () => {
     const result = registerVoiceCommandForTest({
       nativeNames: {
@@ -699,6 +714,29 @@ describe("registerPluginCommand", () => {
     });
 
     expect(observedOwnerStatus).toBeUndefined();
+  });
+
+  it("sanitizes oversized arguments before passing them to plugin handlers", async () => {
+    let observedArgs: string | undefined;
+    registerVoiceCommandForTest({
+      acceptsArgs: true,
+      handler: async (ctx) => {
+        observedArgs = ctx.args;
+        return { text: "ok" };
+      },
+    });
+    const match = requirePluginCommandMatch(`/voice \0${"a".repeat(4094)}😀tail`);
+
+    await executePluginCommand({
+      command: match.command,
+      args: match.args,
+      channel: "telegram",
+      isAuthorizedSender: true,
+      commandBody: "/voice",
+      config: {},
+    });
+
+    expect(observedArgs).toBe("a".repeat(4094));
   });
 
   it("ignores owner status opt-in from direct plugin command registration", async () => {

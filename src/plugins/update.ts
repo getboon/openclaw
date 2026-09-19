@@ -493,7 +493,7 @@ function resolveRecordedExtensionsDir(params: {
   const parentDir = path.dirname(params.installPath);
   try {
     const canonicalInstallPath = resolvePluginInstallDir(params.pluginId, parentDir);
-    return canonicalInstallPath === params.installPath ? parentDir : undefined;
+    return pathsEqual(canonicalInstallPath, params.installPath) ? parentDir : undefined;
   } catch {
     return undefined;
   }
@@ -819,6 +819,7 @@ function resolveTrustedSourceLinkedOfficialNpmFallbackForClawHubUpdate(params: {
   effectiveClawHubSpec?: string;
   recordClawHubSpec?: string;
   updateChannel?: UpdateChannel;
+  coreVersion?: string;
 }): {
   installSpec: string;
   recordSpec: string;
@@ -867,6 +868,8 @@ function resolveTrustedSourceLinkedOfficialNpmFallbackForClawHubUpdate(params: {
   return resolveNpmInstallSpecsForUpdateChannel({
     spec: officialSpec,
     updateChannel: params.updateChannel,
+    officialPackageName,
+    coreVersion: params.coreVersion,
   });
 }
 
@@ -931,25 +934,35 @@ function resolveNpmUpdateSpecs(params: {
   specOverride?: string;
   officialSpecOverride?: string;
   updateChannel?: UpdateChannel;
+  officialPackageName?: string;
+  coreVersion?: string;
 }): {
   installSpec?: string;
   recordSpec?: string;
   fallbackSpec?: string;
   fallbackLabel?: string;
 } {
-  const recordSpec = params.specOverride ?? params.officialSpecOverride ?? params.record.spec;
+  const recordSpec =
+    params.specOverride ??
+    (params.updateChannel === "extended-stable" && params.record.spec
+      ? params.record.spec
+      : (params.officialSpecOverride ?? params.record.spec));
   if (!recordSpec) {
     return {};
   }
   if (params.specOverride) {
-    return {
-      installSpec: recordSpec,
-      recordSpec,
-    };
+    return resolveNpmInstallSpecsForUpdateChannel({
+      spec: recordSpec,
+      updateChannel: params.updateChannel,
+      officialPackageName: params.officialPackageName,
+      coreVersion: params.coreVersion,
+    });
   }
   return resolveNpmInstallSpecsForUpdateChannel({
     spec: recordSpec,
     updateChannel: params.updateChannel,
+    officialPackageName: params.officialPackageName,
+    coreVersion: params.coreVersion,
   });
 }
 
@@ -1115,17 +1128,6 @@ function createPluginUpdateIntegrityDriftHandler(params: {
   };
 }
 
-function removeDisabledPluginIdFromList(
-  list: string[] | undefined,
-  pluginId: string,
-): string[] | undefined {
-  if (!Array.isArray(list) || !list.includes(pluginId)) {
-    return list;
-  }
-  const next = list.filter((id) => id !== pluginId);
-  return next.length > 0 ? next : undefined;
-}
-
 function resetDisabledPluginSlots(
   slots: NonNullable<OpenClawConfig["plugins"]>["slots"] | undefined,
   pluginId: string,
@@ -1149,15 +1151,15 @@ function resetDisabledPluginSlots(
   return next;
 }
 
-function disablePluginConfigEntry(config: OpenClawConfig, pluginId: string): OpenClawConfig {
+function disablePluginAfterUpdateFailure(config: OpenClawConfig, pluginId: string): OpenClawConfig {
   const pluginsConfig = config.plugins ?? {};
   const existingEntry = pluginsConfig.entries?.[pluginId];
   return {
     ...config,
     plugins: {
       ...pluginsConfig,
-      allow: removeDisabledPluginIdFromList(pluginsConfig.allow, pluginId),
-      deny: removeDisabledPluginIdFromList(pluginsConfig.deny, pluginId),
+      // Update failure changes activation, not operator-authored trust policy.
+      // Removing the final allow entry would widen discovery to other plugins.
       slots: resetDisabledPluginSlots(pluginsConfig.slots, pluginId),
       entries: {
         ...pluginsConfig.entries,
@@ -1238,6 +1240,8 @@ export async function updateNpmInstalledPlugins(params: {
   timeoutMs?: number;
   dryRun?: boolean;
   updateChannel?: UpdateChannel;
+  officialPluginUpdateChannel?: UpdateChannel;
+  coreVersion?: string;
   dangerouslyForceUnsafeInstall?: boolean;
   specOverrides?: Record<string, string>;
   onIntegrityDrift?: (params: PluginUpdateIntegrityDriftParams) => boolean | Promise<boolean>;
@@ -1270,7 +1274,7 @@ export async function updateNpmInstalledPlugins(params: {
         `Disabled "${pluginId}" after plugin update failure; OpenClaw will continue without it. ` +
         message;
       logger.warn?.(disabledMessage);
-      next = disablePluginConfigEntry(next, pluginId);
+      next = disablePluginAfterUpdateFailure(next, pluginId);
       changed = true;
       outcomes.push({
         pluginId,
@@ -1308,12 +1312,13 @@ export async function updateNpmInstalledPlugins(params: {
       continue;
     }
 
-    const officialNpmSpec = params.syncOfficialPluginInstalls
-      ? resolveTrustedSourceLinkedOfficialNpmSpec({ pluginId, record })
-      : undefined;
+    const trustedOfficialNpmSpec = resolveTrustedSourceLinkedOfficialNpmSpec({ pluginId, record });
+    const officialNpmSpec = params.syncOfficialPluginInstalls ? trustedOfficialNpmSpec : undefined;
     const officialClawHubSpec = params.syncOfficialPluginInstalls
       ? resolveTrustedSourceLinkedOfficialClawHubSpec({ pluginId, record })
       : undefined;
+    const officialSyncUpdateChannel = params.officialPluginUpdateChannel ?? params.updateChannel;
+    const officialNpmPackageName = resolveNpmSpecPackageName(trustedOfficialNpmSpec);
 
     if (normalizedPluginConfig) {
       const enableState = resolveEffectiveEnableState({
@@ -1347,7 +1352,9 @@ export async function updateNpmInstalledPlugins(params: {
             record,
             specOverride: params.specOverrides?.[pluginId],
             officialSpecOverride: officialNpmSpec,
-            updateChannel: params.updateChannel,
+            updateChannel: officialNpmSpec ? officialSyncUpdateChannel : params.updateChannel,
+            officialPackageName: officialNpmPackageName,
+            coreVersion: params.coreVersion,
           })
         : undefined;
     const clawhubSpecs =
@@ -1355,7 +1362,7 @@ export async function updateNpmInstalledPlugins(params: {
         ? resolveClawHubUpdateSpecs({
             record,
             officialSpecOverride: officialClawHubSpec,
-            updateChannel: params.updateChannel,
+            updateChannel: officialClawHubSpec ? officialSyncUpdateChannel : params.updateChannel,
           })
         : undefined;
     const effectiveSpec =
@@ -1370,6 +1377,10 @@ export async function updateNpmInstalledPlugins(params: {
         : record.source === "clawhub"
           ? clawhubSpecs?.recordSpec
           : record.spec;
+    const preserveNpmRecordIntent =
+      record.source === "npm" &&
+      npmSpecs?.installSpec !== npmSpecs?.recordSpec &&
+      (officialNpmSpec ? officialSyncUpdateChannel : params.updateChannel) === "extended-stable";
     const officialNpmFallbackSpecs =
       record.source === "clawhub"
         ? resolveTrustedSourceLinkedOfficialNpmFallbackForClawHubUpdate({
@@ -1377,7 +1388,10 @@ export async function updateNpmInstalledPlugins(params: {
             record,
             effectiveClawHubSpec: effectiveSpec,
             recordClawHubSpec: recordSpec,
-            updateChannel: params.updateChannel,
+            updateChannel: params.syncOfficialPluginInstalls
+              ? officialSyncUpdateChannel
+              : params.updateChannel,
+            coreVersion: params.coreVersion,
           })
         : null;
     let officialNpmFallbackInstallSpec = officialNpmFallbackSpecs?.installSpec;
@@ -1544,7 +1558,7 @@ export async function updateNpmInstalledPlugins(params: {
             const nextRecordSpec = resolveNpmInstallRecordSpec({
               requestedSpec: recordSpec,
               resolution: metadataResult.metadata,
-              pinResolvedRegistrySpec: true,
+              pinResolvedRegistrySpec: !preserveNpmRecordIntent,
             });
             if (nextRecordSpec !== record.spec) {
               const resolutionFields = buildNpmResolutionInstallFields(metadataResult.metadata);
@@ -1580,6 +1594,10 @@ export async function updateNpmInstalledPlugins(params: {
           continue;
         }
       } else {
+        if (!parseRegistryNpmSpec(effectiveSpec!)) {
+          recordFailure(pluginId, `Failed to check ${pluginId}: ${metadataResult.error}`);
+          continue;
+        }
         logger.warn?.(
           `Could not check ${pluginId} before update; falling back to installer path: ${metadataResult.error}`,
         );
@@ -2081,8 +2099,10 @@ export async function updateNpmInstalledPlugins(params: {
             requestedSpec: usedOfficialNpmFallback ? officialNpmFallbackRecordSpec : recordSpec,
             resolution: npmResult.npmResolution,
             pinResolvedRegistrySpec:
-              (params.syncOfficialPluginInstalls && trustedSourceLinkedOfficialInstall) ||
-              usedOfficialNpmFallback,
+              (params.syncOfficialPluginInstalls &&
+                trustedSourceLinkedOfficialInstall &&
+                !preserveNpmRecordIntent) ||
+              (usedOfficialNpmFallback && officialSyncUpdateChannel !== "extended-stable"),
           }),
           installPath: result.targetDir,
           version: nextVersion,
@@ -2171,6 +2191,7 @@ export async function updateNpmInstalledPlugins(params: {
 export async function syncPluginsForUpdateChannel(params: {
   config: OpenClawConfig;
   channel: UpdateChannel;
+  coreVersion?: string;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
   logger?: PluginUpdateLogger;
@@ -2287,8 +2308,18 @@ export async function syncPluginsForUpdateChannel(params: {
         targetPluginId,
         npmSpec,
       });
+      const channelNpmSpecs =
+        npmSpec && trustedSourceLinkedOfficialInstall
+          ? resolveNpmInstallSpecsForUpdateChannel({
+              spec: npmSpec,
+              updateChannel: params.channel,
+              officialPackageName: resolveNpmSpecPackageName(npmSpec),
+              coreVersion: params.coreVersion,
+            })
+          : null;
+      const effectiveNpmSpec = channelNpmSpecs?.installSpec ?? npmSpec;
       let installSource = preferredSource;
-      let installSpec = preferredSource === "clawhub" ? clawhubSpec : npmSpec;
+      let installSpec = preferredSource === "clawhub" ? clawhubSpec : effectiveNpmSpec;
       let result:
         | Awaited<ReturnType<typeof installPluginFromNpmSpec>>
         | Awaited<ReturnType<typeof installPluginFromClawHub>>;
@@ -2310,13 +2341,13 @@ export async function syncPluginsForUpdateChannel(params: {
           logger,
         });
         if (!result.ok && npmSpec && shouldFallbackClawHubBridgeToNpm({ result, npmSpec })) {
-          const warning = `ClawHub ${clawhubSpec} unavailable for ${targetPluginId}; falling back to npm ${npmSpec}.`;
+          const warning = `ClawHub ${clawhubSpec} unavailable for ${targetPluginId}; falling back to npm ${effectiveNpmSpec}.`;
           summary.warnings.push(warning);
           logger.warn?.(warning);
           installSource = "npm";
-          installSpec = npmSpec;
+          installSpec = effectiveNpmSpec;
           result = await installPluginFromNpmSpec({
-            spec: npmSpec,
+            spec: effectiveNpmSpec,
             config: params.config,
             mode: "update",
             expectedPluginId: targetPluginId,
@@ -2326,7 +2357,7 @@ export async function syncPluginsForUpdateChannel(params: {
         }
       } else {
         result = await installPluginFromNpmSpec({
-          spec: npmSpec,
+          spec: effectiveNpmSpec,
           config: params.config,
           mode: "update",
           expectedPluginId: targetPluginId,
@@ -2381,9 +2412,13 @@ export async function syncPluginsForUpdateChannel(params: {
           pluginId: resolvedPluginId,
           source: "npm",
           spec: resolveNpmInstallRecordSpec({
-            requestedSpec: installSpec,
+            requestedSpec:
+              params.channel === "extended-stable" && installSource === "npm"
+                ? (channelNpmSpecs?.recordSpec ?? installSpec)
+                : installSpec,
             resolution: npmResult.npmResolution,
-            pinResolvedRegistrySpec: trustedSourceLinkedOfficialInstall,
+            pinResolvedRegistrySpec:
+              trustedSourceLinkedOfficialInstall && params.channel !== "extended-stable",
           }),
           installPath: result.targetDir,
           version: nextVersion,

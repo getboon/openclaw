@@ -1,7 +1,9 @@
 // Tests active reply run registry add, lookup, and cleanup behavior.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { setDiagnosticsEnabledForProcess } from "../../infra/diagnostic-events.js";
 import {
   getDiagnosticSessionActivitySnapshot,
+  markDiagnosticRunProgressForTest,
   resetDiagnosticRunActivityForTest,
 } from "../../logging/diagnostic-run-activity.js";
 import { MAX_TIMER_TIMEOUT_MS } from "../../shared/number-coercion.js";
@@ -10,6 +12,7 @@ import {
   abortActiveReplyRuns,
   createReplyOperation,
   forceClearReplyRunBySessionId,
+  isReplyRunEvidenceStaleBySessionId,
   isReplyRunActiveForSessionId,
   isReplyRunAbortableForCompaction,
   queueReplyRunMessage,
@@ -461,6 +464,33 @@ describe("reply run registry", () => {
     expect(replyRunRegistry.isActive("agent:main:main")).toBe(false);
   });
 
+  it("rejects aborts while the attached backend is finalizing", () => {
+    let abortable = false;
+    const cancel = vi.fn();
+    const operation = createReplyOperation({
+      sessionKey: "agent:main:finalizing",
+      sessionId: "session-finalizing",
+      resetTriggered: false,
+    });
+    operation.attachBackend({
+      kind: "embedded",
+      cancel,
+      isStreaming: () => false,
+      isAbortable: () => abortable,
+    });
+    operation.setPhase("running");
+
+    expect(replyRunRegistry.abort("agent:main:finalizing")).toBe(false);
+    expect(abortActiveReplyRuns({ mode: "all" })).toBe(false);
+    expect(operation.result).toBeNull();
+    expect(cancel).not.toHaveBeenCalled();
+
+    abortable = true;
+    expect(replyRunRegistry.abort("agent:main:finalizing")).toBe(true);
+    expect(operation.result).toEqual({ kind: "aborted", code: "aborted_by_user" });
+    expect(cancel).toHaveBeenCalledWith("user_abort");
+  });
+
   it("force-clears a running operation after abort without backend cleanup", async () => {
     vi.useFakeTimers();
     try {
@@ -539,6 +569,57 @@ describe("reply run registry", () => {
 
     expect(queueReplyRunMessage("session-running", "hello")).toBe(true);
     expect(queueMessage).toHaveBeenCalledWith("hello");
+  });
+
+  it("uses reply-operation activity as stale evidence", () => {
+    vi.useFakeTimers();
+    try {
+      setDiagnosticsEnabledForProcess(true);
+      const operation = createReplyOperation({
+        sessionKey: "agent:main:cli-activity",
+        sessionId: "session-cli-activity",
+        resetTriggered: false,
+      });
+      operation.setPhase("running");
+
+      vi.advanceTimersByTime(9 * 60_000);
+      operation.recordActivity();
+      vi.advanceTimersByTime(2 * 60_000);
+      expect(isReplyRunEvidenceStaleBySessionId("session-cli-activity")).toBe(false);
+
+      vi.advanceTimersByTime(8 * 60_000 + 1);
+      expect(isReplyRunEvidenceStaleBySessionId("session-cli-activity")).toBe(true);
+    } finally {
+      setDiagnosticsEnabledForProcess(false);
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses fresh diagnostic progress as reply-run liveness evidence", () => {
+    vi.useFakeTimers();
+    try {
+      setDiagnosticsEnabledForProcess(true);
+      const operation = createReplyOperation({
+        sessionKey: "agent:main:cli-diagnostics",
+        sessionId: "session-cli-diagnostics",
+        resetTriggered: false,
+      });
+      operation.setPhase("running");
+
+      vi.advanceTimersByTime(9 * 60_000);
+      markDiagnosticRunProgressForTest({
+        sessionId: "session-cli-diagnostics",
+        reason: "cli_live:stream_progress",
+      });
+      vi.advanceTimersByTime(2 * 60_000);
+      expect(isReplyRunEvidenceStaleBySessionId("session-cli-diagnostics")).toBe(false);
+
+      vi.advanceTimersByTime(8 * 60_000 + 1);
+      expect(isReplyRunEvidenceStaleBySessionId("session-cli-diagnostics")).toBe(true);
+    } finally {
+      setDiagnosticsEnabledForProcess(false);
+      vi.useRealTimers();
+    }
   });
 
   it("aborts compacting runs through the registry compatibility helper", () => {

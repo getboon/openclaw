@@ -37,19 +37,40 @@ enum ShellExecutor {
         let out = await outTask.value
         let err = await errTask.value
         return ShellResult(
-            stdout: String(bytes: out, encoding: .utf8) ?? "",
-            stderr: String(bytes: err, encoding: .utf8) ?? "",
+            stdout: String(decoding: out, as: UTF8.self),
+            stderr: String(decoding: err, as: UTF8.self),
             exitCode: status,
             timedOut: false,
             success: status == 0,
             errorMessage: status == 0 ? nil : "exit \(status)")
     }
 
+    /// Drains `handle` to EOF in bounded chunks, keeping only the trailing `maxBytes` of it.
+    /// ExecHostOutputLimiter.truncate presents the tail of whatever it's given (the end of a
+    /// command's output is where errors/status usually land), so this must retain the tail too,
+    /// not the head, or a truncated response silently shows stale early output instead. Older
+    /// bytes are dropped as newer ones arrive rather than left unread, so a command with
+    /// unbounded output can't block on a full pipe buffer while also not accumulating unbounded
+    /// memory here.
+    private static func readCapped(_ handle: FileHandle, maxBytes: Int) -> Data {
+        var result = Data()
+        while true {
+            let chunk = handle.readSafely(upToCount: 65536)
+            if chunk.isEmpty { break }
+            result.append(chunk)
+            if result.count > maxBytes {
+                result.removeFirst(result.count - maxBytes)
+            }
+        }
+        return result
+    }
+
     static func runDetailed(
         command: [String],
         cwd: String?,
         env: [String: String]?,
-        timeout: Double?) async -> ShellResult
+        timeout: Double?,
+        maxOutputBytes: Int? = nil) async -> ShellResult
     {
         guard !command.isEmpty else {
             return ShellResult(
@@ -72,8 +93,14 @@ enum ShellExecutor {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        let outTask = Task { stdoutPipe.fileHandleForReading.readToEndSafely() }
-        let errTask = Task { stderrPipe.fileHandleForReading.readToEndSafely() }
+        let outTask = Task {
+            maxOutputBytes.map { self.readCapped(stdoutPipe.fileHandleForReading, maxBytes: $0) }
+                ?? stdoutPipe.fileHandleForReading.readToEndSafely()
+        }
+        let errTask = Task {
+            maxOutputBytes.map { self.readCapped(stderrPipe.fileHandleForReading, maxBytes: $0) }
+                ?? stderrPipe.fileHandleForReading.readToEndSafely()
+        }
 
         if let timeout, timeout > 0 {
             return await withCheckedContinuation { continuation in

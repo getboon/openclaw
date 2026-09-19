@@ -1,10 +1,11 @@
 // Verify Docker Attestations tests cover verify docker attestations script behavior.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   collectDockerAttestationErrors,
   imageRefForDigest,
   parseArgs,
   parsePlatform,
+  verifyDockerAttestations,
 } from "../../scripts/verify-docker-attestations.mjs";
 
 const imageDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
@@ -152,5 +153,34 @@ describe("verify-docker-attestations", () => {
     expect(errors).toEqual([
       "ghcr.io/openclaw/openclaw:test: linux/amd64 missing predicate https://slsa.dev/provenance/v1",
     ]);
+  });
+
+  it("uses the injected executor instead of invoking Docker directly", () => {
+    const execFileSyncImpl = vi.fn((_command: string, args: string[]) => {
+      const target = args.at(-1);
+      if (target === "ghcr.io/openclaw/openclaw:test") {
+        return JSON.stringify(createIndex());
+      }
+      if (target === `ghcr.io/openclaw/openclaw@${attestationDigest}`) {
+        return JSON.stringify(createAttestation());
+      }
+      throw new Error(`unexpected inspect target: ${target}`);
+    });
+    const log = vi.fn();
+
+    verifyDockerAttestations({
+      imageRefs: ["ghcr.io/openclaw/openclaw:test"],
+      requiredPlatforms: [parsePlatform("linux/amd64")],
+      execFileSyncImpl,
+      log,
+    });
+
+    expect(execFileSyncImpl).toHaveBeenCalledTimes(2);
+    expect(execFileSyncImpl).toHaveBeenCalledWith(
+      "docker",
+      expect.arrayContaining(["ghcr.io/openclaw/openclaw:test"]),
+      expect.anything(),
+    );
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("Verified Docker attestations"));
   });
 });

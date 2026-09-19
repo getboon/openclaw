@@ -65,6 +65,7 @@ export type AuthProbeReasonCode =
   | "expired"
   | "invalid_expires"
   | "unresolved_ref"
+  | "malformed_api_key"
   | "ineligible_profile"
   | "no_model";
 
@@ -223,6 +224,9 @@ function mapEligibilityReasonToProbeReasonCode(
   if (reasonCode === "unresolved_ref") {
     return "unresolved_ref";
   }
+  if (reasonCode === "malformed_api_key") {
+    return "malformed_api_key";
+  }
   return "ineligible_profile";
 }
 
@@ -239,6 +243,9 @@ function formatMissingCredentialProbeError(reasonCode: AuthProbeReasonCode): str
   }
   if (reasonCode === "unresolved_ref") {
     return `${legacyLine}\n↳ Auth reason [unresolved_ref]: configured SecretRef could not be resolved.`;
+  }
+  if (reasonCode === "malformed_api_key") {
+    return `${legacyLine}\n↳ Auth reason [malformed_api_key]: paste the API key value, not an onboarding command.`;
   }
   return `${legacyLine}\n↳ Auth reason [ineligible_profile]: profile is incompatible with provider config.`;
 }
