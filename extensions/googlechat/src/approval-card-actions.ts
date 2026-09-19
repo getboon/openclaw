@@ -125,13 +125,8 @@ function pruneApprovalCardBindingsAndOrphanedSuppressions(): void {
     }
     const [evictedToken, evictedBinding] = oldest.value;
     approvalCardBindings.delete(evictedToken);
-    // Deliberately NOT clearing approvalCardResolvingTokens here. Unlike
-    // time-based expiry, LRU eviction can fire while a claim on this exact
-    // token is genuinely in-flight (claimGoogleChatApprovalCardBinding ->
-    // async gateway resolution -> complete/release). If the token later gets
-    // re-registered (same card resent), leaving the resolving marker set
-    // makes a second concurrent claim on it correctly report "in-flight"
-    // instead of racing the still-running first resolution.
+    // Preserve in-flight markers across LRU eviction so a resent token cannot
+    // be claimed while its original resolution is still running.
     const key = manualApprovalFollowupSuppressionKey(evictedBinding.approvalId);
     if (!key) {
       continue;
