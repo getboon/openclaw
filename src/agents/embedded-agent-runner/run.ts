@@ -3783,7 +3783,8 @@ async function runEmbeddedAgentInternal(
           const mergedAttemptToolSummary: ToolSummaryTrace | undefined =
             delegatedToolEvidence.invocations.length > 0
               ? {
-                  calls: attemptToolSummary?.calls ?? 0,
+                  calls:
+                    (attemptToolSummary?.calls ?? 0) + delegatedToolEvidence.invocations.length,
                   tools: attemptToolSummary?.tools ?? [],
                   ...(attemptToolSummary?.failures !== undefined
                     ? { failures: attemptToolSummary.failures }
