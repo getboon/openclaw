@@ -2,6 +2,7 @@
 import { chromium } from "playwright-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as chromeModule from "./chrome.js";
+import { BrowserCdpEndpointBlockedError } from "./errors.js";
 import {
   closePlaywrightBrowserConnection,
   createPageViaPlaywright,
@@ -170,6 +171,32 @@ describe("pw-session connection scoping", () => {
       "Authenticated CDP HTTP endpoint did not expose a usable WebSocket URL.",
     );
 
+    expect(connectOverCdpSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a rate-limited discovery instead of replacing it with a generic error", async () => {
+    const cdpUrl = "https://browserless.example/cdp";
+    setCdpConnectRetryDelayMsForTests(0);
+    getChromeWebSocketUrlSpy.mockRejectedValue(
+      new Error("Browser service rate limit reached. Wait for the current session to complete."),
+    );
+
+    await expect(listPagesViaPlaywright({ cdpUrl })).rejects.toThrow(/rate limit/i);
+
+    expect(getChromeWebSocketUrlSpy).toHaveBeenCalledTimes(1);
+    expect(connectOverCdpSpy).not.toHaveBeenCalled();
+  });
+
+  it("preserves a policy-blocked discovery's 400 status instead of a generic connect error", async () => {
+    const cdpUrl = "https://blocked.example/cdp";
+    setCdpConnectRetryDelayMsForTests(0);
+    getChromeWebSocketUrlSpy.mockRejectedValue(new BrowserCdpEndpointBlockedError());
+
+    const error = await listPagesViaPlaywright({ cdpUrl }).catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(BrowserCdpEndpointBlockedError);
+    expect((error as BrowserCdpEndpointBlockedError).status).toBe(400);
+    expect(getChromeWebSocketUrlSpy).toHaveBeenCalledTimes(1);
     expect(connectOverCdpSpy).not.toHaveBeenCalled();
   });
 

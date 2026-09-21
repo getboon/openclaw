@@ -15,6 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { prepareOomScoreAdjustedSpawn } from "openclaw/plugin-sdk/process-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { formatErrorMessage } from "../infra/errors.js";
 import type { SsrFPolicy } from "../infra/net/ssrf.js";
 import { ensurePortAvailable } from "../infra/ports.js";
 import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
@@ -73,7 +74,7 @@ import {
   DEFAULT_OPENCLAW_BROWSER_COLOR,
   DEFAULT_OPENCLAW_BROWSER_PROFILE_NAME,
 } from "./constants.js";
-import { BrowserProfileUnavailableError } from "./errors.js";
+import { BrowserCdpEndpointBlockedError, BrowserProfileUnavailableError } from "./errors.js";
 import { ensureOutputDirectory } from "./output-directories.js";
 import { DEFAULT_DOWNLOAD_DIR } from "./paths.js";
 
@@ -833,7 +834,16 @@ async function fetchChromeVersion(
 ): Promise<ChromeVersion | null> {
   try {
     return await readChromeVersionWithCredentialFallback(cdpUrl, timeoutMs, ssrfPolicy);
-  } catch {
+  } catch (error) {
+    // Rate-limit and policy-block failures are actionable, not "no version
+    // data" -- swallowing them here hid them from callers that need to stop
+    // retrying (rate limit) or keep the 400 status (policy block).
+    if (
+      error instanceof BrowserCdpEndpointBlockedError ||
+      formatErrorMessage(error).toLowerCase().includes("rate limit")
+    ) {
+      throw error;
+    }
     return null;
   }
 }

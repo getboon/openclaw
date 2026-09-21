@@ -40,7 +40,7 @@ import {
 } from "./cdp.helpers.js";
 import { AX_REF_PATTERN, normalizeCdpWsUrl } from "./cdp.js";
 import { getChromeWebSocketUrl } from "./chrome.js";
-import { BrowserTabNotFoundError } from "./errors.js";
+import { BrowserCdpEndpointBlockedError, BrowserTabNotFoundError } from "./errors.js";
 import {
   assertBrowserNavigationAllowed,
   assertBrowserNavigationRedirectChainAllowed,
@@ -942,7 +942,20 @@ async function connectBrowser(cdpUrl: string, ssrfPolicy?: SsrFPolicy): Promise<
       try {
         const timeout = 5000 + attempt * 2000;
         const wsUrl = await getChromeWebSocketUrl(normalized, timeout, ssrfPolicy).catch(
-          () => null,
+          (error: unknown) => {
+            // Rate limits and policy blocks are actionable failures, not "no
+            // WebSocket URL" -- rethrow so the outer catch below can stop
+            // retrying a rate limit and the policy block keeps its 400 status,
+            // instead of both being replaced with a generic "no usable
+            // WebSocket URL" error.
+            if (
+              error instanceof BrowserCdpEndpointBlockedError ||
+              formatErrorMessage(error).toLowerCase().includes("rate limit")
+            ) {
+              throw error;
+            }
+            return null;
+          },
         );
         const hasUrlCredentials = stripCdpUrlCredentials(normalized) !== normalized;
         if (!wsUrl && hasUrlCredentials && !isWebSocketUrl(normalized)) {
@@ -981,9 +994,10 @@ async function connectBrowser(cdpUrl: string, ssrfPolicy?: SsrFPolicy): Promise<
         return connected;
       } catch (err) {
         lastErr = err;
-        // Don't retry rate-limit errors; retrying worsens the 429.
+        // Don't retry rate-limit errors (retrying worsens the 429) or policy
+        // blocks (a deterministic config issue that won't clear on retry).
         const errMsg = formatErrorMessage(err);
-        if (errMsg.includes("rate limit")) {
+        if (errMsg.includes("rate limit") || err instanceof BrowserCdpEndpointBlockedError) {
           break;
         }
         const delay = resolveCdpConnectRetryDelayMs(attempt);
@@ -991,6 +1005,12 @@ async function connectBrowser(cdpUrl: string, ssrfPolicy?: SsrFPolicy): Promise<
           setTimeout(r, delay);
         });
       }
+    }
+    // BrowserCdpEndpointBlockedError is OpenClaw's own safe, static-message
+    // error (no embedded connection URL), so it's fine to rethrow directly
+    // and keep its 400 status instead of collapsing it into a generic Error.
+    if (lastErr instanceof BrowserCdpEndpointBlockedError) {
+      throw lastErr;
     }
     const message = lastErr ? formatErrorMessage(lastErr) : "CDP connect failed";
     // Never retain the raw dependency error as a cause: Playwright includes
