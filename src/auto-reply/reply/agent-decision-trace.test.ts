@@ -420,6 +420,38 @@ describe("buildAgentDecisionTrace", () => {
     expect(trace.confidence).toBe("medium");
     expect(trace.evidence).toEqual([{ kind: "tool_outcome", tool: "pdf", status: "partial" }]);
   });
+
+  it("carries viaSubagent through to both toolInvocations and evidence when set on input", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["takeoff_dispatch"],
+        failures: 0,
+        visibleTools: ["takeoff_dispatch"],
+        invocations: [{ name: "takeoff_dispatch", status: "ok", viaSubagent: true }],
+      },
+    });
+    expect(trace.toolInvocations).toEqual([
+      { name: "takeoff_dispatch", status: "ok", viaSubagent: true },
+    ]);
+    expect(trace.evidence).toEqual([
+      { kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok", viaSubagent: true },
+    ]);
+  });
+
+  it("omits viaSubagent from both outputs when not set on input", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["read"],
+        failures: 0,
+        visibleTools: ["read"],
+        invocations: [{ name: "read", status: "ok" }],
+      },
+    });
+    expect(trace.toolInvocations).toEqual([{ name: "read", status: "ok" }]);
+    expect(trace.evidence).toEqual([{ kind: "tool_outcome", tool: "read", status: "ok" }]);
+  });
 });
 
 describe("attachAgentDecisionTrace", () => {
