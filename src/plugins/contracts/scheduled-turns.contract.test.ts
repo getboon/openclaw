@@ -761,11 +761,26 @@ describe("plugin scheduled turns", () => {
     },
   );
 
-  it(
-    "still rolls back a job when the OWNER's own standalone context genuinely reloads while " +
-      "cron.add is in flight -- a same-cache-key replacement is a real generation change, not " +
-      "the unrelated-tenant swap the pending-operation pin exists to survive",
-    async () => {
+  it.each([
+    {
+      label: "reloads directly, with no interposed registry",
+      cacheKey: "same-context-cache-key",
+      jobId: "job-stale-reload",
+      interposeUnrelatedRegistry: false,
+    },
+    {
+      label:
+        "reloads after an UNRELATED registry interposes first -- the owner is never the " +
+        "direct previousRegistry for the reload swap, so a per-swap side effect alone would " +
+        "miss it; shouldCommit must compare cache keys directly against current state instead",
+      cacheKey: "interposed-context-cache-key",
+      jobId: "job-interposed-reload",
+      interposeUnrelatedRegistry: true,
+    },
+  ])(
+    "still rolls back a job when the OWNER's own standalone context genuinely reloads under " +
+      "the same cache key while cron.add is in flight -- $label",
+    async ({ cacheKey, jobId, interposeUnrelatedRegistry }) => {
       const ownerFixture = createPluginRegistryFixture();
       ownerFixture.registry.registry.plugins.push(
         createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
@@ -775,57 +790,10 @@ describe("plugin scheduled turns", () => {
       // longer loads the plugin -- it was genuinely disabled/removed as part
       // of the reload, not just transiently not the active pointer.
       const reloadedRegistry = createEmptyPluginRegistry();
-      const contextCacheKey = "same-context-cache-key";
-      setActivePluginRegistry(ownerRegistry, contextCacheKey);
-      const shouldCommit = () =>
-        !isPluginRegistrySuperseded(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
-      let resolveCronAdd!: (job: CronJob) => void;
-      workflowMocks.cronAdd.mockImplementation(
-        () =>
-          new Promise<CronJob>((resolve) => {
-            resolveCronAdd = resolve;
-          }),
-      );
-
-      const schedulePromise = scheduleWorkflowTurn({
-        pluginName: "Workflow Plugin",
-        schedule: { delayMs: 1 },
-        shouldCommit,
-        ownerRegistry,
-      });
-      // The owner's own context reloads into a fresh registry generation
-      // under the SAME cache key while cron.add() is pending.
-      setActivePluginRegistry(reloadedRegistry, contextCacheKey);
-      resolveCronAdd(makeCronJob({ id: "job-stale-reload" }));
-
-      const handle = await schedulePromise;
-
-      expect(handle).toBeUndefined();
-      expect(workflowMocks.cronRemove).toHaveBeenCalledWith("job-stale-reload");
-      expect(listPluginSessionSchedulerJobs(WORKFLOW_PLUGIN_ID)).toEqual([]);
-    },
-  );
-
-  it(
-    "still rolls back a job when an UNRELATED registry interposes before the OWNER's own " +
-      "context reloads under the same cache key -- the owner is never the direct previousRegistry " +
-      "for that second swap, so a per-swap side effect alone would miss it; shouldCommit must " +
-      "compare cache keys directly against current state instead",
-    async () => {
-      const ownerFixture = createPluginRegistryFixture();
-      ownerFixture.registry.registry.plugins.push(
-        createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
-      );
-      const ownerRegistry = ownerFixture.registry.registry;
-      const contextCacheKey = "interposed-context-cache-key";
-      const unrelatedRegistry = createEmptyPluginRegistry();
-      const reloadedRegistry = createEmptyPluginRegistry();
-      setActivePluginRegistry(ownerRegistry, contextCacheKey);
+      setActivePluginRegistry(ownerRegistry, cacheKey);
       // Mirrors the REAL production shouldCommit wiring exactly (registry.ts's
       // isLoadedRecordInActiveRegistry) -- uses the exported
-      // isPluginRegistrySuperseded rather than a hand-rolled reconstruction,
-      // since this test exists specifically to prove that function's own
-      // correctness against an interposed swap.
+      // isPluginRegistrySuperseded rather than a hand-rolled reconstruction.
       const shouldCommit = () =>
         !isPluginRegistrySuperseded(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
       let resolveCronAdd!: (job: CronJob) => void;
@@ -842,20 +810,21 @@ describe("plugin scheduled turns", () => {
         shouldCommit,
         ownerRegistry,
       });
-      // An unrelated registry interposes first -- ownerRegistry is displaced
-      // but still protected by the pending-operation pin.
-      setActivePluginRegistry(unrelatedRegistry);
-      // THEN, before cron.add() resolves, a genuine reload of the OWNER's
-      // own context takes over -- but ownerRegistry was never
-      // previousRegistry for THIS swap (unrelatedRegistry was), so no
-      // per-swap side effect for ownerRegistry itself ever fires.
-      setActivePluginRegistry(reloadedRegistry, contextCacheKey);
-      resolveCronAdd(makeCronJob({ id: "job-interposed-reload" }));
+      if (interposeUnrelatedRegistry) {
+        // An unrelated registry interposes first -- ownerRegistry is
+        // displaced but still protected by the pending-operation pin, and
+        // is never previousRegistry for the reload swap below.
+        setActivePluginRegistry(createEmptyPluginRegistry());
+      }
+      // The owner's own context reloads into a fresh registry generation
+      // under the SAME cache key while cron.add() is pending.
+      setActivePluginRegistry(reloadedRegistry, cacheKey);
+      resolveCronAdd(makeCronJob({ id: jobId }));
 
       const handle = await schedulePromise;
 
       expect(handle).toBeUndefined();
-      expect(workflowMocks.cronRemove).toHaveBeenCalledWith("job-interposed-reload");
+      expect(workflowMocks.cronRemove).toHaveBeenCalledWith(jobId);
       expect(listPluginSessionSchedulerJobs(WORKFLOW_PLUGIN_ID)).toEqual([]);
     },
   );
