@@ -3,7 +3,7 @@
 // boon's monolithic run.ts (buildTraceToolSummary lives here) and boon's
 // per-call `errored` flag (vs upstream `isError`) + `hadFailure` param name.
 import { describe, expect, it } from "vitest";
-import { buildTraceToolSummary } from "./run.js";
+import { buildTraceToolSummary, collectDelegatedToolInvocationsFromInternalEvents } from "./run.js";
 
 describe("buildTraceToolSummary", () => {
   it("keeps visible tools and per-invocation outcomes without arguments or results", () => {
@@ -194,5 +194,104 @@ describe("buildTraceToolSummary", () => {
         hadFailure: true,
       }),
     ).not.toHaveProperty("unrecoveredFailures");
+  });
+});
+
+describe("collectDelegatedToolInvocationsFromInternalEvents", () => {
+  it("returns empty when internalEvents is undefined", () => {
+    expect(collectDelegatedToolInvocationsFromInternalEvents(undefined)).toEqual({
+      invocations: [],
+      visibleTools: [],
+    });
+  });
+
+  it("returns empty when no event is a task_completion with childToolEvidence", () => {
+    expect(
+      collectDelegatedToolInvocationsFromInternalEvents([
+        {
+          type: "task_completion",
+          source: "subagent",
+          childSessionKey: "c1",
+          announceType: "subagent task",
+          taskLabel: "t",
+          status: "ok",
+          statusLabel: "completed",
+          result: "done",
+          replyInstruction: "review",
+        },
+      ]),
+    ).toEqual({ invocations: [], visibleTools: [] });
+  });
+
+  it("flattens childToolEvidence across events and tags each invocation viaSubagent", () => {
+    const result = collectDelegatedToolInvocationsFromInternalEvents([
+      {
+        type: "task_completion",
+        source: "subagent",
+        childSessionKey: "c1",
+        announceType: "subagent task",
+        taskLabel: "t",
+        status: "ok",
+        statusLabel: "completed",
+        result: "done",
+        replyInstruction: "review",
+        childToolEvidence: [
+          {
+            childSessionKey: "c1",
+            toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+            visibleTools: ["takeoff_dispatch"],
+          },
+          {
+            childSessionKey: "c2",
+            toolInvocations: [{ name: "takeoff_status_poll", status: "ok" }],
+            visibleTools: ["takeoff_status_poll"],
+          },
+        ],
+      },
+    ]);
+    expect(result.invocations).toEqual([
+      { name: "takeoff_dispatch", status: "ok", viaSubagent: true },
+      { name: "takeoff_status_poll", status: "ok", viaSubagent: true },
+    ]);
+    expect(result.visibleTools.toSorted()).toEqual(["takeoff_dispatch", "takeoff_status_poll"]);
+  });
+});
+
+describe("buildTraceToolSummary + delegated merge (integration shape)", () => {
+  it("merging delegated invocations into an existing summary preserves direct invocations untagged", () => {
+    const direct = buildTraceToolSummary({
+      visibleToolNames: ["message"],
+      toolMetas: [{ toolName: "message", errored: false }],
+      hadFailure: false,
+    });
+    const delegated = collectDelegatedToolInvocationsFromInternalEvents([
+      {
+        type: "task_completion",
+        source: "subagent",
+        childSessionKey: "c1",
+        announceType: "subagent task",
+        taskLabel: "t",
+        status: "ok",
+        statusLabel: "completed",
+        result: "done",
+        replyInstruction: "review",
+        childToolEvidence: [
+          {
+            childSessionKey: "c1",
+            toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+            visibleTools: ["takeoff_dispatch"],
+          },
+        ],
+      },
+    ]);
+    const merged = {
+      ...direct,
+      invocations: [...(direct?.invocations ?? []), ...delegated.invocations],
+      visibleTools: [...new Set([...(direct?.visibleTools ?? []), ...delegated.visibleTools])],
+    };
+    expect(merged.invocations).toEqual([
+      { name: "message", status: "ok" },
+      { name: "takeoff_dispatch", status: "ok", viaSubagent: true },
+    ]);
   });
 });

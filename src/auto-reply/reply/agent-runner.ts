@@ -432,6 +432,8 @@ type TraceToolSummaryView = {
     name: string;
     status: "ok" | "partial" | "error" | "blocked";
     detail?: string;
+    /** Set when this invocation was made by a delegated subagent, not this attempt (ENG-19951). */
+    viaSubagent?: boolean;
   }>;
   /**
    * Errored calls still unresolved when the turn ended. `undefined` means the
