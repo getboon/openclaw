@@ -11,6 +11,7 @@ import {
   asDateTimestampMs,
   resolveExpiresAtMsFromDurationMs,
 } from "openclaw/plugin-sdk/number-runtime";
+import { recordPendingHistoryEntryWithMedia } from "openclaw/plugin-sdk/reply-history";
 import type { ResolvedSlackAccount } from "../accounts.js";
 import type { SlackSendIdentity } from "../send.js";
 import type { SlackMessageEvent } from "../types.js";
@@ -24,6 +25,8 @@ import {
   buildSlackDebounceKey,
   buildTopLevelSlackConversationKey,
 } from "./message-handler/debounce-key.js";
+import { resolveSlackTimestampMs } from "./message-handler/timestamp.js";
+import type { PreparedSlackMessage } from "./message-handler/types.js";
 import { createSlackThreadTsResolver } from "./thread-resolution.js";
 
 type SlackMessagePipeline = typeof import("./message-handler/pipeline.runtime.js");
@@ -89,6 +92,45 @@ function isRetryableSlackInboundError(error: unknown): boolean {
   return (
     error instanceof SlackRetryableInboundError || isReplySessionInitializationConflictError(error)
   );
+}
+
+/**
+ * An app_mention's own optimistic "I'll handle this" marker
+ * (`appMentionDispatchedKeys`) is set right after prepare succeeds, before
+ * dispatch runs. A same-ts "message" copy trusts that marker and suppresses
+ * its own dropped-history record. If dispatch then fails for good (no more
+ * retries), that trust was misplaced: neither copy ever recorded the message,
+ * and it silently vanishes from channel history. Record it here instead,
+ * using the already-resolved history target from the app_mention's own
+ * successful prepare -- this only ever fires for entries that reach this
+ * point after `prepared` succeeded, so it can't race the drop conditions
+ * inside prepareSlackMessage itself.
+ */
+async function recordDroppedHistoryForFailedAppMentionDispatch(params: {
+  prepared: PreparedSlackMessage;
+  entries: readonly { message: SlackMessageEvent }[];
+}): Promise<void> {
+  const history = params.prepared.turn.history;
+  if (!history?.historyMap || !history.historyKey || !history.limit || history.limit <= 0) {
+    return;
+  }
+  for (const entry of params.entries) {
+    const body = (entry.message.text ?? "").trim();
+    if (!body) {
+      continue;
+    }
+    await recordPendingHistoryEntryWithMedia({
+      historyMap: history.historyMap,
+      historyKey: history.historyKey,
+      limit: history.limit,
+      entry: {
+        sender: entry.message.user ?? entry.message.bot_id ?? "unknown",
+        body,
+        timestamp: resolveSlackTimestampMs(entry.message.ts),
+        messageId: entry.message.ts,
+      },
+    });
+  }
 }
 
 function shouldDebounceSlackMessage(message: SlackMessageEvent, cfg: SlackMonitorContext["cfg"]) {
@@ -167,6 +209,10 @@ export function createSlackMessageHandler(params: {
       const completions = entries
         .map((entry) => entry.opts.dispatchCompletion)
         .filter((completion) => completion !== undefined);
+      // Set once this attempt's prepare succeeds, so the outer catch below can
+      // record compensating dropped-history once no further retry is coming
+      // (this attempt's own scope; each retry re-enters onFlush fresh).
+      let preparedForFailedDispatchFallback: PreparedSlackMessage | undefined;
       try {
         await (async () => {
           const last = entries.at(-1);
@@ -260,6 +306,7 @@ export function createSlackMessageHandler(params: {
             if (!prepared) {
               return;
             }
+            preparedForFailedDispatchFallback = prepared;
             if (entries.length > 1) {
               const ids = entries.map((entry) => entry.message.ts).filter(Boolean) as string[];
               if (ids.length > 0) {
@@ -308,6 +355,24 @@ export function createSlackMessageHandler(params: {
         }
       } catch (error) {
         const retryScheduled = retryEntries(error);
+        if (
+          !retryScheduled &&
+          preparedForFailedDispatchFallback &&
+          entries.at(-1)?.opts.source === "app_mention"
+        ) {
+          // Dispatch is done retrying and failed for good. A same-ts "message"
+          // copy may have already suppressed its own dropped-history record,
+          // trusting this app_mention's now-optimistic-only winner marker to
+          // cover it. Record it here instead of letting it vanish silently.
+          await recordDroppedHistoryForFailedAppMentionDispatch({
+            prepared: preparedForFailedDispatchFallback,
+            entries,
+          }).catch((err: unknown) => {
+            ctx.runtime.error?.(
+              `slack failed-app_mention history fallback failed: ${formatErrorMessage(err)}`,
+            );
+          });
+        }
         for (const completion of completions) {
           completion.reject(error);
         }

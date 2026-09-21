@@ -417,4 +417,58 @@ describe("createSlackMessageHandler app_mention race handling", () => {
     expect(prepareSlackMessageMock).toHaveBeenCalledTimes(1);
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(1);
   });
+
+  it("records dropped history when a trusted app_mention's dispatch fails for good", async () => {
+    const channelHistories = new Map<string, TestHistoryEntry[]>();
+    prepareSlackMessageMock.mockResolvedValue({
+      ctxPayload: {},
+      turn: {
+        history: {
+          historyMap: channelHistories,
+          historyKey: "C1",
+          limit: 10,
+        },
+      },
+    });
+    dispatchPreparedSlackMessageMock.mockRejectedValueOnce(new Error("post-send failure"));
+
+    const handler = createTestHandler({ channelHistories });
+
+    await expect(sendMentionEvent(handler, "1700000000.000400")).rejects.toThrow(
+      "post-send failure",
+    );
+
+    expect(channelHistories.get("C1")).toMatchObject([
+      { sender: "unknown", body: "<@U_BOT> hello", messageId: "1700000000.000400" },
+    ]);
+  });
+
+  it("records dropped history once app_mention retries are exhausted", async () => {
+    vi.useFakeTimers();
+    const channelHistories = new Map<string, TestHistoryEntry[]>();
+    prepareSlackMessageMock.mockResolvedValue({
+      ctxPayload: {},
+      turn: {
+        history: {
+          historyMap: channelHistories,
+          historyKey: "C1",
+          limit: 10,
+        },
+      },
+    });
+    dispatchPreparedSlackMessageMock.mockRejectedValue(new SlackRetryableInboundError("retry me"));
+
+    const handler = createTestHandler({ channelHistories });
+
+    await expect(sendMentionEvent(handler, "1700000000.000410")).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    // 1 initial attempt + 3 retries exhausts RETRYABLE_FLUSH_MAX_ATTEMPTS.
+    expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(4);
+
+    expect(channelHistories.get("C1")).toMatchObject([
+      { sender: "unknown", body: "<@U_BOT> hello", messageId: "1700000000.000410" },
+    ]);
+  });
 });
