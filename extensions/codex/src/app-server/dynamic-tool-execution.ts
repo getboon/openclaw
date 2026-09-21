@@ -24,8 +24,6 @@ import {
 
 /** Default timeout for Codex dynamic tool calls. */
 export const CODEX_DYNAMIC_TOOL_TIMEOUT_MS = 90_000;
-/** Hard cap for per-call Codex dynamic tool timeout overrides. */
-export const CODEX_DYNAMIC_TOOL_MAX_TIMEOUT_MS = 600_000;
 // timeoutSeconds is an inner tool budget. Keep enough outer-watchdog headroom
 // for bounded setup RPCs and the tool's structured timeout result to complete.
 // sessions_send's own setup can chain multiple sequential 10s-timeout gateway
@@ -33,6 +31,13 @@ export const CODEX_DYNAMIC_TOOL_MAX_TIMEOUT_MS = 600_000;
 // wait even starts, so a small requested timeoutSeconds needs enough grace to
 // outlast that worst-case setup chain, not just typical-case latency.
 const CODEX_DYNAMIC_TOOL_TIMEOUT_SECONDS_GRACE_MS = 60_000;
+// Hard cap for per-call Codex dynamic tool timeout overrides. There's no
+// upper bound on the raw timeoutSeconds a caller can request, so a request
+// near/at the old 600s cap had its grace silently discarded by that same
+// cap before the watchdog fired. Set the cap 60s (the grace above) higher
+// than the old ceiling so timeoutSeconds requests up to 600s always keep
+// their full grace window.
+export const CODEX_DYNAMIC_TOOL_MAX_TIMEOUT_MS = 660_000;
 const CODEX_DYNAMIC_IMAGE_GENERATION_TOOL_TIMEOUT_MS = 120_000;
 /** Timeout for image-understanding style dynamic tool calls. */
 export const CODEX_DYNAMIC_IMAGE_TOOL_TIMEOUT_MS = 60_000;

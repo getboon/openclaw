@@ -72,6 +72,25 @@ describe("dynamic tool execution helpers", () => {
     ).toBe(90_000);
   });
 
+  it("keeps the full grace for timeoutSeconds at the old 600s cap instead of losing it to clamping", () => {
+    // Before CODEX_DYNAMIC_TOOL_MAX_TIMEOUT_MS was raised, 600_000 + 60_000
+    // grace would have been clamped straight back down to 600_000, losing
+    // the entire grace window right when a max-length request needs it most.
+    expect(
+      resolveDynamicToolCallTimeoutMs({
+        call: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          callId: "call-seconds-at-ceiling",
+          namespace: null,
+          tool: "session_status",
+          arguments: { timeoutSeconds: 600 },
+        },
+        config: undefined,
+      }),
+    ).toBe(660_000);
+  });
+
   it("prefers timeoutMs over timeoutSeconds", () => {
     expect(
       resolveDynamicToolCallTimeoutMs({
