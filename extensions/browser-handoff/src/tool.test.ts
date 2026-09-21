@@ -315,7 +315,9 @@ describe("browser-handoff tool", () => {
       });
 
       expect(scheduleSessionTurn).not.toHaveBeenCalled();
-      expect(subsystemLoggerWarnMock).toHaveBeenCalledWith(expect.stringContaining("example.com"));
+      expect(subsystemLoggerWarnMock).toHaveBeenCalledWith(
+        expect.stringContaining("no sessionKey/runSessionKey in context"),
+      );
     });
 
     it("status reschedules another check, with a longer delay, when still pending", async () => {
@@ -633,7 +635,7 @@ describe("browser-handoff tool", () => {
         expect(scheduleSessionTurn).not.toHaveBeenCalled();
         expect(result.content[0].text).toContain("not available");
         expect(subsystemLoggerWarnMock).toHaveBeenCalledWith(
-          expect.stringContaining("example.com"),
+          expect.stringContaining("could not confirm prior schedule cleared"),
         );
       },
     );

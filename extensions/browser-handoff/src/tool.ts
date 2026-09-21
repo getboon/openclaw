@@ -110,10 +110,8 @@ async function scheduleRecheck(
 ): Promise<boolean> {
   const sessionKey = context.runSessionKey ?? context.sessionKey;
   if (!sessionKey) {
-    // Live-observed (ENG-17466): this was previously 100% silent, making a
-    // broken automatic-resume chain indistinguishable from "working as
-    // intended, just hasn't fired yet" until someone manually diffs cron
-    // logs against boon-core poll history.
+    // Logged rather than silent: without this, a broken automatic-resume
+    // chain is indistinguishable from "working as intended, hasn't fired yet".
     log.warn(`site=${params.site} recheck not scheduled: no sessionKey/runSessionKey in context`);
     return false;
   }
