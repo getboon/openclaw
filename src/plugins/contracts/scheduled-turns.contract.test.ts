@@ -777,10 +777,24 @@ describe("plugin scheduled turns", () => {
       jobId: "job-interposed-reload",
       interposeUnrelatedRegistry: true,
     },
+    {
+      label:
+        "reloads after an UNRELATED registry interposes first and ANOTHER unrelated registry " +
+        "becomes active afterward -- the superseded signal must survive later active-pointer swaps",
+      cacheKey: "interposed-then-unrelated-context-cache-key",
+      jobId: "job-interposed-reload-then-unrelated",
+      interposeUnrelatedRegistry: true,
+      activateUnrelatedRegistryAfterReload: true,
+    },
   ])(
     "still rolls back a job when the OWNER's own standalone context genuinely reloads under " +
       "the same cache key while cron.add is in flight -- $label",
-    async ({ cacheKey, jobId, interposeUnrelatedRegistry }) => {
+    async ({
+      cacheKey,
+      jobId,
+      interposeUnrelatedRegistry,
+      activateUnrelatedRegistryAfterReload = false,
+    }) => {
       const ownerFixture = createPluginRegistryFixture();
       ownerFixture.registry.registry.plugins.push(
         createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
@@ -819,6 +833,9 @@ describe("plugin scheduled turns", () => {
       // The owner's own context reloads into a fresh registry generation
       // under the SAME cache key while cron.add() is pending.
       setActivePluginRegistry(reloadedRegistry, cacheKey);
+      if (activateUnrelatedRegistryAfterReload) {
+        setActivePluginRegistry(createEmptyPluginRegistry());
+      }
       resolveCronAdd(makeCronJob({ id: jobId }));
 
       const handle = await schedulePromise;

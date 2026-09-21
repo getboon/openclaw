@@ -5,7 +5,18 @@ const retiredRegistries = new WeakSet<PluginRegistry>();
 const activatedRegistries = new WeakSet<PluginRegistry>();
 const pendingAsyncOperationCounts = new WeakMap<PluginRegistry, number>();
 const registryCacheKeys = new WeakMap<PluginRegistry, string | null>();
+const supersededCacheKeyRegistries = new WeakSet<PluginRegistry>();
+const latestCacheKeyRegistries = new Map<string, WeakRef<PluginRegistry>>();
 const pendingCommittedSchedulerJobIds = new WeakMap<PluginRegistry, Map<string, Set<string>>>();
+
+const cacheKeyRegistryFinalizer = new FinalizationRegistry<{
+  cacheKey: string;
+  ref: WeakRef<PluginRegistry>;
+}>(({ cacheKey, ref }) => {
+  if (latestCacheKeyRegistries.get(cacheKey) === ref) {
+    latestCacheKeyRegistries.delete(cacheKey);
+  }
+});
 
 /** Marks a registry retired so late runtime calls can reject stale plugin state. */
 export function markPluginRegistryRetired(registry: PluginRegistry | null | undefined): void {
@@ -72,18 +83,47 @@ export function hasPendingRegistryOperation(registry: PluginRegistry): boolean {
 // Records load context so liveness checks distinguish unrelated active-registry
 // swaps from same-context reloads. Only setActivePluginRegistry sets this; pin
 // surfaces leave it unset and keep the conservative pending-operation fallback.
+// Marking the older same-key generation superseded at install time keeps the
+// signal alive even if the active pointer later moves to an unrelated registry
+// before a pending side effect re-checks liveness. WeakRef + finalizer keep the
+// latest-by-key index lifecycle-owned instead of retaining registries.
 export function recordPluginRegistryCacheKey(
   registry: PluginRegistry | null | undefined,
   cacheKey: string | null,
 ): void {
-  if (registry) {
-    registryCacheKeys.set(registry, cacheKey);
+  if (!registry) {
+    return;
   }
+  const previousCacheKey = registryCacheKeys.get(registry) ?? null;
+  registryCacheKeys.set(registry, cacheKey);
+  supersededCacheKeyRegistries.delete(registry);
+  if (
+    previousCacheKey !== null &&
+    latestCacheKeyRegistries.get(previousCacheKey)?.deref() === registry
+  ) {
+    latestCacheKeyRegistries.delete(previousCacheKey);
+  }
+  if (cacheKey === null) {
+    return;
+  }
+  const previousLatest = latestCacheKeyRegistries.get(cacheKey)?.deref();
+  if (previousLatest && previousLatest !== registry) {
+    supersededCacheKeyRegistries.add(previousLatest);
+  }
+  const ref = new WeakRef(registry);
+  latestCacheKeyRegistries.set(cacheKey, ref);
+  cacheKeyRegistryFinalizer.unregister(registry);
+  cacheKeyRegistryFinalizer.register(registry, { cacheKey, ref }, registry);
 }
 
 /** The cache key a registry was activated under, or null if none was recorded. */
 export function getPluginRegistryCacheKey(registry: PluginRegistry): string | null {
   return registryCacheKeys.get(registry) ?? null;
+}
+
+/** True when a newer registry generation has taken over this registry's load cache key. */
+export function isPluginRegistryCacheKeySuperseded(registry: PluginRegistry): boolean {
+  return supersededCacheKeyRegistries.has(registry);
 }
 
 // Two schedulePluginSessionTurn calls for the same registry can overlap: an

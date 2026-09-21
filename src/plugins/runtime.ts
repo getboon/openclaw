@@ -12,6 +12,7 @@ import {
   getPendingCommittedSchedulerJobIds,
   getPluginRegistryCacheKey,
   hasPendingRegistryOperation,
+  isPluginRegistryCacheKeySuperseded,
   isPluginRegistryRetired,
   markPluginRegistryActive,
   markPluginRegistryRetired,
@@ -88,18 +89,18 @@ function isRegistryPinned(registry: PluginRegistry): boolean {
 }
 
 // True when the CURRENTLY active registry shares this registry's own load
-// cache key while being a different object -- a genuine same-context reload,
-// checked directly against current state rather than traced through any
-// specific setActivePluginRegistry swap. An unrelated registry can interpose
-// between the original registry losing the active pointer and a fresh
-// same-key generation taking it, in which case the original is never
-// `previousRegistry` for that second swap and per-swap side effects (the
-// retiredRegistries flag, isRegistryLive's own pending-op check) never fire
-// for it -- this direct comparison is immune to how many swaps happened
-// in between.
+// cache key while being a different object -- a genuine same-context reload.
+// The recorded cache-key generation is checked first so the superseded signal
+// survives a later unrelated active-pointer swap before a pending side effect
+// re-checks liveness; the direct current-state comparison remains as a
+// conservative fallback for registries whose activation predates generation
+// tracking.
 function isSameContextReplacement(registry: PluginRegistry): boolean {
   if (state.activeRegistry === registry) {
     return false;
+  }
+  if (isPluginRegistryCacheKeySuperseded(registry)) {
+    return true;
   }
   const ownCacheKey = getPluginRegistryCacheKey(registry);
   return ownCacheKey !== null && ownCacheKey === state.key;
