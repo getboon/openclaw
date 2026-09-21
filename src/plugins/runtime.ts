@@ -8,6 +8,8 @@ import {
 import { clearPluginMetadataLifecycleCaches } from "./plugin-metadata-lifecycle.js";
 import { createEmptyPluginRegistry } from "./registry-empty.js";
 import {
+  clearPendingCommittedSchedulerJobIds,
+  getPendingCommittedSchedulerJobIds,
   getPluginRegistryCacheKey,
   hasPendingRegistryOperation,
   markPluginRegistryActive,
@@ -126,11 +128,7 @@ async function cleanupPreviousPluginHostRegistry(params: {
   });
 }
 
-// Returns the (never-rejecting) cleanup promise rather than firing it as
-// void so a caller that genuinely needs to observe completion (tests
-// proving preserveSchedulerJobIds survives the real async cleanup, rather
-// than guessing a wall-clock delay) can await it. Production callers still
-// don't await this -- see retirePluginRegistryIfNowUnused's own callers.
+// Returns a never-rejecting promise so callers can observe cleanup completion.
 function cleanupRetiredPluginHostRegistry(
   previousRegistry: PluginRegistry,
   preserveSchedulerJobIds?: ReadonlyMap<string, ReadonlySet<string>>,
@@ -159,18 +157,23 @@ function retirePluginRegistryIfUnused(registry: PluginRegistry | null): boolean 
  * (e.g. a pending async operation just settled). Mirrors the re-check every
  * pin-release function already does after uninstalling its own pin -- a
  * registry that was kept alive only by that protection may now be retirable.
- * preserveSchedulerJobIds protects specific jobs, keyed by pluginId, from the
- * retirement cleanup pass this can trigger (e.g. jobs committed by any call
- * sharing this registry's pending-operation window, not just the caller's
- * own). Returns a promise callers may await for tests; production callers
- * don't need to and shouldn't.
+ * Preserves scheduler jobs committed via recordPendingCommittedSchedulerJobId
+ * during this registry's pending window; once the window has fully closed
+ * (no other overlapping call still holds the pin), that bookkeeping is
+ * dropped so a later, unrelated retirement can't keep protecting stale jobs
+ * from a window that already ended. Returns a promise callers may await for
+ * tests; production callers don't need to and shouldn't.
  */
-export function retirePluginRegistryIfNowUnused(
-  registry: PluginRegistry | null,
-  preserveSchedulerJobIds?: ReadonlyMap<string, ReadonlySet<string>>,
-): Promise<void> {
+export function retirePluginRegistryIfNowUnused(registry: PluginRegistry | null): Promise<void> {
+  if (!registry) {
+    return Promise.resolve();
+  }
+  const preserveSchedulerJobIds = getPendingCommittedSchedulerJobIds(registry);
+  if (!hasPendingRegistryOperation(registry)) {
+    clearPendingCommittedSchedulerJobIds(registry);
+  }
   if (retirePluginRegistryIfUnused(registry)) {
-    return cleanupRetiredPluginHostRegistry(registry!, preserveSchedulerJobIds);
+    return cleanupRetiredPluginHostRegistry(registry, preserveSchedulerJobIds);
   }
   return Promise.resolve();
 }

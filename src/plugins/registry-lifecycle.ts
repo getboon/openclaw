@@ -119,3 +119,12 @@ export function getPendingCommittedSchedulerJobIds(
 ): ReadonlyMap<string, ReadonlySet<string>> {
   return pendingCommittedSchedulerJobIds.get(registry) ?? new Map();
 }
+
+/** Drops accumulated ids once their shared pending window has fully closed. */
+export function clearPendingCommittedSchedulerJobIds(
+  registry: PluginRegistry | null | undefined,
+): void {
+  if (registry) {
+    pendingCommittedSchedulerJobIds.delete(registry);
+  }
+}

@@ -22,7 +22,6 @@ import type {
 import type { PluginOrigin } from "./plugin-origin.types.js";
 import {
   beginPendingRegistryOperation,
-  getPendingCommittedSchedulerJobIds,
   recordPendingCommittedSchedulerJobId,
 } from "./registry-lifecycle.js";
 import type { PluginRegistry } from "./registry-types.js";
@@ -409,10 +408,7 @@ export async function schedulePluginSessionTurn(params: {
   } finally {
     endPendingRegistryOperation();
     if (params.ownerRegistry) {
-      void retirePluginRegistryIfNowUnused(
-        params.ownerRegistry,
-        getPendingCommittedSchedulerJobIds(params.ownerRegistry),
-      );
+      void retirePluginRegistryIfNowUnused(params.ownerRegistry);
     }
   }
 }

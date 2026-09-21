@@ -699,6 +699,68 @@ describe("plugin scheduled turns", () => {
   );
 
   it(
+    "does not let a job committed in an EARLIER, already-closed pending window keep being " +
+      "preserved by a LATER, unrelated retirement -- the accumulator must be cleared once its " +
+      "window closes, or it grows without bound and shields stale jobs from legitimate cleanup",
+    async () => {
+      const ownerFixture = createPluginRegistryFixture();
+      ownerFixture.registry.registry.plugins.push(
+        createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
+      );
+      const ownerRegistry = ownerFixture.registry.registry;
+      const unrelatedRegistry = createEmptyPluginRegistry();
+      setActivePluginRegistry(ownerRegistry);
+      const shouldCommit = () =>
+        !isPluginRegistryRetired(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
+
+      // First call: no overlap, no swap -- its pending window opens and
+      // fully closes on its own, well before the second call even starts.
+      workflowMocks.cronAdd.mockResolvedValueOnce(makeCronJob({ id: "job-old" }));
+      const handleOld = await withRetirementSettled(() =>
+        scheduleWorkflowTurn({
+          pluginName: "Workflow Plugin",
+          shouldCommit,
+          ownerRegistry,
+        }),
+      );
+      expectSessionTurnHandle(handleOld, "job-old");
+      // ownerRegistry is still the active pointer -- nothing retired it yet.
+      expect(isPluginRegistryRetired(ownerRegistry)).toBe(false);
+
+      // Second, later call: its own pending window is the one an unrelated
+      // swap displaces ownerRegistry during, and the one whose retirement
+      // check actually fires cleanup.
+      let resolveCronAdd!: (job: CronJob) => void;
+      workflowMocks.cronAdd.mockImplementation(
+        () =>
+          new Promise<CronJob>((resolve) => {
+            resolveCronAdd = resolve;
+          }),
+      );
+      const scheduleNew = scheduleWorkflowTurn({
+        pluginName: "Workflow Plugin",
+        schedule: { delayMs: 1 },
+        shouldCommit,
+        ownerRegistry,
+      });
+      setActivePluginRegistry(unrelatedRegistry);
+      resolveCronAdd(makeCronJob({ id: "job-new" }));
+      const handleNew = await withRetirementSettled(() => scheduleNew);
+      expectSessionTurnHandle(handleNew, "job-new");
+      expect(isPluginRegistryRetired(ownerRegistry)).toBe(true);
+
+      // job-new was committed during THIS retirement's own pending window
+      // and survives; job-old belongs to an already-closed, unrelated
+      // window and must not still be shielded by stale accumulator state.
+      expect(workflowMocks.cronRemove).toHaveBeenCalledWith("job-old");
+      const survivingJobIds = listPluginSessionSchedulerJobs(WORKFLOW_PLUGIN_ID).map(
+        (job) => job.id,
+      );
+      expect(survivingJobIds).toEqual(["job-new"]);
+    },
+  );
+
+  it(
     "still rolls back a job when the OWNER's own standalone context genuinely reloads while " +
       "cron.add is in flight -- a same-cache-key replacement is a real generation change, not " +
       "the unrelated-tenant swap the pending-operation pin exists to survive",

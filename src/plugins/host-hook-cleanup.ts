@@ -396,12 +396,8 @@ export async function cleanupReplacedPluginHostRegistry(params: {
       break;
     }
     const restarted = nextPluginIds.has(pluginId);
-    // Caller-supplied preserved job ids (e.g. ones this same retirement's own
-    // caller committed) are scoped per pluginId -- a flat set shared across
-    // every pluginId in this loop would also protect an unrelated plugin's
-    // job if its id happened to collide with a preserved one. Applies
-    // regardless of restart/disable, merged with the restart-specific
-    // carryover below.
+    // Scope caller-preserved IDs by plugin so a colliding ID on an unrelated
+    // plugin is not protected; merge them with restart-specific carryover.
     const preserveSchedulerJobIds = new Set([
       ...(restarted ? collectSchedulerJobIds(params.nextRegistry, pluginId) : []),
       ...(params.preserveSchedulerJobIds?.get(pluginId) ?? []),
