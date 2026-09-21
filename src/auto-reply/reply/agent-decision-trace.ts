@@ -157,7 +157,7 @@ export function buildAgentDecisionTrace(params: {
   // call even when this attempt's own terminal action was a successful
   // "message" send. "Terminal" here means this attempt's own last action,
   // so exclude delegated entries before taking it (ENG-19951).
-  const terminalInvocation = allInvocations.filter((entry) => !entry.viaSubagent).at(-1);
+  const terminalInvocation = allInvocations.findLast((entry) => !entry.viaSubagent);
   const hasSuccessfulTerminalMessage =
     terminalInvocation?.name === "message" && terminalInvocation.status === "ok";
   const hasUsableAnswer = params.payloads?.some(isUsableAnswerPayload) === true;
