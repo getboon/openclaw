@@ -26,6 +26,7 @@ import {
 import { clearPluginLoaderCache, loadOpenClawPlugins } from "../loader.js";
 import { makeTempDir, writePlugin } from "../loader.test-fixtures.js";
 import { createEmptyPluginRegistry } from "../registry-empty.js";
+import { isPluginRegistryActivated, isPluginRegistryRetired } from "../registry-lifecycle.js";
 import {
   pinActivePluginChannelRegistry,
   releasePinnedPluginChannelRegistry,
@@ -508,6 +509,45 @@ describe("plugin scheduled turns", () => {
     expect(removed).toEqual(["job-stale"]);
     expect(listPluginSessionSchedulerJobs(WORKFLOW_PLUGIN_ID)).toEqual([]);
   });
+
+  it(
+    "does not roll back a job when an UNRELATED registry becomes globally active while cron.add " +
+      "is in flight -- the caller's own registry was never actually unloaded, just transiently not " +
+      "the global active pointer, which retirePluginRegistryIfUnused would otherwise misread as a real unload",
+    async () => {
+      const ownerRegistry = createEmptyPluginRegistry();
+      const unrelatedRegistry = createEmptyPluginRegistry();
+      setActivePluginRegistry(ownerRegistry);
+      // Mirrors the real isLoadedRecordInActiveRegistry shouldCommit wiring
+      // (registry.ts), not a hand-picked stand-in for it.
+      const shouldCommit = () =>
+        !isPluginRegistryRetired(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
+      let resolveCronAdd!: (job: CronJob) => void;
+      workflowMocks.cronAdd.mockImplementation(
+        () =>
+          new Promise<CronJob>((resolve) => {
+            resolveCronAdd = resolve;
+          }),
+      );
+
+      const schedulePromise = scheduleWorkflowTurn({
+        schedule: { delayMs: 1 },
+        shouldCommit,
+        ownerRegistry,
+      });
+      // A different, concurrently-running standalone load (e.g. a
+      // cron-triggered isolated-agent run for an unrelated session)
+      // installs its own registry as active while cron.add() is pending.
+      setActivePluginRegistry(unrelatedRegistry);
+      resolveCronAdd(makeCronJob({ id: "job-survives" }));
+
+      const handle = await schedulePromise;
+
+      expectSessionTurnHandle(handle, "job-survives");
+      expect(workflowMocks.cronRemove).not.toHaveBeenCalled();
+      expect(listPluginSessionSchedulerJobs(WORKFLOW_PLUGIN_ID)).not.toEqual([]);
+    },
+  );
 
   it("allows bundled plugins to schedule turns during real plugin registration", async () => {
     const bundledDir = makeTempDir();

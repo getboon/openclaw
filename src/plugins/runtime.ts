@@ -7,7 +7,11 @@ import {
 } from "./host-hook-runtime.js";
 import { clearPluginMetadataLifecycleCaches } from "./plugin-metadata-lifecycle.js";
 import { createEmptyPluginRegistry } from "./registry-empty.js";
-import { markPluginRegistryActive, markPluginRegistryRetired } from "./registry-lifecycle.js";
+import {
+  hasPendingRegistryOperation,
+  markPluginRegistryActive,
+  markPluginRegistryRetired,
+} from "./registry-lifecycle.js";
 import type { PluginRegistry } from "./registry-types.js";
 import { getActivePluginChannelRegistrySnapshotFromState } from "./runtime-channel-state.js";
 import {
@@ -79,7 +83,11 @@ function isRegistryPinned(registry: PluginRegistry): boolean {
 }
 
 function isRegistryLive(registry: PluginRegistry): boolean {
-  return state.activeRegistry === registry || isRegistryPinned(registry);
+  return (
+    state.activeRegistry === registry ||
+    isRegistryPinned(registry) ||
+    hasPendingRegistryOperation(registry)
+  );
 }
 
 async function cleanupPreviousPluginHostRegistry(params: {
@@ -121,6 +129,18 @@ function retirePluginRegistryIfUnused(registry: PluginRegistry | null): boolean 
   }
   markPluginRegistryRetired(registry);
   return true;
+}
+
+/**
+ * Re-checks retirement for a registry that a caller just stopped protecting
+ * (e.g. a pending async operation just settled). Mirrors the re-check every
+ * pin-release function already does after uninstalling its own pin -- a
+ * registry that was kept alive only by that protection may now be retirable.
+ */
+export function retirePluginRegistryIfNowUnused(registry: PluginRegistry | null): void {
+  if (retirePluginRegistryIfUnused(registry)) {
+    cleanupRetiredPluginHostRegistry(registry!);
+  }
 }
 
 /**

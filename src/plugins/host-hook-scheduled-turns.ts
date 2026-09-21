@@ -20,7 +20,9 @@ import type {
   PluginSessionTurnUnscheduleByTagResult,
 } from "./host-hooks.js";
 import type { PluginOrigin } from "./plugin-origin.types.js";
+import { beginPendingRegistryOperation } from "./registry-lifecycle.js";
 import type { PluginRegistry } from "./registry-types.js";
+import { retirePluginRegistryIfNowUnused } from "./runtime.js";
 
 const log = createSubsystemLogger("plugins/host-scheduled-turns");
 const PLUGIN_CRON_NAME_PREFIX = "plugin:";
@@ -297,86 +299,100 @@ export async function schedulePluginSessionTurn(params: {
     kind: "agentTurn",
     message,
   };
-  let result: Awaited<ReturnType<CronServiceContract["add"]>>;
+  // Protects params.ownerRegistry from being retired purely because a
+  // DIFFERENT, concurrently-running standalone registry became the global
+  // active pointer while cron.add() (and the shouldCommit re-check right
+  // after it) are in flight -- see registry-lifecycle.ts's docstring on
+  // beginPendingRegistryOperation for why that race is real, not
+  // theoretical, on a host serving multiple concurrent registries.
+  const endPendingRegistryOperation = beginPendingRegistryOperation(params.ownerRegistry);
   try {
-    result = await cron.add({
-      name: cronJobName,
-      enabled: true,
-      schedule: cronSchedule,
-      sessionTarget: `session:${sessionKey}`,
-      payload: cronPayload,
-      ...(params.schedule.agentId ? { agentId: params.schedule.agentId } : {}),
-      deleteAfterRun: params.schedule.deleteAfterRun ?? cronSchedule.kind === "at",
-      wakeMode: "now",
-      delivery: {
-        mode: cronDeliveryMode,
-        ...(cronDeliveryMode === "announce" ? { channel: "last" } : {}),
-      },
-    });
-  } catch (error) {
-    log.warn(
-      `plugin session turn scheduling failed (${formatScheduleLogContext({
-        pluginId: params.pluginId,
-        sessionKey,
+    let result: Awaited<ReturnType<CronServiceContract["add"]>>;
+    try {
+      result = await cron.add({
         name: cronJobName,
-      })}): ${formatErrorMessage(error)}`,
-    );
-    return undefined;
-  }
-  const jobId = result.id;
-  if (!jobId) {
-    log.warn(
-      `plugin session turn scheduling failed (${formatScheduleLogContext({
-        pluginId: params.pluginId,
-        sessionKey,
-        name: cronJobName,
-      })}): cron.add returned no job id`,
-    );
-    return undefined;
-  }
-  if (params.shouldCommit && !params.shouldCommit()) {
-    const removed = await removeScheduledSessionTurn({
-      cron,
-      jobId,
-      pluginId: params.pluginId,
-      sessionKey,
-      name: cronJobName,
-    });
-    if (!removed) {
+        enabled: true,
+        schedule: cronSchedule,
+        sessionTarget: `session:${sessionKey}`,
+        payload: cronPayload,
+        ...(params.schedule.agentId ? { agentId: params.schedule.agentId } : {}),
+        deleteAfterRun: params.schedule.deleteAfterRun ?? cronSchedule.kind === "at",
+        wakeMode: "now",
+        delivery: {
+          mode: cronDeliveryMode,
+          ...(cronDeliveryMode === "announce" ? { channel: "last" } : {}),
+        },
+      });
+    } catch (error) {
       log.warn(
-        `plugin session turn scheduling rollback failed (${formatScheduleLogContext({
+        `plugin session turn scheduling failed (${formatScheduleLogContext({
           pluginId: params.pluginId,
           sessionKey,
           name: cronJobName,
-          jobId,
-        })}): failed to remove stale scheduled session turn`,
+        })}): ${formatErrorMessage(error)}`,
       );
+      return undefined;
     }
-    return undefined;
-  }
-  const handle = registerPluginSessionSchedulerJob({
-    pluginId: params.pluginId,
-    pluginName: params.pluginName,
-    ownerRegistry: params.ownerRegistry,
-    job: {
-      id: jobId,
-      sessionKey,
-      kind: "session-turn",
-      cleanup: async () => {
-        const removed = await removeScheduledSessionTurn({
-          cron,
-          jobId,
+    const jobId = result.id;
+    if (!jobId) {
+      log.warn(
+        `plugin session turn scheduling failed (${formatScheduleLogContext({
           pluginId: params.pluginId,
           sessionKey,
           name: cronJobName,
-        });
-        if (!removed) {
-          throw new Error(`failed to remove scheduled session turn: ${jobId}`);
-        }
+        })}): cron.add returned no job id`,
+      );
+      return undefined;
+    }
+    if (params.shouldCommit && !params.shouldCommit()) {
+      const removed = await removeScheduledSessionTurn({
+        cron,
+        jobId,
+        pluginId: params.pluginId,
+        sessionKey,
+        name: cronJobName,
+      });
+      if (!removed) {
+        log.warn(
+          `plugin session turn scheduling rollback failed (${formatScheduleLogContext({
+            pluginId: params.pluginId,
+            sessionKey,
+            name: cronJobName,
+            jobId,
+          })}): failed to remove stale scheduled session turn`,
+        );
+      }
+      return undefined;
+    }
+    const handle = registerPluginSessionSchedulerJob({
+      pluginId: params.pluginId,
+      pluginName: params.pluginName,
+      ownerRegistry: params.ownerRegistry,
+      job: {
+        id: jobId,
+        sessionKey,
+        kind: "session-turn",
+        cleanup: async () => {
+          const removed = await removeScheduledSessionTurn({
+            cron,
+            jobId,
+            pluginId: params.pluginId,
+            sessionKey,
+            name: cronJobName,
+          });
+          if (!removed) {
+            throw new Error(`failed to remove scheduled session turn: ${jobId}`);
+          }
+        },
       },
-    },
-  });
-  return handle;
+    });
+    return handle;
+  } finally {
+    endPendingRegistryOperation();
+    if (params.ownerRegistry) {
+      retirePluginRegistryIfNowUnused(params.ownerRegistry);
+    }
+  }
 }
 
 export async function unschedulePluginSessionTurnsByTag(params: {
