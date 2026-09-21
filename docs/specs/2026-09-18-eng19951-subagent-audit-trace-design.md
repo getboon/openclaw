@@ -51,66 +51,113 @@ new failure modes for restart/orphan/multi-child cases that don't exist today.
   present in the ticket's proven case, and it requires new persistent state
   with its own lifecycle — tracked as a separate follow-up ticket, not
   bundled here.
-- **Found during planning:** `runSubagentAnnounceFlow` has a third source for
-  a completion's reply text besides the two transcript-read call sites this
-  fix instruments — a caller-supplied `params.roundOneReply`, used when the
-  flow runs synchronously right after a child's run ends and the caller
-  already has the text in hand. When `roundOneReply` is set, the flow never
-  calls the trace-carrying read, so this fix's evidence-capture is skipped
-  for that path — same (unfixed) behavior as today, not worse. Not present
-  in the ticket's proven case (which goes through the async-wait read path);
-  tracked as a candidate follow-up if a real case is ever found hitting it.
+
+**No longer out of scope, resolved by the 3.1 redesign below:** an earlier
+draft of this doc scoped out `runSubagentAnnounceFlow`'s `roundOneReply`
+fast-path as a gap, because the original (abandoned) capture design only
+read evidence out of a transcript read that `roundOneReply` bypasses. The
+redesigned capture in 3.1 writes the trace to the registry unconditionally,
+whenever the child computes any reply — independent of which text-source
+later wins in the announce flow — so `roundOneReply` is no longer a gap.
 
 ## 3. Design
 
-### 3.1 Where evidence is captured: at subagent completion, alongside the existing text capture
+### 3.1 Where evidence is captured: a direct write when the subagent's own reply is computed
 
-`freezeRunResultAtCompletion` (`src/agents/subagent-registry-lifecycle.ts:399`)
-is the single place a subagent's final text gets captured and frozen onto its
-registry row, via `params.captureSubagentCompletionReply(...)` →
-`captureSubagentCompletionReplyUsing` (`subagent-announce-capture.ts:38`) →
-`readSubagentOutput` (`subagent-announce-output.ts:225`), which scans the
-child's transcript (`summarizeSubagentOutputHistory`) and extracts plain text
-via `selectSubagentOutputText`. **Today this only ever extracts text — the
-transcript messages it scans are never inspected for their `auditTrace`
-field**, even though the child's own final assistant message already carries
-one (attached by the same unmodified `attachAgentDecisionTrace` call every
-reply goes through).
+**Revised after discovering, during implementation, that the original
+approach below the line cannot work — kept here so the reasoning isn't
+lost, since the same mistake is easy to make again.**
 
-Change: extend this same scan to also extract the `auditTrace` off the exact
-message `selectSubagentOutputText` selects as the winning text — same
-message, same pass, no second transcript read. Concretely:
+~~Original approach (do not implement): read `auditTrace` back off the
+child's persisted session transcript, alongside the existing text
+capture in `freezeRunResultAtCompletion`.~~ **This is impossible.**
+Traced precisely: `auditTrace` is computed and attached to a reply only in
+`agent-runner.ts`, immediately before that reply is delivered
+(`buildAgentDecisionTrace`/`attachAgentDecisionTrace`, ~line 2420). The
+child's local session transcript entry for that same turn is written
+**earlier** — inside the embedded-agent-runner, before `agent-runner.ts`
+even begins its post-processing (confirmed: `agent-runner.ts` contains zero
+transcript-write calls, only reads). The transcript therefore can never
+contain `auditTrace` — it's written before that value exists. Reading it
+back later, as the original 3.1 planned, would always find nothing.
 
-- `summarizeSubagentOutputHistory` gains a parallel `latestAuditTrace` field
-  on `SubagentOutputSnapshot`, set whenever `latestAssistantText` is set
-  (same branch, same message).
-- A new sibling function, `readSubagentOutputWithTrace`, wraps the same
-  internal scan and returns `{ text?: string; auditTrace?: AgentDecisionTrace
-}` instead of just `string | undefined`. **The existing exported
-  `readSubagentOutput` is untouched — same signature, same behavior, same
-  callers, zero risk to anything that isn't this fix.** `readSubagentOutput`
-  becomes a one-line wrapper around the new richer internal function that
-  drops the trace field, preserving its exact current contract.
-- `captureSubagentCompletionReply` gets an analogous
-  `captureSubagentCompletionReplyWithTrace` sibling (same
-  wrap-and-drop-the-extra-field relationship to the existing function).
+**Actual mechanism: write the trace directly onto the subagent's registry
+row, at the moment it's computed, independent of the later text-capture
+freeze.**
 
-### 3.2 Where evidence is frozen: a new field alongside `completion.resultText`
+`agent-runner.ts` computes `auditTrace` for **every** reply, including a
+subagent child's own reply to its own task (child replies flow through the
+identical `runReplyAgent`/`agent-runner.ts` path as any top-level reply —
+confirmed, single call site, no bypass). At that exact point, add one
+narrow, conditional call:
+
+```ts
+if (!isHeartbeat) {
+  const auditTrace = buildAgentDecisionTrace({ toolSummary, completion, ... });
+  finalPayloads = attachAgentDecisionTrace(finalPayloads, auditTrace);
+  if (isSubagentSessionKey(sessionKey)) {
+    recordSubagentReplyAuditTrace(sessionKey, auditTrace);
+  }
+}
+```
+
+`isSubagentSessionKey` (`src/sessions/session-key-utils.ts:270`, existing,
+unmodified) is a cheap string check. `recordSubagentReplyAuditTrace` is a
+new, small function in `src/agents/subagent-registry.ts` (alongside
+`addSubagentRunForTests`/`releaseSubagentRun`) that looks up the latest
+`SubagentRunRecord` for that `childSessionKey` directly against the live
+`subagentRuns` map (**not** via `getSubagentRunsSnapshotForRead`, which may
+return a `structuredClone`'d snapshot outside test mode — confirmed by
+reading its implementation — so writing through it would silently not
+persist), sets `entry.completion.resultAuditTrace`, and calls the existing
+module-private `persistSubagentRuns()`.
+
+**Ordering, confirmed architecturally, not just assumed:** `agent-runner.ts`
+does not itself emit the lifecycle `"end"` signal that later triggers
+`completeSubagentRun`/`freezeRunResultAtCompletion` (it only emits
+`"fallback"`/`"fallback_cleared"`, both earlier in the same function, before
+`auditTrace` is computed). That terminal signal comes from an orchestration
+layer that necessarily hasn't observed a result yet — `runReplyAgent`
+(`agent-runner.ts`) must return first. So this write structurally precedes
+the freeze, every time — no race. And even if it didn't: a plain field-set
+of `completion.resultAuditTrace` is independent of
+`freezeRunResultAtCompletion`'s own `resultText`-only idempotency guard, so
+a late write would still land correctly rather than being silently
+dropped.
+
+This eliminates the entire `readSubagentOutputWithTrace`/
+`captureSubagentCompletionReplyWithTrace` sibling-function design from the
+original 3.1 — nothing needs to read a trace out of a transcript anymore,
+because nothing needs to; it's already sitting on the registry row by the
+time anything downstream looks for it. `readSubagentOutput`/
+`captureSubagentCompletionReply` (text capture) are **completely
+unmodified** by this fix.
+
+### 3.2 Where evidence lands, and how it reaches delivery: `completion.resultAuditTrace`, forwarded unchanged
 
 `SubagentCompletionState` (`subagent-registry.types.ts:39`) gains
-`resultAuditTrace?: AgentDecisionTrace`, frozen in `freezeRunResultAtCompletion`
-in the same call that sets `completion.resultText`, using
-`captureSubagentCompletionReplyWithTrace` instead of the text-only version.
+`resultAuditTrace?: AgentDecisionTrace` — this is exactly the field 3.1's
+`recordSubagentReplyAuditTrace` writes. **`freezeRunResultAtCompletion`
+itself needs no changes at all** for the trace — it only ever freezes
+`resultText`; `resultAuditTrace` was already set (or, for an orphaned child
+that never got to reply, was never set) by the time freeze runs, and freeze
+simply never touches that field either way.
+
 `PendingFinalDeliveryPayload` (`subagent-registry.types.ts:11`) gets the
 matching `frozenAuditTrace?: AgentDecisionTrace`, mirroring how
 `frozenResultText` is already carried there — same pattern, same file, same
 two call sites in `subagent-registry-lifecycle.ts` (~546, ~581) that already
-build this payload from `completion.resultText`.
+build this payload from `completion.resultText`; add
+`frozenAuditTrace: entry.completion?.resultAuditTrace` (and the
+`entry.delivery?.payload?.frozenAuditTrace ??` precedence for the site that
+already has that pattern) alongside the existing `frozenResultText` lines.
+This is the only touch this section still needs in
+`subagent-registry-lifecycle.ts`.
 
-This is purely additive: a new optional field with a producer and no existing
-readers. Nothing that reads `SubagentCompletionState`/`PendingFinalDeliveryPayload`
-today changes behavior because it simply never looks at a field it doesn't
-know exists.
+This is purely additive: a new optional field with a producer (3.1) and no
+existing readers. Nothing that reads
+`SubagentCompletionState`/`PendingFinalDeliveryPayload` today changes
+behavior because it simply never looks at a field it doesn't know exists.
 
 ### 3.3 Where evidence enters the completion event: `AgentTaskCompletionInternalEvent`
 
@@ -143,13 +190,20 @@ read. Zero risk of changing what the parent LLM sees in its own context.
 
 In `runSubagentAnnounceFlow` (`src/agents/subagent-announce.ts`), where
 `completionEvent: AgentInternalEvent` is constructed (~line 531), populate
-`childToolEvidence` from whichever source supplied `reply`/`findings`:
+`childToolEvidence` by reading `completion.resultAuditTrace` off the
+registry row — **for both paths, the same field, populated the same way by
+3.1, independent of which text-source supplied `reply`**:
 
-- Single-child path: from the registry's frozen `completion.resultAuditTrace`
-  (read via the same registry accessor already used to read
-  `completion.resultText` for this run) when the `reply` came from the frozen
-  freeze path, or from a live `readSubagentOutputWithTrace` call when it came
-  from the live-read fallback branches (~lines 409/413).
+- Single-child path: look up the child's registry entry (this function
+  already has `subagentRegistryRuntime.getLatestSubagentRunByChildSessionKey`
+  in scope for the multi-child case below — reuse it here too) and read
+  `entry.completion?.resultAuditTrace`. Note this is now **independent of
+  `params.roundOneReply`** — unlike the original (abandoned) 3.1 design,
+  which only captured evidence when `reply` came from a transcript read and
+  therefore missed the `roundOneReply` fast-path entirely, the registry
+  write in 3.1 happens whenever the child computes any reply at all,
+  regardless of which text-source later wins. The `roundOneReply` gap noted
+  earlier in this doc's Goal section no longer applies — removed there.
 - Multi-child wake path (`childCompletionFindings`, built by
   `buildChildCompletionFindings` from `directChildren` registry rows): each
   row already carries what becomes `frozenResultText` — add the matching
@@ -288,28 +342,28 @@ evidence when it's genuinely available; it introduces no new way to fail.
 
 ## 4. Files touched (summary)
 
-| File                                                                             | Change                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/agents/subagent-announce-output.ts`                                         | Add `latestAuditTrace` to `SubagentOutputSnapshot`; add `readSubagentOutputWithTrace`, `captureSubagentCompletionReplyWithTrace` siblings. `readSubagentOutput`/`captureSubagentCompletionReply` unchanged.                                                                                                                                                                                                                                                                        |
-| `src/agents/subagent-registry.types.ts`                                          | Add `resultAuditTrace?` to `SubagentCompletionState`; add `frozenAuditTrace?` to `PendingFinalDeliveryPayload`.                                                                                                                                                                                                                                                                                                                                                                    |
-| `src/agents/subagent-registry-lifecycle.ts`                                      | `freezeRunResultAtCompletion` (and `refreshFrozenResultFromSession`) also freeze the trace; the two `PendingFinalDeliveryPayload`-building sites also carry `frozenAuditTrace`. The new capture dependency is added as an **optional** field on the controller's params (not a replacement of the existing required one) — found during planning that the existing field is a required test dependency ~15 existing tests individually mock; see the plan for the exact reasoning. |
-| `src/agents/subagent-registry.ts`                                                | **Found during planning, not in the original draft of this table.** Wire the new optional capture-with-trace dependency through `SubagentAnnounceModule`'s type, `subagentRegistryDeps`'s lazy-loaded default, and the controller construction — mirrors the existing `captureSubagentCompletionReply` wiring at each of those three spots exactly. Without this, the fix compiles and tests pass but never actually freezes a trace outside tests.                                |
-| `src/agents/internal-events.ts`                                                  | Add `SubagentToolEvidence` type; add optional `childToolEvidence?` to `AgentTaskCompletionInternalEvent`. No change to prompt rendering.                                                                                                                                                                                                                                                                                                                                           |
-| `src/agents/subagent-announce.ts`                                                | Populate `childToolEvidence` when building `completionEvent`, for both the single-child and multi-child-findings paths. Also re-export `captureSubagentCompletionReplyWithTrace` alongside the existing `captureSubagentCompletionReply` re-export, needed for `subagent-registry.ts`'s wiring above.                                                                                                                                                                              |
-| `src/agents/subagent-announce-output.ts` (`buildChildCompletionFindings` family) | Thread `frozenAuditTrace` through the same row shape already carrying `frozenResultText`, collect into the evidence array.                                                                                                                                                                                                                                                                                                                                                         |
-| `src/agents/embedded-agent-runner/run.ts`                                        | Add `collectDelegatedToolInvocationsFromInternalEvents` (new, pure, mirrors the existing `collectPendingMediaFromInternalEvents` pattern); merge its output into `attemptToolSummary` right after `buildTraceToolSummary` returns (~line 3739), tagging entries `viaSubagent: true`. No new fields on `runResult.meta`.                                                                                                                                                            |
-| `src/auto-reply/reply/agent-decision-trace.ts`                                   | Add optional `viaSubagent?: boolean` to the `ToolSummary.invocations` item type and to the two output object-literal constructions (`toolInvocations`, `evidence`) — additive, no logic change.                                                                                                                                                                                                                                                                                    |
-
-**`src/auto-reply/reply/agent-runner.ts` needs no changes at all** — it already reads `runResult.meta.toolSummary` and passes it straight through; once `toolSummary.invocations` carries the merged set (from the `run.ts` change above), this layer's existing code produces the correct trace with zero modification.
+| File                                                                             | Change                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/agents/subagent-registry.ts`                                                | Add `recordSubagentReplyAuditTrace(childSessionKey, auditTrace)` (3.1) — new, small, alongside `addSubagentRunForTests`/`releaseSubagentRun`. Looks up the live `subagentRuns` map directly (not the read-snapshot helper), sets `completion.resultAuditTrace`, persists.                                                                                                                                                             |
+| `src/auto-reply/reply/agent-runner.ts`                                           | **Does need a change, unlike an earlier draft of this table claimed.** Capture the already-built `auditTrace` in a local variable instead of inlining it, and — inside the existing `if (!isHeartbeat)` block, right after `attachAgentDecisionTrace` — conditionally call `recordSubagentReplyAuditTrace` when `isSubagentSessionKey(sessionKey)`. New import of the subagent registry into this file; confirmed no circular import. |
+| `src/agents/subagent-registry.types.ts`                                          | Add `resultAuditTrace?` to `SubagentCompletionState`; add `frozenAuditTrace?` to `PendingFinalDeliveryPayload`.                                                                                                                                                                                                                                                                                                                       |
+| `src/agents/subagent-registry-lifecycle.ts`                                      | **No change to `freezeRunResultAtCompletion`/`refreshFrozenResultFromSession`** — the trace is already on the row by the time either runs. Only the two `PendingFinalDeliveryPayload`-building sites (`loadPendingFinalDeliveryPayload`, `refreshPendingFinalDeliveryPayload`) gain a `frozenAuditTrace` line mirroring the existing `frozenResultText` one.                                                                          |
+| `src/agents/internal-events.ts`                                                  | Add `SubagentToolEvidence` type; add optional `childToolEvidence?` to `AgentTaskCompletionInternalEvent`. No change to prompt rendering.                                                                                                                                                                                                                                                                                              |
+| `src/agents/subagent-announce.ts`                                                | Populate `childToolEvidence` when building `completionEvent`, for both the single-child and multi-child-findings paths, both reading `completion.resultAuditTrace` off the registry row (3.3) — no re-export needed here, `readSubagentOutput`/`captureSubagentCompletionReply` are untouched by this fix.                                                                                                                            |
+| `src/agents/subagent-announce-output.ts` (`buildChildCompletionFindings` family) | Thread `frozenAuditTrace` through the same row shape already carrying `frozenResultText`, collect into the evidence array. **This is the only touch to this file** — no `readSubagentOutputWithTrace`/`captureSubagentCompletionReplyWithTrace` siblings; those are no longer needed.                                                                                                                                                 |
+| `src/agents/embedded-agent-runner/run.ts`                                        | Add `collectDelegatedToolInvocationsFromInternalEvents` (new, pure, mirrors the existing `collectPendingMediaFromInternalEvents` pattern); merge its output into `attemptToolSummary` right after `buildTraceToolSummary` returns (~line 3739), tagging entries `viaSubagent: true`. No new fields on `runResult.meta`.                                                                                                               |
+| `src/auto-reply/reply/agent-decision-trace.ts`                                   | Add optional `viaSubagent?: boolean` to the `ToolSummary.invocations` item type and to the two output object-literal constructions (`toolInvocations`, `evidence`) — additive, no logic change.                                                                                                                                                                                                                                       |
 
 ## 5. Testing
 
-- Unit: `summarizeSubagentOutputHistory`/`selectSubagentOutputText` sibling
-  extraction returns the correct `auditTrace` for the selected message; a
-  message with no trace yields `undefined` (not a crash).
-- Unit: `freezeRunResultAtCompletion` freezes `resultAuditTrace` alongside
-  `resultText`; an error-outcome run freezes neither (matches existing
-  `resultText = null` branch).
+- Unit: `recordSubagentReplyAuditTrace` — given a childSessionKey matching a
+  live registry row, sets `completion.resultAuditTrace` and persists; given
+  no matching row (already cleaned up, or a plain top-level session that
+  isn't a subagent at all), no-ops without throwing.
+- Unit: `isSubagentSessionKey` gating in `agent-runner.ts` — a top-level
+  session's reply never calls `recordSubagentReplyAuditTrace`; a subagent
+  child's reply does, with the same `auditTrace` object that got attached
+  to its own delivered payload.
 - Unit: `collectDelegatedToolInvocationsFromInternalEvents` — given
   `internalEvents` with a `task_completion` entry carrying `childToolEvidence`,
   returns those invocations tagged `viaSubagent: true`; given `undefined`/`[]`/
@@ -350,12 +404,16 @@ evidence when it's genuinely available; it introduces no new way to fail.
   single-purpose object `buildTraceToolSummary` returns purely for trace
   consumption, immediately after that function returns. Narrower surface,
   same file, different (safer) variable.
-- **Trace-build-time blind registry lookup** ("which children did this
-  session recently spawn") — rejected in favor of explicit tagging: blind
-  lookup risks matching the wrong turn's children in a session with rapid
-  successive delegations; the existing `inputProvenance`/`internalEvents`
-  threading already identifies exactly which completion(s) this specific
-  resume is for, so use that instead of inferring it.
+- **Trace-build-time blind registry lookup, on the _parent_ side** ("which
+  children did this session recently spawn") — rejected in favor of
+  explicit tagging: blind lookup risks matching the wrong turn's children
+  in a session with rapid successive delegations; the existing
+  `inputProvenance`/`internalEvents` threading already identifies exactly
+  which completion(s) this specific resume is for, so use that instead of
+  inferring it. **Not the same thing as 3.1's registry lookup on the
+  _child_ side** — that one is never blind: it's keyed by the exact
+  `childSessionKey` the write is for, at the exact moment that child
+  computes its own reply, with no ambiguity about which turn it belongs to.
 - **Recovering pre-yield attempt's own tool calls in this same change** —
   deferred to a follow-up ticket: real gap, but requires new persistent state
   (the value is correctly computed today but never delivered anywhere before
