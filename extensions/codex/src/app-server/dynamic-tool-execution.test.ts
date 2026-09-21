@@ -69,7 +69,7 @@ describe("dynamic tool execution helpers", () => {
         },
         config: undefined,
       }),
-    ).toBe(60_000);
+    ).toBe(90_000);
   });
 
   it("prefers timeoutMs over timeoutSeconds", () => {
@@ -360,6 +360,54 @@ describe("dynamic tool execution helpers", () => {
     });
 
     await vi.advanceTimersByTimeAsync(6_000);
+
+    await expect(response).resolves.toEqual(structuredTimeout);
+  });
+
+  it("lets a structured sessions_send timeout win even after a worst-case setup chain", async () => {
+    vi.useFakeTimers();
+    // A small requested timeoutSeconds must still outlast sessions_send's
+    // own worst-case setup latency (e.g. sequential sessions.resolve ->
+    // sessions.create fallback RPCs, each up to 10s) before its timeoutSeconds
+    // wait even starts.
+    const call = {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "call-session-send-slow-setup",
+      namespace: null,
+      tool: "sessions_send",
+      arguments: { sessionKey: "agent:child", message: "ping", timeoutSeconds: 5 },
+    };
+    const structuredTimeout: CodexDynamicToolCallResponse = {
+      success: true,
+      contentItems: [
+        {
+          type: "inputText" as const,
+          text: JSON.stringify({
+            runId: "run-child",
+            status: "timeout",
+            sentBeforeError: true,
+          }),
+        },
+      ],
+    };
+    const response = handleDynamicToolCallWithTimeout({
+      call,
+      toolBridge: {
+        handleToolCall: vi.fn(
+          () =>
+            new Promise<CodexDynamicToolCallResponse>((resolve) => {
+              // 40s: past the old 30s-grace outer bound (5s + 30s = 35s) but
+              // comfortably inside the current 60s-grace bound (5s + 60s = 65s).
+              setTimeout(() => resolve(structuredTimeout), 40_000);
+            }),
+        ),
+      },
+      signal: new AbortController().signal,
+      timeoutMs: resolveDynamicToolCallTimeoutMs({ call, config: undefined }),
+    });
+
+    await vi.advanceTimersByTimeAsync(40_000);
 
     await expect(response).resolves.toEqual(structuredTimeout);
   });

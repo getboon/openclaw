@@ -4069,6 +4069,61 @@ describe("CodexAppServerEventProjector", () => {
     expect(afterContext.sessionId).toBe("session-1");
   });
 
+  it("keeps the last known-good mirrored history when a later compaction's read hits ENOENT", async () => {
+    const beforeCompaction = vi.fn();
+    const afterCompaction = vi.fn();
+    initializeGlobalHookRunner(
+      createMockPluginRegistry([
+        { hookName: "before_compaction", handler: beforeCompaction },
+        { hookName: "after_compaction", handler: afterCompaction },
+      ]),
+    );
+    const params = await createParams();
+    const projector = await createProjector(params);
+
+    await projector.handleNotification(
+      forCurrentTurn("item/started", {
+        item: { type: "contextCompaction", id: "compact-1" },
+      }),
+    );
+    await projector.handleNotification(
+      forCurrentTurn("item/completed", {
+        item: { type: "contextCompaction", id: "compact-1" },
+      }),
+    );
+    expect(
+      requireRecord(mockCallArg(beforeCompaction, 0, 0, "beforeCompaction"), "before payload")
+        .messageCount,
+    ).toBe(1);
+
+    // Simulate an active run whose mirror file becomes transiently unreadable.
+    await fs.rm(params.sessionFile);
+
+    await projector.handleNotification(
+      forCurrentTurn("item/started", {
+        item: { type: "contextCompaction", id: "compact-2" },
+      }),
+    );
+    await projector.handleNotification(
+      forCurrentTurn("item/completed", {
+        item: { type: "contextCompaction", id: "compact-2" },
+      }),
+    );
+
+    const secondBeforePayload = requireRecord(
+      mockCallArg(beforeCompaction, 1, 0, "beforeCompaction"),
+      "second before payload",
+    );
+    // Without the fix, this regresses to 0 -- the ENOENT read is silently
+    // treated as "no history" instead of keeping the last known-good snapshot.
+    expect(secondBeforePayload.messageCount).toBe(1);
+    const secondAfterPayload = requireRecord(
+      mockCallArg(afterCompaction, 1, 0, "afterCompaction"),
+      "second after payload",
+    );
+    expect(secondAfterPayload.messageCount).toBe(1);
+  });
+
   it("projects codex hook started and completed notifications into agent events", async () => {
     const onAgentEvent = vi.fn();
     const params = await createParams();
