@@ -327,7 +327,7 @@ The webhook route also enforces, independent of signature validation:
 - Client addresses are resolved through the shared Gateway trusted-proxy rules. If `gateway.trustedProxies` contains the reverse proxy that forwards Twilio callbacks, OpenClaw keys these limits from the forwarded client address; otherwise it falls back to the direct socket address.
 - The payload `AccountSid` must match the configured `accountSid` (HTTP 403 otherwise).
 - Replayed `MessageSid` values are deduplicated for 10 minutes.
-- Each SMS account's replay cache retains up to 10,000 live message SIDs. When every slot is live, new webhooks for that account fail closed with HTTP 429 and a `Retry-After` header until the oldest slot expires.
+- Each SMS account's replay cache retains up to 10,000 live message SIDs. When every slot is live, requests that reach replay handling fail closed with HTTP 429 and a `Retry-After` header until the oldest slot expires.
 - Request bodies over 32 KB are rejected.
 
 Twilio does not retry HTTP 429 by default or document support for `Retry-After`. The `#rp=4xx` and `#rp=all` connection overrides opt into 4xx retries, but Twilio caps the complete retry transaction at 15 seconds, so retries can still finish before a replay-cache slot expires. Configure a fallback URL when another handler must receive failed deliveries; treat a 429 as a fail-closed rejection, not reliable backpressure.

@@ -223,6 +223,26 @@ describe("createSmsWebhookHandler", () => {
     expect(dispatchSmsInboundEvent).not.toHaveBeenCalled();
   });
 
+  it("rejects signed webhooks that omit AccountSid instead of dispatching them", async () => {
+    const body = `From=%2B15551234567&To=%2B15557654321&Body=hello&SmsMessageSid=${createMessageSid(8)}`;
+    const signature = computeTwilioSignature({
+      url: "https://gateway.example.com/webhooks/sms",
+      authToken: "secret",
+      form: parseTwilioFormBody(body),
+    });
+    const handler = createSmsWebhookHandler({
+      cfg: {},
+      account: createAccount(),
+      channelRuntime: {} as SmsChannelRuntime,
+    });
+
+    const res = createResponse();
+    await handler(createRequest(body, signature), res);
+
+    expect(res.statusCode).toBe(403);
+    expect(dispatchSmsInboundEvent).not.toHaveBeenCalled();
+  });
+
   it("does not let unsigned proxy traffic consume the same client's signed webhook rate limit", async () => {
     const account = createAccount();
     const handler = createSmsWebhookHandler({

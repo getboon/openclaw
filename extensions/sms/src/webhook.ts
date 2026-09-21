@@ -211,11 +211,11 @@ export function createSmsWebhookHandler(
       respondTwiml(res, 400, "Missing SMS payload");
       return true;
     }
-    if (msg.accountSid && msg.accountSid !== params.account.accountSid) {
+    if (!msg.accountSid || msg.accountSid !== params.account.accountSid) {
       if (invalidRequestRateLimited) {
         return rejectInvalidRequestRateLimit({ key, log: params.log, res });
       }
-      params.log?.warn?.("SMS webhook rejected mismatched Twilio AccountSid");
+      params.log?.warn?.("SMS webhook rejected missing or mismatched Twilio AccountSid");
       respondTwiml(res, 403, "Invalid account");
       return true;
     }
