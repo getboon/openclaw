@@ -288,254 +288,209 @@ git commit -m "feat(subagent): add SubagentToolEvidence type to task_completion 
 
 ---
 
-## Task 3: extract the subagent's `auditTrace` alongside its text
+## Task 3: record a subagent's own audit trace directly onto its registry row
+
+**Superseded design note:** the first version of this task tried to read
+`auditTrace` back off the child's session transcript. That's impossible —
+`auditTrace` is computed in `agent-runner.ts` right before a reply is
+delivered; the transcript entry for the same turn is written earlier,
+inside the embedded-agent-runner, before `agent-runner.ts` even starts its
+post-processing. Confirmed by grepping `agent-runner.ts` for any
+transcript-write call: zero. Found this only by actually running Task 3 —
+see the spec's 3.1 for the full trace. This version writes the trace
+directly instead.
 
 **Files:**
 
-- Modify: `src/agents/subagent-announce-output.ts:52-70` (`SubagentOutputSnapshot` type, `extractSubagentAssistantText`), `:137-223` (`summarizeSubagentOutputHistory`, `selectSubagentOutputText`), `:225-273` (`readSubagentOutput`, `readLatestSubagentOutputWithRetry`), `:325-339` (`captureSubagentCompletionReply`)
-- Test: `src/agents/subagent-announce-output.test.ts`
+- Modify: `src/agents/subagent-registry.ts` (add `recordSubagentReplyAuditTrace`, near `addSubagentRunForTests`/`releaseSubagentRun` at line ~1311; add an `AgentDecisionTrace` type import)
+- Modify: `src/auto-reply/reply/agent-runner.ts` (~line 2418-2432: capture the built trace in a local variable, call the new function conditionally; add imports for `isSubagentSessionKey` and `recordSubagentReplyAuditTrace`)
+- Test: `src/agents/subagent-registry.test.ts` (or wherever this file's existing tests for other simple registry mutators live — check before assuming; if none fit, create `src/agents/subagent-registry.record-reply-audit-trace.test.ts` following this family's convention of small, focused test files per concern)
+- Test: `src/auto-reply/reply/agent-runner.test.ts` (or its closest equivalent — check for an existing test asserting on `attachAgentDecisionTrace`'s call site and extend it, rather than inventing new scaffolding)
 
 **Interfaces:**
 
-- Produces: `readSubagentOutputWithTrace(sessionKey, outcome?, options?): Promise<{ text?: string; auditTrace?: AgentDecisionTrace }>` and `captureSubagentCompletionReplyWithTrace(sessionKey, options?): Promise<{ text?: string; auditTrace?: AgentDecisionTrace }>` — new siblings. Task 5 consumes `captureSubagentCompletionReplyWithTrace`; Task 6 consumes `readSubagentOutputWithTrace` for its live-read fallback branch.
-- Guarantee: `readSubagentOutput` and `captureSubagentCompletionReply` (existing, exported) keep their exact current signature and behavior — verified by the existing test suite in this file passing unmodified.
+- Produces: `recordSubagentReplyAuditTrace(childSessionKey: string, auditTrace: AgentDecisionTrace): void`, exported from `subagent-registry.ts`. Task 5 (indirectly, via `PendingFinalDeliveryPayload`) and Task 6 (via `getLatestSubagentRunByChildSessionKey`) read `completion.resultAuditTrace` that this function sets.
+- Consumes: nothing new — `isSubagentSessionKey` (`src/sessions/session-key-utils.ts:270`) and `subagentRuns` (the live map, imported into `subagent-registry.ts` from `subagent-registry-memory.ts` — already imported there) both already exist.
+- Guarantee: for a non-subagent (top-level) session, `isSubagentSessionKey(sessionKey)` is `false` and `recordSubagentReplyAuditTrace` is never called — zero behavior change for the overwhelmingly common case, structurally (not just by convention).
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test for `recordSubagentReplyAuditTrace`**
 
-Add to `src/agents/subagent-announce-output.test.ts` (check the existing file's mocking pattern for `readSessionMessagesAsync`/`callGateway` first — reuse whatever fixture/mock helper it already uses for `readSubagentOutput` tests, adapting the message fixture below to that pattern):
+First read `src/agents/subagent-registry.ts` lines 1-60 (imports), ~1240-1320 (`addSubagentRunForTests`, `releaseSubagentRun`, and neighbors), and ~1520-1550 (`getLatestSubagentRunByChildSessionKey`, for the lookup-loop shape to mirror) — these exact line ranges are from this session's own research; re-confirm before writing code, this file is large and any commit history since could have shifted them slightly. Also check whichever test file you're extending for its existing setup pattern (how does it construct a `SubagentRunRecord` fixture and insert it into the registry for a test — likely via `addSubagentRunForTests` or a similar test helper already used elsewhere in that file).
 
 ```ts
-it("readSubagentOutputWithTrace returns the auditTrace attached to the winning message", async () => {
-  testing.setDepsForTest({
-    readSessionMessagesAsync: async () => [
-      {
-        role: "assistant",
-        content: "All 7 scopes completed.",
-        auditTrace: {
-          schemaVersion: 1,
-          visibleTools: ["takeoff_dispatch"],
-          toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
-          evidence: [{ kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok" }],
-          confidence: "high",
-          disposition: "completed",
-          reason: "tool_execution_succeeded",
-        },
-      },
-    ],
-  });
-  const result = await readSubagentOutputWithTrace("child-session-key", undefined, {
-    sessionFile: "/tmp/fake-session.json",
-  });
-  expect(result.text).toBe("All 7 scopes completed.");
-  expect(result.auditTrace?.toolInvocations).toEqual([{ name: "takeoff_dispatch", status: "ok" }]);
+it("records the audit trace onto the matching registry row and persists", () => {
+  const entry: SubagentRunRecord = {
+    runId: "run-1",
+    childSessionKey: "agent:main:subagent:child-1",
+    requesterSessionKey: "agent:main:main",
+    requesterDisplayKey: "main",
+    task: "run takeoff scopes",
+    cleanup: "keep",
+    createdAt: 1_000,
+  };
+  addSubagentRunForTests(entry);
+
+  const auditTrace: AgentDecisionTrace = {
+    schemaVersion: 1,
+    visibleTools: ["takeoff_dispatch"],
+    toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+    evidence: [{ kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok" }],
+    confidence: "high",
+    disposition: "completed",
+    reason: "tool_execution_succeeded",
+  };
+  recordSubagentReplyAuditTrace("agent:main:subagent:child-1", auditTrace);
+
+  const found = getLatestSubagentRunByChildSessionKey("agent:main:subagent:child-1");
+  expect(found?.completion?.resultAuditTrace).toEqual(auditTrace);
 });
 
-it("readSubagentOutputWithTrace omits auditTrace when the winning message has none", async () => {
-  testing.setDepsForTest({
-    readSessionMessagesAsync: async () => [
-      { role: "assistant", content: "Done, no tools needed." },
-    ],
-  });
-  const result = await readSubagentOutputWithTrace("child-session-key", undefined, {
-    sessionFile: "/tmp/fake-session.json",
-  });
-  expect(result.text).toBe("Done, no tools needed.");
-  expect(result.auditTrace).toBeUndefined();
-});
-
-it("readSubagentOutput (existing, unchanged) still returns only text for the same fixture", async () => {
-  testing.setDepsForTest({
-    readSessionMessagesAsync: async () => [
-      {
-        role: "assistant",
-        content: "All 7 scopes completed.",
-        auditTrace: { schemaVersion: 1, visibleTools: [], toolInvocations: [], evidence: [] },
-      },
-    ],
-  });
-  const text = await readSubagentOutput("child-session-key", undefined, {
-    sessionFile: "/tmp/fake-session.json",
-  });
-  expect(text).toBe("All 7 scopes completed.");
+it("no-ops without throwing when no registry row matches the session key", () => {
+  expect(() =>
+    recordSubagentReplyAuditTrace("agent:main:subagent:does-not-exist", {
+      schemaVersion: 1,
+      visibleTools: [],
+      toolInvocations: [],
+      evidence: [],
+      confidence: "medium",
+      disposition: "completed",
+      reason: "no_tools_visible",
+    }),
+  ).not.toThrow();
 });
 ```
 
-Add `readSubagentOutputWithTrace` and `testing` to this test file's imports from `./subagent-announce-output.js`.
+(Check whether this test file needs `resetSubagentRegistryForTests()` in a `beforeEach`/`afterEach` to isolate `addSubagentRunForTests`'s effect on the shared module-level `subagentRuns` map from other tests in the same file — most likely yes, following whatever pattern the file's existing tests already use for this.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `npx vitest run src/agents/subagent-announce-output.test.ts`
-Expected: FAIL — `readSubagentOutputWithTrace` is not exported yet.
+Run: `npx vitest run <the test file from Step 1>`
+Expected: FAIL — `recordSubagentReplyAuditTrace` is not exported yet.
 
-- [ ] **Step 3: Extend the transcript-extraction shape**
+- [ ] **Step 3: Implement `recordSubagentReplyAuditTrace`**
 
-In `src/agents/subagent-announce-output.ts`, import `AgentDecisionTrace` (same source as Task 2 used).
+In `src/agents/subagent-registry.ts`, add near the top: `import type { AgentDecisionTrace } from "../auto-reply/reply-payload.js";` (confirm this exact relative path from this file's location before using it — it's `../auto-reply/reply-payload.js` from `src/agents/`, matching Task 1's import in `internal-events.ts` which sits at the same depth).
 
-Change `SubagentOutputSnapshot` (line 52-57):
-
-```ts
-type SubagentOutputSnapshot = {
-  latestAssistantText?: string;
-  latestSilentText?: string;
-  latestToolCallCount?: number;
-  latestAuditTrace?: AgentDecisionTrace;
-  waitingForContinuation?: boolean;
-};
-```
-
-Add a small extractor mirroring `extractSubagentAssistantText` (line 102-115), placed right after it:
+Add the function near `addSubagentRunForTests`/`releaseSubagentRun` (~line 1311):
 
 ```ts
-function extractSubagentAssistantAuditTrace(message: unknown): AgentDecisionTrace | undefined {
-  if (!message || typeof message !== "object") {
-    return undefined;
+/**
+ * Records a subagent's own already-computed audit trace onto its registry
+ * row (ENG-19951). Called from agent-runner.ts at the exact point that
+ * trace is computed for the child's own reply — independent of, and
+ * earlier than, the later text-only completion freeze. Looks up the live
+ * map directly, not via getSubagentRunsSnapshotForRead (which may return a
+ * structuredClone'd snapshot outside test mode, so writing through it
+ * would silently not persist). No-ops if no row matches — an orphaned or
+ * already-cleaned-up child simply has nothing left to record onto.
+ */
+export function recordSubagentReplyAuditTrace(
+  childSessionKey: string,
+  auditTrace: AgentDecisionTrace,
+): void {
+  const key = childSessionKey.trim();
+  if (!key) {
+    return;
   }
-  const record = message as { role?: unknown; auditTrace?: unknown };
-  if (record.role !== "assistant" || !record.auditTrace || typeof record.auditTrace !== "object") {
-    return undefined;
+  let latest: SubagentRunRecord | null = null;
+  for (const entry of subagentRuns.values()) {
+    if (entry.childSessionKey !== key) {
+      continue;
+    }
+    if (!latest || entry.createdAt > latest.createdAt) {
+      latest = entry;
+    }
   }
-  return record.auditTrace as AgentDecisionTrace;
+  if (!latest) {
+    return;
+  }
+  latest.completion = {
+    ...(latest.completion ?? { required: false }),
+    resultAuditTrace: auditTrace,
+  };
+  persistSubagentRuns();
 }
 ```
 
-In `summarizeSubagentOutputHistory` (line 137-184), the branch that sets `snapshot.latestAssistantText = text` (currently lines 168-171) is the ONE place the winning text gets selected — set the trace in the same branch, same message:
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npx vitest run <the test file from Step 1>`
+Expected: PASS.
+
+- [ ] **Step 5: Write the failing test for the `agent-runner.ts` call site**
+
+Find (or, if none exists, add near) an existing test in `agent-runner.ts`'s test suite that already asserts on `attachAgentDecisionTrace`'s output for a delivered reply — extend it, don't build new scaffolding. Add a case for a subagent child session:
 
 ```ts
-snapshot.latestSilentText = undefined;
-snapshot.latestAssistantText = text;
-snapshot.latestAuditTrace = extractSubagentAssistantAuditTrace(message);
-snapshot.waitingForContinuation = false;
-previousAssistantCalledYield = false;
-continue;
+it("records the audit trace onto the subagent registry when the reply is for a subagent child session", async () => {
+  // ... reuse this suite's existing harness to run a reply for
+  // sessionKey "agent:main:subagent:child-1" with some toolSummary ...
+  // assert recordSubagentReplyAuditTrace (mocked) was called once with
+  // ("agent:main:subagent:child-1", the same auditTrace object attached
+  // to the delivered payload).
+});
+
+it("does not record onto the registry for a top-level (non-subagent) session", async () => {
+  // ... same harness, sessionKey "agent:main:main" ...
+  // assert recordSubagentReplyAuditTrace (mocked) was NOT called.
+});
 ```
 
-Every OTHER branch in this loop that clears `latestAssistantText`/`latestSilentText` (there are three: the `assistantCallsSessionsYield` branch ~line 147-151, the empty-text branch ~154-160, and the `isAnnounceSkip`/silent branch ~161-167) must also clear `latestAuditTrace` to `undefined` — a stale trace from an earlier message must never survive past a later message that supersedes it. Add `snapshot.latestAuditTrace = undefined;` to each of those three branches.
+(This step's exact mock setup depends on how `agent-runner.ts`'s existing test suite mocks its many dependencies — read that suite's top-level `vi.mock` calls first, find its existing pattern for mocking a same-layer sibling function call, and mirror it. Do not guess a mock shape that doesn't match the file's real conventions — this is the same discipline that caught real problems in Tasks 5/6 during the first draft of this plan.)
 
-- [ ] **Step 4: Add the `WithTrace` sibling functions**
+- [ ] **Step 6: Run test to verify it fails**
 
-Add a new function right after `selectSubagentOutputText` (line 209-223) that returns both fields:
+Run: `npx vitest run <agent-runner.ts's test file>`
+Expected: FAIL — the call site doesn't exist yet.
+
+- [ ] **Step 7: Wire the call site**
+
+In `src/auto-reply/reply/agent-runner.ts`, add imports:
 
 ```ts
-function selectSubagentOutputResult(snapshot: SubagentOutputSnapshot): {
-  text?: string;
-  auditTrace?: AgentDecisionTrace;
-} {
-  const text = selectSubagentOutputText(snapshot);
-  if (!text) {
-    return {};
-  }
-  // Only the branch that set latestAssistantText also sets latestAuditTrace
-  // (Step 3) — a silent/tool-call-count fallback text never carries a trace,
-  // which is correct: there's no assistant message with real evidence to
-  // attach in those cases.
-  return text === snapshot.latestAssistantText
-    ? { text, auditTrace: snapshot.latestAuditTrace }
-    : { text };
-}
+import { isSubagentSessionKey } from "../../sessions/session-key-utils.js";
+import { recordSubagentReplyAuditTrace } from "../../agents/subagent-registry.js";
 ```
 
-Add `readSubagentOutputWithTrace` as a near-duplicate of `readSubagentOutput` (line 225-259) that shares the same transcript-fetch logic but returns the richer result. Refactor `readSubagentOutput` to call it, rather than duplicating the fetch:
+(Confirm these exact relative paths from `src/auto-reply/reply/agent-runner.ts`'s location before using them.)
+
+Change the `if (!isHeartbeat) { ... }` block (~line 2419-2432):
 
 ```ts
-export async function readSubagentOutputWithTrace(
-  sessionKey: string,
-  _outcome?: SubagentRunOutcome,
-  options?: { sessionFile?: string },
-): Promise<{ text?: string; auditTrace?: AgentDecisionTrace }> {
-  let messages: unknown[] | undefined;
-  if (options?.sessionFile) {
-    const transcriptMessages = await subagentAnnounceOutputDeps.readSessionMessagesAsync(
-      {
-        sessionFile: options.sessionFile,
-        sessionId: sessionKey,
-      },
-      {
-        mode: "recent",
-        maxMessages: 100,
-        maxBytes: 1024 * 1024,
-      },
-    );
-    messages = transcriptMessages;
-  }
-  const history =
-    messages === undefined
-      ? await subagentAnnounceOutputDeps.callGateway({
-          method: "chat.history",
-          params: { sessionKey, limit: 100 },
-        })
-      : undefined;
-  const sourceMessages = messages ?? (Array.isArray(history?.messages) ? history.messages : []);
-  const snapshot = summarizeSubagentOutputHistory(sourceMessages);
-  const result = selectSubagentOutputResult(snapshot);
-  return result.text?.trim() ? result : {};
-}
-
-export async function readSubagentOutput(
-  sessionKey: string,
-  outcome?: SubagentRunOutcome,
-  options?: { sessionFile?: string },
-): Promise<string | undefined> {
-  const { text } = await readSubagentOutputWithTrace(sessionKey, outcome, options);
-  return text;
-}
-```
-
-This removes the duplicated fetch body from `readSubagentOutput` (it now delegates) — same transcript is read once, same behavior, confirmed by Step 1's third test.
-
-Now add `captureSubagentCompletionReplyWithTrace`, mirroring `captureSubagentCompletionReply` (line 325-339) and its dependency `captureSubagentCompletionReplyUsing` (`subagent-announce-capture.ts:38`, which only accepts a `string`-returning reader). Rather than widen that shared low-level helper's type (touching a file with its own retry-loop tests, unnecessary risk for this fix), write a small dedicated wrapper here:
-
-```ts
-export async function captureSubagentCompletionReplyWithTrace(
-  sessionKey: string,
-  options?: { waitForReply?: boolean; outcome?: SubagentRunOutcome; sessionFile?: string },
-): Promise<{ text?: string; auditTrace?: AgentDecisionTrace }> {
-  const immediate = await readSubagentOutputWithTrace(sessionKey, options?.outcome, {
-    sessionFile: options?.sessionFile,
+if (!isHeartbeat) {
+  // Attach before verbose, raw-trace, and usage decorations so audit facts
+  // stay on the terminal assistant reply instead of diagnostic payloads.
+  const auditTrace = buildAgentDecisionTrace({
+    toolSummary,
+    completion,
+    error: runResult.meta?.error,
+    failureSignal: runResult.meta?.failureSignal,
+    payloads: finalPayloads,
   });
-  if (immediate.text?.trim()) {
-    return immediate;
+  finalPayloads = attachAgentDecisionTrace(finalPayloads, auditTrace);
+  // ENG-19951: a subagent's own reply computes its audit trace here, same
+  // as any top-level reply (this is the same call, not a special path) —
+  // record it directly on the registry row so the parent's eventual
+  // announce can merge it in later. No-op for a non-subagent session.
+  if (isSubagentSessionKey(sessionKey)) {
+    recordSubagentReplyAuditTrace(sessionKey, auditTrace);
   }
-  if (options?.waitForReply === false) {
-    return {};
-  }
-  const maxWaitMs = isFastTestMode() ? 50 : 1_500;
-  const retryIntervalMs = isFastTestMode() ? FAST_TEST_RETRY_INTERVAL_MS : 100;
-  let waitedMs = 0;
-  let result: { text?: string; auditTrace?: AgentDecisionTrace } = {};
-  while (waitedMs < maxWaitMs) {
-    result = await readSubagentOutputWithTrace(sessionKey, options?.outcome, {
-      sessionFile: options?.sessionFile,
-    });
-    if (result.text?.trim()) {
-      return result;
-    }
-    const remainingMs = maxWaitMs - waitedMs;
-    if (remainingMs <= 0) {
-      break;
-    }
-    const sleepMs = Math.min(retryIntervalMs, remainingMs);
-    await new Promise((resolve) => {
-      setTimeout(resolve, sleepMs);
-    });
-    waitedMs += sleepMs;
-  }
-  return result;
 }
 ```
 
-(This duplicates the retry-loop shape of `readLatestSubagentOutputWithRetryUsing`/`captureSubagentCompletionReplyUsing` in `subagent-announce-capture.ts` rather than generalizing that shared file — the design spec's "one change, one file" additive principle takes priority over DRY here, since generalizing a tested low-level shared utility's return type is exactly the kind of touch-something-shared risk this fix is designed to avoid.)
+- [ ] **Step 8: Run test to verify it passes**
 
-- [ ] **Step 5: Run test to verify it passes**
+Run: `npx vitest run <agent-runner.ts's test file>`
+Expected: PASS — both new tests, and every pre-existing test in the suite (confirms zero behavior change to the delivered payload itself — only a new, side-effecting call for subagent sessions).
 
-Run: `npx vitest run src/agents/subagent-announce-output.test.ts`
-Expected: PASS — all new tests, and every pre-existing test in this file (confirms `readSubagentOutput`'s behavior is unchanged after the refactor).
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/agents/subagent-announce-output.ts src/agents/subagent-announce-output.test.ts
-git commit -m "feat(subagent): extract auditTrace alongside text when reading subagent output"
+git add src/agents/subagent-registry.ts src/auto-reply/reply/agent-runner.ts
+git commit -m "feat(subagent): record a subagent's own audit trace onto its registry row"
 ```
+
+(Include whichever test file(s) Steps 1 and 5 actually created/modified — the exact filenames depend on what you found this repo's existing convention to be.)
 
 ---
 
@@ -636,257 +591,108 @@ git commit -m "feat(subagent): add resultAuditTrace/frozenAuditTrace to registry
 
 ---
 
-## Task 5: freeze the trace onto the registry at completion
+## Task 5: forward the recorded trace through `PendingFinalDeliveryPayload`
+
+**Superseded design note:** the first version of this task added an
+optional `captureSubagentCompletionReplyWithTrace` dependency and had
+`freezeRunResultAtCompletion` capture the trace at freeze time. That's no
+longer needed — Task 3's direct write means `completion.resultAuditTrace`
+is already set (if the child ever replied at all) by the time freeze runs.
+Freeze needs **zero changes**. This task is now much smaller: just forward
+the already-set field through the one place that still needs it,
+`PendingFinalDeliveryPayload`.
 
 **Files:**
 
-- Modify: `src/agents/subagent-registry-lifecycle.ts:399-424` (`freezeRunResultAtCompletion`), `:450-479` (`refreshFrozenResultFromSession`), `:527-552` (`loadPendingFinalDeliveryPayload`), `:567-585` (`refreshPendingFinalDeliveryPayload`), and the `createSubagentRegistryLifecycleController` params type (`:124-150`)
-- Modify: `src/agents/subagent-announce.ts` — add `export { captureSubagentCompletionReplyWithTrace } from "./subagent-announce-output.js";` next to the existing `captureSubagentCompletionReply` re-export (line 91)
-- Modify: `src/agents/subagent-registry.ts:104,113,150-151,598-599` — wire the new dep through `SubagentAnnounceModule`, `subagentRegistryDeps`, and the controller construction, mirroring `captureSubagentCompletionReply`'s existing wiring exactly
+- Modify: `src/agents/subagent-registry-lifecycle.ts:527-552` (`loadPendingFinalDeliveryPayload`), `:567-585` (`refreshPendingFinalDeliveryPayload`)
 - Test: `src/agents/subagent-registry-lifecycle.test.ts`
 
 **Interfaces:**
 
-- Consumes: `captureSubagentCompletionReplyWithTrace` from Task 3, `resultAuditTrace`/`frozenAuditTrace` fields from Task 4.
-- Produces: a subagent run's registry row has `completion.resultAuditTrace` populated whenever `completion.resultText` is (same freeze moment, same condition), and `PendingFinalDeliveryPayload.frozenAuditTrace` mirrors `frozenResultText` at both sites that build that payload.
-
-**Critical constraint found while reading the actual test file** (this correction replaces an earlier draft of this task that would have broken every existing test in `subagent-registry-lifecycle.test.ts`): `createSubagentRegistryLifecycleController`'s params type declares `captureSubagentCompletionReply: CaptureSubagentCompletionReply` as a **required** field (`subagent-registry-lifecycle.ts:150`), and this file's test helper `createLifecycleController` (`subagent-registry-lifecycle.test.ts:172-200`) supplies a default (`captureSubagentCompletionReply: vi.fn(async () => "final completion reply")`) that ~15 individual tests override per-test via `vi.fn(...)`. **Do not rename or replace this field** — every one of those ~15 tests would silently stop freezing any result at all, since their mock would no longer be the function actually called. Instead, add `captureSubagentCompletionReplyWithTrace` as a **new, optional** field, and have `freezeRunResultAtCompletion`/`refreshFrozenResultFromSession` prefer it when present, falling back to the existing required field when absent. This is the same additive-optional-field pattern used everywhere else in this plan, applied to a dependency-injection parameter instead of a data type — same reasoning, same guarantee: every test that doesn't know about the new field is unaffected.
+- Consumes: `resultAuditTrace`/`frozenAuditTrace` fields from Task 4; `completion.resultAuditTrace` as set by Task 3's `recordSubagentReplyAuditTrace` (this task does not set it — only reads and forwards it).
+- Produces: `PendingFinalDeliveryPayload.frozenAuditTrace` mirrors `frozenResultText`'s existing precedence at both call sites.
+- Guarantee: `freezeRunResultAtCompletion`/`refreshFrozenResultFromSession` are byte-identical to before this task — verified by the full existing test suite in this file passing with zero new mocks needed for those two functions.
 
 - [ ] **Step 1: Write the failing test**
 
-Read `src/agents/subagent-registry-lifecycle.test.ts` lines 104-200 (`createRunEntry`, `createLifecycleController`) and lines 919-949 (`"does not freeze stale reply text for terminal error outcomes"`) before writing this — the tests below reuse those exact helpers. Add to the `describe("subagent registry lifecycle hardening", ...)` block:
+Read `src/agents/subagent-registry-lifecycle.test.ts` lines 104-200 (`createRunEntry`, `createLifecycleController`) before writing this, and find whichever existing test already asserts on the shape of a built `PendingFinalDeliveryPayload` (search this file for `frozenResultText` in an `expect(...)` — there should be at least one, since that's the field this task's new one mirrors) — extend that test rather than inventing new scaffolding:
 
 ```ts
-it("freezes resultAuditTrace alongside resultText when captureSubagentCompletionReplyWithTrace is provided", async () => {
+it("carries the registry-recorded audit trace through to the pending delivery payload", async () => {
   const entry = createRunEntry({
     expectsCompletionMessage: true,
   });
-  const auditTrace = {
-    schemaVersion: 1 as const,
-    visibleTools: ["takeoff_dispatch"],
-    toolInvocations: [{ name: "takeoff_dispatch", status: "ok" as const }],
-    evidence: [{ kind: "tool_outcome" as const, tool: "takeoff_dispatch", status: "ok" as const }],
-    confidence: "high" as const,
-    disposition: "completed" as const,
-    reason: "tool_execution_succeeded" as const,
+  // Simulate Task 3's direct write already having landed before this run
+  // any pending-delivery-payload build — this task never sets
+  // resultAuditTrace itself, only reads it.
+  entry.completion = {
+    required: true,
+    resultText: "All 7 scopes completed.",
+    resultAuditTrace: {
+      schemaVersion: 1,
+      visibleTools: ["takeoff_dispatch"],
+      toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+      evidence: [{ kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok" }],
+      confidence: "high",
+      disposition: "completed",
+      reason: "tool_execution_succeeded",
+    },
   };
-  const captureSubagentCompletionReplyWithTrace = vi.fn(async () => ({
-    text: "All 7 scopes completed.",
-    auditTrace,
-  }));
 
-  const controller = createLifecycleController({
-    entry,
-    captureSubagentCompletionReplyWithTrace,
-  });
-
-  await expect(
-    controller.completeSubagentRun({
-      runId: entry.runId,
-      endedAt: 4_000,
-      outcome: { status: "ok" },
-      reason: SUBAGENT_ENDED_REASON_COMPLETE,
-      triggerCleanup: false,
-    }),
-  ).resolves.toBeUndefined();
-
-  expect(entry.completion?.resultText).toBe("All 7 scopes completed.");
-  expect(entry.completion?.resultAuditTrace).toEqual(auditTrace);
-});
-
-it("falls back to the text-only capture when captureSubagentCompletionReplyWithTrace is not provided", async () => {
-  const entry = createRunEntry({
-    expectsCompletionMessage: true,
-  });
-  const controller = createLifecycleController({
-    entry,
-    captureSubagentCompletionReply: vi.fn(async () => "final completion reply"),
-  });
-
-  await expect(
-    controller.completeSubagentRun({
-      runId: entry.runId,
-      endedAt: 4_000,
-      outcome: { status: "ok" },
-      reason: SUBAGENT_ENDED_REASON_COMPLETE,
-      triggerCleanup: false,
-    }),
-  ).resolves.toBeUndefined();
-
-  expect(entry.completion?.resultText).toBe("final completion reply");
-  expect(entry.completion?.resultAuditTrace).toBeUndefined();
-});
-
-it("freezes neither resultText nor resultAuditTrace on an error outcome, even with trace capture provided", async () => {
-  const entry = createRunEntry({
-    expectsCompletionMessage: true,
-  });
-  const captureSubagentCompletionReplyWithTrace = vi.fn(async () => ({
-    text: "stale assistant text",
-    auditTrace: { schemaVersion: 1 as const, visibleTools: [], toolInvocations: [], evidence: [] },
-  }));
-
-  const controller = createLifecycleController({
-    entry,
-    captureSubagentCompletionReplyWithTrace,
-  });
-
-  await expect(
-    controller.completeSubagentRun({
-      runId: entry.runId,
-      endedAt: 4_000,
-      outcome: { status: "error", error: "All models failed (2): timeout" },
-      reason: SUBAGENT_ENDED_REASON_COMPLETE,
-      triggerCleanup: false,
-    }),
-  ).resolves.toBeUndefined();
-
-  expect(captureSubagentCompletionReplyWithTrace).not.toHaveBeenCalled();
-  expect(entry.completion?.resultText).toBeNull();
-  expect(entry.completion?.resultAuditTrace).toBeUndefined();
+  // ... drive whichever existing lifecycle path builds and exposes
+  // PendingFinalDeliveryPayload for this entry (the same path the
+  // existing frozenResultText-asserting test already exercises) ...
+  // expect(pendingPayload.frozenAuditTrace).toEqual(entry.completion.resultAuditTrace);
 });
 ```
 
-Also add `captureSubagentCompletionReplyWithTrace: undefined` is NOT needed in the base `params` object inside `createLifecycleController` (line 180-197) — since the field is optional, omitting it entirely from the defaults is correct and is exactly what makes the second new test above ("falls back...") exercise the true default path.
+(The middle section is deliberately left as a description, not invented code — copy the exact drive-and-read pattern from the existing `frozenResultText` test you found, changing only the assertion. Writing fabricated plumbing here that doesn't match this file's real mechanism would be worse than no test at all.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run src/agents/subagent-registry-lifecycle.test.ts`
-Expected: FAIL — TypeScript error on `captureSubagentCompletionReplyWithTrace` (field doesn't exist on the params type yet), and `entry.completion?.resultAuditTrace` is `undefined` in the first new test.
+Expected: FAIL — `pendingPayload.frozenAuditTrace` is `undefined`.
 
-- [ ] **Step 3: Add the optional dep and update `freezeRunResultAtCompletion`**
+- [ ] **Step 3: Update both `PendingFinalDeliveryPayload`-building sites**
 
-In `src/agents/subagent-registry-lifecycle.ts`, near line 69 where `CaptureSubagentCompletionReply` is type-aliased from `subagent-announce.js`, add a sibling alias:
-
-```ts
-type CaptureSubagentCompletionReplyWithTrace =
-  (typeof import("./subagent-announce.js"))["captureSubagentCompletionReplyWithTrace"];
-```
-
-In the `createSubagentRegistryLifecycleController(params: {...})` type (starting line 124), add after the existing `captureSubagentCompletionReply: CaptureSubagentCompletionReply;` (line 150):
-
-```ts
-  /**
-   * Optional: when provided, freezing also captures the subagent's own
-   * audit trace alongside its text (ENG-19951). Optional so every existing
-   * caller/test that only supplies captureSubagentCompletionReply keeps
-   * working unmodified — freezeRunResultAtCompletion falls back to the
-   * text-only capture when this is absent.
-   */
-  captureSubagentCompletionReplyWithTrace?: CaptureSubagentCompletionReplyWithTrace;
-```
-
-Change `freezeRunResultAtCompletion` (lines 399-424):
-
-```ts
-const freezeRunResultAtCompletion = async (
-  entry: SubagentRunRecord,
-  outcome: SubagentRunOutcome,
-): Promise<boolean> => {
-  const completion = ensureCompletionState(entry);
-  if (completion.resultText !== undefined) {
-    return false;
-  }
-  if (outcome.status === "error") {
-    completion.resultText = null;
-    completion.capturedAt = Date.now();
-    return true;
-  }
-  try {
-    const captured = params.captureSubagentCompletionReplyWithTrace
-      ? await params.captureSubagentCompletionReplyWithTrace(entry.childSessionKey, {
-          waitForReply: entry.expectsCompletionMessage === true,
-          outcome,
-          sessionFile: entry.execution?.transcriptFile,
-        })
-      : {
-          text: await params.captureSubagentCompletionReply(entry.childSessionKey, {
-            waitForReply: entry.expectsCompletionMessage === true,
-            outcome,
-            sessionFile: entry.execution?.transcriptFile,
-          }),
-        };
-    completion.resultText = captured.text?.trim() ? capFrozenResultText(captured.text) : null;
-    completion.resultAuditTrace = captured.text?.trim() ? captured.auditTrace : undefined;
-  } catch {
-    completion.resultText = null;
-    completion.resultAuditTrace = undefined;
-  }
-  completion.capturedAt = Date.now();
-  return true;
-};
-```
-
-Change `refreshFrozenResultFromSession` (lines 450-479) the same way — its single `captured = await params.captureSubagentCompletionReply(sessionKey);` call (line 460) becomes:
-
-```ts
-let captured: { text?: string; auditTrace?: AgentDecisionTrace } | undefined;
-try {
-  captured = params.captureSubagentCompletionReplyWithTrace
-    ? await params.captureSubagentCompletionReplyWithTrace(sessionKey)
-    : { text: await params.captureSubagentCompletionReply(sessionKey) };
-} catch {
-  return false;
-}
-const trimmed = captured?.text?.trim();
-```
-
-(replacing the existing `let captured: string | undefined;` / `captured = await params.captureSubagentCompletionReply(sessionKey);` / `const trimmed = captured?.trim();` trio at lines 458-464), and inside the `for (const entry of candidates)` loop, alongside the existing `completion.resultText = nextFrozen;` (line 477), add `completion.resultAuditTrace = captured?.auditTrace;`.
-
-- [ ] **Step 4: Update both `PendingFinalDeliveryPayload`-building sites**
-
-In `loadPendingFinalDeliveryPayload` (lines 527-552), add after line 546 (`frozenResultText: ...`):
+In `loadPendingFinalDeliveryPayload` (lines 527-552), add after the existing `frozenResultText: entry.delivery?.payload?.frozenResultText ?? entry.completion?.resultText,` line:
 
 ```ts
       frozenAuditTrace: entry.delivery?.payload?.frozenAuditTrace ?? entry.completion?.resultAuditTrace,
 ```
 
-In `refreshPendingFinalDeliveryPayload` (lines 567-585), add after line 581 (`frozenResultText: entry.completion?.resultText,`):
+In `refreshPendingFinalDeliveryPayload` (lines 567-585), add after the existing `frozenResultText: entry.completion?.resultText,` line:
 
 ```ts
       frozenAuditTrace: entry.completion?.resultAuditTrace,
 ```
 
-- [ ] **Step 5: Wire the new dep into production (`subagent-announce.ts`, `subagent-registry.ts`)**
-
-In `src/agents/subagent-announce.ts`, add next to line 91's existing re-export:
-
-```ts
-export { captureSubagentCompletionReplyWithTrace } from "./subagent-announce-output.js";
-```
-
-In `src/agents/subagent-registry.ts`:
-
-- Line 104's `Pick<..., "captureSubagentCompletionReply" | "runSubagentAnnounceFlow">`-style type union: add `| "captureSubagentCompletionReplyWithTrace"`.
-- Line 113's `captureSubagentCompletionReply: SubagentAnnounceModule["captureSubagentCompletionReply"];` in the deps type: add a sibling line `captureSubagentCompletionReplyWithTrace: SubagentAnnounceModule["captureSubagentCompletionReplyWithTrace"];`.
-- Lines 150-151's lazy-loaded default:
-  ```ts
-  captureSubagentCompletionReplyWithTrace: async (sessionKey, options) =>
-    (await loadSubagentAnnounceModule()).captureSubagentCompletionReplyWithTrace(sessionKey, options),
-  ```
-- Lines 598-599's controller construction, add:
-  ```ts
-  captureSubagentCompletionReplyWithTrace: (sessionKey, options) =>
-    subagentRegistryDeps.captureSubagentCompletionReplyWithTrace(sessionKey, options),
-  ```
-
-This is the one place a production caller must be updated for Task 5's fix to actually take effect outside tests — without this step, `freezeRunResultAtCompletion`'s optional-field fallback means the code still runs correctly, it just never freezes a trace in production (silently falls back to text-only forever). Do not skip this step.
-
-- [ ] **Step 6: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run src/agents/subagent-registry-lifecycle.test.ts`
-Expected: PASS — the 3 new tests, and every one of the ~15 pre-existing tests that supply only `captureSubagentCompletionReply` (confirms the optional-field fallback truly preserves their behavior).
+Expected: PASS — the new test, and every pre-existing test in this file unmodified (confirms `freezeRunResultAtCompletion`/`refreshFrozenResultFromSession` genuinely needed no changes).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/agents/subagent-registry-lifecycle.ts src/agents/subagent-announce.ts src/agents/subagent-registry.ts src/agents/subagent-registry-lifecycle.test.ts
-git commit -m "feat(subagent): freeze resultAuditTrace alongside resultText at completion"
+git add src/agents/subagent-registry-lifecycle.ts src/agents/subagent-registry-lifecycle.test.ts
+git commit -m "feat(subagent): forward the recorded audit trace through PendingFinalDeliveryPayload"
 ```
 
 ---
 
 ## Task 6: populate `childToolEvidence` on the completion event (single-child and multi-child)
+
+**Superseded design note:** the first version of this task threaded a
+`replyAuditTrace` through the two transcript-read call sites in
+`runSubagentAnnounceFlow`, and — because of that — had to document a
+deliberate gap for `params.roundOneReply`, a third source for `reply` that
+bypasses those reads entirely. Task 3's redesign removes the gap along
+with the complexity that caused it: `completion.resultAuditTrace` is now
+set directly on the registry row whenever the child computes any reply at
+all, so the single-child path here is a plain registry lookup by
+`childSessionKey` — completely independent of which text-source `reply`
+came from. `roundOneReply` is no longer relevant to this task.
 
 **Files:**
 
@@ -896,46 +702,32 @@ git commit -m "feat(subagent): freeze resultAuditTrace alongside resultText at c
 
 **Interfaces:**
 
-- Consumes: `SubagentToolEvidence` (Task 2), `resultAuditTrace`/`frozenAuditTrace` (Tasks 4-5), `readSubagentOutputWithTrace` (Task 3).
+- Consumes: `SubagentToolEvidence` (Task 2), `resultAuditTrace`/`frozenAuditTrace` (Task 4), `subagentRegistryRuntime.getLatestSubagentRunByChildSessionKey` (already imported/used in this function today, per the existing call at the multi-child findings section — reused here for the single-child case too, not a new dependency).
 - Produces: `completionEvent.childToolEvidence` populated for both the single-child direct path and the multi-child `buildChildCompletionFindings` wake path — this is what `run.ts` (Task 7) reads.
-
-**Known, deliberate gap in this task** (read before writing code): `runSubagentAnnounceFlow` has a _third_ source for `reply` besides the two read-based call sites this task instruments — `params.roundOneReply`, a pre-supplied text the caller already had in hand (used when the flow is invoked synchronously right after a run ends, avoiding a redundant transcript read). When `roundOneReply` is set, `reply` never goes through `readSubagentOutputWithTrace`/`readLatestSubagentOutputWithRetry`, so this task's `childToolEvidence` population is skipped for that path — same as today's (unfixed) behavior, not worse. This is intentionally out of scope here, the same way the spec scopes out pre-yield-attempt evidence: the ticket's proven case (and the general async-wait case this fix targets) goes through the read-based path, not `roundOneReply`. If a future case shows `roundOneReply`-sourced completions also need evidence, that's a follow-up, not a blocker for this task.
 
 - [ ] **Step 1: Write the failing test — single child**
 
-Read `src/agents/subagent-announce.test.ts` lines 1-240 (mock setup, `runCompletionFixture`) before writing this. The default fixture sets `roundOneReply: "done"`, which (per the gap above) bypasses the read path entirely — override it to `undefined` so the flow actually calls `readSubagentOutputWithTrace`/`readLatestSubagentOutputWithRetry`. This requires making `readSessionMessagesAsync`'s mock return value controllable per-test: change line 67's inline `readSessionMessagesAsync: vi.fn(async () => [])` to reference a hoisted mock instead, so a test can override its resolved value.
-
-Add near the top of the file, alongside the other `vi.hoisted`/const mock declarations (e.g. near line 36's `deliverSubagentAnnouncementArgsMock`):
-
-```ts
-const readSessionMessagesAsyncMock = vi.fn(
-  async (_target: unknown, _opts: unknown) => [] as unknown[],
-);
-```
-
-Change line 67 from `readSessionMessagesAsync: vi.fn(async () => []),` to `readSessionMessagesAsync: readSessionMessagesAsyncMock,`.
+Read `src/agents/subagent-announce.test.ts` lines 1-240 (mock setup, `runCompletionFixture`, and the `subagentRegistryRuntimeMock` hoisted at line ~44) before writing this — `subagentRegistryRuntimeMock.getLatestSubagentRunByChildSessionKey` will need a `vi.fn()` added if it isn't already one of the mocked methods there (check the existing `subagentRegistryRuntimeMock` object's keys first; several sibling methods like `resolveRequesterForChildSession` are already present, so this is very likely a matter of adding one more key to that same object, not inventing new mock infrastructure).
 
 Add the test, in `describe("subagent announce seam flow", ...)`:
 
 ```ts
-it("populates childToolEvidence on the completion event when the child's transcript carries an audit trace", async () => {
-  readSessionMessagesAsyncMock.mockResolvedValueOnce([
-    {
-      role: "assistant",
-      content: "All 7 scopes completed.",
-      auditTrace: {
-        schemaVersion: 1,
-        visibleTools: ["takeoff_dispatch"],
-        toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
-        evidence: [{ kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok" }],
-        confidence: "high",
-        disposition: "completed",
-        reason: "tool_execution_succeeded",
-      },
-    },
-  ]);
+it("populates childToolEvidence on the completion event from the registry-recorded audit trace", async () => {
+  const auditTrace = {
+    schemaVersion: 1,
+    visibleTools: ["takeoff_dispatch"],
+    toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+    evidence: [{ kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok" }],
+    confidence: "high",
+    disposition: "completed",
+    reason: "tool_execution_succeeded",
+  };
+  subagentRegistryRuntimeMock.getLatestSubagentRunByChildSessionKey.mockReturnValueOnce({
+    childSessionKey: "agent:main:subagent:fixture",
+    completion: { required: true, resultAuditTrace: auditTrace },
+  });
 
-  await runCompletionFixture({ roundOneReply: undefined });
+  await runCompletionFixture({ roundOneReply: "All 7 scopes completed." });
 
   const call = requireAgentCall();
   const message = (call.params as { message?: string })?.message ?? "";
@@ -955,6 +747,8 @@ it("populates childToolEvidence on the completion event when the child's transcr
   ]);
 });
 ```
+
+Note this test deliberately keeps `roundOneReply: "All 7 scopes completed."` (the fixture's default text-source) rather than forcing the flow through a transcript read — proving the point of this redesign: evidence population works **regardless** of which text-source supplied `reply`.
 
 (This test asserts on `internalEvents` in the `agent` gateway call params, per `subagent-announce-delivery.ts`'s `directAgentParams.internalEvents: params.internalEvents` wiring already confirmed in the spec — check this test file's mocked `deliverSubagentAnnouncement`/`callGatewayMock` implementation, lines 93-196, to confirm exactly which mock's call arguments actually carry `internalEvents` through to `requireAgentCall()`; the mock at lines 135-154 builds its own `params` object for the `agent` gateway call and does not currently forward `internalEvents` — if it doesn't, add `internalEvents: params.internalEvents` to that mock's constructed `params` object as part of this step, since a test mock that silently drops a field the real code path carries would make this assertion meaningless.)
 
@@ -1081,17 +875,20 @@ Import `SubagentToolEvidence` and `AgentDecisionTrace` at the top of this file (
 
 In `src/agents/subagent-announce.ts`, import `collectChildCompletionToolEvidence` and `SubagentToolEvidence` alongside the existing imports from `./subagent-announce-output.js` (line 38-48) and `./internal-events.js` (line 23-27).
 
-Where `completionEvent: AgentInternalEvent` is constructed (spec cites ~line 531; re-verify the exact current line in this file before editing, since it's unmodified by prior tasks), add `childToolEvidence`:
+Where `completionEvent: AgentInternalEvent` is constructed (spec cites ~line 531; re-verify the exact current line in this file before editing, since it's unmodified by prior tasks), add `childToolEvidence`, sourced from a **plain registry lookup by this child's own session key** — no threading through `reply`'s text-source at all:
 
 ```ts
+const ownAuditTrace = subagentRegistryRuntime?.getLatestSubagentRunByChildSessionKey?.(
+  params.childSessionKey,
+)?.completion?.resultAuditTrace;
 const directChildToolEvidence: SubagentToolEvidence[] = childCompletionFindings
   ? [] // multi-child path fills this below, before completionEvent is built
-  : replyAuditTrace?.toolInvocations?.length
+  : ownAuditTrace?.toolInvocations?.length
     ? [
         {
           childSessionKey: params.childSessionKey,
-          toolInvocations: replyAuditTrace.toolInvocations,
-          visibleTools: replyAuditTrace.visibleTools ?? [],
+          toolInvocations: ownAuditTrace.toolInvocations,
+          visibleTools: ownAuditTrace.visibleTools ?? [],
         },
       ]
     : [];
@@ -1111,7 +908,14 @@ const completionEvent: AgentInternalEvent = {
 };
 ```
 
-`replyAuditTrace` needs to be threaded from wherever `reply` is set (the single-child path, lines ~408-422 in the spec's citation): change the two call sites that currently do `reply = await readSubagentOutput(...)` / `reply = await readLatestSubagentOutputWithRetry(...)` to instead call the `WithTrace` variants and destructure both `text`/`auditTrace`, keeping `reply` assigned to the text (so every existing downstream use of `reply` as a string is untouched) while also capturing `replyAuditTrace` in an outer-scoped `let replyAuditTrace: AgentDecisionTrace | undefined;` declared alongside `let reply = params.roundOneReply;` near the top of the function.
+`subagentRegistryRuntime` is already loaded earlier in this function (the multi-child findings section above already calls
+`subagentAnnounceDeps.loadSubagentRegistryRuntime()` and assigns it to a
+`let subagentRegistryRuntime: ... | undefined;` that stays in scope for the
+rest of the function) — confirm this before writing the code, since if the
+lookup happens to run before that load in some code path, the optional
+chaining above (`subagentRegistryRuntime?.`) degrades gracefully to no
+evidence rather than throwing, matching the "can only add evidence, never
+break existing behavior" guarantee elsewhere in this plan.
 
 For the multi-child wake path (where `childCompletionFindings` is set from `buildChildCompletionFindings`, lines ~356-364 in the spec's citation), call `collectChildCompletionToolEvidence` on the exact same `directChildren` array (after the same `dedupeLatestChildCompletionRows(filterCurrentDirectChildCompletionRows(...))` filtering) and assign its result into `directChildToolEvidence` instead of the single-child branch above:
 
