@@ -172,6 +172,15 @@ describe("fetchHttpJson error body boundary", () => {
     expect(successStreamCompleted).toBe(false);
   });
 
+  it("honors an explicit maxResponseBytes override past the default success cap", async () => {
+    const result = await fetchBrowserJson(`${baseUrl}/success-large`, {
+      maxResponseBytes: Number.POSITIVE_INFINITY,
+    });
+
+    expect((result as { payload: string }).payload.length).toBe(SUCCESS_STREAM_BODY_BYTES);
+    expect(successStreamCompleted).toBe(true);
+  });
+
   it("preserves a normal successful JSON response", async () => {
     await expect(fetchBrowserJson(`${baseUrl}/success-small`)).resolves.toEqual({
       payload: "control",

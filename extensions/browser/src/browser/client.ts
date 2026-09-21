@@ -408,8 +408,13 @@ export async function browserSnapshot(
   const resolvedTimeoutMs =
     clampPositiveTimerTimeoutMs(opts.timeoutMs) ?? DEFAULT_BROWSER_SNAPSHOT_TIMEOUT_MS;
   q.set("timeoutMs", String(resolvedTimeoutMs));
+  // maxChars: 0 means "no character cap" at the snapshot producer; honor that
+  // uncapped contract at the transport too instead of silently truncating an
+  // otherwise-uncapped snapshot at the default response-size limit.
+  const maxResponseBytes = opts.maxChars === 0 ? Number.POSITIVE_INFINITY : undefined;
   return await fetchBrowserJson<SnapshotResult>(withBaseUrl(baseUrl, `/snapshot?${q.toString()}`), {
     timeoutMs: resolvedTimeoutMs,
+    maxResponseBytes,
   });
 }
 

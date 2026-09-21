@@ -97,6 +97,32 @@ describe("browser client", () => {
     expect(parsed.searchParams.get("mode")).toBe("efficient");
   });
 
+  it("honors maxChars: 0 as an uncapped snapshot response past the default transport limit", async () => {
+    const bigSnapshot = "x".repeat(33 * 1024 * 1024);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          ok: true,
+          format: "ai",
+          targetId: "t1",
+          url: "https://x",
+          snapshot: bigSnapshot,
+        }),
+      ),
+    );
+
+    const snapshot = await browserSnapshot("http://127.0.0.1:18791", {
+      format: "ai",
+      maxChars: 0,
+    });
+
+    if (snapshot.format !== "ai") {
+      throw new Error("expected an ai-format snapshot");
+    }
+    expect(snapshot.snapshot).toHaveLength(bigSnapshot.length);
+  });
+
   it("adds refs=aria to snapshots when requested", async () => {
     const calls: string[] = [];
     stubSnapshotFetch(calls);
