@@ -306,17 +306,12 @@ export async function schedulePluginSessionTurn(params: {
   // beginPendingRegistryOperation for why that race is real, not
   // theoretical, on a host serving multiple concurrent registries.
   const endPendingRegistryOperation = beginPendingRegistryOperation(params.ownerRegistry);
-  // Re-checked explicitly on every FAILURE return below, never on success:
-  // a registry that's genuinely retirable by the time we're done here is
-  // safe to retire immediately when nothing new was just added to it, but
-  // doing the same right after a SUCCESSFUL commit would let this exact
-  // retirement's own cleanup pass (which sweeps the registry's
-  // sessionSchedulerJobs) immediately cancel the job this call just
-  // created -- reopening the bug this whole mechanism exists to fix, one
-  // step later. A registry left un-retired after a success path is picked
-  // up by whatever future event naturally re-checks it, same as any other
-  // registry that stops being live between checks.
+  // Called on every FAILURE path below, never on success: retiring right
+  // after a successful commit would let that same retirement's cleanup pass
+  // cancel the job just created. Releases the pin first -- otherwise this
+  // registry's own still-held pin would make the retirement check no-op.
   const retireOwnerIfNowUnused = () => {
+    endPendingRegistryOperation();
     if (params.ownerRegistry) {
       retirePluginRegistryIfNowUnused(params.ownerRegistry);
     }
