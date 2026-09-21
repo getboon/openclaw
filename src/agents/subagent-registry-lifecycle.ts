@@ -546,6 +546,8 @@ export function createSubagentRegistryLifecycleController(params: {
       frozenResultText: entry.delivery?.payload?.frozenResultText ?? entry.completion?.resultText,
       fallbackFrozenResultText:
         entry.delivery?.payload?.fallbackFrozenResultText ?? entry.completion?.fallbackResultText,
+      frozenAuditTrace:
+        entry.delivery?.payload?.frozenAuditTrace ?? entry.completion?.resultAuditTrace,
       wakeOnDescendantSettle:
         entry.delivery?.payload?.wakeOnDescendantSettle ?? entry.wakeOnDescendantSettle,
     };
@@ -580,6 +582,7 @@ export function createSubagentRegistryLifecycleController(params: {
       outcome: entry.outcome,
       frozenResultText: entry.completion?.resultText,
       fallbackFrozenResultText: entry.completion?.fallbackResultText,
+      frozenAuditTrace: entry.completion?.resultAuditTrace,
     };
     return true;
   };

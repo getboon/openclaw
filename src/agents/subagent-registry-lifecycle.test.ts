@@ -1050,7 +1050,22 @@ describe("subagent registry lifecycle hardening", () => {
       endedAt: 4_000,
       endedReason: SUBAGENT_ENDED_REASON_COMPLETE,
       expectsCompletionMessage: true,
-      completion: { required: true, resultText: "final answer" },
+      completion: {
+        required: true,
+        resultText: "final answer",
+        // ENG-19951: recordSubagentReplyAuditTrace lands this before any
+        // pending-delivery-payload build ever happens; this task only
+        // forwards it, never sets it.
+        resultAuditTrace: {
+          schemaVersion: 1,
+          visibleTools: ["takeoff_dispatch"],
+          toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+          evidence: [{ kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok" }],
+          confidence: "high",
+          disposition: "completed",
+          reason: "tool_execution_succeeded",
+        },
+      },
       delivery: { status: "pending", lastError: "gateway request timeout for agent" },
       outcome: { status: "ok" },
       retainAttachmentsOnKeep: true,
@@ -1074,6 +1089,7 @@ describe("subagent registry lifecycle hardening", () => {
       childSessionKey: entry.childSessionKey,
       childRunId: entry.runId,
       frozenResultText: "final answer",
+      frozenAuditTrace: entry.completion?.resultAuditTrace,
     });
     expect(entry.delivery?.suspendedAt).toBeTypeOf("number");
     expect(entry.delivery?.suspendedReason).toBe("retry-limit");
