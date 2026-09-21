@@ -146,7 +146,14 @@ async function scheduleRecheck(
     tag: browserHandoffScheduleTag(params.site),
     deliveryMode: "none",
   });
-  return Boolean(job);
+  if (!job) {
+    // The host scheduler logs its own generic failure reason, but not this
+    // handoff's site — without this, the same silent-diagnosis gap reopens
+    // one layer down.
+    log.warn(`site=${params.site} recheck not scheduled: scheduleSessionTurn returned no job`);
+    return false;
+  }
+  return true;
 }
 
 /**

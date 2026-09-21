@@ -612,6 +612,9 @@ describe("browser-handoff tool", () => {
       );
 
       expect(result.content[0].text).toContain("not available");
+      expect(subsystemLoggerWarnMock).toHaveBeenCalledWith(
+        expect.stringContaining("scheduleSessionTurn returned no job"),
+      );
     });
 
     it(
