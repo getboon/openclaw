@@ -56,6 +56,7 @@ const { subagentRegistryRuntimeMock } = vi.hoisted(() => ({
         | {
             childSessionKey: string;
             completion?: { required?: boolean; resultAuditTrace?: unknown };
+            delivery?: { payload?: { frozenAuditTrace?: unknown } };
           }
         | undefined => undefined,
     ),
@@ -359,6 +360,39 @@ describe("subagent announce seam flow", () => {
     const call = requireAgentCall();
     const message = (call.params as { message?: string })?.message ?? "";
     expect(message).toContain("All 7 scopes completed.");
+    const internalEvents = (
+      call.params as { internalEvents?: Array<{ childToolEvidence?: unknown }> }
+    )?.internalEvents;
+    expect(internalEvents?.[0]?.childToolEvidence).toEqual([
+      {
+        childSessionKey: "agent:main:subagent:fixture",
+        toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+        visibleTools: ["takeoff_dispatch"],
+      },
+    ]);
+  });
+
+  it("falls back to the frozen delivery payload's audit trace when completion.resultAuditTrace is absent (ENG-19951)", async () => {
+    const auditTrace = {
+      schemaVersion: 1,
+      visibleTools: ["takeoff_dispatch"],
+      toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+      evidence: [{ kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok" }],
+      confidence: "high",
+      disposition: "completed",
+      reason: "tool_execution_succeeded",
+    };
+    // Simulates a suspended-delivery/restart edge: completion state was reset
+    // (no resultAuditTrace) but the frozen delivery payload copy survived.
+    subagentRegistryRuntimeMock.getLatestSubagentRunByChildSessionKey.mockReturnValueOnce({
+      childSessionKey: "agent:main:subagent:fixture",
+      completion: { required: true },
+      delivery: { payload: { frozenAuditTrace: auditTrace } },
+    });
+
+    await runCompletionFixture({ roundOneReply: "All 7 scopes completed." });
+
+    const call = requireAgentCall();
     const internalEvents = (
       call.params as { internalEvents?: Array<{ childToolEvidence?: unknown }> }
     )?.internalEvents;

@@ -532,10 +532,18 @@ export async function runSubagentAnnounceFlow(params: {
       endedAt: params.endedAt,
     });
     // ENG-19951: a plain registry lookup by this child's own session key --
-    // independent of which text-source `reply` came from above.
-    const ownAuditTrace = subagentRegistryRuntime?.getLatestSubagentRunByChildSessionKey?.(
+    // independent of which text-source `reply` came from above. Falls back to
+    // the frozen delivery payload copy, mirroring
+    // selectChildCompletionAuditTrace's precedence in
+    // subagent-announce-output.ts, so a suspended-delivery/restart edge where
+    // completion state was reset but the payload retained its copy still
+    // surfaces evidence here instead of only on the multi-child path.
+    const ownRegistryRun = subagentRegistryRuntime?.getLatestSubagentRunByChildSessionKey?.(
       params.childSessionKey,
-    )?.completion?.resultAuditTrace;
+    );
+    const ownAuditTrace =
+      ownRegistryRun?.completion?.resultAuditTrace ??
+      ownRegistryRun?.delivery?.payload?.frozenAuditTrace;
     const directChildToolEvidence: SubagentToolEvidence[] = childCompletionFindings
       ? multiChildToolEvidence
       : ownAuditTrace?.toolInvocations?.length
