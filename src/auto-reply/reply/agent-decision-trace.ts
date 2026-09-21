@@ -152,7 +152,12 @@ export function buildAgentDecisionTrace(params: {
   const permissionRequired =
     params.failureSignal?.kind === "execution_denied" ||
     params.failureSignal?.code === "SYSTEM_RUN_DENIED";
-  const terminalInvocation = allInvocations.at(-1);
+  // Delegated (viaSubagent) invocations are appended after the current
+  // attempt's own, so the literal last array entry can be a subagent's tool
+  // call even when this attempt's own terminal action was a successful
+  // "message" send. "Terminal" here means this attempt's own last action,
+  // so exclude delegated entries before taking it (ENG-19951).
+  const terminalInvocation = allInvocations.filter((entry) => !entry.viaSubagent).at(-1);
   const hasSuccessfulTerminalMessage =
     terminalInvocation?.name === "message" && terminalInvocation.status === "ok";
   const hasUsableAnswer = params.payloads?.some(isUsableAnswerPayload) === true;
