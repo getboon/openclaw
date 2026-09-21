@@ -576,6 +576,51 @@ describe("plugin scheduled turns", () => {
     },
   );
 
+  it(
+    "still rolls back a job when the OWNER's own standalone context genuinely reloads while " +
+      "cron.add is in flight -- a same-cache-key replacement is a real generation change, not " +
+      "the unrelated-tenant swap the pending-operation pin exists to survive",
+    async () => {
+      const ownerFixture = createPluginRegistryFixture();
+      ownerFixture.registry.registry.plugins.push(
+        createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
+      );
+      const ownerRegistry = ownerFixture.registry.registry;
+      // The reloaded generation for the SAME context (same cache key) no
+      // longer loads the plugin -- it was genuinely disabled/removed as part
+      // of the reload, not just transiently not the active pointer.
+      const reloadedRegistry = createEmptyPluginRegistry();
+      const contextCacheKey = "same-context-cache-key";
+      setActivePluginRegistry(ownerRegistry, contextCacheKey);
+      const shouldCommit = () =>
+        !isPluginRegistryRetired(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
+      let resolveCronAdd!: (job: CronJob) => void;
+      workflowMocks.cronAdd.mockImplementation(
+        () =>
+          new Promise<CronJob>((resolve) => {
+            resolveCronAdd = resolve;
+          }),
+      );
+
+      const schedulePromise = scheduleWorkflowTurn({
+        pluginName: "Workflow Plugin",
+        schedule: { delayMs: 1 },
+        shouldCommit,
+        ownerRegistry,
+      });
+      // The owner's own context reloads into a fresh registry generation
+      // under the SAME cache key while cron.add() is pending.
+      setActivePluginRegistry(reloadedRegistry, contextCacheKey);
+      resolveCronAdd(makeCronJob({ id: "job-stale-reload" }));
+
+      const handle = await schedulePromise;
+
+      expect(handle).toBeUndefined();
+      expect(workflowMocks.cronRemove).toHaveBeenCalledWith("job-stale-reload");
+      expect(listPluginSessionSchedulerJobs(WORKFLOW_PLUGIN_ID)).toEqual([]);
+    },
+  );
+
   it("allows bundled plugins to schedule turns during real plugin registration", async () => {
     const bundledDir = makeTempDir();
     writePlugin({

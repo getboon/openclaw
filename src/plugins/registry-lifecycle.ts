@@ -4,6 +4,7 @@ import type { PluginRegistry } from "./registry-types.js";
 const retiredRegistries = new WeakSet<PluginRegistry>();
 const activatedRegistries = new WeakSet<PluginRegistry>();
 const pendingAsyncOperationCounts = new WeakMap<PluginRegistry, number>();
+const registryCacheKeys = new WeakMap<PluginRegistry, string | null>();
 
 /** Marks a registry retired so late runtime calls can reject stale plugin state. */
 export function markPluginRegistryRetired(registry: PluginRegistry | null | undefined): void {
@@ -65,4 +66,27 @@ export function beginPendingRegistryOperation(
 /** True when a registry has at least one in-flight async operation still pending. */
 export function hasPendingRegistryOperation(registry: PluginRegistry): boolean {
   return (pendingAsyncOperationCounts.get(registry) ?? 0) > 0;
+}
+
+// Standalone registries are loaded and re-loaded under a cache key derived from
+// their own load context (session/tenant, config, etc.) -- see
+// resolvePluginRegistryLoadCacheKey. Recording it here lets a later check tell
+// "this registry's own context reloaded into a fresh registry generation" (same
+// cache key taking over as active) apart from "an unrelated context's registry
+// happened to become active" (a different cache key, or no cache key at all).
+// Only setActivePluginRegistry records this; registries activated through the
+// pin surfaces (channel/http-route/session-extension) never get a key, so they
+// fall back to the conservative default below.
+export function recordPluginRegistryCacheKey(
+  registry: PluginRegistry | null | undefined,
+  cacheKey: string | null,
+): void {
+  if (registry) {
+    registryCacheKeys.set(registry, cacheKey);
+  }
+}
+
+/** The cache key a registry was activated under, or null if none was recorded. */
+export function getPluginRegistryCacheKey(registry: PluginRegistry): string | null {
+  return registryCacheKeys.get(registry) ?? null;
 }

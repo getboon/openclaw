@@ -8,9 +8,11 @@ import {
 import { clearPluginMetadataLifecycleCaches } from "./plugin-metadata-lifecycle.js";
 import { createEmptyPluginRegistry } from "./registry-empty.js";
 import {
+  getPluginRegistryCacheKey,
   hasPendingRegistryOperation,
   markPluginRegistryActive,
   markPluginRegistryRetired,
+  recordPluginRegistryCacheKey,
 } from "./registry-lifecycle.js";
 import type { PluginRegistry } from "./registry-types.js";
 import { getActivePluginChannelRegistrySnapshotFromState } from "./runtime-channel-state.js";
@@ -83,11 +85,21 @@ function isRegistryPinned(registry: PluginRegistry): boolean {
 }
 
 function isRegistryLive(registry: PluginRegistry): boolean {
-  return (
-    state.activeRegistry === registry ||
-    isRegistryPinned(registry) ||
-    hasPendingRegistryOperation(registry)
-  );
+  if (state.activeRegistry === registry || isRegistryPinned(registry)) {
+    return true;
+  }
+  if (!hasPendingRegistryOperation(registry)) {
+    return false;
+  }
+  // A pending operation normally keeps a registry "live" through a transient,
+  // unrelated active-pointer swap (see beginPendingRegistryOperation). But if
+  // the registry that's now active shares this one's own load cache key, this
+  // isn't an unrelated swap -- it's this registry's own context genuinely
+  // reloading into a fresh generation, and the pending operation must not mask
+  // that real replacement.
+  const ownCacheKey = getPluginRegistryCacheKey(registry);
+  const sameContextReload = ownCacheKey !== null && ownCacheKey === state.key;
+  return !sameContextReload;
 }
 
 async function cleanupPreviousPluginHostRegistry(params: {
@@ -229,6 +241,7 @@ export function setActivePluginRegistry(
   syncTrackedSurface(state.channel, registry, true);
   syncTrackedSurface(state.sessionExtension, registry, true);
   state.key = cacheKey ?? null;
+  recordPluginRegistryCacheKey(registry, state.key);
   state.workspaceDir = workspaceDir ?? null;
   state.runtimeSubagentMode = runtimeSubagentMode;
   syncPluginAgentEventBridge();
