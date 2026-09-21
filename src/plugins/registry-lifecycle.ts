@@ -20,8 +20,20 @@ const cacheKeyRegistryFinalizer = new FinalizationRegistry<{
 
 /** Marks a registry retired so late runtime calls can reject stale plugin state. */
 export function markPluginRegistryRetired(registry: PluginRegistry | null | undefined): void {
-  if (registry) {
-    retiredRegistries.add(registry);
+  if (!registry) {
+    return;
+  }
+  retiredRegistries.add(registry);
+  // Retirement is permanent and already covers isPluginRegistrySuperseded on
+  // its own, so this registry no longer needs a latest-by-cache-key slot --
+  // drop it now instead of leaving it for the FinalizationRegistry, which
+  // only runs once the registry object itself is collected and would let a
+  // gateway cycling through many distinct cache keys accumulate entries for
+  // keys whose registry is done but not yet GC'd.
+  const cacheKey = registryCacheKeys.get(registry);
+  if (cacheKey && latestCacheKeyRegistries.get(cacheKey)?.deref() === registry) {
+    latestCacheKeyRegistries.delete(cacheKey);
+    cacheKeyRegistryFinalizer.unregister(registry);
   }
 }
 
