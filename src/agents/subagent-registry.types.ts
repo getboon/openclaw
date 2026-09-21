@@ -3,6 +3,7 @@
  *
  * Defines execution, completion, delivery, pending-delivery, and attachment state stored for child runs.
  */
+import type { AgentDecisionTrace } from "../auto-reply/reply-payload.js";
 import type { DeliveryContext } from "../utils/delivery-context.types.js";
 import type { SubagentRunOutcome } from "./subagent-announce-output.js";
 import type { SubagentLifecycleEndedReason } from "./subagent-lifecycle-events.js";
@@ -23,6 +24,8 @@ export type PendingFinalDeliveryPayload = {
   spawnMode?: SpawnSubagentMode;
   frozenResultText?: string | null;
   fallbackFrozenResultText?: string | null;
+  /** Mirrors SubagentCompletionState.resultAuditTrace (ENG-19951). */
+  frozenAuditTrace?: AgentDecisionTrace;
   wakeOnDescendantSettle?: boolean;
 };
 
@@ -42,6 +45,15 @@ export type SubagentCompletionState = {
   capturedAt?: number;
   fallbackResultText?: string | null;
   fallbackCapturedAt?: number;
+  /**
+   * The subagent's own already-computed audit trace, recorded directly
+   * (not frozen from a transcript read — that's impossible, since this
+   * value doesn't exist yet when the transcript entry is written) by
+   * recordSubagentReplyAuditTrace whenever the child computes any reply
+   * (ENG-19951). Additive — absent until that write happens, absent
+   * forever for a child that never got to reply (error/orphan/timeout).
+   */
+  resultAuditTrace?: AgentDecisionTrace;
 };
 
 export type SubagentCompletionDeliveryState = {
