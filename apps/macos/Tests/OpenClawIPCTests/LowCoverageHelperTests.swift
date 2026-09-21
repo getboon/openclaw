@@ -77,6 +77,35 @@ struct LowCoverageHelperTests {
         #expect(result.stderr.contains("stderr-1999"))
     }
 
+    @Test func `shell executor truncation does not split a multi-byte UTF-8 character`() async {
+        // "AAAAA" + é (0xC3 0xA9) + "Z" = 8 bytes. maxOutputBytes: 2 keeps the
+        // last 2 bytes (0xA9, 'Z'), which without a boundary fix would decode
+        // the lone continuation byte 0xA9 as U+FFFD instead of dropping it.
+        let result = await ShellExecutor.runDetailed(
+            command: ["/bin/sh", "-c", #"printf 'AAAAA\xC3\xA9Z'"#],
+            cwd: nil,
+            env: nil,
+            timeout: 2,
+            maxOutputBytes: 2)
+        #expect(result.success == true)
+        #expect(result.stdout == "Z")
+        #expect(!result.stdout.contains("\u{FFFD}"))
+    }
+
+    @Test func `shell executor truncation keeps a clean character boundary intact`() async {
+        // "AAAAA" + é (0xC3 0xA9) + "Z" = 8 bytes. maxOutputBytes: 3 keeps the
+        // last 3 bytes (0xC3, 0xA9, 'Z'), already a clean boundary -- nothing
+        // should be stripped beyond the requested byte count.
+        let result = await ShellExecutor.runDetailed(
+            command: ["/bin/sh", "-c", #"printf 'AAAAA\xC3\xA9Z'"#],
+            cwd: nil,
+            env: nil,
+            timeout: 2,
+            maxOutputBytes: 3)
+        #expect(result.success == true)
+        #expect(result.stdout == "éZ")
+    }
+
     @Test func `node info codable round trip`() throws {
         let info = NodeInfo(
             nodeId: "node-1",

@@ -60,6 +60,11 @@ enum ShellExecutor {
             result.append(chunk)
             if result.count > maxBytes {
                 result.removeFirst(result.count - maxBytes)
+                // Drop leading UTF-8 continuation bytes so a decode never
+                // starts mid-character and turns it into U+FFFD.
+                while let first = result.first, (first & 0xC0) == 0x80 {
+                    result.removeFirst()
+                }
             }
         }
         return result
