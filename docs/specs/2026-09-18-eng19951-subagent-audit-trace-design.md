@@ -1,7 +1,7 @@
 # ENG-19951: Subagent tool evidence goes missing from the parent's audit trace
 
 **Ticket:** [ENG-19951](https://linear.app/getboon/issue/ENG-19951) — Agent audit trace drops tool items on long turns; Message-only trajectories turn grounded replies into fabrication judge failures.
-**Status:** design approved by ticket owner, ready for `writing-plans`.
+**Status:** implemented, see commits on `fix/eng-19951-subagent-audit-trace`.
 **Branch:** `fix/eng-19951-subagent-audit-trace` (worktree off `origin/boon`, boon.45 base).
 
 ## 1. Problem
