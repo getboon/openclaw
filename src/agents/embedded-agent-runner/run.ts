@@ -518,6 +518,50 @@ export function collectDelegatedToolInvocationsFromInternalEvents(
   return { invocations, visibleTools: [...visibleTools] };
 }
 
+/**
+ * Merges delegated tool evidence (ENG-19951) into a parent's own attempt
+ * summary. Appends delegated invocations AFTER the parent's own, so any
+ * consumer treating the last invocation as "this attempt's own terminal
+ * action" (e.g. buildAgentDecisionTrace's hasSuccessfulTerminalMessage) must
+ * filter out viaSubagent entries first -- delegated evidence is additive
+ * context, never this attempt's own terminal action. Pure passthrough
+ * (identical reference) when there's nothing to merge, so the common
+ * non-delegating case is a true no-op.
+ */
+export function mergeDelegatedToolEvidenceIntoSummary(
+  attemptToolSummary: ToolSummaryTrace | undefined,
+  delegatedToolEvidence: ReturnType<typeof collectDelegatedToolInvocationsFromInternalEvents>,
+): ToolSummaryTrace | undefined {
+  if (delegatedToolEvidence.invocations.length === 0) {
+    return attemptToolSummary;
+  }
+  return {
+    calls: (attemptToolSummary?.calls ?? 0) + delegatedToolEvidence.invocations.length,
+    tools: [
+      ...new Set([
+        ...(attemptToolSummary?.tools ?? []),
+        ...delegatedToolEvidence.invocations.map((invocation) => invocation.name),
+      ]),
+    ],
+    ...(attemptToolSummary?.failures !== undefined
+      ? { failures: attemptToolSummary.failures }
+      : {}),
+    ...(attemptToolSummary?.totalToolTimeMs !== undefined
+      ? { totalToolTimeMs: attemptToolSummary.totalToolTimeMs }
+      : {}),
+    ...(attemptToolSummary?.unrecoveredFailures !== undefined
+      ? { unrecoveredFailures: attemptToolSummary.unrecoveredFailures }
+      : {}),
+    invocations: [...(attemptToolSummary?.invocations ?? []), ...delegatedToolEvidence.invocations],
+    visibleTools: [
+      ...new Set([
+        ...(attemptToolSummary?.visibleTools ?? []),
+        ...delegatedToolEvidence.visibleTools,
+      ]),
+    ],
+  };
+}
+
 export function buildTraceToolSummary(params: {
   toolMetas?: Array<{
     toolName: string;
@@ -3780,33 +3824,10 @@ async function runEmbeddedAgentInternal(
           const delegatedToolEvidence = collectDelegatedToolInvocationsFromInternalEvents(
             params.internalEvents,
           );
-          const mergedAttemptToolSummary: ToolSummaryTrace | undefined =
-            delegatedToolEvidence.invocations.length > 0
-              ? {
-                  calls:
-                    (attemptToolSummary?.calls ?? 0) + delegatedToolEvidence.invocations.length,
-                  tools: attemptToolSummary?.tools ?? [],
-                  ...(attemptToolSummary?.failures !== undefined
-                    ? { failures: attemptToolSummary.failures }
-                    : {}),
-                  ...(attemptToolSummary?.totalToolTimeMs !== undefined
-                    ? { totalToolTimeMs: attemptToolSummary.totalToolTimeMs }
-                    : {}),
-                  ...(attemptToolSummary?.unrecoveredFailures !== undefined
-                    ? { unrecoveredFailures: attemptToolSummary.unrecoveredFailures }
-                    : {}),
-                  invocations: [
-                    ...(attemptToolSummary?.invocations ?? []),
-                    ...delegatedToolEvidence.invocations,
-                  ],
-                  visibleTools: [
-                    ...new Set([
-                      ...(attemptToolSummary?.visibleTools ?? []),
-                      ...delegatedToolEvidence.visibleTools,
-                    ]),
-                  ],
-                }
-              : attemptToolSummary;
+          const mergedAttemptToolSummary = mergeDelegatedToolEvidenceIntoSummary(
+            attemptToolSummary,
+            delegatedToolEvidence,
+          );
           const failureSignal = resolveEmbeddedRunFailureSignal({
             trigger: params.trigger,
             lastToolError: attempt.lastToolError,

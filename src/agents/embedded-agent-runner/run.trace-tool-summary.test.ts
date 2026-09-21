@@ -3,7 +3,11 @@
 // boon's monolithic run.ts (buildTraceToolSummary lives here) and boon's
 // per-call `errored` flag (vs upstream `isError`) + `hadFailure` param name.
 import { describe, expect, it } from "vitest";
-import { buildTraceToolSummary, collectDelegatedToolInvocationsFromInternalEvents } from "./run.js";
+import {
+  buildTraceToolSummary,
+  collectDelegatedToolInvocationsFromInternalEvents,
+  mergeDelegatedToolEvidenceIntoSummary,
+} from "./run.js";
 
 describe("buildTraceToolSummary", () => {
   it("keeps visible tools and per-invocation outcomes without arguments or results", () => {
@@ -284,14 +288,55 @@ describe("buildTraceToolSummary + delegated merge (integration shape)", () => {
         ],
       },
     ]);
-    const merged = {
-      ...direct,
-      invocations: [...(direct?.invocations ?? []), ...delegated.invocations],
-      visibleTools: [...new Set([...(direct?.visibleTools ?? []), ...delegated.visibleTools])],
-    };
-    expect(merged.invocations).toEqual([
+    const merged = mergeDelegatedToolEvidenceIntoSummary(direct, delegated);
+    expect(merged?.invocations).toEqual([
       { name: "message", status: "ok" },
       { name: "takeoff_dispatch", status: "ok", viaSubagent: true },
     ]);
+  });
+
+  it("keeps calls and tools consistent with the merged invocations array (ENG-19951)", () => {
+    const direct = buildTraceToolSummary({
+      visibleToolNames: ["message"],
+      toolMetas: [{ toolName: "message", errored: false }],
+      hadFailure: false,
+    });
+    const delegated = collectDelegatedToolInvocationsFromInternalEvents([
+      {
+        type: "task_completion",
+        source: "subagent",
+        childSessionKey: "c1",
+        announceType: "subagent task",
+        taskLabel: "t",
+        status: "ok",
+        statusLabel: "completed",
+        result: "done",
+        replyInstruction: "review",
+        childToolEvidence: [
+          {
+            childSessionKey: "c1",
+            toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+            visibleTools: ["takeoff_dispatch"],
+          },
+        ],
+      },
+    ]);
+    const merged = mergeDelegatedToolEvidenceIntoSummary(direct, delegated);
+    expect(merged?.calls).toBe(2);
+    expect(merged?.tools).toEqual(["message", "takeoff_dispatch"]);
+    expect(merged?.calls).toBe(merged?.invocations?.length);
+  });
+
+  it("is a true no-op (identical reference) when there is nothing delegated to merge (ENG-19951)", () => {
+    const direct = buildTraceToolSummary({
+      visibleToolNames: ["message"],
+      toolMetas: [{ toolName: "message", errored: false }],
+      hadFailure: false,
+    });
+    const merged = mergeDelegatedToolEvidenceIntoSummary(direct, {
+      invocations: [],
+      visibleTools: [],
+    });
+    expect(merged).toBe(direct);
   });
 });
