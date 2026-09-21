@@ -28,6 +28,7 @@ import { makeTempDir, writePlugin } from "../loader.test-fixtures.js";
 import { createEmptyPluginRegistry } from "../registry-empty.js";
 import { isPluginRegistryActivated, isPluginRegistryRetired } from "../registry-lifecycle.js";
 import {
+  isPluginRegistrySuperseded,
   pinActivePluginChannelRegistry,
   releasePinnedPluginChannelRegistry,
   setActivePluginRegistry,
@@ -557,7 +558,7 @@ describe("plugin scheduled turns", () => {
       // test targets, and is exercised by the sibling "removes a stale cron
       // job..." test above instead.
       const shouldCommit = () =>
-        !isPluginRegistryRetired(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
+        !isPluginRegistrySuperseded(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
       let resolveCronAdd!: (job: CronJob) => void;
       workflowMocks.cronAdd.mockImplementation(
         () =>
@@ -600,7 +601,7 @@ describe("plugin scheduled turns", () => {
       const unrelatedRegistry = createEmptyPluginRegistry();
       setActivePluginRegistry(ownerRegistry);
       const shouldCommit = () =>
-        !isPluginRegistryRetired(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
+        !isPluginRegistrySuperseded(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
       let resolveCronAdd!: (job: CronJob) => void;
       workflowMocks.cronAdd.mockImplementation(
         () =>
@@ -652,7 +653,7 @@ describe("plugin scheduled turns", () => {
       const unrelatedRegistry = createEmptyPluginRegistry();
       setActivePluginRegistry(ownerRegistry);
       const shouldCommit = () =>
-        !isPluginRegistryRetired(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
+        !isPluginRegistrySuperseded(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
       const resolveCronAdd: Array<(job: CronJob) => void> = [];
       workflowMocks.cronAdd.mockImplementation(
         () =>
@@ -711,7 +712,7 @@ describe("plugin scheduled turns", () => {
       const unrelatedRegistry = createEmptyPluginRegistry();
       setActivePluginRegistry(ownerRegistry);
       const shouldCommit = () =>
-        !isPluginRegistryRetired(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
+        !isPluginRegistrySuperseded(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
 
       // First call: no overlap, no swap -- its pending window opens and
       // fully closes on its own, well before the second call even starts.
@@ -777,7 +778,7 @@ describe("plugin scheduled turns", () => {
       const contextCacheKey = "same-context-cache-key";
       setActivePluginRegistry(ownerRegistry, contextCacheKey);
       const shouldCommit = () =>
-        !isPluginRegistryRetired(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
+        !isPluginRegistrySuperseded(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
       let resolveCronAdd!: (job: CronJob) => void;
       workflowMocks.cronAdd.mockImplementation(
         () =>
@@ -801,6 +802,60 @@ describe("plugin scheduled turns", () => {
 
       expect(handle).toBeUndefined();
       expect(workflowMocks.cronRemove).toHaveBeenCalledWith("job-stale-reload");
+      expect(listPluginSessionSchedulerJobs(WORKFLOW_PLUGIN_ID)).toEqual([]);
+    },
+  );
+
+  it(
+    "still rolls back a job when an UNRELATED registry interposes before the OWNER's own " +
+      "context reloads under the same cache key -- the owner is never the direct previousRegistry " +
+      "for that second swap, so a per-swap side effect alone would miss it; shouldCommit must " +
+      "compare cache keys directly against current state instead",
+    async () => {
+      const ownerFixture = createPluginRegistryFixture();
+      ownerFixture.registry.registry.plugins.push(
+        createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
+      );
+      const ownerRegistry = ownerFixture.registry.registry;
+      const contextCacheKey = "interposed-context-cache-key";
+      const unrelatedRegistry = createEmptyPluginRegistry();
+      const reloadedRegistry = createEmptyPluginRegistry();
+      setActivePluginRegistry(ownerRegistry, contextCacheKey);
+      // Mirrors the REAL production shouldCommit wiring exactly (registry.ts's
+      // isLoadedRecordInActiveRegistry) -- uses the exported
+      // isPluginRegistrySuperseded rather than a hand-rolled reconstruction,
+      // since this test exists specifically to prove that function's own
+      // correctness against an interposed swap.
+      const shouldCommit = () =>
+        !isPluginRegistrySuperseded(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
+      let resolveCronAdd!: (job: CronJob) => void;
+      workflowMocks.cronAdd.mockImplementation(
+        () =>
+          new Promise<CronJob>((resolve) => {
+            resolveCronAdd = resolve;
+          }),
+      );
+
+      const schedulePromise = scheduleWorkflowTurn({
+        pluginName: "Workflow Plugin",
+        schedule: { delayMs: 1 },
+        shouldCommit,
+        ownerRegistry,
+      });
+      // An unrelated registry interposes first -- ownerRegistry is displaced
+      // but still protected by the pending-operation pin.
+      setActivePluginRegistry(unrelatedRegistry);
+      // THEN, before cron.add() resolves, a genuine reload of the OWNER's
+      // own context takes over -- but ownerRegistry was never
+      // previousRegistry for THIS swap (unrelatedRegistry was), so no
+      // per-swap side effect for ownerRegistry itself ever fires.
+      setActivePluginRegistry(reloadedRegistry, contextCacheKey);
+      resolveCronAdd(makeCronJob({ id: "job-interposed-reload" }));
+
+      const handle = await schedulePromise;
+
+      expect(handle).toBeUndefined();
+      expect(workflowMocks.cronRemove).toHaveBeenCalledWith("job-interposed-reload");
       expect(listPluginSessionSchedulerJobs(WORKFLOW_PLUGIN_ID)).toEqual([]);
     },
   );

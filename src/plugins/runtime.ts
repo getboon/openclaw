@@ -12,6 +12,7 @@ import {
   getPendingCommittedSchedulerJobIds,
   getPluginRegistryCacheKey,
   hasPendingRegistryOperation,
+  isPluginRegistryRetired,
   markPluginRegistryActive,
   markPluginRegistryRetired,
   recordPluginRegistryCacheKey,
@@ -86,6 +87,24 @@ function isRegistryPinned(registry: PluginRegistry): boolean {
   );
 }
 
+// True when the CURRENTLY active registry shares this registry's own load
+// cache key while being a different object -- a genuine same-context reload,
+// checked directly against current state rather than traced through any
+// specific setActivePluginRegistry swap. An unrelated registry can interpose
+// between the original registry losing the active pointer and a fresh
+// same-key generation taking it, in which case the original is never
+// `previousRegistry` for that second swap and per-swap side effects (the
+// retiredRegistries flag, isRegistryLive's own pending-op check) never fire
+// for it -- this direct comparison is immune to how many swaps happened
+// in between.
+function isSameContextReplacement(registry: PluginRegistry): boolean {
+  if (state.activeRegistry === registry) {
+    return false;
+  }
+  const ownCacheKey = getPluginRegistryCacheKey(registry);
+  return ownCacheKey !== null && ownCacheKey === state.key;
+}
+
 function isRegistryLive(registry: PluginRegistry): boolean {
   if (state.activeRegistry === registry || isRegistryPinned(registry)) {
     return true;
@@ -94,14 +113,22 @@ function isRegistryLive(registry: PluginRegistry): boolean {
     return false;
   }
   // A pending operation normally keeps a registry "live" through a transient,
-  // unrelated active-pointer swap (see beginPendingRegistryOperation). But if
-  // the registry that's now active shares this one's own load cache key, this
-  // isn't an unrelated swap -- it's this registry's own context genuinely
-  // reloading into a fresh generation, and the pending operation must not mask
-  // that real replacement.
-  const ownCacheKey = getPluginRegistryCacheKey(registry);
-  const sameContextReload = ownCacheKey !== null && ownCacheKey === state.key;
-  return !sameContextReload;
+  // unrelated active-pointer swap (see beginPendingRegistryOperation). But a
+  // same-context replacement is a real reload, not an unrelated swap, and the
+  // pending operation must not mask it.
+  return !isSameContextReplacement(registry);
+}
+
+/**
+ * True when a registry has been superseded: explicitly retired, or replaced
+ * by a fresh same-cache-key generation even though it was never the direct
+ * previousRegistry for that swap (see isSameContextReplacement). Callers that
+ * gate a side effect on "is this registry still genuinely live" (e.g. the
+ * production scheduleSessionTurn shouldCommit wiring in registry.ts) should
+ * use this instead of the raw isPluginRegistryRetired flag.
+ */
+export function isPluginRegistrySuperseded(registry: PluginRegistry): boolean {
+  return isPluginRegistryRetired(registry) || isSameContextReplacement(registry);
 }
 
 async function cleanupPreviousPluginHostRegistry(params: {
