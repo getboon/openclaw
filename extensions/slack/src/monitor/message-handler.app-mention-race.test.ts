@@ -70,6 +70,7 @@ vi.mock("./message-handler/dispatch.js", () => ({
 
 let createSlackMessageHandler: typeof import("./message-handler.js").createSlackMessageHandler;
 let SlackRetryableInboundError: typeof import("./message-handler.js").SlackRetryableInboundError;
+let RETRYABLE_FLUSH_RETRY_DELAY_MS: typeof import("./message-handler.js").RETRYABLE_FLUSH_RETRY_DELAY_MS;
 let clearSlackInboundDeliveryStateForTest: typeof import("./inbound-delivery-state.js").clearSlackInboundDeliveryStateForTest;
 let clearSlackRuntime: typeof import("../runtime.js").clearSlackRuntime;
 let setSlackRuntime: typeof import("../runtime.js").setSlackRuntime;
@@ -157,7 +158,7 @@ async function createInFlightMessageScenario(ts: string) {
 
 describe("createSlackMessageHandler app_mention race handling", () => {
   beforeAll(async () => {
-    ({ createSlackMessageHandler, SlackRetryableInboundError } =
+    ({ createSlackMessageHandler, SlackRetryableInboundError, RETRYABLE_FLUSH_RETRY_DELAY_MS } =
       await import("./message-handler.js"));
     ({ clearSlackInboundDeliveryStateForTest } = await import("./inbound-delivery-state.js"));
     ({ clearSlackRuntime, setSlackRuntime } = await import("../runtime.js"));
@@ -346,7 +347,7 @@ describe("createSlackMessageHandler app_mention race handling", () => {
     await expect(sendMessageEvent(handler, "1700000000.000250")).resolves.toBeUndefined();
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
 
     expect(prepareSlackMessageMock).toHaveBeenCalledTimes(2);
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(2);
@@ -360,13 +361,13 @@ describe("createSlackMessageHandler app_mention race handling", () => {
     const handler = createTestHandler();
 
     await expect(sendMessageEvent(handler, "1700000000.000260")).resolves.toBeUndefined();
-    await vi.advanceTimersByTimeAsync(1_000);
-    await vi.advanceTimersByTimeAsync(1_000);
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
     // 1 initial attempt + 3 retries (retryAttempt 1..3) exhausts RETRYABLE_FLUSH_MAX_ATTEMPTS.
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(4);
 
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(4);
   });
 
@@ -461,9 +462,9 @@ describe("createSlackMessageHandler app_mention race handling", () => {
     const handler = createTestHandler({ channelHistories });
 
     await expect(sendMentionEvent(handler, "1700000000.000410")).resolves.toBeUndefined();
-    await vi.advanceTimersByTimeAsync(1_000);
-    await vi.advanceTimersByTimeAsync(1_000);
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
     // 1 initial attempt + 3 retries exhausts RETRYABLE_FLUSH_MAX_ATTEMPTS.
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(4);
 

@@ -11,7 +11,7 @@ import {
   asDateTimestampMs,
   resolveExpiresAtMsFromDurationMs,
 } from "openclaw/plugin-sdk/number-runtime";
-import { recordPendingHistoryEntryWithMedia } from "openclaw/plugin-sdk/reply-history";
+import { createChannelHistoryWindow } from "openclaw/plugin-sdk/reply-history";
 import type { ResolvedSlackAccount } from "../accounts.js";
 import type { SlackSendIdentity } from "../send.js";
 import type { SlackMessageEvent } from "../types.js";
@@ -75,7 +75,9 @@ function createSlackDispatchCompletion(): SlackDispatchCompletion {
 
 const APP_MENTION_RETRY_TTL_MS = 60_000;
 const RETRYABLE_FLUSH_MAX_ATTEMPTS = 3;
-const RETRYABLE_FLUSH_RETRY_DELAY_MS = 1_000;
+// Exported so tests drive fake timers off the same value instead of a
+// hardcoded duplicate that would silently drift from this production delay.
+export const RETRYABLE_FLUSH_RETRY_DELAY_MS = 1_000;
 
 export class SlackRetryableInboundError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -114,13 +116,13 @@ async function recordDroppedHistoryForFailedAppMentionDispatch(params: {
   if (!history?.historyMap || !history.historyKey || !history.limit || history.limit <= 0) {
     return;
   }
+  const channelHistory = createChannelHistoryWindow({ historyMap: history.historyMap });
   for (const entry of params.entries) {
     const body = (entry.message.text ?? "").trim();
     if (!body) {
       continue;
     }
-    await recordPendingHistoryEntryWithMedia({
-      historyMap: history.historyMap,
+    await channelHistory.recordWithMedia({
       historyKey: history.historyKey,
       limit: history.limit,
       entry: {
