@@ -149,70 +149,101 @@ In `runSubagentAnnounceFlow` (`src/agents/subagent-announce.ts`), where
   evidence into the array, in the same order `buildChildCompletionFindings`
   already sorts them.
 
-### 3.4 Where evidence crosses into the parent's trace: `agent-runner.ts`, additive merge
+### 3.4 Where evidence crosses into the parent's trace: `run.ts`, right where `attemptToolSummary` is built
 
-Confirmed the structured `internalEvents` array (not just its rendered text)
-is **already threaded through as a param** on the dispatch call that resumes
-the parent (`subagent-announce-delivery.ts:1529`,
-`directAgentParams.internalEvents: params.internalEvents`), tagged via the
-same call's `inputProvenance.sourceTool` (default `"subagent_announce"`,
-`subagent-announce-delivery.ts:1546`) — this repo already has a working
-precedent for "this resumed run carries internal-event context" (the
-steering path, `maybeSteerSubagentAnnounce`, carries it the analogous way for
-a live/steered resume rather than a fresh dispatch).
+**Revised after confirming the exact wiring (this replaces an earlier draft
+of this section that planned a new `runResult.meta.delegatedToolEvidence`
+field consumed in `agent-runner.ts` — that approach is no longer needed; see
+below for why the simpler version is correct and lower-risk).**
 
-Remaining work, confirmed as a code-reading task rather than a design
-decision (no tradeoffs — just need to trace the last hop precisely at
-implementation time): follow `internalEvents` from the `agent` gateway
-method's params through `attempt-execution.shared.ts` (confirmed it already
-consumes `events`/`AgentInternalEvent[]` to build prompt text via
-`formatAgentInternalEventsForPrompt`/`formatAgentInternalEventsForPlainPrompt`,
-lines ~89/102) to wherever the resuming attempt's `runResult.meta` gets
-built, and expose the consumed events' `childToolEvidence` arrays there as a
-new `runResult.meta.delegatedToolEvidence?: SubagentToolEvidence[]` field
-(flattened across all consumed `task_completion` events in this turn).
+Confirmed `internalEvents` is already a first-class parameter on
+`RunEmbeddedAgentParams` (`run/params.ts:269`) and is already available,
+unmodified, in the exact same top-level `run.ts` function scope where
+`attemptToolSummary` is computed (`params.internalEvents`, same function that
+contains the `buildTraceToolSummary` call at `run.ts:3739`) — no new plumbing
+needed to get the data there at all.
 
-At the trace-build call site (`agent-runner.ts:2423`), before calling
-`buildAgentDecisionTrace`, merge `runResult.meta?.delegatedToolEvidence`
-(if present) into the `toolSummary` object passed in:
+Confirmed `buildTraceToolSummary`'s return type, `ToolSummaryTrace`
+(`embedded-agent-runner/types.ts:110`), has an `invocations` field shaped
+`{name: string; status: "ok"|"partial"|"error"|"blocked"; detail?: string}[]`
+(`run.ts:556-575`) — **shape-identical** to a completed subagent's own
+`AgentDecisionTrace.toolInvocations`. This is the same fact the earlier draft
+of this section relied on, but it means the merge can happen immediately
+after `buildTraceToolSummary` returns, entirely inside `run.ts`, as a plain
+array concatenation — no reshape, no new field on `runResult.meta`, and
+**no change to `agent-runner.ts` at all** (it already reads
+`runResult.meta.toolSummary` and passes it straight to
+`buildAgentDecisionTrace`; if `toolSummary.invocations` already contains the
+merged set by the time `agent-runner.ts` sees it, there's nothing left for
+that layer to do).
 
-- Concatenate every entry's `toolInvocations` onto `toolSummary.invocations`
-  (the `ToolSummary.invocations` input array `agent-decision-trace.ts` already
-  reads and normalizes — confirmed the child's own already-computed
-  `AgentDecisionTrace.toolInvocations` entries are shape-identical to this
-  input type, both `{name, status, detail?}`, so they pass through the
-  existing `normalizeTraceToolName`/`normalizeTraceToolStatus` validation
-  unchanged; the merge is a plain array concatenation, not a reshape).
-- Union each entry's `visibleTools` into `toolSummary.visibleTools`.
-- Tag each merged invocation entry `viaSubagent: true` before concatenating.
-  This requires adding `viaSubagent?: boolean` to **three** places in
-  `agent-decision-trace.ts`, since each is a separate object-literal
-  construction that only carries the fields explicitly listed — none of them
-  pass unknown fields through implicitly:
-  1. The `ToolSummary.invocations` item type (so a tagged entry can be
-     passed in as input).
-  2. The output `toolInvocations` entry construction (currently
-     `{name, status, ...(detail ? {detail} : {})}`).
-  3. The output `evidence` entry construction (currently
-     `{kind: "tool_outcome", tool: invocation.name, status: invocation.status,
-   ...(detail ? {detail} : {})}`, built by mapping over `toolInvocations` —
-     without this third addition, a merged entry would carry `viaSubagent` in
-     `toolInvocations` but silently lose it in `evidence`, an inconsistency
-     between two views of the same data that's worse than not tagging at all).
-     All three additive — ignored by anything that doesn't know the field exists.
+Concretely, right after `const attemptToolSummary = buildTraceToolSummary({...})`
+(`run.ts:3739`):
 
-No merge target exists for `evidence` (see 3.3) — it's correctly recomputed
-by the existing, unmodified `evidence: toolInvocations.map(...)` line once
-`toolInvocations` carries the merged set.
+```ts
+const delegatedInvocations = collectDelegatedToolInvocationsFromInternalEvents(
+  params.internalEvents,
+);
+const mergedAttemptToolSummary =
+  delegatedInvocations.invocations.length > 0
+    ? {
+        ...attemptToolSummary,
+        invocations: [
+          ...(attemptToolSummary?.invocations ?? []),
+          ...delegatedInvocations.invocations,
+        ],
+        visibleTools: [
+          ...new Set([
+            ...(attemptToolSummary?.visibleTools ?? []),
+            ...delegatedInvocations.visibleTools,
+          ]),
+        ],
+      }
+    : attemptToolSummary;
+```
 
-**This merge only ever fires when `runResult.meta.delegatedToolEvidence` is
-present — which only happens for a reply that resumed after consuming a
-`task_completion` event.** An ordinary, non-delegating turn's `runResult.meta`
-never has this field, so `buildAgentDecisionTrace`'s inputs are byte-for-byte
-identical to today for the overwhelming majority of turns. This is the
-concrete mechanism behind the "no regressions for the common case" goal — not
-a promise to be careful, but a structural consequence of where the merge is
-gated.
+(`mergedAttemptToolSummary` replaces `attemptToolSummary` at its 4 existing
+consumption sites, `run.ts:3816/4059/4150/4289` — a rename, not new call
+sites.) `collectDelegatedToolInvocationsFromInternalEvents` is a new,
+small, pure function (same shape/spirit as the existing
+`collectPendingMediaFromInternalEvents` in `embedded-agent-subscribe.ts:135`,
+a direct precedent for "extract a specific structured payload out of
+`internalEvents`"): it filters `internalEvents` for `type === "task_completion"`
+entries, flattens their `childToolEvidence` arrays, and returns each
+invocation pre-tagged `viaSubagent: true`.
+
+That tagging requires adding `viaSubagent?: boolean` to **three** places in
+`agent-decision-trace.ts`, since each is a separate object-literal
+construction that only carries the fields explicitly listed — none of them
+pass unknown fields through implicitly:
+
+1. The `ToolSummary.invocations` item type (so a tagged entry can be
+   passed in as input).
+2. The output `toolInvocations` entry construction (currently
+   `{name, status, ...(detail ? {detail} : {})}`).
+3. The output `evidence` entry construction (currently
+   `{kind: "tool_outcome", tool: invocation.name, status: invocation.status,
+...(detail ? {detail} : {})}`, built by mapping over `toolInvocations` —
+   without this third addition, a merged entry would carry `viaSubagent` in
+   `toolInvocations` but silently lose it in `evidence`, an inconsistency
+   between two views of the same data that's worse than not tagging at all).
+
+All three additive — ignored by anything that doesn't know the field exists.
+No merge target exists for `evidence` itself (see 3.3) — it's correctly
+recomputed by the existing, unmodified `evidence: toolInvocations.map(...)`
+line once `toolInvocations` carries the merged set.
+
+**This merge only ever adds entries when `params.internalEvents` contains at
+least one `task_completion` event with non-empty `childToolEvidence` — which
+only happens for an attempt that resumed after consuming a subagent
+completion.** An ordinary, non-delegating turn's `internalEvents` is
+`undefined`/empty, `delegatedInvocations.invocations` is `[]`, and
+`mergedAttemptToolSummary` is literally `=== attemptToolSummary` (same
+reference, no new object even allocated) — `buildAgentDecisionTrace`'s
+inputs are byte-for-byte identical to today for the overwhelming majority of
+turns. This is the concrete mechanism behind the "no regressions for the
+common case" goal — not a promise to be careful, but a structural
+consequence of where the merge is gated.
 
 ### 3.5 Multi-child and nested grandchildren: confirmed free, no extra code
 
@@ -248,17 +279,18 @@ evidence when it's genuinely available; it introduces no new way to fail.
 
 ## 4. Files touched (summary)
 
-| File                                                                                                               | Change                                                                                                                                                                                                      |
-| ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/agents/subagent-announce-output.ts`                                                                           | Add `latestAuditTrace` to `SubagentOutputSnapshot`; add `readSubagentOutputWithTrace`, `captureSubagentCompletionReplyWithTrace` siblings. `readSubagentOutput`/`captureSubagentCompletionReply` unchanged. |
-| `src/agents/subagent-registry.types.ts`                                                                            | Add `resultAuditTrace?` to `SubagentCompletionState`; add `frozenAuditTrace?` to `PendingFinalDeliveryPayload`.                                                                                             |
-| `src/agents/subagent-registry-lifecycle.ts`                                                                        | `freezeRunResultAtCompletion` (and `refreshFrozenResultFromSession`) also freeze the trace; the two `PendingFinalDeliveryPayload`-building sites also carry `frozenAuditTrace`.                             |
-| `src/agents/internal-events.ts`                                                                                    | Add `SubagentToolEvidence` type; add optional `childToolEvidence?` to `AgentTaskCompletionInternalEvent`. No change to prompt rendering.                                                                    |
-| `src/agents/subagent-announce.ts`                                                                                  | Populate `childToolEvidence` when building `completionEvent`, for both the single-child and multi-child-findings paths.                                                                                     |
-| `src/agents/subagent-announce-output.ts` (`buildChildCompletionFindings` family)                                   | Thread `frozenAuditTrace` through the same row shape already carrying `frozenResultText`, collect into the evidence array.                                                                                  |
-| `src/agents/command/attempt-execution.shared.ts` (or wherever the last hop lands — confirm at implementation time) | Expose consumed `task_completion` events' `childToolEvidence` on `runResult.meta.delegatedToolEvidence`.                                                                                                    |
-| `src/auto-reply/reply/agent-runner.ts`                                                                             | Before `buildAgentDecisionTrace` (~line 2423), additively merge `runResult.meta?.delegatedToolEvidence` into `toolSummary`, tagging entries `viaSubagent: true`.                                            |
-| `src/auto-reply/reply/agent-decision-trace.ts`                                                                     | Add optional `viaSubagent?: boolean` to the invocation/evidence entry types (additive, no logic change).                                                                                                    |
+| File                                                                             | Change                                                                                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/agents/subagent-announce-output.ts`                                         | Add `latestAuditTrace` to `SubagentOutputSnapshot`; add `readSubagentOutputWithTrace`, `captureSubagentCompletionReplyWithTrace` siblings. `readSubagentOutput`/`captureSubagentCompletionReply` unchanged.                                                                                                             |
+| `src/agents/subagent-registry.types.ts`                                          | Add `resultAuditTrace?` to `SubagentCompletionState`; add `frozenAuditTrace?` to `PendingFinalDeliveryPayload`.                                                                                                                                                                                                         |
+| `src/agents/subagent-registry-lifecycle.ts`                                      | `freezeRunResultAtCompletion` (and `refreshFrozenResultFromSession`) also freeze the trace; the two `PendingFinalDeliveryPayload`-building sites also carry `frozenAuditTrace`.                                                                                                                                         |
+| `src/agents/internal-events.ts`                                                  | Add `SubagentToolEvidence` type; add optional `childToolEvidence?` to `AgentTaskCompletionInternalEvent`. No change to prompt rendering.                                                                                                                                                                                |
+| `src/agents/subagent-announce.ts`                                                | Populate `childToolEvidence` when building `completionEvent`, for both the single-child and multi-child-findings paths.                                                                                                                                                                                                 |
+| `src/agents/subagent-announce-output.ts` (`buildChildCompletionFindings` family) | Thread `frozenAuditTrace` through the same row shape already carrying `frozenResultText`, collect into the evidence array.                                                                                                                                                                                              |
+| `src/agents/embedded-agent-runner/run.ts`                                        | Add `collectDelegatedToolInvocationsFromInternalEvents` (new, pure, mirrors the existing `collectPendingMediaFromInternalEvents` pattern); merge its output into `attemptToolSummary` right after `buildTraceToolSummary` returns (~line 3739), tagging entries `viaSubagent: true`. No new fields on `runResult.meta`. |
+| `src/auto-reply/reply/agent-decision-trace.ts`                                   | Add optional `viaSubagent?: boolean` to the `ToolSummary.invocations` item type and to the two output object-literal constructions (`toolInvocations`, `evidence`) — additive, no logic change.                                                                                                                         |
+
+**`src/auto-reply/reply/agent-runner.ts` needs no changes at all** — it already reads `runResult.meta.toolSummary` and passes it straight through; once `toolSummary.invocations` carries the merged set (from the `run.ts` change above), this layer's existing code produces the correct trace with zero modification.
 
 ## 5. Testing
 
@@ -268,14 +300,21 @@ evidence when it's genuinely available; it introduces no new way to fail.
 - Unit: `freezeRunResultAtCompletion` freezes `resultAuditTrace` alongside
   `resultText`; an error-outcome run freezes neither (matches existing
   `resultText = null` branch).
-- Unit: `buildAgentDecisionTrace` merge — given a `toolSummary` with existing
-  direct invocations plus `delegatedToolEvidence` with N more, the result
-  contains all of them, delegated ones tagged `viaSubagent: true`, and
+- Unit: `collectDelegatedToolInvocationsFromInternalEvents` — given
+  `internalEvents` with a `task_completion` entry carrying `childToolEvidence`,
+  returns those invocations tagged `viaSubagent: true`; given `undefined`/`[]`/
+  events with no `childToolEvidence`, returns `{invocations: [], visibleTools: []}`.
+- Unit: the `run.ts` merge — given an attempt with N direct tool calls and
+  `params.internalEvents` carrying M delegated ones, `mergedAttemptToolSummary.invocations`
+  has N+M entries, the M delegated ones tagged `viaSubagent: true`; feeding
+  that into the existing, unmodified `buildAgentDecisionTrace` shows
   disposition math (`successfulCalls`/`failedCalls`/etc.) counts them the
   same as direct invocations.
-- Unit: merge is a no-op when `delegatedToolEvidence` is absent —
-  byte-identical `buildAgentDecisionTrace` output to current behavior for a
-  representative existing non-delegating test case.
+- Unit: merge is a no-op when `params.internalEvents` is absent or has no
+  `task_completion` entries — `mergedAttemptToolSummary` is reference-equal
+  to `attemptToolSummary` (no new object allocated), so
+  `buildAgentDecisionTrace`'s output for a representative existing
+  non-delegating test case is byte-identical to current behavior.
 - Integration: reproduce the ticket's proven shape — a parent spawns a
   subagent, the subagent makes real tool calls and replies, the parent
   resumes and answers — assert the parent's final `audit_trace.toolInvocations`
@@ -292,10 +331,15 @@ evidence when it's genuinely available; it introduces no new way to fail.
 ## 6. Design-log: what was considered and rejected
 
 - **Mutate `attempt.toolMetas` directly during resume** (`run.ts`) — rejected:
-  highest blast radius, since that value likely feeds more than trace-building
-  in a ~4,000-line function, and mutating it for every attempt processing a
-  particular event type is harder to bound than gating a merge at the single
-  trace-build call site.
+  that raw, internal array (shaped `{toolName, errored, status, ...}`, distinct
+  from the public `{name, status, detail?}` trace shape) is accumulated and
+  likely read by more than trace-building across a ~4,000-line function, so
+  mutating it is higher blast radius than necessary. The chosen approach
+  (3.4) mutates neither `attempt.toolMetas` nor `state.toolMetas` — it builds
+  a merged copy of `attemptToolSummary`, the small, already-public-shaped,
+  single-purpose object `buildTraceToolSummary` returns purely for trace
+  consumption, immediately after that function returns. Narrower surface,
+  same file, different (safer) variable.
 - **Trace-build-time blind registry lookup** ("which children did this
   session recently spawn") — rejected in favor of explicit tagging: blind
   lookup risks matching the wrong turn's children in a session with rapid
