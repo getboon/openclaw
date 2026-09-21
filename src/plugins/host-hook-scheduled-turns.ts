@@ -20,7 +20,11 @@ import type {
   PluginSessionTurnUnscheduleByTagResult,
 } from "./host-hooks.js";
 import type { PluginOrigin } from "./plugin-origin.types.js";
-import { beginPendingRegistryOperation } from "./registry-lifecycle.js";
+import {
+  beginPendingRegistryOperation,
+  getPendingCommittedSchedulerJobIds,
+  recordPendingCommittedSchedulerJobId,
+} from "./registry-lifecycle.js";
 import type { PluginRegistry } from "./registry-types.js";
 import { retirePluginRegistryIfNowUnused } from "./runtime.js";
 
@@ -314,9 +318,10 @@ export async function schedulePluginSessionTurn(params: {
   // event" isn't safe either: retirement only ever fires as a side effect of
   // being the immediate previousRegistry in a setActivePluginRegistry call,
   // so a registry already displaced by an unrelated swap would never be
-  // retired again once bypassed. committedJobId is set only once a job is
-  // actually registered, so failure paths retire with nothing to preserve.
-  let committedJobId: string | undefined;
+  // retired again once bypassed. The preserve set comes from the shared
+  // per-registry accumulator, not just this call's own job: a concurrent
+  // call sharing the same pin can commit and return before this one's
+  // retirement check is the one that actually fires cleanup.
   try {
     let result: Awaited<ReturnType<CronServiceContract["add"]>>;
     try {
@@ -397,14 +402,16 @@ export async function schedulePluginSessionTurn(params: {
         },
       },
     });
-    committedJobId = jobId;
+    if (params.ownerRegistry) {
+      recordPendingCommittedSchedulerJobId(params.ownerRegistry, params.pluginId, jobId);
+    }
     return handle;
   } finally {
     endPendingRegistryOperation();
     if (params.ownerRegistry) {
-      retirePluginRegistryIfNowUnused(
+      void retirePluginRegistryIfNowUnused(
         params.ownerRegistry,
-        committedJobId ? new Set([committedJobId]) : undefined,
+        getPendingCommittedSchedulerJobIds(params.ownerRegistry),
       );
     }
   }

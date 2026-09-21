@@ -32,6 +32,7 @@ import {
   releasePinnedPluginChannelRegistry,
   setActivePluginRegistry,
 } from "../runtime.js";
+import * as pluginRuntimeModule from "../runtime.js";
 import { createPluginRecord } from "../status.test-helpers.js";
 import type { OpenClawPluginApi } from "../types.js";
 
@@ -158,6 +159,24 @@ function expectSessionTurnHandle(
     sessionKey,
     kind: "session-turn",
   });
+}
+
+/**
+ * Spies on retirePluginRegistryIfNowUnused for the duration of `run`, then
+ * awaits every real invocation's returned cleanup promise -- deterministic
+ * proof that a retirement this call triggered has actually settled, instead
+ * of guessing a wall-clock delay long enough for its fire-and-forget cleanup
+ * (two dynamic imports deep) to have plausibly finished.
+ */
+async function withRetirementSettled<T>(run: () => Promise<T>): Promise<T> {
+  const retireSpy = vi.spyOn(pluginRuntimeModule, "retirePluginRegistryIfNowUnused");
+  try {
+    const result = await run();
+    await Promise.all(retireSpy.mock.results.map((entry) => entry.value));
+    return result;
+  } finally {
+    retireSpy.mockRestore();
+  }
 }
 
 async function scheduleWorkflowTurn(
@@ -559,18 +578,9 @@ describe("plugin scheduled turns", () => {
       setActivePluginRegistry(unrelatedRegistry);
       resolveCronAdd(makeCronJob({ id: "job-survives" }));
 
-      const handle = await schedulePromise;
+      const handle = await withRetirementSettled(() => schedulePromise);
 
       expectSessionTurnHandle(handle, "job-survives");
-      // Retirement cleanup for a genuinely-unused registry runs as a
-      // fire-and-forget promise (cleanupRetiredPluginHostRegistry's `void`
-      // call), not something schedulePluginSessionTurn itself awaits -- a
-      // real wall-clock wait here is required to actually observe whether
-      // it eventually cancels the job, not just whether it hasn't
-      // synchronously by the time schedulePluginSessionTurn returns.
-      await new Promise((resolve) => {
-        setTimeout(resolve, 50);
-      });
       expect(workflowMocks.cronRemove).not.toHaveBeenCalled();
       expect(listPluginSessionSchedulerJobs(WORKFLOW_PLUGIN_ID)).not.toEqual([]);
     },
@@ -608,15 +618,9 @@ describe("plugin scheduled turns", () => {
       setActivePluginRegistry(unrelatedRegistry);
       resolveCronAdd(makeCronJob({ id: "job-preserved" }));
 
-      const handle = await schedulePromise;
+      const handle = await withRetirementSettled(() => schedulePromise);
       expectSessionTurnHandle(handle, "job-preserved");
-      // markPluginRegistryRetired runs synchronously inside the finally
-      // block, before any async cleanup -- no wait needed to observe this.
       expect(isPluginRegistryRetired(ownerRegistry)).toBe(true);
-
-      await new Promise((resolve) => {
-        setTimeout(resolve, 50);
-      });
       // The just-committed job survives the retirement cleanup pass its own
       // caller triggered, because it was passed as a preserved job id.
       expect(workflowMocks.cronRemove).not.toHaveBeenCalled();
@@ -631,6 +635,66 @@ describe("plugin scheduled turns", () => {
       setActivePluginRegistry(reloadedUnrelatedRegistry, "unrelated-context");
       expect(isPluginRegistryRetired(ownerRegistry)).toBe(true);
       expect(workflowMocks.cronRemove).not.toHaveBeenCalled();
+    },
+  );
+
+  it(
+    "preserves BOTH jobs from two overlapping schedule calls sharing the same owner registry, " +
+      "even though only the LAST call to release its pending-operation pin is the one whose " +
+      "retirement check actually fires cleanup -- that cleanup pass must not sweep the earlier " +
+      "call's already-returned job just because it wasn't the job THIS call committed",
+    async () => {
+      const ownerFixture = createPluginRegistryFixture();
+      ownerFixture.registry.registry.plugins.push(
+        createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
+      );
+      const ownerRegistry = ownerFixture.registry.registry;
+      const unrelatedRegistry = createEmptyPluginRegistry();
+      setActivePluginRegistry(ownerRegistry);
+      const shouldCommit = () =>
+        !isPluginRegistryRetired(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
+      const resolveCronAdd: Array<(job: CronJob) => void> = [];
+      workflowMocks.cronAdd.mockImplementation(
+        () =>
+          new Promise<CronJob>((resolve) => {
+            resolveCronAdd.push(resolve);
+          }),
+      );
+
+      const scheduleA = scheduleWorkflowTurn({
+        pluginName: "Workflow Plugin",
+        schedule: { delayMs: 1 },
+        shouldCommit,
+        ownerRegistry,
+      });
+      const scheduleB = scheduleWorkflowTurn({
+        pluginName: "Workflow Plugin",
+        schedule: { delayMs: 1 },
+        shouldCommit,
+        ownerRegistry,
+      });
+      // An unrelated registry displaces ownerRegistry while BOTH calls are
+      // still pending -- both calls' pending-operation pins protect it.
+      setActivePluginRegistry(unrelatedRegistry);
+      resolveCronAdd[0](makeCronJob({ id: "job-a" }));
+      const handleA = await scheduleA;
+      expectSessionTurnHandle(handleA, "job-a");
+      // Call A released its own pin, but B's is still held -- ownerRegistry
+      // must not be retired yet, or job-a's survival proves nothing about
+      // the mechanism this test targets.
+      expect(isPluginRegistryRetired(ownerRegistry)).toBe(false);
+
+      resolveCronAdd[1](makeCronJob({ id: "job-b" }));
+      const handleB = await withRetirementSettled(() => scheduleB);
+      expectSessionTurnHandle(handleB, "job-b");
+      // B is the last call to release the pin, so its retirement check is
+      // the one that actually fires cleanup -- for BOTH jobs.
+      expect(isPluginRegistryRetired(ownerRegistry)).toBe(true);
+      expect(workflowMocks.cronRemove).not.toHaveBeenCalled();
+      const survivingJobIds = listPluginSessionSchedulerJobs(WORKFLOW_PLUGIN_ID).map(
+        (job) => job.id,
+      );
+      expect(survivingJobIds).toEqual(expect.arrayContaining(["job-a", "job-b"]));
     },
   );
 
@@ -1036,6 +1100,49 @@ describe("plugin scheduled turns", () => {
       },
     ]);
   });
+
+  it(
+    "scopes preserved scheduler job ids by pluginId -- a preserved id for one plugin must not " +
+      "also protect a DIFFERENT plugin's job that happens to share the same job id string",
+    async () => {
+      const OTHER_PLUGIN_ID = "other-plugin";
+      workflowMocks.cronAdd.mockResolvedValue(makeCronJob({ id: "shared-job-id" }));
+      workflowMocks.cronRemove.mockResolvedValue({ ok: true, removed: true });
+
+      const previousFixture = createPluginRegistryFixture();
+      previousFixture.registry.registry.plugins.push(
+        createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
+        createPluginRecord({ id: OTHER_PLUGIN_ID, name: "Other Plugin", origin: "bundled" }),
+      );
+      const previousRegistry = previousFixture.registry.registry;
+
+      await scheduleWorkflowTurn({ ownerRegistry: previousRegistry });
+      await schedulePluginSessionTurn({
+        pluginId: OTHER_PLUGIN_ID,
+        origin: "bundled",
+        pluginName: "Other Plugin",
+        cron,
+        ownerRegistry: previousRegistry,
+        schedule: DEFAULT_TURN_SCHEDULE as SessionTurnSchedule,
+      });
+      expect(listPluginSessionSchedulerJobs(WORKFLOW_PLUGIN_ID)).not.toEqual([]);
+      expect(listPluginSessionSchedulerJobs(OTHER_PLUGIN_ID)).not.toEqual([]);
+
+      await cleanupReplacedPluginHostRegistry({
+        cfg: previousFixture.config,
+        previousRegistry,
+        nextRegistry: createEmptyPluginRegistry(),
+        preserveSchedulerJobIds: new Map([[OTHER_PLUGIN_ID, new Set(["shared-job-id"])]]),
+      });
+
+      // WORKFLOW_PLUGIN_ID's job shares the same string id but wasn't in ITS
+      // OWN preserve set -- an unscoped preserve set would have protected it
+      // by accident; it must still be cleaned up.
+      expect(listPluginSessionSchedulerJobs(WORKFLOW_PLUGIN_ID)).toEqual([]);
+      // OTHER_PLUGIN_ID's job was preserved under its own pluginId and survives.
+      expect(listPluginSessionSchedulerJobs(OTHER_PLUGIN_ID)).not.toEqual([]);
+    },
+  );
 
   it("treats already-missing cron jobs as successful scheduled-turn cleanup", async () => {
     const removed: string[] = [];

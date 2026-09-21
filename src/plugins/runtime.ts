@@ -104,7 +104,7 @@ function isRegistryLive(registry: PluginRegistry): boolean {
 
 async function cleanupPreviousPluginHostRegistry(params: {
   previousRegistry: PluginRegistry;
-  preserveSchedulerJobIds?: ReadonlySet<string>;
+  preserveSchedulerJobIds?: ReadonlyMap<string, ReadonlySet<string>>;
 }): Promise<void> {
   const [{ getRuntimeConfig }, { cleanupReplacedPluginHostRegistry }] = await Promise.all([
     import("../config/config.js"),
@@ -126,14 +126,19 @@ async function cleanupPreviousPluginHostRegistry(params: {
   });
 }
 
+// Returns the (never-rejecting) cleanup promise rather than firing it as
+// void so a caller that genuinely needs to observe completion (tests
+// proving preserveSchedulerJobIds survives the real async cleanup, rather
+// than guessing a wall-clock delay) can await it. Production callers still
+// don't await this -- see retirePluginRegistryIfNowUnused's own callers.
 function cleanupRetiredPluginHostRegistry(
   previousRegistry: PluginRegistry,
-  preserveSchedulerJobIds?: ReadonlySet<string>,
-): void {
+  preserveSchedulerJobIds?: ReadonlyMap<string, ReadonlySet<string>>,
+): Promise<void> {
   if (!registryHasPluginHostCleanupWork(previousRegistry)) {
-    return;
+    return Promise.resolve();
   }
-  void cleanupPreviousPluginHostRegistry({
+  return cleanupPreviousPluginHostRegistry({
     previousRegistry,
     preserveSchedulerJobIds,
   }).catch((error: unknown) => {
@@ -154,16 +159,20 @@ function retirePluginRegistryIfUnused(registry: PluginRegistry | null): boolean 
  * (e.g. a pending async operation just settled). Mirrors the re-check every
  * pin-release function already does after uninstalling its own pin -- a
  * registry that was kept alive only by that protection may now be retirable.
- * preserveSchedulerJobIds protects specific jobs (e.g. one just committed by
- * the same caller) from the retirement cleanup pass this can trigger.
+ * preserveSchedulerJobIds protects specific jobs, keyed by pluginId, from the
+ * retirement cleanup pass this can trigger (e.g. jobs committed by any call
+ * sharing this registry's pending-operation window, not just the caller's
+ * own). Returns a promise callers may await for tests; production callers
+ * don't need to and shouldn't.
  */
 export function retirePluginRegistryIfNowUnused(
   registry: PluginRegistry | null,
-  preserveSchedulerJobIds?: ReadonlySet<string>,
-): void {
+  preserveSchedulerJobIds?: ReadonlyMap<string, ReadonlySet<string>>,
+): Promise<void> {
   if (retirePluginRegistryIfUnused(registry)) {
-    cleanupRetiredPluginHostRegistry(registry!, preserveSchedulerJobIds);
+    return cleanupRetiredPluginHostRegistry(registry!, preserveSchedulerJobIds);
   }
+  return Promise.resolve();
 }
 
 /**
@@ -262,7 +271,7 @@ export function setActivePluginRegistry(
   if (!retirePluginRegistryIfUnused(previousRegistry)) {
     return;
   }
-  cleanupRetiredPluginHostRegistry(previousRegistry);
+  void cleanupRetiredPluginHostRegistry(previousRegistry);
 }
 
 export function getActivePluginRegistry(): PluginRegistry | null {
@@ -291,7 +300,7 @@ export function pinActivePluginHttpRouteRegistry(registry: PluginRegistry) {
   markPluginRegistryActive(registry);
   syncPluginAgentEventBridge();
   if (retirePluginRegistryIfUnused(previousRegistry)) {
-    cleanupRetiredPluginHostRegistry(previousRegistry!);
+    void cleanupRetiredPluginHostRegistry(previousRegistry!);
   }
 }
 
@@ -303,7 +312,7 @@ export function releasePinnedPluginHttpRouteRegistry(registry?: PluginRegistry) 
   installSurfaceRegistry(state.httpRoute, state.activeRegistry, false);
   syncPluginAgentEventBridge();
   if (retirePluginRegistryIfUnused(previousRegistry)) {
-    cleanupRetiredPluginHostRegistry(previousRegistry!);
+    void cleanupRetiredPluginHostRegistry(previousRegistry!);
   }
 }
 
@@ -347,7 +356,7 @@ export function pinActivePluginChannelRegistry(registry: PluginRegistry) {
   markPluginRegistryActive(registry);
   syncPluginAgentEventBridge();
   if (retirePluginRegistryIfUnused(previousRegistry)) {
-    cleanupRetiredPluginHostRegistry(previousRegistry!);
+    void cleanupRetiredPluginHostRegistry(previousRegistry!);
   }
 }
 
@@ -359,7 +368,7 @@ export function releasePinnedPluginChannelRegistry(registry?: PluginRegistry) {
   installSurfaceRegistry(state.channel, state.activeRegistry, false);
   syncPluginAgentEventBridge();
   if (retirePluginRegistryIfUnused(previousRegistry)) {
-    cleanupRetiredPluginHostRegistry(previousRegistry!);
+    void cleanupRetiredPluginHostRegistry(previousRegistry!);
   }
 }
 
@@ -411,7 +420,7 @@ export function pinActivePluginSessionExtensionRegistry(registry: PluginRegistry
   markPluginRegistryActive(registry);
   syncPluginAgentEventBridge();
   if (retirePluginRegistryIfUnused(previousRegistry)) {
-    cleanupRetiredPluginHostRegistry(previousRegistry!);
+    void cleanupRetiredPluginHostRegistry(previousRegistry!);
   }
 }
 
@@ -423,7 +432,7 @@ export function releasePinnedPluginSessionExtensionRegistry(registry?: PluginReg
   installSurfaceRegistry(state.sessionExtension, state.activeRegistry, false);
   syncPluginAgentEventBridge();
   if (retirePluginRegistryIfUnused(previousRegistry)) {
-    cleanupRetiredPluginHostRegistry(previousRegistry!);
+    void cleanupRetiredPluginHostRegistry(previousRegistry!);
   }
 }
 

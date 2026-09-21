@@ -374,7 +374,7 @@ export async function cleanupReplacedPluginHostRegistry(params: {
   previousRegistry?: PluginRegistry | null;
   nextRegistry?: PluginRegistry | null;
   shouldCleanup?: () => boolean;
-  preserveSchedulerJobIds?: ReadonlySet<string>;
+  preserveSchedulerJobIds?: ReadonlyMap<string, ReadonlySet<string>>;
 }): Promise<PluginHostCleanupResult> {
   const previousRegistry = params.previousRegistry;
   const shouldCleanup = params.shouldCleanup ?? (() => true);
@@ -396,12 +396,15 @@ export async function cleanupReplacedPluginHostRegistry(params: {
       break;
     }
     const restarted = nextPluginIds.has(pluginId);
-    // Caller-supplied preserved job ids (e.g. one this same retirement's own
-    // caller just committed) apply regardless of restart/disable, merged with
-    // the restart-specific carryover below.
+    // Caller-supplied preserved job ids (e.g. ones this same retirement's own
+    // caller committed) are scoped per pluginId -- a flat set shared across
+    // every pluginId in this loop would also protect an unrelated plugin's
+    // job if its id happened to collide with a preserved one. Applies
+    // regardless of restart/disable, merged with the restart-specific
+    // carryover below.
     const preserveSchedulerJobIds = new Set([
       ...(restarted ? collectSchedulerJobIds(params.nextRegistry, pluginId) : []),
-      ...(params.preserveSchedulerJobIds ?? []),
+      ...(params.preserveSchedulerJobIds?.get(pluginId) ?? []),
     ]);
     const result = await runPluginHostCleanup({
       cfg: params.cfg,

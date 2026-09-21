@@ -5,6 +5,7 @@ const retiredRegistries = new WeakSet<PluginRegistry>();
 const activatedRegistries = new WeakSet<PluginRegistry>();
 const pendingAsyncOperationCounts = new WeakMap<PluginRegistry, number>();
 const registryCacheKeys = new WeakMap<PluginRegistry, string | null>();
+const pendingCommittedSchedulerJobIds = new WeakMap<PluginRegistry, Map<string, Set<string>>>();
 
 /** Marks a registry retired so late runtime calls can reject stale plugin state. */
 export function markPluginRegistryRetired(registry: PluginRegistry | null | undefined): void {
@@ -83,4 +84,38 @@ export function recordPluginRegistryCacheKey(
 /** The cache key a registry was activated under, or null if none was recorded. */
 export function getPluginRegistryCacheKey(registry: PluginRegistry): string | null {
   return registryCacheKeys.get(registry) ?? null;
+}
+
+// Two schedulePluginSessionTurn calls for the same registry can overlap: an
+// unrelated swap can protect both via the pending-op pin above, and whichever
+// call releases its pin LAST is the one whose retirement check actually fires
+// cleanup. That cleanup must preserve every job committed during the shared
+// window, not just the job the last-releasing call itself created, or it
+// sweeps an earlier call's already-returned job out from under its caller.
+export function recordPendingCommittedSchedulerJobId(
+  registry: PluginRegistry | null | undefined,
+  pluginId: string,
+  jobId: string,
+): void {
+  if (!registry) {
+    return;
+  }
+  let byPlugin = pendingCommittedSchedulerJobIds.get(registry);
+  if (!byPlugin) {
+    byPlugin = new Map();
+    pendingCommittedSchedulerJobIds.set(registry, byPlugin);
+  }
+  let jobIds = byPlugin.get(pluginId);
+  if (!jobIds) {
+    jobIds = new Set();
+    byPlugin.set(pluginId, jobIds);
+  }
+  jobIds.add(jobId);
+}
+
+/** Committed job ids recorded via recordPendingCommittedSchedulerJobId, keyed by pluginId. */
+export function getPendingCommittedSchedulerJobIds(
+  registry: PluginRegistry,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  return pendingCommittedSchedulerJobIds.get(registry) ?? new Map();
 }
