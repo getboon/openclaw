@@ -306,6 +306,21 @@ export async function schedulePluginSessionTurn(params: {
   // beginPendingRegistryOperation for why that race is real, not
   // theoretical, on a host serving multiple concurrent registries.
   const endPendingRegistryOperation = beginPendingRegistryOperation(params.ownerRegistry);
+  // Re-checked explicitly on every FAILURE return below, never on success:
+  // a registry that's genuinely retirable by the time we're done here is
+  // safe to retire immediately when nothing new was just added to it, but
+  // doing the same right after a SUCCESSFUL commit would let this exact
+  // retirement's own cleanup pass (which sweeps the registry's
+  // sessionSchedulerJobs) immediately cancel the job this call just
+  // created -- reopening the bug this whole mechanism exists to fix, one
+  // step later. A registry left un-retired after a success path is picked
+  // up by whatever future event naturally re-checks it, same as any other
+  // registry that stops being live between checks.
+  const retireOwnerIfNowUnused = () => {
+    if (params.ownerRegistry) {
+      retirePluginRegistryIfNowUnused(params.ownerRegistry);
+    }
+  };
   try {
     let result: Awaited<ReturnType<CronServiceContract["add"]>>;
     try {
@@ -331,6 +346,7 @@ export async function schedulePluginSessionTurn(params: {
           name: cronJobName,
         })}): ${formatErrorMessage(error)}`,
       );
+      retireOwnerIfNowUnused();
       return undefined;
     }
     const jobId = result.id;
@@ -342,6 +358,7 @@ export async function schedulePluginSessionTurn(params: {
           name: cronJobName,
         })}): cron.add returned no job id`,
       );
+      retireOwnerIfNowUnused();
       return undefined;
     }
     if (params.shouldCommit && !params.shouldCommit()) {
@@ -362,6 +379,7 @@ export async function schedulePluginSessionTurn(params: {
           })}): failed to remove stale scheduled session turn`,
         );
       }
+      retireOwnerIfNowUnused();
       return undefined;
     }
     const handle = registerPluginSessionSchedulerJob({
@@ -389,9 +407,6 @@ export async function schedulePluginSessionTurn(params: {
     return handle;
   } finally {
     endPendingRegistryOperation();
-    if (params.ownerRegistry) {
-      retirePluginRegistryIfNowUnused(params.ownerRegistry);
-    }
   }
 }
 

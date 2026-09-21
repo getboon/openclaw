@@ -515,11 +515,28 @@ describe("plugin scheduled turns", () => {
       "is in flight -- the caller's own registry was never actually unloaded, just transiently not " +
       "the global active pointer, which retirePluginRegistryIfUnused would otherwise misread as a real unload",
     async () => {
-      const ownerRegistry = createEmptyPluginRegistry();
+      // A REAL loaded plugin record is required, not createEmptyPluginRegistry():
+      // an empty registry has nothing in previousPluginIds, so
+      // cleanupReplacedPluginHostRegistry's whole per-plugin cleanup loop never
+      // iterates at all, which would make this test pass even with the
+      // on-success retirement bug it's meant to catch (an earlier version of
+      // this test used createEmptyPluginRegistry() and did exactly that).
+      const ownerFixture = createPluginRegistryFixture();
+      ownerFixture.registry.registry.plugins.push(
+        createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
+      );
+      const ownerRegistry = ownerFixture.registry.registry;
+      // Deliberately does NOT load WORKFLOW_PLUGIN_ID -- an unrelated
+      // tenant's standalone registry has its own, different plugin set.
       const unrelatedRegistry = createEmptyPluginRegistry();
       setActivePluginRegistry(ownerRegistry);
-      // Mirrors the real isLoadedRecordInActiveRegistry shouldCommit wiring
-      // (registry.ts), not a hand-picked stand-in for it.
+      // Mirrors the retired/activated half of the real
+      // isLoadedRecordInActiveRegistry shouldCommit wiring (registry.ts) --
+      // deliberately drops its isLoadedRecordInRegistry() condition: that
+      // condition is a static snapshot of the registry's own .plugins array
+      // (see registry.ts), orthogonal to the retired/activated race this
+      // test targets, and is exercised by the sibling "removes a stale cron
+      // job..." test above instead.
       const shouldCommit = () =>
         !isPluginRegistryRetired(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
       let resolveCronAdd!: (job: CronJob) => void;
@@ -531,6 +548,7 @@ describe("plugin scheduled turns", () => {
       );
 
       const schedulePromise = scheduleWorkflowTurn({
+        pluginName: "Workflow Plugin",
         schedule: { delayMs: 1 },
         shouldCommit,
         ownerRegistry,
@@ -544,6 +562,15 @@ describe("plugin scheduled turns", () => {
       const handle = await schedulePromise;
 
       expectSessionTurnHandle(handle, "job-survives");
+      // Retirement cleanup for a genuinely-unused registry runs as a
+      // fire-and-forget promise (cleanupRetiredPluginHostRegistry's `void`
+      // call), not something schedulePluginSessionTurn itself awaits -- a
+      // real wall-clock wait here is required to actually observe whether
+      // it eventually cancels the job, not just whether it hasn't
+      // synchronously by the time schedulePluginSessionTurn returns.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
       expect(workflowMocks.cronRemove).not.toHaveBeenCalled();
       expect(listPluginSessionSchedulerJobs(WORKFLOW_PLUGIN_ID)).not.toEqual([]);
     },
