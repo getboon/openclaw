@@ -374,6 +374,7 @@ export async function cleanupReplacedPluginHostRegistry(params: {
   previousRegistry?: PluginRegistry | null;
   nextRegistry?: PluginRegistry | null;
   shouldCleanup?: () => boolean;
+  preserveSchedulerJobIds?: ReadonlySet<string>;
 }): Promise<PluginHostCleanupResult> {
   const previousRegistry = params.previousRegistry;
   const shouldCleanup = params.shouldCleanup ?? (() => true);
@@ -395,14 +396,19 @@ export async function cleanupReplacedPluginHostRegistry(params: {
       break;
     }
     const restarted = nextPluginIds.has(pluginId);
+    // Caller-supplied preserved job ids (e.g. one this same retirement's own
+    // caller just committed) apply regardless of restart/disable, merged with
+    // the restart-specific carryover below.
+    const preserveSchedulerJobIds = new Set([
+      ...(restarted ? collectSchedulerJobIds(params.nextRegistry, pluginId) : []),
+      ...(params.preserveSchedulerJobIds ?? []),
+    ]);
     const result = await runPluginHostCleanup({
       cfg: params.cfg,
       registry: previousRegistry,
       pluginId,
       reason: restarted ? "restart" : "disable",
-      preserveSchedulerJobIds: restarted
-        ? collectSchedulerJobIds(params.nextRegistry, pluginId)
-        : undefined,
+      preserveSchedulerJobIds,
       shouldCleanup,
       restartPromotedSessionEntrySlotKeys: restarted
         ? collectRestartPromotedSessionEntrySlotKeys(

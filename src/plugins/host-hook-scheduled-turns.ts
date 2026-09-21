@@ -306,16 +306,17 @@ export async function schedulePluginSessionTurn(params: {
   // beginPendingRegistryOperation for why that race is real, not
   // theoretical, on a host serving multiple concurrent registries.
   const endPendingRegistryOperation = beginPendingRegistryOperation(params.ownerRegistry);
-  // Called on every FAILURE path below, never on success: retiring right
-  // after a successful commit would let that same retirement's cleanup pass
-  // cancel the job just created. Releases the pin first -- otherwise this
-  // registry's own still-held pin would make the retirement check no-op.
-  const retireOwnerIfNowUnused = () => {
-    endPendingRegistryOperation();
-    if (params.ownerRegistry) {
-      retirePluginRegistryIfNowUnused(params.ownerRegistry);
-    }
-  };
+  // Retirement runs once, here, on every path (success or failure) -- never
+  // inline in a branch. Retiring while the pin above is still held would
+  // just no-op (see beginPendingRegistryOperation), and retiring on success
+  // without preserving the just-created job would let that same retirement's
+  // cleanup pass cancel it. Deferring a real retirement check to a "later
+  // event" isn't safe either: retirement only ever fires as a side effect of
+  // being the immediate previousRegistry in a setActivePluginRegistry call,
+  // so a registry already displaced by an unrelated swap would never be
+  // retired again once bypassed. committedJobId is set only once a job is
+  // actually registered, so failure paths retire with nothing to preserve.
+  let committedJobId: string | undefined;
   try {
     let result: Awaited<ReturnType<CronServiceContract["add"]>>;
     try {
@@ -341,7 +342,6 @@ export async function schedulePluginSessionTurn(params: {
           name: cronJobName,
         })}): ${formatErrorMessage(error)}`,
       );
-      retireOwnerIfNowUnused();
       return undefined;
     }
     const jobId = result.id;
@@ -353,7 +353,6 @@ export async function schedulePluginSessionTurn(params: {
           name: cronJobName,
         })}): cron.add returned no job id`,
       );
-      retireOwnerIfNowUnused();
       return undefined;
     }
     if (params.shouldCommit && !params.shouldCommit()) {
@@ -374,7 +373,6 @@ export async function schedulePluginSessionTurn(params: {
           })}): failed to remove stale scheduled session turn`,
         );
       }
-      retireOwnerIfNowUnused();
       return undefined;
     }
     const handle = registerPluginSessionSchedulerJob({
@@ -399,9 +397,16 @@ export async function schedulePluginSessionTurn(params: {
         },
       },
     });
+    committedJobId = jobId;
     return handle;
   } finally {
     endPendingRegistryOperation();
+    if (params.ownerRegistry) {
+      retirePluginRegistryIfNowUnused(
+        params.ownerRegistry,
+        committedJobId ? new Set([committedJobId]) : undefined,
+      );
+    }
   }
 }
 

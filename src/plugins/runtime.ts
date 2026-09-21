@@ -104,6 +104,7 @@ function isRegistryLive(registry: PluginRegistry): boolean {
 
 async function cleanupPreviousPluginHostRegistry(params: {
   previousRegistry: PluginRegistry;
+  preserveSchedulerJobIds?: ReadonlySet<string>;
 }): Promise<void> {
   const [{ getRuntimeConfig }, { cleanupReplacedPluginHostRegistry }] = await Promise.all([
     import("../config/config.js"),
@@ -121,15 +122,20 @@ async function cleanupPreviousPluginHostRegistry(params: {
     previousRegistry: params.previousRegistry,
     nextRegistry,
     shouldCleanup,
+    preserveSchedulerJobIds: params.preserveSchedulerJobIds,
   });
 }
 
-function cleanupRetiredPluginHostRegistry(previousRegistry: PluginRegistry): void {
+function cleanupRetiredPluginHostRegistry(
+  previousRegistry: PluginRegistry,
+  preserveSchedulerJobIds?: ReadonlySet<string>,
+): void {
   if (!registryHasPluginHostCleanupWork(previousRegistry)) {
     return;
   }
   void cleanupPreviousPluginHostRegistry({
     previousRegistry,
+    preserveSchedulerJobIds,
   }).catch((error: unknown) => {
     log.warn(`plugin host registry cleanup failed: ${String(error)}`);
   });
@@ -148,10 +154,15 @@ function retirePluginRegistryIfUnused(registry: PluginRegistry | null): boolean 
  * (e.g. a pending async operation just settled). Mirrors the re-check every
  * pin-release function already does after uninstalling its own pin -- a
  * registry that was kept alive only by that protection may now be retirable.
+ * preserveSchedulerJobIds protects specific jobs (e.g. one just committed by
+ * the same caller) from the retirement cleanup pass this can trigger.
  */
-export function retirePluginRegistryIfNowUnused(registry: PluginRegistry | null): void {
+export function retirePluginRegistryIfNowUnused(
+  registry: PluginRegistry | null,
+  preserveSchedulerJobIds?: ReadonlySet<string>,
+): void {
   if (retirePluginRegistryIfUnused(registry)) {
-    cleanupRetiredPluginHostRegistry(registry!);
+    cleanupRetiredPluginHostRegistry(registry!, preserveSchedulerJobIds);
   }
 }
 

@@ -577,6 +577,64 @@ describe("plugin scheduled turns", () => {
   );
 
   it(
+    "retires the OWNER's registry once it's genuinely unused after a successful commit, even " +
+      "though an UNRELATED registry displaced it -- retirement only ever fires as a side effect of " +
+      "being the immediate previousRegistry in a future setActivePluginRegistry call, so a registry " +
+      "left un-retired after success would never be retired again once something else takes that slot",
+    async () => {
+      const ownerFixture = createPluginRegistryFixture();
+      ownerFixture.registry.registry.plugins.push(
+        createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
+      );
+      const ownerRegistry = ownerFixture.registry.registry;
+      const unrelatedRegistry = createEmptyPluginRegistry();
+      setActivePluginRegistry(ownerRegistry);
+      const shouldCommit = () =>
+        !isPluginRegistryRetired(ownerRegistry) && isPluginRegistryActivated(ownerRegistry);
+      let resolveCronAdd!: (job: CronJob) => void;
+      workflowMocks.cronAdd.mockImplementation(
+        () =>
+          new Promise<CronJob>((resolve) => {
+            resolveCronAdd = resolve;
+          }),
+      );
+
+      const schedulePromise = scheduleWorkflowTurn({
+        pluginName: "Workflow Plugin",
+        schedule: { delayMs: 1 },
+        shouldCommit,
+        ownerRegistry,
+      });
+      setActivePluginRegistry(unrelatedRegistry);
+      resolveCronAdd(makeCronJob({ id: "job-preserved" }));
+
+      const handle = await schedulePromise;
+      expectSessionTurnHandle(handle, "job-preserved");
+      // markPluginRegistryRetired runs synchronously inside the finally
+      // block, before any async cleanup -- no wait needed to observe this.
+      expect(isPluginRegistryRetired(ownerRegistry)).toBe(true);
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      // The just-committed job survives the retirement cleanup pass its own
+      // caller triggered, because it was passed as a preserved job id.
+      expect(workflowMocks.cronRemove).not.toHaveBeenCalled();
+      expect(listPluginSessionSchedulerJobs(WORKFLOW_PLUGIN_ID)).not.toEqual([]);
+
+      // A LATER same-key reload of the unrelated context that displaced
+      // ownerRegistry only ever retires ITS OWN previousRegistry
+      // (unrelatedRegistry) -- ownerRegistry must already be retired by this
+      // point (asserted above), since this swap chain would never reach it.
+      const reloadedUnrelatedRegistry = createEmptyPluginRegistry();
+      setActivePluginRegistry(unrelatedRegistry, "unrelated-context");
+      setActivePluginRegistry(reloadedUnrelatedRegistry, "unrelated-context");
+      expect(isPluginRegistryRetired(ownerRegistry)).toBe(true);
+      expect(workflowMocks.cronRemove).not.toHaveBeenCalled();
+    },
+  );
+
+  it(
     "still rolls back a job when the OWNER's own standalone context genuinely reloads while " +
       "cron.add is in flight -- a same-cache-key replacement is a real generation change, not " +
       "the unrelated-tenant swap the pending-operation pin exists to survive",
