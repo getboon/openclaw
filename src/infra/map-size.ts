@@ -20,3 +20,26 @@ export function pruneMapToMaxSize<K, V>(map: Map<K, V>, maxSize: number): void {
     map.delete(oldest.value);
   }
 }
+
+/** Prunes a Set in insertion order until it fits the requested maximum size. */
+export function pruneSetToMaxSize<T>(set: Set<T>, maxSize: number): void {
+  if (Number.isNaN(maxSize) || maxSize === Number.POSITIVE_INFINITY) {
+    // Treat "unknown" or unlimited sizes as no-op so callers can wire optional caps directly.
+    return;
+  }
+  const limit = Math.max(0, Math.floor(maxSize));
+  if (limit <= 0) {
+    set.clear();
+    return;
+  }
+
+  while (set.size > limit) {
+    // Set iteration is insertion ordered; deleting the first value preserves the newest tracked
+    // entries for request/memory guard caches.
+    const oldest = set.values().next();
+    if (oldest.done) {
+      break;
+    }
+    set.delete(oldest.value);
+  }
+}

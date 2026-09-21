@@ -1,5 +1,6 @@
 // Discord plugin module implements gateway supervisor behavior.
 import type { EventEmitter } from "node:events";
+import { pruneSetToMaxSize } from "openclaw/plugin-sdk/collection-runtime";
 import { createSubsystemLogger, danger } from "openclaw/plugin-sdk/runtime-env";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import { formatErrorMessage } from "openclaw/plugin-sdk/ssrf-runtime";
@@ -43,6 +44,10 @@ type GatewaySupervisorPhase = "active" | "buffering" | "disposed" | "teardown";
 
 const discordGatewayLog = createSubsystemLogger("discord/gateway");
 const discordGatewayLateErrorGuards = new WeakMap<EventEmitter, (err: unknown) => void>();
+// Tracks which supervisor instance currently owns a given emitter, so an
+// older overlapping supervisor's delayed dispose() can tell it's no longer
+// the owner and skip installing the late-error guard over an active one.
+const discordGatewaySupervisorOwners = new WeakMap<EventEmitter, symbol>();
 
 function removeDiscordGatewayLateErrorGuard(emitter: EventEmitter): void {
   const guard = discordGatewayLateErrorGuards.get(emitter);
@@ -53,6 +58,8 @@ function removeDiscordGatewayLateErrorGuard(emitter: EventEmitter): void {
   discordGatewayLateErrorGuards.delete(emitter);
 }
 
+const DISCORD_GATEWAY_LATE_ERROR_SEEN_MESSAGES_MAX_ENTRIES = 200;
+
 function ensureDiscordGatewayLateErrorGuard(emitter: EventEmitter): void {
   if (discordGatewayLateErrorGuards.has(emitter)) {
     return;
@@ -60,12 +67,14 @@ function ensureDiscordGatewayLateErrorGuard(emitter: EventEmitter): void {
   const seenMessages = new Set<string>();
   // Keep the emitter safe after its supervisor is gone without retaining the disposed runtime.
   // A module-owned logger preserves one diagnostic per distinct late error until the next start.
+  // Bounded so an emitter stuck emitting endlessly varying late errors can't grow this forever.
   const guard = (err: unknown) => {
     const message = formatDiscordGatewayErrorMessage(err);
     if (seenMessages.has(message)) {
       return;
     }
     seenMessages.add(message);
+    pruneSetToMaxSize(seenMessages, DISCORD_GATEWAY_LATE_ERROR_SEEN_MESSAGES_MAX_ENTRIES);
     discordGatewayLog.error(`suppressed late gateway error after dispose: ${message}`);
   };
   discordGatewayLateErrorGuards.set(emitter, guard);
@@ -200,6 +209,8 @@ export function createDiscordGatewaySupervisor(params: {
         pending.push(event);
     }
   };
+  const ownerToken = Symbol("discord-gateway-supervisor-owner");
+  discordGatewaySupervisorOwners.set(emitter, ownerToken);
   removeDiscordGatewayLateErrorGuard(emitter);
   emitter.on("error", onGatewayError);
 
@@ -231,7 +242,13 @@ export function createDiscordGatewaySupervisor(params: {
         return;
       }
       emitter.off("error", onGatewayError);
-      ensureDiscordGatewayLateErrorGuard(emitter);
+      // Only the current owner installs the late-error guard. A newer
+      // supervisor may already have taken over this emitter by the time an
+      // older overlapping one's dispose() runs; installing the guard then
+      // would shadow the newer supervisor's still-active handler.
+      if (discordGatewaySupervisorOwners.get(emitter) === ownerToken) {
+        ensureDiscordGatewayLateErrorGuard(emitter);
+      }
       lifecycleHandler = undefined;
       phase = "disposed";
       pending.length = 0;

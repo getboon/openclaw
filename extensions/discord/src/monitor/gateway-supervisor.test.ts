@@ -152,6 +152,74 @@ describe("createDiscordGatewaySupervisor", () => {
     );
   });
 
+  it("bounds the late-error dedup set so a stream of distinct errors can't grow it forever", () => {
+    const emitter = new EventEmitter();
+    gatewayLogError.mockClear();
+
+    const supervisor = createDiscordGatewaySupervisor({
+      gateway: { emitter },
+      isDisallowedIntentsError: () => false,
+      runtime: { error: vi.fn() } as never,
+    });
+    supervisor.dispose();
+
+    const firstMessage = "late gateway error 0";
+    emitter.emit("error", new Error(firstMessage));
+    expect(gatewayLogError).toHaveBeenCalledWith(
+      `suppressed late gateway error after dispose: Error: ${firstMessage}`,
+    );
+
+    // Push the dedup set well past its bound with distinct messages.
+    for (let index = 1; index <= 250; index += 1) {
+      emitter.emit("error", new Error(`late gateway error ${index}`));
+    }
+
+    gatewayLogError.mockClear();
+    // The very first message should have been evicted by now, so it logs again
+    // instead of staying silently deduped forever.
+    emitter.emit("error", new Error(firstMessage));
+    expect(gatewayLogError).toHaveBeenCalledWith(
+      `suppressed late gateway error after dispose: Error: ${firstMessage}`,
+    );
+  });
+
+  it("does not let an older overlapping supervisor's dispose shadow a newer supervisor still owning the emitter", () => {
+    const emitter = new EventEmitter();
+    gatewayLogError.mockClear();
+    const runtimeA = { error: vi.fn() };
+    const runtimeB = { error: vi.fn() };
+
+    const supervisorA = createDiscordGatewaySupervisor({
+      gateway: { emitter },
+      isDisallowedIntentsError: () => false,
+      runtime: runtimeA as never,
+    });
+    // A newer supervisor takes over the same emitter before A disposes.
+    const supervisorB = createDiscordGatewaySupervisor({
+      gateway: { emitter },
+      isDisallowedIntentsError: () => false,
+      runtime: runtimeB as never,
+    });
+    supervisorB.attachLifecycle(vi.fn());
+
+    // A's delayed dispose must not install the shared late-error guard over B.
+    supervisorA.dispose();
+    expect(gatewayLogError).not.toHaveBeenCalled();
+
+    const liveHandler = vi.fn();
+    supervisorB.attachLifecycle(liveHandler);
+    emitter.emit("error", new Error("still active under B"));
+    expect(liveHandler).toHaveBeenCalledTimes(1);
+    expect(gatewayLogError).not.toHaveBeenCalled();
+
+    // Once the actual current owner disposes, the guard installs normally.
+    supervisorB.dispose();
+    emitter.emit("error", new Error("late gateway error after B disposes"));
+    expect(gatewayLogError).toHaveBeenCalledWith(
+      "suppressed late gateway error after dispose: Error: late gateway error after B disposes",
+    );
+  });
+
   it("still installs the late error guard when an unrelated error listener is present at dispose", () => {
     const emitter = new EventEmitter();
     gatewayLogError.mockClear();
