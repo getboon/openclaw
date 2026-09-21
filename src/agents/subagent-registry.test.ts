@@ -335,6 +335,49 @@ describe("subagent registry seam flow", () => {
     ]);
   });
 
+  it("records the audit trace onto the matching registry row and persists (ENG-19951)", () => {
+    mod.addSubagentRunForTests({
+      runId: "run-1",
+      childSessionKey: "agent:main:subagent:child-1",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "run takeoff scopes",
+      cleanup: "keep",
+      createdAt: 1_000,
+    });
+
+    const auditTrace = {
+      schemaVersion: 1 as const,
+      visibleTools: ["takeoff_dispatch"],
+      toolInvocations: [{ name: "takeoff_dispatch", status: "ok" as const }],
+      evidence: [
+        { kind: "tool_outcome" as const, tool: "takeoff_dispatch", status: "ok" as const },
+      ],
+      confidence: "high" as const,
+      disposition: "completed" as const,
+      reason: "tool_execution_succeeded" as const,
+    };
+    mod.recordSubagentReplyAuditTrace("agent:main:subagent:child-1", auditTrace);
+
+    const found = mod.getLatestSubagentRunByChildSessionKey("agent:main:subagent:child-1");
+    expect(found?.completion?.resultAuditTrace).toEqual(auditTrace);
+    expect(mocks.persistSubagentRunsToDisk).toHaveBeenCalled();
+  });
+
+  it("no-ops without throwing when no registry row matches the session key (ENG-19951)", () => {
+    expect(() =>
+      mod.recordSubagentReplyAuditTrace("agent:main:subagent:does-not-exist", {
+        schemaVersion: 1,
+        visibleTools: [],
+        toolInvocations: [],
+        evidence: [],
+        confidence: "medium",
+        disposition: "completed",
+        reason: "no_tools_visible",
+      }),
+    ).not.toThrow();
+  });
+
   it("uses the disk-aware run snapshot for maintenance preservation", () => {
     const now = Date.now();
     mocks.getSubagentRunsSnapshotForRead.mockReturnValueOnce(

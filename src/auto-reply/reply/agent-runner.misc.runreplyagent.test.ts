@@ -194,10 +194,15 @@ vi.mock("../../acp/control-plane/manager.js", () => ({
   }),
 }));
 
+const subagentRegistryMocks = vi.hoisted(() => ({
+  recordSubagentReplyAuditTraceMock: vi.fn(),
+}));
 vi.mock("../../agents/subagent-registry.js", () => ({
   getLatestSubagentRunByChildSessionKey: () => null,
   listSubagentRunsForController: () => [],
   markSubagentRunTerminated: () => 0,
+  recordSubagentReplyAuditTrace: (...args: unknown[]) =>
+    subagentRegistryMocks.recordSubagentReplyAuditTraceMock(...args),
 }));
 
 // #85714: keep the real private-final decision but spy the WARN emitter so we
@@ -262,6 +267,7 @@ beforeEach(() => {
   embeddedRunTesting.resetActiveEmbeddedRuns();
   replyRunRegistryTesting.resetReplyRunRegistry();
   runEmbeddedAgentMock.mockClear();
+  subagentRegistryMocks.recordSubagentReplyAuditTraceMock.mockClear();
   warnPrivateFinalSpy.mockClear();
   runCliAgentMock.mockClear();
   runWithModelFallbackMock.mockClear();
@@ -322,6 +328,7 @@ describe("runReplyAgent auto-compaction token update", () => {
     config?: Record<string, unknown>;
     sessionFile?: string;
     workspaceDir?: string;
+    sessionKey?: string;
   }) {
     const typing = createMockTypingController();
     const sessionCtx = {
@@ -339,7 +346,7 @@ describe("runReplyAgent auto-compaction token update", () => {
         agentId: "main",
         agentDir: "/tmp/agent",
         sessionId: "session",
-        sessionKey: "main",
+        sessionKey: params.sessionKey ?? "main",
         messageProvider: "whatsapp",
         sessionFile: params.sessionFile ?? "/tmp/session.jsonl",
         workspaceDir: params.workspaceDir ?? "/tmp",
@@ -508,6 +515,125 @@ describe("runReplyAgent auto-compaction token update", () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain("private_input=not-for-audit-trace");
+  });
+
+  it("records the audit trace onto the subagent registry when the reply is for a subagent child session (ENG-19951)", async () => {
+    const sessionKey = "agent:main:subagent:child-1";
+    const sessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 50_000,
+    };
+    runEmbeddedAgentMock.mockResolvedValue({
+      payloads: [{ text: "Project found." }],
+      meta: {
+        agentMeta: {},
+        toolSummary: {
+          calls: 1,
+          tools: ["buildingconnected_list_projects"],
+          failures: 0,
+          visibleTools: ["buildingconnected_list_projects", "read"],
+          invocations: [{ name: "buildingconnected_list_projects", status: "ok" }],
+        },
+        completion: { stopReason: "end_turn", refusal: false },
+      },
+    });
+    const { typing, sessionCtx, resolvedQueue, followupRun } = createBaseRun({
+      storePath: "",
+      sessionEntry,
+      sessionKey,
+    });
+
+    await runReplyAgent({
+      commandBody: "Find the active BuildingConnected project",
+      followupRun,
+      queueKey: sessionKey,
+      resolvedQueue,
+      shouldSteer: false,
+      shouldFollowup: false,
+      isActive: false,
+      isStreaming: false,
+      typing,
+      sessionCtx,
+      sessionEntry,
+      sessionStore: { [sessionKey]: sessionEntry },
+      sessionKey,
+      defaultModel: "anthropic/claude-opus-4-6",
+      agentCfgContextTokens: 200_000,
+      resolvedVerboseLevel: "off",
+      isNewSession: false,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      shouldInjectGroupIntro: false,
+      typingMode: "instant",
+    });
+
+    expect(subagentRegistryMocks.recordSubagentReplyAuditTraceMock).toHaveBeenCalledTimes(1);
+    expect(subagentRegistryMocks.recordSubagentReplyAuditTraceMock).toHaveBeenCalledWith(
+      sessionKey,
+      expect.objectContaining({
+        schemaVersion: 1,
+        visibleTools: ["buildingconnected_list_projects", "read"],
+        toolInvocations: [{ name: "buildingconnected_list_projects", status: "ok" }],
+        confidence: "high",
+        disposition: "completed",
+        reason: "tool_execution_succeeded",
+      }),
+    );
+  });
+
+  it("does not record onto the registry for a top-level (non-subagent) session (ENG-19951)", async () => {
+    const sessionKey = "main";
+    const sessionEntry = {
+      sessionId: "session",
+      updatedAt: Date.now(),
+      totalTokens: 50_000,
+    };
+    runEmbeddedAgentMock.mockResolvedValue({
+      payloads: [{ text: "Project found." }],
+      meta: {
+        agentMeta: {},
+        toolSummary: {
+          calls: 1,
+          tools: ["buildingconnected_list_projects"],
+          failures: 0,
+          visibleTools: ["buildingconnected_list_projects", "read"],
+          invocations: [{ name: "buildingconnected_list_projects", status: "ok" }],
+        },
+        completion: { stopReason: "end_turn", refusal: false },
+      },
+    });
+    const { typing, sessionCtx, resolvedQueue, followupRun } = createBaseRun({
+      storePath: "",
+      sessionEntry,
+      sessionKey,
+    });
+
+    await runReplyAgent({
+      commandBody: "Find the active BuildingConnected project",
+      followupRun,
+      queueKey: sessionKey,
+      resolvedQueue,
+      shouldSteer: false,
+      shouldFollowup: false,
+      isActive: false,
+      isStreaming: false,
+      typing,
+      sessionCtx,
+      sessionEntry,
+      sessionStore: { [sessionKey]: sessionEntry },
+      sessionKey,
+      defaultModel: "anthropic/claude-opus-4-6",
+      agentCfgContextTokens: 200_000,
+      resolvedVerboseLevel: "off",
+      isNewSession: false,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      shouldInjectGroupIntro: false,
+      typingMode: "instant",
+    });
+
+    expect(subagentRegistryMocks.recordSubagentReplyAuditTraceMock).not.toHaveBeenCalled();
   });
 
   it("keeps an unarmed preflight drain visible instead of dropping the reply", async () => {

@@ -3,6 +3,7 @@
  *
  * Owns registration, lifecycle, delivery retry, steering, orphan recovery, persistence, and cleanup for child runs.
  */
+import type { AgentDecisionTrace } from "../auto-reply/reply-payload.js";
 import type { cleanupBrowserSessionsForLifecycleEnd } from "../browser-lifecycle-cleanup.js";
 import { getRuntimeConfig } from "../config/config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -1310,6 +1311,40 @@ export const testing = {
 
 export function addSubagentRunForTests(entry: SubagentRunRecord) {
   subagentRuns.set(entry.runId, entry);
+}
+
+/**
+ * Records a subagent's own already-computed audit trace onto its registry
+ * row (ENG-19951). Called from agent-runner.ts at the exact point that
+ * trace is computed for the child's own reply — independent of, and
+ * earlier than, the later text-only completion freeze. Looks up the live
+ * map directly, not via getSubagentRunsSnapshotForRead (which may return a
+ * structuredClone'd snapshot outside test mode, so writing through it
+ * would silently not persist). No-ops if no row matches — an orphaned or
+ * already-cleaned-up child simply has nothing left to record onto.
+ */
+export function recordSubagentReplyAuditTrace(
+  childSessionKey: string,
+  auditTrace: AgentDecisionTrace,
+): void {
+  const key = childSessionKey.trim();
+  if (!key) {
+    return;
+  }
+  let latest: SubagentRunRecord | null = null;
+  for (const entry of subagentRuns.values()) {
+    if (entry.childSessionKey !== key) {
+      continue;
+    }
+    if (!latest || entry.createdAt > latest.createdAt) {
+      latest = entry;
+    }
+  }
+  if (!latest) {
+    return;
+  }
+  ensureCompletionState(latest).resultAuditTrace = auditTrace;
+  persistSubagentRuns();
 }
 
 export function releaseSubagentRun(runId: string) {
