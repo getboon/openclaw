@@ -18,28 +18,17 @@ describe("plugin registry cache-key supersession bookkeeping", () => {
     expect(isPluginRegistryCacheKeySuperseded(newer)).toBe(false);
   });
 
-  it(
-    "drops a retired registry's latest-by-cache-key slot immediately, instead of leaving it " +
-      "for real GC to eventually reclaim -- a gateway cycling through many distinct cache keys " +
-      "would otherwise keep accumulating one map entry per key until each retired registry " +
-      "happens to be collected",
-    () => {
-      const registry = createEmptyPluginRegistry();
-      recordPluginRegistryCacheKey(registry, "retiring-key");
+  it("drops a retired registry's latest-by-cache-key slot instead of leaving it for GC", () => {
+    const registry = createEmptyPluginRegistry();
+    recordPluginRegistryCacheKey(registry, "retiring-key");
 
-      markPluginRegistryRetired(registry);
+    markPluginRegistryRetired(registry);
 
-      // A later registry reusing the SAME cache key finds no stale "latest"
-      // entry still pointing at the retired one. If the slot had been left
-      // in place, this call would mark the (already-retired) registry
-      // superseded too, via the exact same-key-reuse path the first test
-      // above exercises -- observable proof the slot was actually cleared,
-      // not just that isPluginRegistrySuperseded happens to already be true
-      // via the separate retired flag.
-      const laterRegistry = createEmptyPluginRegistry();
-      recordPluginRegistryCacheKey(laterRegistry, "retiring-key");
-      expect(isPluginRegistryCacheKeySuperseded(registry)).toBe(false);
-      expect(isPluginRegistryCacheKeySuperseded(laterRegistry)).toBe(false);
-    },
-  );
+    // Clearing the slot here means a later same-key registry can't mark
+    // this retired registry superseded via the cache-key reuse path.
+    const laterRegistry = createEmptyPluginRegistry();
+    recordPluginRegistryCacheKey(laterRegistry, "retiring-key");
+    expect(isPluginRegistryCacheKeySuperseded(registry)).toBe(false);
+    expect(isPluginRegistryCacheKeySuperseded(laterRegistry)).toBe(false);
+  });
 });
