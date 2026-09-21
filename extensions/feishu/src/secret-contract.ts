@@ -91,13 +91,9 @@ export function collectRuntimeConfigAssignments(params: {
     return;
   }
   const { channel: feishu, surface } = resolved;
-  // Feishu account listing starts an implicit default account from top-level
-  // appId+appSecret even when every named account overrides appSecret.  The
-  // shared helper's isBaseFieldActiveForChannelSurface only checks whether any
-  // explicit account inherits the field, so top-level appSecret refs would be
-  // skipped when all accounts override.  Account for the implicit default here,
-  // unless an explicit accounts.default entry disables it: an explicitly
-  // disabled default account must not still count as an active implicit one.
+  // Feishu retains an implicit top-level default when root appId/appSecret
+  // are configured. Keep its appSecret active unless accounts.default
+  // explicitly disables that account.
   const explicitDefaultAccountDisabled =
     surface.accounts.find((entry) => entry.accountId === "default")?.enabled === false;
   const hasImplicitDefaultAccount =

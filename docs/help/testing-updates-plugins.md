@@ -158,8 +158,9 @@ older trusted releases.
 
 Candidate sources:
 
-- `source=npm`: validate `openclaw@beta`, `openclaw@extended-stable`,
-  `openclaw@latest`, or an exact published version.
+- `source=npm`: validate `openclaw@alpha`, `openclaw@beta`,
+  `openclaw@extended-stable`, `openclaw@latest`, or an exact published
+  version.
 - `source=ref`: pack a trusted branch, tag, or commit with the selected current
   harness.
 - `source=url`: validate a public HTTPS tarball with required `package_sha256`.

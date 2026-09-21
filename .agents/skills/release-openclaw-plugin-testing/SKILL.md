@@ -125,7 +125,7 @@ environment, secret, OIDC, npm mutation, or ClawHub mutation path:
 
 ```bash
 release_sha="$(git rev-parse <branch-or-sha>)"
-ghx workflow run plugin-npm-release.yml \
+gh workflow run plugin-npm-release.yml \
   --repo openclaw/openclaw \
   --ref main \
   -f preflight_only=true \
