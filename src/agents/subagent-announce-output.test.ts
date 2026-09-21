@@ -6,6 +6,7 @@ import {
   applySubagentWaitOutcome,
   buildCompactAnnounceStatsLine,
   buildChildCompletionFindings,
+  collectChildCompletionToolEvidence,
   isSyntheticNoOutputResult,
   readSubagentOutput,
 } from "./subagent-announce-output.js";
@@ -331,6 +332,46 @@ describe("buildChildCompletionFindings", () => {
 
     expect(findings).toContain("1. visible task");
     expect(findings).not.toContain("2. visible task");
+  });
+});
+
+describe("collectChildCompletionToolEvidence", () => {
+  it("carries childToolEvidence for every child that has a frozen audit trace (ENG-19951)", () => {
+    const rows = [
+      {
+        childSessionKey: "child-a",
+        task: "run steel scope",
+        createdAt: 1,
+        outcome: { status: "ok" as const },
+        completion: {
+          resultText: "steel done",
+          resultAuditTrace: {
+            schemaVersion: 1 as const,
+            visibleTools: ["takeoff_dispatch"],
+            toolInvocations: [{ name: "takeoff_dispatch", status: "ok" as const }],
+            evidence: [],
+            confidence: "high" as const,
+            disposition: "completed" as const,
+            reason: "tool_execution_succeeded" as const,
+          },
+        },
+      },
+      {
+        childSessionKey: "child-b",
+        task: "run concrete scope",
+        createdAt: 2,
+        outcome: { status: "ok" as const },
+        completion: { resultText: "concrete done" },
+      },
+    ];
+    const evidence = collectChildCompletionToolEvidence(rows);
+    expect(evidence).toEqual([
+      {
+        childSessionKey: "child-a",
+        toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+        visibleTools: ["takeoff_dispatch"],
+      },
+    ]);
   });
 });
 

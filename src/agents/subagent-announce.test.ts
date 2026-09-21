@@ -51,6 +51,14 @@ const { subagentRegistryRuntimeMock } = vi.hoisted(() => ({
     listSubagentRunsForRequester: vi.fn(() => []),
     replaceSubagentRunAfterSteer: vi.fn(() => true),
     resolveRequesterForChildSession: vi.fn(() => null),
+    getLatestSubagentRunByChildSessionKey: vi.fn(
+      ():
+        | {
+            childSessionKey: string;
+            completion?: { required?: boolean; resultAuditTrace?: unknown };
+          }
+        | undefined => undefined,
+    ),
   },
 }));
 
@@ -105,6 +113,7 @@ vi.mock("./subagent-announce-delivery.js", () => ({
     directOrigin?: { channel?: string; to?: string; accountId?: string; threadId?: string };
     requesterSessionOrigin?: { provider?: string; channel?: string };
     bestEffortDeliver?: boolean;
+    internalEvents?: unknown;
   }) => {
     deliverSubagentAnnouncementArgsMock(params);
     // The delivery mock preserves the key branch: active Discord requester
@@ -137,6 +146,7 @@ vi.mock("./subagent-announce-delivery.js", () => ({
       params: {
         sessionKey: params.targetRequesterSessionKey,
         message: params.triggerMessage,
+        internalEvents: params.internalEvents,
         deliver:
           !params.requesterIsSubagent &&
           effectiveOrigin?.channel !== "webchat" &&
@@ -325,6 +335,40 @@ describe("subagent announce seam flow", () => {
     subagentRegistryRuntimeMock.replaceSubagentRunAfterSteer.mockReturnValue(true);
     subagentRegistryRuntimeMock.resolveRequesterForChildSession.mockReset();
     subagentRegistryRuntimeMock.resolveRequesterForChildSession.mockReturnValue(null);
+    subagentRegistryRuntimeMock.getLatestSubagentRunByChildSessionKey.mockReset();
+    subagentRegistryRuntimeMock.getLatestSubagentRunByChildSessionKey.mockReturnValue(undefined);
+  });
+
+  it("populates childToolEvidence on the completion event from the registry-recorded audit trace (ENG-19951)", async () => {
+    const auditTrace = {
+      schemaVersion: 1,
+      visibleTools: ["takeoff_dispatch"],
+      toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+      evidence: [{ kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok" }],
+      confidence: "high",
+      disposition: "completed",
+      reason: "tool_execution_succeeded",
+    };
+    subagentRegistryRuntimeMock.getLatestSubagentRunByChildSessionKey.mockReturnValueOnce({
+      childSessionKey: "agent:main:subagent:fixture",
+      completion: { required: true, resultAuditTrace: auditTrace },
+    });
+
+    await runCompletionFixture({ roundOneReply: "All 7 scopes completed." });
+
+    const call = requireAgentCall();
+    const message = (call.params as { message?: string })?.message ?? "";
+    expect(message).toContain("All 7 scopes completed.");
+    const internalEvents = (
+      call.params as { internalEvents?: Array<{ childToolEvidence?: unknown }> }
+    )?.internalEvents;
+    expect(internalEvents?.[0]?.childToolEvidence).toEqual([
+      {
+        childSessionKey: "agent:main:subagent:fixture",
+        toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+        visibleTools: ["takeoff_dispatch"],
+      },
+    ]);
   });
 
   it("suppresses ANNOUNCE_SKIP delivery while still deleting the child session", async () => {

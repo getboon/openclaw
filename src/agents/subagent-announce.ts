@@ -24,6 +24,7 @@ import {
   formatAgentInternalEventsForPlainPrompt,
   formatAgentInternalEventsForPrompt,
   type AgentInternalEvent,
+  type SubagentToolEvidence,
 } from "./internal-events.js";
 import {
   deliverSubagentAnnouncement,
@@ -39,6 +40,7 @@ import {
   applySubagentWaitOutcome,
   buildChildCompletionFindings,
   buildCompactAnnounceStatsLine,
+  collectChildCompletionToolEvidence,
   dedupeLatestChildCompletionRows,
   filterCurrentDirectChildCompletionRows,
   readLatestSubagentOutputWithRetry,
@@ -322,6 +324,7 @@ export async function runSubagentAnnounceFlow(params: {
       requesterDepth >= 1 || isCronSessionKey(targetRequesterSessionKey);
 
     let childCompletionFindings: string | undefined;
+    let multiChildToolEvidence: SubagentToolEvidence[] = [];
     let subagentRegistryRuntime:
       | Awaited<ReturnType<typeof loadSubagentRegistryRuntime>>
       | undefined;
@@ -353,15 +356,15 @@ export async function runSubagentAnnounceFlow(params: {
           },
         );
         if (Array.isArray(directChildren) && directChildren.length > 0) {
-          childCompletionFindings = buildChildCompletionFindings(
-            dedupeLatestChildCompletionRows(
-              filterCurrentDirectChildCompletionRows(directChildren, {
-                requesterSessionKey: params.childSessionKey,
-                getLatestSubagentRunByChildSessionKey:
-                  subagentRegistryRuntime.getLatestSubagentRunByChildSessionKey,
-              }),
-            ),
+          const filteredChildren = dedupeLatestChildCompletionRows(
+            filterCurrentDirectChildCompletionRows(directChildren, {
+              requesterSessionKey: params.childSessionKey,
+              getLatestSubagentRunByChildSessionKey:
+                subagentRegistryRuntime.getLatestSubagentRunByChildSessionKey,
+            }),
           );
+          childCompletionFindings = buildChildCompletionFindings(filteredChildren);
+          multiChildToolEvidence = collectChildCompletionToolEvidence(filteredChildren);
         }
       }
     } catch {
@@ -528,6 +531,22 @@ export async function runSubagentAnnounceFlow(params: {
       startedAt: params.startedAt,
       endedAt: params.endedAt,
     });
+    // ENG-19951: a plain registry lookup by this child's own session key --
+    // independent of which text-source `reply` came from above.
+    const ownAuditTrace = subagentRegistryRuntime?.getLatestSubagentRunByChildSessionKey?.(
+      params.childSessionKey,
+    )?.completion?.resultAuditTrace;
+    const directChildToolEvidence: SubagentToolEvidence[] = childCompletionFindings
+      ? multiChildToolEvidence
+      : ownAuditTrace?.toolInvocations?.length
+        ? [
+            {
+              childSessionKey: params.childSessionKey,
+              toolInvocations: ownAuditTrace.toolInvocations,
+              visibleTools: ownAuditTrace.visibleTools ?? [],
+            },
+          ]
+        : [];
     const completionEvent: AgentInternalEvent = {
       type: "task_completion",
       source: announceType === "cron job" ? "cron" : "subagent",
@@ -540,6 +559,7 @@ export async function runSubagentAnnounceFlow(params: {
       result: findings,
       statsLine,
       replyInstruction,
+      ...(directChildToolEvidence.length > 0 ? { childToolEvidence: directChildToolEvidence } : {}),
     };
     const internalEvents: AgentInternalEvent[] = [completionEvent];
     const triggerMessage = buildAnnounceSteerMessage(internalEvents);

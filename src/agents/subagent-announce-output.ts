@@ -4,8 +4,10 @@
  * Reads child session output, detects waiting states, and formats completion findings for announcements.
  */
 import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
+import type { AgentDecisionTrace } from "../auto-reply/reply-payload.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { buildAgentRunTerminalOutcomeFromWaitResult } from "./agent-run-terminal-outcome.js";
+import type { SubagentToolEvidence } from "./internal-events.js";
 import { wrapPromptDataBlock } from "./sanitize-for-prompt.js";
 import {
   captureSubagentCompletionReplyUsing,
@@ -373,11 +375,13 @@ type ChildCompletionRow = {
   completion?: {
     resultText?: string | null;
     fallbackResultText?: string | null;
+    resultAuditTrace?: AgentDecisionTrace;
   };
   delivery?: {
     payload?: {
       frozenResultText?: string | null;
       fallbackFrozenResultText?: string | null;
+      frozenAuditTrace?: AgentDecisionTrace;
     };
   };
   outcome?: SubagentRunOutcome;
@@ -392,6 +396,12 @@ function selectChildCompletionResultText(child: ChildCompletionRow): string | un
     child.frozenResultText ??
     undefined
   )?.trim();
+}
+
+function selectChildCompletionAuditTrace(
+  child: ChildCompletionRow,
+): AgentDecisionTrace | undefined {
+  return child.completion?.resultAuditTrace ?? child.delivery?.payload?.frozenAuditTrace;
 }
 
 export function buildChildCompletionFindings(
@@ -435,6 +445,32 @@ export function buildChildCompletionFindings(
   }
 
   return ["Child completion results:", "", ...sections].join("\n\n");
+}
+
+export function collectChildCompletionToolEvidence(
+  children: Array<ChildCompletionRow>,
+): SubagentToolEvidence[] {
+  const sorted = [...children].toSorted((a, b) => {
+    if (a.createdAt !== b.createdAt) {
+      return a.createdAt - b.createdAt;
+    }
+    const aEnded = typeof a.endedAt === "number" ? a.endedAt : Number.MAX_SAFE_INTEGER;
+    const bEnded = typeof b.endedAt === "number" ? b.endedAt : Number.MAX_SAFE_INTEGER;
+    return aEnded - bEnded;
+  });
+  const out: SubagentToolEvidence[] = [];
+  for (const child of sorted) {
+    const auditTrace = selectChildCompletionAuditTrace(child);
+    if (!auditTrace?.toolInvocations?.length) {
+      continue;
+    }
+    out.push({
+      childSessionKey: child.childSessionKey,
+      toolInvocations: auditTrace.toolInvocations,
+      visibleTools: auditTrace.visibleTools ?? [],
+    });
+  }
+  return out;
 }
 
 export function dedupeLatestChildCompletionRows(
