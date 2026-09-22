@@ -23,7 +23,7 @@ import { wrapPromptDataBlock } from "./sanitize-for-prompt.js";
 
 /**
  * Structured tool-call evidence a completing subagent already computed for
- * its own reply (ENG-19951), carried alongside the completion event so the
+ * its own reply, carried alongside the completion event so the
  * resuming parent's own audit trace can include delegated work. One entry
  * per settled child in a wake — never rendered into the prompt (see
  * formatTaskCompletionEvent below, which never reads this field).

@@ -120,7 +120,7 @@ export type ToolSummaryTrace = {
     status: "ok" | "partial" | "error" | "blocked";
     /** Real error text for a blocked pre-execution-failure call; absent otherwise. */
     detail?: string;
-    /** Set when this invocation was made by a delegated subagent, not this attempt (ENG-19951). */
+    /** Set when this invocation was made by a delegated subagent, not this attempt. */
     viaSubagent?: boolean;
   }>;
   /**

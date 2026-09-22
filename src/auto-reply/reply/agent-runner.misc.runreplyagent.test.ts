@@ -517,7 +517,7 @@ describe("runReplyAgent auto-compaction token update", () => {
     expect(JSON.stringify(result)).not.toContain("private_input=not-for-audit-trace");
   });
 
-  it("records the audit trace onto the subagent registry when the reply is for a subagent child session (ENG-19951)", async () => {
+  it("records the audit trace onto the subagent registry when the reply is for a subagent child session", async () => {
     const sessionKey = "agent:main:subagent:child-1";
     const sessionEntry = {
       sessionId: "session",
@@ -582,7 +582,7 @@ describe("runReplyAgent auto-compaction token update", () => {
     );
   });
 
-  it("does not record onto the registry for a top-level (non-subagent) session (ENG-19951)", async () => {
+  it("does not record onto the registry for a top-level (non-subagent) session", async () => {
     const sessionKey = "main";
     const sessionEntry = {
       sessionId: "session",

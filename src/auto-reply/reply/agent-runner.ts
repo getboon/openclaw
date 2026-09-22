@@ -432,7 +432,7 @@ type TraceToolSummaryView = {
     name: string;
     status: "ok" | "partial" | "error" | "blocked";
     detail?: string;
-    /** Set when this invocation was made by a delegated subagent, not this attempt (ENG-19951). */
+    /** Set when this invocation was made by a delegated subagent, not this attempt. */
     viaSubagent?: boolean;
   }>;
   /**
@@ -2433,7 +2433,7 @@ export async function runReplyAgent(params: {
       });
       finalPayloads = attachAgentDecisionTrace(finalPayloads, auditTrace);
       if (sessionKey && isSubagentSessionKey(sessionKey)) {
-        // ENG-19951: capture the child's own audit trace onto its registry
+        // capture the child's own audit trace onto its registry
         // row here, at the only point it's ever computed — the session
         // transcript is written earlier (inside the embedded-agent-runner),
         // before this trace exists, so it can never be read back from there.

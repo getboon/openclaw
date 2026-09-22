@@ -205,7 +205,7 @@ vi.mock("./subagent-announce.registry.runtime.js", () => ({
   shouldIgnorePostCompletionAnnounceForSession: () => shouldIgnorePostCompletion,
   replaceSubagentRunAfterSteer: () => true,
   resolveRequesterForChildSession: () => fallbackRequesterResolution,
-  // ENG-19951: the single-child childToolEvidence lookup calls this
+  // the single-child childToolEvidence lookup calls this
   // unconditionally, not just on the multi-child path this file previously
   // exercised.
   getLatestSubagentRunByChildSessionKey: () => undefined,

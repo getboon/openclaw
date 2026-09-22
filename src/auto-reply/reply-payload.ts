@@ -25,7 +25,7 @@ export type AgentDecisionTrace = {
     detail?: string;
     /**
      * Set when this invocation's evidence came from a subagent the current
-     * turn delegated to (ENG-19951), not from a tool the current attempt ran
+     * turn delegated to, not from a tool the current attempt ran
      * directly. Additive — absent for every direct invocation, as before.
      */
     viaSubagent?: boolean;

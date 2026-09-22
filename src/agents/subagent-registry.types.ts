@@ -24,7 +24,7 @@ export type PendingFinalDeliveryPayload = {
   spawnMode?: SpawnSubagentMode;
   frozenResultText?: string | null;
   fallbackFrozenResultText?: string | null;
-  /** Mirrors SubagentCompletionState.resultAuditTrace (ENG-19951). */
+  /** Mirrors SubagentCompletionState.resultAuditTrace. */
   frozenAuditTrace?: AgentDecisionTrace;
   wakeOnDescendantSettle?: boolean;
 };
@@ -49,8 +49,8 @@ export type SubagentCompletionState = {
    * The subagent's own already-computed audit trace, recorded directly
    * (not frozen from a transcript read — that's impossible, since this
    * value doesn't exist yet when the transcript entry is written) by
-   * recordSubagentReplyAuditTrace whenever the child computes any reply
-   * (ENG-19951). Additive — absent until that write happens, absent
+   * recordSubagentReplyAuditTrace whenever the child computes any reply.
+   * Additive — absent until that write happens, absent
    * forever for a child that never got to reply (error/orphan/timeout).
    */
   resultAuditTrace?: AgentDecisionTrace;

@@ -492,7 +492,7 @@ function createScopedAuthProfileStore(
  * existing collectPendingMediaFromInternalEvents pattern in
  * embedded-agent-subscribe.ts -- same idea, different payload. Every
  * returned invocation is tagged viaSubagent so it's distinguishable from
- * tool calls this attempt made directly (ENG-19951).
+ * tool calls this attempt made directly.
  */
 export function collectDelegatedToolInvocationsFromInternalEvents(
   internalEvents: RunEmbeddedAgentParams["internalEvents"],
@@ -519,7 +519,7 @@ export function collectDelegatedToolInvocationsFromInternalEvents(
 }
 
 /**
- * Merges delegated tool evidence (ENG-19951) into a parent's own attempt
+ * Merges delegated tool evidence into a parent's own attempt
  * summary. Appends delegated invocations AFTER the parent's own, so any
  * consumer treating the last invocation as "this attempt's own terminal
  * action" (e.g. buildAgentDecisionTrace's hasSuccessfulTerminalMessage) must
@@ -3818,7 +3818,7 @@ async function runEmbeddedAgentInternal(
             hadFailure: Boolean(attempt.lastToolError),
             toolFailures: attempt.toolFailures,
           });
-          // ENG-19951: merge in tool evidence a completing subagent already
+          // merge in tool evidence a completing subagent already
           // computed for its own reply -- the session transcript never
           // carries it (see subagent-registry.ts's recordSubagentReplyAuditTrace).
           const delegatedToolEvidence = collectDelegatedToolInvocationsFromInternalEvents(

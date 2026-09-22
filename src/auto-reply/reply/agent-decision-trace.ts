@@ -156,7 +156,7 @@ export function buildAgentDecisionTrace(params: {
   // attempt's own, so the literal last array entry can be a subagent's tool
   // call even when this attempt's own terminal action was a successful
   // "message" send. "Terminal" here means this attempt's own last action,
-  // so exclude delegated entries before taking it (ENG-19951).
+  // so exclude delegated entries before taking it.
   const terminalInvocation = allInvocations.findLast((entry) => !entry.viaSubagent);
   const hasSuccessfulTerminalMessage =
     terminalInvocation?.name === "message" && terminalInvocation.status === "ok";

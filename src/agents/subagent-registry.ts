@@ -1315,7 +1315,7 @@ export function addSubagentRunForTests(entry: SubagentRunRecord) {
 
 /**
  * Records a subagent's own already-computed audit trace onto its registry
- * row (ENG-19951). Called from agent-runner.ts at the exact point that
+ * row. Called from agent-runner.ts at the exact point that
  * trace is computed for the child's own reply — independent of, and
  * earlier than, the later text-only completion freeze. Looks up the live
  * map directly, not via getSubagentRunsSnapshotForRead (which may return a

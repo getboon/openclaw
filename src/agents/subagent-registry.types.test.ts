@@ -4,7 +4,7 @@ import type {
   SubagentCompletionState,
 } from "./subagent-registry.types.js";
 
-describe("subagent registry types carry the recorded audit trace (ENG-19951)", () => {
+describe("subagent registry types carry the recorded audit trace", () => {
   it("SubagentCompletionState accepts resultAuditTrace", () => {
     const completion: SubagentCompletionState = {
       required: true,

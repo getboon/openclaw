@@ -288,7 +288,7 @@ describe("buildAgentDecisionTrace", () => {
     });
   });
 
-  it("does not let delegated (viaSubagent) evidence appended after the parent's own terminal message defeat the recovered-turn disposition (ENG-19951)", () => {
+  it("does not let delegated (viaSubagent) evidence appended after the parent's own terminal message defeat the recovered-turn disposition", () => {
     // run.ts appends delegated invocations after the parent's own, so the
     // literal last array entry can be a subagent's tool call even though the
     // parent's own terminal action -- the thing hasSuccessfulTerminalMessage
