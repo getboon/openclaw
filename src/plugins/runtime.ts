@@ -7,7 +7,17 @@ import {
 } from "./host-hook-runtime.js";
 import { clearPluginMetadataLifecycleCaches } from "./plugin-metadata-lifecycle.js";
 import { createEmptyPluginRegistry } from "./registry-empty.js";
-import { markPluginRegistryActive, markPluginRegistryRetired } from "./registry-lifecycle.js";
+import {
+  clearPendingCommittedSchedulerJobIds,
+  getPendingCommittedSchedulerJobIds,
+  getPluginRegistryCacheKey,
+  hasPendingRegistryOperation,
+  isPluginRegistryCacheKeySuperseded,
+  isPluginRegistryRetired,
+  markPluginRegistryActive,
+  markPluginRegistryRetired,
+  recordPluginRegistryCacheKey,
+} from "./registry-lifecycle.js";
 import type { PluginRegistry } from "./registry-types.js";
 import { getActivePluginChannelRegistrySnapshotFromState } from "./runtime-channel-state.js";
 import {
@@ -78,12 +88,53 @@ function isRegistryPinned(registry: PluginRegistry): boolean {
   );
 }
 
+// True when the CURRENTLY active registry shares this registry's own load
+// cache key while being a different object -- a genuine same-context reload.
+// The recorded cache-key generation is checked first so the superseded signal
+// survives a later unrelated active-pointer swap before a pending side effect
+// re-checks liveness; the direct current-state comparison remains as a
+// conservative fallback for registries whose activation predates generation
+// tracking.
+function isSameContextReplacement(registry: PluginRegistry): boolean {
+  if (state.activeRegistry === registry) {
+    return false;
+  }
+  if (isPluginRegistryCacheKeySuperseded(registry)) {
+    return true;
+  }
+  const ownCacheKey = getPluginRegistryCacheKey(registry);
+  return ownCacheKey !== null && ownCacheKey === state.key;
+}
+
 function isRegistryLive(registry: PluginRegistry): boolean {
-  return state.activeRegistry === registry || isRegistryPinned(registry);
+  if (state.activeRegistry === registry || isRegistryPinned(registry)) {
+    return true;
+  }
+  if (!hasPendingRegistryOperation(registry)) {
+    return false;
+  }
+  // A pending operation normally keeps a registry "live" through a transient,
+  // unrelated active-pointer swap (see beginPendingRegistryOperation). But a
+  // same-context replacement is a real reload, not an unrelated swap, and the
+  // pending operation must not mask it.
+  return !isSameContextReplacement(registry);
+}
+
+/**
+ * True when a registry has been superseded: explicitly retired, or replaced
+ * by a fresh same-cache-key generation even though it was never the direct
+ * previousRegistry for that swap (see isSameContextReplacement). Callers that
+ * gate a side effect on "is this registry still genuinely live" (e.g. the
+ * production scheduleSessionTurn shouldCommit wiring in registry.ts) should
+ * use this instead of the raw isPluginRegistryRetired flag.
+ */
+export function isPluginRegistrySuperseded(registry: PluginRegistry): boolean {
+  return isPluginRegistryRetired(registry) || isSameContextReplacement(registry);
 }
 
 async function cleanupPreviousPluginHostRegistry(params: {
   previousRegistry: PluginRegistry;
+  preserveSchedulerJobIds?: ReadonlyMap<string, ReadonlySet<string>>;
 }): Promise<void> {
   const [{ getRuntimeConfig }, { cleanupReplacedPluginHostRegistry }] = await Promise.all([
     import("../config/config.js"),
@@ -101,15 +152,21 @@ async function cleanupPreviousPluginHostRegistry(params: {
     previousRegistry: params.previousRegistry,
     nextRegistry,
     shouldCleanup,
+    preserveSchedulerJobIds: params.preserveSchedulerJobIds,
   });
 }
 
-function cleanupRetiredPluginHostRegistry(previousRegistry: PluginRegistry): void {
+// Returns a never-rejecting promise so callers can observe cleanup completion.
+function cleanupRetiredPluginHostRegistry(
+  previousRegistry: PluginRegistry,
+  preserveSchedulerJobIds?: ReadonlyMap<string, ReadonlySet<string>>,
+): Promise<void> {
   if (!registryHasPluginHostCleanupWork(previousRegistry)) {
-    return;
+    return Promise.resolve();
   }
-  void cleanupPreviousPluginHostRegistry({
+  return cleanupPreviousPluginHostRegistry({
     previousRegistry,
+    preserveSchedulerJobIds,
   }).catch((error: unknown) => {
     log.warn(`plugin host registry cleanup failed: ${String(error)}`);
   });
@@ -121,6 +178,32 @@ function retirePluginRegistryIfUnused(registry: PluginRegistry | null): boolean 
   }
   markPluginRegistryRetired(registry);
   return true;
+}
+
+/**
+ * Re-checks retirement for a registry that a caller just stopped protecting
+ * (e.g. a pending async operation just settled). Mirrors the re-check every
+ * pin-release function already does after uninstalling its own pin -- a
+ * registry that was kept alive only by that protection may now be retirable.
+ * Preserves scheduler jobs committed via recordPendingCommittedSchedulerJobId
+ * during this registry's pending window; once the window has fully closed
+ * (no other overlapping call still holds the pin), that bookkeeping is
+ * dropped so a later, unrelated retirement can't keep protecting stale jobs
+ * from a window that already ended. Returns a promise callers may await for
+ * tests; production callers don't need to and shouldn't.
+ */
+export function retirePluginRegistryIfNowUnused(registry: PluginRegistry | null): Promise<void> {
+  if (!registry) {
+    return Promise.resolve();
+  }
+  const preserveSchedulerJobIds = getPendingCommittedSchedulerJobIds(registry);
+  if (!hasPendingRegistryOperation(registry)) {
+    clearPendingCommittedSchedulerJobIds(registry);
+  }
+  if (retirePluginRegistryIfUnused(registry)) {
+    return cleanupRetiredPluginHostRegistry(registry, preserveSchedulerJobIds);
+  }
+  return Promise.resolve();
 }
 
 /**
@@ -209,6 +292,7 @@ export function setActivePluginRegistry(
   syncTrackedSurface(state.channel, registry, true);
   syncTrackedSurface(state.sessionExtension, registry, true);
   state.key = cacheKey ?? null;
+  recordPluginRegistryCacheKey(registry, state.key);
   state.workspaceDir = workspaceDir ?? null;
   state.runtimeSubagentMode = runtimeSubagentMode;
   syncPluginAgentEventBridge();
@@ -218,7 +302,7 @@ export function setActivePluginRegistry(
   if (!retirePluginRegistryIfUnused(previousRegistry)) {
     return;
   }
-  cleanupRetiredPluginHostRegistry(previousRegistry);
+  void cleanupRetiredPluginHostRegistry(previousRegistry);
 }
 
 export function getActivePluginRegistry(): PluginRegistry | null {
@@ -247,7 +331,7 @@ export function pinActivePluginHttpRouteRegistry(registry: PluginRegistry) {
   markPluginRegistryActive(registry);
   syncPluginAgentEventBridge();
   if (retirePluginRegistryIfUnused(previousRegistry)) {
-    cleanupRetiredPluginHostRegistry(previousRegistry!);
+    void cleanupRetiredPluginHostRegistry(previousRegistry!);
   }
 }
 
@@ -259,7 +343,7 @@ export function releasePinnedPluginHttpRouteRegistry(registry?: PluginRegistry) 
   installSurfaceRegistry(state.httpRoute, state.activeRegistry, false);
   syncPluginAgentEventBridge();
   if (retirePluginRegistryIfUnused(previousRegistry)) {
-    cleanupRetiredPluginHostRegistry(previousRegistry!);
+    void cleanupRetiredPluginHostRegistry(previousRegistry!);
   }
 }
 
@@ -303,7 +387,7 @@ export function pinActivePluginChannelRegistry(registry: PluginRegistry) {
   markPluginRegistryActive(registry);
   syncPluginAgentEventBridge();
   if (retirePluginRegistryIfUnused(previousRegistry)) {
-    cleanupRetiredPluginHostRegistry(previousRegistry!);
+    void cleanupRetiredPluginHostRegistry(previousRegistry!);
   }
 }
 
@@ -315,7 +399,7 @@ export function releasePinnedPluginChannelRegistry(registry?: PluginRegistry) {
   installSurfaceRegistry(state.channel, state.activeRegistry, false);
   syncPluginAgentEventBridge();
   if (retirePluginRegistryIfUnused(previousRegistry)) {
-    cleanupRetiredPluginHostRegistry(previousRegistry!);
+    void cleanupRetiredPluginHostRegistry(previousRegistry!);
   }
 }
 
@@ -367,7 +451,7 @@ export function pinActivePluginSessionExtensionRegistry(registry: PluginRegistry
   markPluginRegistryActive(registry);
   syncPluginAgentEventBridge();
   if (retirePluginRegistryIfUnused(previousRegistry)) {
-    cleanupRetiredPluginHostRegistry(previousRegistry!);
+    void cleanupRetiredPluginHostRegistry(previousRegistry!);
   }
 }
 
@@ -379,7 +463,7 @@ export function releasePinnedPluginSessionExtensionRegistry(registry?: PluginReg
   installSurfaceRegistry(state.sessionExtension, state.activeRegistry, false);
   syncPluginAgentEventBridge();
   if (retirePluginRegistryIfUnused(previousRegistry)) {
-    cleanupRetiredPluginHostRegistry(previousRegistry!);
+    void cleanupRetiredPluginHostRegistry(previousRegistry!);
   }
 }
 

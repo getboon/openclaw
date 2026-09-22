@@ -374,6 +374,7 @@ export async function cleanupReplacedPluginHostRegistry(params: {
   previousRegistry?: PluginRegistry | null;
   nextRegistry?: PluginRegistry | null;
   shouldCleanup?: () => boolean;
+  preserveSchedulerJobIds?: ReadonlyMap<string, ReadonlySet<string>>;
 }): Promise<PluginHostCleanupResult> {
   const previousRegistry = params.previousRegistry;
   const shouldCleanup = params.shouldCleanup ?? (() => true);
@@ -395,14 +396,18 @@ export async function cleanupReplacedPluginHostRegistry(params: {
       break;
     }
     const restarted = nextPluginIds.has(pluginId);
+    // Scope caller-preserved IDs by plugin so a colliding ID on an unrelated
+    // plugin is not protected; merge them with restart-specific carryover.
+    const preserveSchedulerJobIds = new Set([
+      ...(restarted ? collectSchedulerJobIds(params.nextRegistry, pluginId) : []),
+      ...(params.preserveSchedulerJobIds?.get(pluginId) ?? []),
+    ]);
     const result = await runPluginHostCleanup({
       cfg: params.cfg,
       registry: previousRegistry,
       pluginId,
       reason: restarted ? "restart" : "disable",
-      preserveSchedulerJobIds: restarted
-        ? collectSchedulerJobIds(params.nextRegistry, pluginId)
-        : undefined,
+      preserveSchedulerJobIds,
       shouldCleanup,
       restartPromotedSessionEntrySlotKeys: restarted
         ? collectRestartPromotedSessionEntrySlotKeys(
