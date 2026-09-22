@@ -1991,7 +1991,6 @@ describe("diagnostics-otel service", () => {
 
     emitTrustedDiagnosticEvent({
       type: "model.usage",
-      runId: "run-late",
       provider: "openai",
       model: "gpt-5.4",
       usage: { input: 10, output: 5 },
@@ -3916,6 +3915,29 @@ describe("diagnostics-otel service", () => {
         traceFlags: "01",
       },
     });
+
+    // Positive control: while the run context is still retained, a late usage
+    // span resolves the retained (non-remote) span context of the run.
+    telemetryState.tracer.startSpan.mockClear();
+    emitTrustedDiagnosticEvent({
+      type: "model.usage",
+      provider: "openai",
+      model: "gpt-5.4",
+      usage: { input: 1, output: 1, total: 2 },
+      durationMs: 10,
+      trace: {
+        traceId: TRACE_ID,
+        spanId: "3333333333333333",
+        parentSpanId: CHILD_SPAN_ID,
+        traceFlags: "01",
+      },
+    });
+    const retainedUsageParent = (
+      startedSpanCall("openclaw.model.usage")?.[2] as
+        | { spanContext?: { spanId?: string; isRemote?: boolean } }
+        | undefined
+    )?.spanContext;
+    expect(retainedUsageParent?.isRemote).toBeUndefined();
 
     await service.stop?.(ctx);
     await service.start(ctx);
