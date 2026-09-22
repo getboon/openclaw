@@ -1,6 +1,6 @@
-// End-to-end coverage for ENG-19951: proves the delegated tool-evidence chain
+// End-to-end coverage proving the delegated tool-evidence chain
 // (registry write -> announce completion event -> run.ts merge -> final audit
-// trace) actually connects across Tasks 3/6/7/1, not just in isolation.
+// trace) actually connects across every layer, not just in isolation.
 //
 // The repo's only existing spawn+yield integration harness
 // (subagent-announce.live.test.ts) drives a real gateway against a live LLM
@@ -18,6 +18,7 @@ import { buildAgentDecisionTrace } from "../auto-reply/reply/agent-decision-trac
 import {
   buildTraceToolSummary,
   collectDelegatedToolInvocationsFromInternalEvents,
+  mergeDelegatedToolEvidenceIntoSummary,
 } from "./embedded-agent-runner/run.js";
 import type { EmbeddedAgentQueueMessageOutcome } from "./embedded-agent-runner/runs.js";
 import { createSubagentAnnounceDeliveryRuntimeMock } from "./subagent-announce.test-support.js";
@@ -25,6 +26,7 @@ import { createSubagentAnnounceDeliveryRuntimeMock } from "./subagent-announce.t
 type AgentCallRequest = { method?: string; params?: Record<string, unknown> };
 type AgentCallResponse = { runId?: string; status: string; error?: string };
 type RegistryRow = {
+  runId?: string;
   childSessionKey: string;
   task?: string;
   createdAt?: number;
@@ -216,21 +218,19 @@ function requireAgentCallInternalEvents(callIndex: number) {
   return internalEvents as Array<{ type: string; childToolEvidence?: unknown }>;
 }
 
-/** Simulates what run.ts/agent-runner.ts compute for a resumed parent's own reply. */
+/**
+ * Simulates what run.ts/agent-runner.ts compute for a resumed parent's own
+ * reply -- calling the REAL production merge (mergeDelegatedToolEvidenceIntoSummary)
+ * rather than reimplementing it, so a regression in that function (e.g.
+ * dropping the viaSubagent tag or the calls/tools accounting) fails this
+ * chain test too, not just run.trace-tool-summary.test.ts in isolation.
+ */
 function computeResumedTurnAuditTrace(internalEvents: unknown): AgentDecisionTrace {
   const direct = buildTraceToolSummary({ toolMetas: [], visibleToolNames: [], hadFailure: false });
   const delegated = collectDelegatedToolInvocationsFromInternalEvents(
     internalEvents as Parameters<typeof collectDelegatedToolInvocationsFromInternalEvents>[0],
   );
-  const merged =
-    delegated.invocations.length > 0
-      ? {
-          calls: direct?.calls ?? 0,
-          tools: direct?.tools ?? [],
-          invocations: [...(direct?.invocations ?? []), ...delegated.invocations],
-          visibleTools: [...new Set([...(direct?.visibleTools ?? []), ...delegated.visibleTools])],
-        }
-      : direct;
+  const merged = mergeDelegatedToolEvidenceIntoSummary(direct, delegated);
   return buildAgentDecisionTrace({
     toolSummary: merged,
     completion: { refusal: false },
@@ -238,7 +238,7 @@ function computeResumedTurnAuditTrace(internalEvents: unknown): AgentDecisionTra
   });
 }
 
-describe("ENG-19951 end-to-end: delegated audit-trace evidence reaches the parent's final trace", () => {
+describe("delegated audit-trace evidence reaches the parent's final trace", () => {
   beforeEach(() => {
     registryRows.map.clear();
     agentSpy.mockClear();
@@ -302,6 +302,7 @@ describe("ENG-19951 end-to-end: delegated audit-trace evidence reaches the paren
       reason: "tool_execution_succeeded",
     };
     registryRows.map.set("agent:main:subagent:child-1", {
+      runId: "run-child-1",
       childSessionKey: "agent:main:subagent:child-1",
       completion: { required: true, resultAuditTrace: childTrace },
     });
@@ -399,8 +400,125 @@ describe("ENG-19951 end-to-end: delegated audit-trace evidence reaches the paren
     });
   });
 
+  it("multi-child: a settled descendant's tool evidence is not discarded when its own text reply is a silent skip", async () => {
+    // buildChildCompletionFindings returns undefined for an all-ANNOUNCE_SKIP
+    // wake (nothing worth announcing in prose), but the descendant still made
+    // a real tool call -- that evidence must survive even though the prose
+    // findings string is falsy.
+    const descendantTrace: AgentDecisionTrace = {
+      schemaVersion: 1,
+      visibleTools: ["takeoff_dispatch"],
+      toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+      evidence: [],
+      confidence: "high",
+      disposition: "completed",
+      reason: "tool_execution_succeeded",
+    };
+    subagentRegistryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([
+      {
+        childSessionKey: "agent:main:subagent:silent-descendant",
+        task: "silent scope",
+        createdAt: 1,
+        outcome: { status: "ok" },
+        completion: { resultText: "ANNOUNCE_SKIP", resultAuditTrace: descendantTrace },
+      },
+    ]);
+
+    await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:parent-of-silent",
+      childRunId: "run-parent-of-silent",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "telegram", to: "-100123" },
+      task: "outer scope",
+      timeoutMs: 10,
+      cleanup: "keep",
+      waitForCompletion: false,
+      outcome: { status: "ok" },
+      roundOneReply: "outer scope complete.",
+      expectsCompletionMessage: true,
+    });
+
+    const internalEvents = requireAgentCallInternalEvents(0);
+    const parentAuditTrace = computeResumedTurnAuditTrace(internalEvents);
+
+    expect(parentAuditTrace.toolInvocations).toContainEqual({
+      name: "takeoff_dispatch",
+      status: "ok",
+      viaSubagent: true,
+    });
+  });
+
+  it("multi-child: a child's own direct tool calls and its settled descendant's tool calls both reach the parent", async () => {
+    // The completing child made its own tool call AND has a settled
+    // descendant with its own tool call -- both are independent evidence
+    // sources and must both survive, not just whichever the ternary picks.
+    const ownTrace: AgentDecisionTrace = {
+      schemaVersion: 1,
+      visibleTools: ["read"],
+      toolInvocations: [{ name: "read", status: "ok" }],
+      evidence: [],
+      confidence: "high",
+      disposition: "completed",
+      reason: "tool_execution_succeeded",
+    };
+    const descendantTrace: AgentDecisionTrace = {
+      schemaVersion: 1,
+      visibleTools: ["takeoff_dispatch"],
+      toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+      evidence: [],
+      confidence: "high",
+      disposition: "completed",
+      reason: "tool_execution_succeeded",
+    };
+    registryRows.map.set("agent:main:subagent:mid", {
+      runId: "run-mid",
+      childSessionKey: "agent:main:subagent:mid",
+      completion: { required: true, resultAuditTrace: ownTrace },
+    });
+    subagentRegistryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([
+      {
+        childSessionKey: "agent:main:subagent:mid-descendant",
+        task: "descendant scope",
+        createdAt: 1,
+        outcome: { status: "ok" },
+        completion: { resultText: "descendant done", resultAuditTrace: descendantTrace },
+      },
+    ]);
+
+    await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:mid",
+      childRunId: "run-mid",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "telegram", to: "-100123" },
+      task: "mid scope",
+      timeoutMs: 10,
+      cleanup: "keep",
+      waitForCompletion: false,
+      outcome: { status: "ok" },
+      roundOneReply: "mid scope complete, descendant done too.",
+      expectsCompletionMessage: true,
+    });
+
+    const internalEvents = requireAgentCallInternalEvents(0);
+    const parentAuditTrace = computeResumedTurnAuditTrace(internalEvents);
+
+    expect(parentAuditTrace.toolInvocations).toContainEqual({
+      name: "read",
+      status: "ok",
+      viaSubagent: true,
+    });
+    expect(parentAuditTrace.toolInvocations).toContainEqual({
+      name: "takeoff_dispatch",
+      status: "ok",
+      viaSubagent: true,
+    });
+  });
+
   it("orphaned child: no resultAuditTrace on the registry row -- delivery still succeeds, no delegated evidence added, no crash", async () => {
     registryRows.map.set("agent:main:subagent:orphan", {
+      runId: "run-orphan",
       childSessionKey: "agent:main:subagent:orphan",
       completion: { required: true, resultText: "done" },
     });
@@ -440,6 +558,7 @@ describe("ENG-19951 end-to-end: delegated audit-trace evidence reaches the paren
       reason: "tool_execution_succeeded",
     };
     registryRows.map.set("agent:main:subagent:c1:subagent:grandchild", {
+      runId: "run-grandchild",
       childSessionKey: "agent:main:subagent:c1:subagent:grandchild",
       completion: { required: true, resultAuditTrace: grandchildTrace },
     });
@@ -464,6 +583,7 @@ describe("ENG-19951 end-to-end: delegated audit-trace evidence reaches the paren
     // the same real functions the single-child test above exercises.
     const c1OwnAuditTrace = computeResumedTurnAuditTrace(c1InternalEvents);
     registryRows.map.set("agent:main:subagent:c1", {
+      runId: "run-c1",
       childSessionKey: "agent:main:subagent:c1",
       completion: { required: true, resultAuditTrace: c1OwnAuditTrace },
     });

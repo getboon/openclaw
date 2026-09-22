@@ -335,7 +335,7 @@ describe("subagent registry seam flow", () => {
     ]);
   });
 
-  it("records the audit trace onto the matching registry row and persists (ENG-19951)", () => {
+  it("records the audit trace onto the matching registry row and persists", () => {
     mod.addSubagentRunForTests({
       runId: "run-1",
       childSessionKey: "agent:main:subagent:child-1",
@@ -364,7 +364,18 @@ describe("subagent registry seam flow", () => {
     expect(mocks.persistSubagentRunsToDisk).toHaveBeenCalled();
   });
 
-  it("no-ops without throwing when no registry row matches the session key (ENG-19951)", () => {
+  it("no-ops without throwing when no registry row matches the session key", () => {
+    mod.addSubagentRunForTests({
+      runId: "run-unrelated",
+      childSessionKey: "agent:main:subagent:unrelated",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "unrelated task",
+      cleanup: "keep",
+      createdAt: 1_000,
+    });
+    const persistCallCountBefore = mocks.persistSubagentRunsToDisk.mock.calls.length;
+
     expect(() =>
       mod.recordSubagentReplyAuditTrace("agent:main:subagent:does-not-exist", {
         schemaVersion: 1,
@@ -376,6 +387,14 @@ describe("subagent registry seam flow", () => {
         reason: "no_tools_visible",
       }),
     ).not.toThrow();
+
+    // No row matches "does-not-exist", so this returns before
+    // ensureCompletionState/persist: confirm it's a genuine no-op, not just
+    // a non-throw -- no unrelated row was mutated and no disk write fired.
+    expect(
+      mod.getLatestSubagentRunByChildSessionKey("agent:main:subagent:unrelated")?.completion,
+    ).toBeUndefined();
+    expect(mocks.persistSubagentRunsToDisk.mock.calls.length).toBe(persistCallCountBefore);
   });
 
   it("uses the disk-aware run snapshot for maintenance preservation", () => {

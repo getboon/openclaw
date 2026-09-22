@@ -56,6 +56,7 @@ describe("formatAgentInternalEventsForPlainPrompt", () => {
         ],
       },
     ]);
+    expect(rendered).toContain("All 7 scopes completed.");
     expect(rendered).not.toContain("takeoff_dispatch");
   });
 });
