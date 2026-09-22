@@ -309,6 +309,22 @@ export function getActivePluginRegistry(): PluginRegistry | null {
   return asPluginRegistry(state.activeRegistry);
 }
 
+// A plugin tool's own execute() handler resolves a fresh, narrow registry
+// scoped to just that plugin on every invocation (activate:false, never
+// installed as the gateway's real active registry -- see
+// createCachedDescriptorPluginTool in tools.ts). That snapshot's own
+// activation/liveness flags are permanently false, so a durable side effect
+// API called from inside a tool's own execution (e.g. scheduleSessionTurn)
+// needs to ask this instead: is this plugin genuinely loaded in whatever
+// registry is the CURRENT real active one, regardless of which specific
+// registry object the caller happens to hold a reference to.
+export function isPluginLoadedInActiveRegistry(pluginId: string): boolean {
+  const active = getActivePluginRegistry();
+  return (
+    active?.plugins.some((plugin) => plugin.id === pluginId && plugin.status === "loaded") ?? false
+  );
+}
+
 export function getActivePluginRegistryWorkspaceDir(): string | undefined {
   return state.workspaceDir ?? undefined;
 }

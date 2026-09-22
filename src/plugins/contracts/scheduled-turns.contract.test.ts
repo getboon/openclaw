@@ -27,6 +27,7 @@ import { clearPluginLoaderCache, loadOpenClawPlugins } from "../loader.js";
 import { makeTempDir, writePlugin } from "../loader.test-fixtures.js";
 import { createEmptyPluginRegistry } from "../registry-empty.js";
 import { isPluginRegistryActivated, isPluginRegistryRetired } from "../registry-lifecycle.js";
+import { createPluginRegistry } from "../registry.js";
 import {
   isPluginRegistrySuperseded,
   pinActivePluginChannelRegistry,
@@ -34,6 +35,7 @@ import {
   setActivePluginRegistry,
 } from "../runtime.js";
 import * as pluginRuntimeModule from "../runtime.js";
+import type { PluginRuntime } from "../runtime/types.js";
 import { createPluginRecord } from "../status.test-helpers.js";
 import type { OpenClawPluginApi } from "../types.js";
 
@@ -758,6 +760,91 @@ describe("plugin scheduled turns", () => {
         (job) => job.id,
       );
       expect(survivingJobIds).toEqual(["job-new"]);
+    },
+  );
+
+  it(
+    "still schedules a session turn when the calling api is bound to a narrow, NEVER-activated " +
+      "registry -- a plugin tool's own execute() handler resolves exactly this kind of " +
+      "per-invocation registry on every call (see createCachedDescriptorPluginTool), so requiring " +
+      "THIS registry to be the active one would make scheduleSessionTurn unusable from inside a " +
+      "tool's own execution even though the same plugin is genuinely loaded gateway-wide",
+    async () => {
+      // The real, gateway-wide active registry -- has the plugin loaded and activated.
+      const activeFixture = createPluginRegistryFixture();
+      activeFixture.registry.registry.plugins.push(
+        createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
+      );
+      setActivePluginRegistry(activeFixture.registry.registry);
+
+      // A separate, narrow, NEVER-activated registry -- mirrors exactly what
+      // a tool's own execute() handler resolves per invocation
+      // (activate:false, never installed via setActivePluginRegistry).
+      const toolExecutionRegistry = createPluginRegistry({
+        logger: {
+          info() {},
+          warn() {},
+          error() {},
+          debug() {},
+        },
+        runtime: {} as PluginRuntime,
+        hostServices: { cron },
+        activateGlobalSideEffects: false,
+      });
+      const record = createPluginRecord({
+        id: WORKFLOW_PLUGIN_ID,
+        name: "Workflow Plugin",
+        origin: "bundled",
+      });
+      toolExecutionRegistry.registry.plugins.push(record);
+      const api = toolExecutionRegistry.createApi(record, { config: {} });
+
+      workflowMocks.cronAdd.mockResolvedValue(makeCronJob({ id: "job-from-tool-execution" }));
+      const handle = await api.session.workflow.scheduleSessionTurn({
+        sessionKey: MAIN_SESSION_KEY,
+        message: "wake",
+        delayMs: 1,
+      });
+
+      expectSessionTurnHandle(handle, "job-from-tool-execution");
+    },
+  );
+
+  it(
+    "still refuses to schedule a session turn on a registry that WAS installed active with " +
+      "side effects deliberately off (e.g. the migration-provider registry) -- only a registry " +
+      "that was never activated at all falls back to checking the real active registry",
+    async () => {
+      const registryWithSideEffectsOff = createPluginRegistry({
+        logger: {
+          info() {},
+          warn() {},
+          error() {},
+          debug() {},
+        },
+        runtime: {} as PluginRuntime,
+        hostServices: { cron },
+        activateGlobalSideEffects: false,
+      });
+      const record = createPluginRecord({
+        id: WORKFLOW_PLUGIN_ID,
+        name: "Workflow Plugin",
+        origin: "bundled",
+      });
+      registryWithSideEffectsOff.registry.plugins.push(record);
+      // Installed as the real active registry, same as
+      // ensureStandaloneMigrationProviderRegistryLoaded does.
+      setActivePluginRegistry(registryWithSideEffectsOff.registry);
+      const api = registryWithSideEffectsOff.createApi(record, { config: {} });
+
+      const handle = await api.session.workflow.scheduleSessionTurn({
+        sessionKey: MAIN_SESSION_KEY,
+        message: "wake",
+        delayMs: 1,
+      });
+
+      expect(handle).toBeUndefined();
+      expect(workflowMocks.cronAdd).not.toHaveBeenCalled();
     },
   );
 
