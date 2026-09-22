@@ -9,7 +9,7 @@
 > drifted once later tasks refactored the code they describe; each such spot
 > is called out inline rather than silently left to mislead a reader diffing
 > this plan against the shipped code.
-
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make a parent agent's delivered reply carry a completing subagent's tool-call evidence in its own `audit_trace`, so eval judges (and anything else reading the trace) see proof of delegated work instead of an empty trace for a turn that genuinely used tools via a spawned subagent.
