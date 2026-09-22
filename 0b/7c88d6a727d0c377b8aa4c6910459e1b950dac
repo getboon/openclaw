@@ -1,0 +1,19 @@
+extensions/diagnostics-otel/src/service.test.ts
+  s_bdbecec0b2d5b0::t_98d66bb03b349c 3935
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0b7c88d6a727d0c377b8aa4c6910459e1b950dac",
+  "prompts": {},
+  "sessions": {
+    "s_bdbecec0b2d5b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e12c774-ade0-4fec-bfe3-1be251f34711",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
