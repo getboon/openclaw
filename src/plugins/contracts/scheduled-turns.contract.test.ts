@@ -164,6 +164,38 @@ function expectSessionTurnHandle(
   });
 }
 
+/** Installs a real, activated registry with the workflow plugin loaded gateway-wide. */
+function activateWorkflowPluginFixtureRegistry(): void {
+  const activeFixture = createPluginRegistryFixture();
+  activeFixture.registry.registry.plugins.push(
+    createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
+  );
+  setActivePluginRegistry(activeFixture.registry.registry);
+}
+
+/** Builds a separate, never-activated, side-effects-off registry with the workflow plugin loaded. */
+function createWorkflowPluginRegistryApi(params: { toolExecutionSnapshot?: boolean } = {}) {
+  const built = createPluginRegistry({
+    logger: {
+      info() {},
+      warn() {},
+      error() {},
+      debug() {},
+    },
+    runtime: {} as PluginRuntime,
+    hostServices: { cron },
+    activateGlobalSideEffects: false,
+    ...(params.toolExecutionSnapshot ? { toolExecutionSnapshot: true } : {}),
+  });
+  const record = createPluginRecord({
+    id: WORKFLOW_PLUGIN_ID,
+    name: "Workflow Plugin",
+    origin: "bundled",
+  });
+  built.registry.plugins.push(record);
+  return { api: built.createApi(record, { config: {} }), registry: built.registry };
+}
+
 /**
  * Spies on retirePluginRegistryIfNowUnused for the duration of `run`, then
  * awaits every real invocation's returned cleanup promise -- deterministic
@@ -764,31 +796,8 @@ describe("plugin scheduled turns", () => {
   );
 
   it("schedules a session turn from a never-activated, toolExecutionSnapshot registry when the plugin is loaded in the real active registry", async () => {
-    const activeFixture = createPluginRegistryFixture();
-    activeFixture.registry.registry.plugins.push(
-      createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
-    );
-    setActivePluginRegistry(activeFixture.registry.registry);
-
-    const toolExecutionRegistry = createPluginRegistry({
-      logger: {
-        info() {},
-        warn() {},
-        error() {},
-        debug() {},
-      },
-      runtime: {} as PluginRuntime,
-      hostServices: { cron },
-      activateGlobalSideEffects: false,
-      toolExecutionSnapshot: true,
-    });
-    const record = createPluginRecord({
-      id: WORKFLOW_PLUGIN_ID,
-      name: "Workflow Plugin",
-      origin: "bundled",
-    });
-    toolExecutionRegistry.registry.plugins.push(record);
-    const api = toolExecutionRegistry.createApi(record, { config: {} });
+    activateWorkflowPluginFixtureRegistry();
+    const { api } = createWorkflowPluginRegistryApi({ toolExecutionSnapshot: true });
 
     workflowMocks.cronAdd.mockResolvedValue(makeCronJob({ id: "job-from-tool-execution" }));
     const handle = await api.session.workflow.scheduleSessionTurn({
@@ -801,31 +810,8 @@ describe("plugin scheduled turns", () => {
   });
 
   it("unschedules a session turn by tag from the same never-activated, toolExecutionSnapshot registry", async () => {
-    const activeFixture = createPluginRegistryFixture();
-    activeFixture.registry.registry.plugins.push(
-      createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
-    );
-    setActivePluginRegistry(activeFixture.registry.registry);
-
-    const toolExecutionRegistry = createPluginRegistry({
-      logger: {
-        info() {},
-        warn() {},
-        error() {},
-        debug() {},
-      },
-      runtime: {} as PluginRuntime,
-      hostServices: { cron },
-      activateGlobalSideEffects: false,
-      toolExecutionSnapshot: true,
-    });
-    const record = createPluginRecord({
-      id: WORKFLOW_PLUGIN_ID,
-      name: "Workflow Plugin",
-      origin: "bundled",
-    });
-    toolExecutionRegistry.registry.plugins.push(record);
-    const api = toolExecutionRegistry.createApi(record, { config: {} });
+    activateWorkflowPluginFixtureRegistry();
+    const { api } = createWorkflowPluginRegistryApi({ toolExecutionSnapshot: true });
 
     const addedJobs: CronJob[] = [];
     const removedJobIds = new Set<string>();
@@ -865,25 +851,8 @@ describe("plugin scheduled turns", () => {
   });
 
   it("refuses to schedule a session turn on a registry installed active with side effects off (the migration-provider pattern)", async () => {
-    const registryWithSideEffectsOff = createPluginRegistry({
-      logger: {
-        info() {},
-        warn() {},
-        error() {},
-        debug() {},
-      },
-      runtime: {} as PluginRuntime,
-      hostServices: { cron },
-      activateGlobalSideEffects: false,
-    });
-    const record = createPluginRecord({
-      id: WORKFLOW_PLUGIN_ID,
-      name: "Workflow Plugin",
-      origin: "bundled",
-    });
-    registryWithSideEffectsOff.registry.plugins.push(record);
-    setActivePluginRegistry(registryWithSideEffectsOff.registry);
-    const api = registryWithSideEffectsOff.createApi(record, { config: {} });
+    const { api, registry } = createWorkflowPluginRegistryApi();
+    setActivePluginRegistry(registry);
 
     const handle = await api.session.workflow.scheduleSessionTurn({
       sessionKey: MAIN_SESSION_KEY,
@@ -896,32 +865,10 @@ describe("plugin scheduled turns", () => {
   });
 
   it("refuses to schedule a session turn on a never-activated registry that is NOT a toolExecutionSnapshot, even if the plugin is loaded in the real active registry", async () => {
-    const activeFixture = createPluginRegistryFixture();
-    activeFixture.registry.registry.plugins.push(
-      createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
-    );
-    setActivePluginRegistry(activeFixture.registry.registry);
-
+    activateWorkflowPluginFixtureRegistry();
     // Mirrors a tool-discovery descriptor scan or the CLI-only registry: never
     // activated and side effects off, but not marked toolExecutionSnapshot.
-    const discoveryRegistry = createPluginRegistry({
-      logger: {
-        info() {},
-        warn() {},
-        error() {},
-        debug() {},
-      },
-      runtime: {} as PluginRuntime,
-      hostServices: { cron },
-      activateGlobalSideEffects: false,
-    });
-    const record = createPluginRecord({
-      id: WORKFLOW_PLUGIN_ID,
-      name: "Workflow Plugin",
-      origin: "bundled",
-    });
-    discoveryRegistry.registry.plugins.push(record);
-    const api = discoveryRegistry.createApi(record, { config: {} });
+    const { api } = createWorkflowPluginRegistryApi();
 
     const handle = await api.session.workflow.scheduleSessionTurn({
       sessionKey: MAIN_SESSION_KEY,
