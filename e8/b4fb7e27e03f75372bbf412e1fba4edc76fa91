@@ -1,0 +1,24 @@
+extensions/diagnostics-otel/src/service.test.ts
+  s_bdbecec0b2d5b0::t_4cb09abd4ab45a 1406-1408,1430-1445
+  s_bdbecec0b2d5b0::t_178970d0c9e857 170-171
+  s_bdbecec0b2d5b0::t_75ad3770e3d2a1 1446-1448
+extensions/diagnostics-otel/src/service.ts
+  s_bdbecec0b2d5b0::t_4cb09abd4ab45a 1485-1488,1509-1512
+  s_bdbecec0b2d5b0::t_5b3716f5b4d353 1513
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e8b4fb7e27e03f75372bbf412e1fba4edc76fa91",
+  "prompts": {},
+  "sessions": {
+    "s_bdbecec0b2d5b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e12c774-ade0-4fec-bfe3-1be251f34711",
+        "model": "claude-opus-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
