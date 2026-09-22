@@ -167,8 +167,8 @@ vi.mock("@opentelemetry/resources", () => {
     merge: (other: Record<string, unknown>) => mergeable({ ...base, ...other }),
   });
   return {
-    defaultResource: vi.fn(() => mergeable({})),
-    detectResources: vi.fn(() => ({})),
+    defaultResource: vi.fn(() => mergeable({ "telemetry.sdk.language": "nodejs" })),
+    detectResources: vi.fn(() => ({ "host.name": "test-host", "process.pid": 4242 })),
     envDetector: {},
     hostDetector: {},
     osDetector: {},
@@ -1403,10 +1403,9 @@ describe("diagnostics-otel service", () => {
   });
 
   test("takes its tracer from the provider it owns, not the global one", async () => {
-    // A gateway can load another SDK that registers a global tracer provider
-    // first (@sentry/node does, and drops every span at tracesSampleRate 0).
-    // Global registration is first-writer-wins, so reading the tracer off the
-    // global API sent this plugin's spans into that SDK and exported nothing.
+    // Global provider registration is first-writer-wins: reading the tracer off
+    // the global API hands our spans to whichever SDK registered first, and they
+    // are exported on its terms or not at all.
     const service = createDiagnosticsOtelService();
     const ctx = createTraceOnlyContext(OTEL_TEST_ENDPOINT);
     await service.start(ctx);
@@ -1425,6 +1424,25 @@ describe("diagnostics-otel service", () => {
     await flushDiagnosticEvents();
 
     expect(startedSpanCall("openclaw.run")).toBeDefined();
+    await service.stop?.(ctx);
+  });
+
+  test("keeps the resource attributes NodeSDK used to detect", async () => {
+    // Without these, two gateways are indistinguishable in the trace backend.
+    const service = createDiagnosticsOtelService();
+    const ctx = createTraceOnlyContext(OTEL_TEST_ENDPOINT);
+    await service.start(ctx);
+
+    const providerConfig = tracerProviderCtor.mock.calls[0]?.[0] as
+      | { resource?: Record<string, unknown> }
+      | undefined;
+    expect(providerConfig?.resource).toMatchObject({
+      "service.name": "openclaw",
+      "host.name": "test-host",
+      "process.pid": 4242,
+      "telemetry.sdk.language": "nodejs",
+    });
+
     await service.stop?.(ctx);
   });
 

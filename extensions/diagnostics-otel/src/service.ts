@@ -1482,9 +1482,10 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
                 : {}),
             });
           }
-          if (metricReader) {
-            meterProvider = new MeterProvider({ resource, readers: [metricReader] });
-          }
+          meterProvider = new MeterProvider({
+            resource,
+            ...(metricReader ? { readers: [metricReader] } : {}),
+          });
         } catch (err) {
           emitForSignals(
             [
@@ -1504,6 +1505,11 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
         }
       } else if (sdkPreloaded && (tracesEnabled || metricsEnabled)) {
         ctx.logger.info("diagnostics-otel: using preloaded OpenTelemetry SDK");
+      }
+      if (!sdkPreloaded && !meterProvider) {
+        // Instruments record unconditionally, so a logs-only config still needs a
+        // provider of our own; the global one may belong to another SDK.
+        meterProvider = new MeterProvider({ resource });
       }
 
       const logSeverityMap: Record<string, SeverityNumber> = {
