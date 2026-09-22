@@ -115,7 +115,20 @@ stdout, or `both` to send each diagnostic log record to OTLP and stdout.
 | `OTEL_SERVICE_NAME`                                                                                               | Override `diagnostics.otel.serviceName`.                                                                                                                                                                                                                                                                                                       |
 | `OTEL_EXPORTER_OTLP_PROTOCOL`                                                                                     | Override the wire protocol (only `http/protobuf` is honored today).                                                                                                                                                                                                                                                                            |
 | `OTEL_SEMCONV_STABILITY_OPT_IN`                                                                                   | Set to `gen_ai_latest_experimental` to emit the latest experimental GenAI inference span shape, including `{gen_ai.operation.name} {gen_ai.request.model}` span names, `CLIENT` span kind, and `gen_ai.provider.name` instead of the legacy `gen_ai.system`. GenAI metrics always use bounded, low-cardinality semantic attributes regardless. |
-| `OPENCLAW_OTEL_PRELOADED`                                                                                         | Set to `1` when another preload or host process already registered the global OpenTelemetry SDK. The plugin then skips its own NodeSDK lifecycle but still wires diagnostic listeners and honors `traces`/`metrics`/`logs`.                                                                                                                    |
+| `OPENCLAW_OTEL_PRELOADED`                                                                                         | Set to `1` when another preload or host process already registered the global OpenTelemetry SDK. The plugin then skips its own tracer/meter providers, reads the tracer and meter off the global API, and still wires diagnostic listeners and honors `traces`/`metrics`/`logs`.                                                               |
+
+## Coexisting with other OpenTelemetry SDKs
+
+The plugin builds its own tracer and meter providers and never registers them
+globally. Global registration is first-writer-wins: a gateway that also loads an
+SDK which claims the global provider — `@sentry/node` does, and drops every span
+when its `tracesSampleRate` is `0` — would otherwise capture this plugin's spans
+and export nothing, with no error anywhere. Owning the providers keeps the two
+independent, so Sentry error reporting and OTLP tracing can both run.
+
+The one exception is `OPENCLAW_OTEL_PRELOADED=1`, which says a host process
+deliberately owns the SDK; the plugin then joins that global provider instead of
+creating its own.
 
 ## Privacy and content capture
 
