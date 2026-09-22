@@ -1,0 +1,22 @@
+extensions/diagnostics-otel/src/service.test.ts
+  s_bdbecec0b2d5b0::t_3e970d3690699c 1987-2015
+  s_bdbecec0b2d5b0::t_2188b6171dcf7a 3876-3884,3939-3947
+extensions/diagnostics-otel/src/service.ts
+  s_bdbecec0b2d5b0::t_3e970d3690699c 2415-2417,2419
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b6c7b6cf3ad6d0ece6e0116f6947421f8f89c4ec",
+  "prompts": {},
+  "sessions": {
+    "s_bdbecec0b2d5b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e12c774-ade0-4fec-bfe3-1be251f34711",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
