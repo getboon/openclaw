@@ -3932,6 +3932,7 @@ describe("diagnostics-otel service", () => {
         traceFlags: "01",
       },
     });
+    await flushDiagnosticEvents();
     const retainedUsageParent = (
       startedSpanCall("openclaw.model.usage")?.[2] as
         | { spanContext?: { spanId?: string; isRemote?: boolean } }
