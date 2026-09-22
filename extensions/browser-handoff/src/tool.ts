@@ -1,6 +1,7 @@
 // Browser Login Handoff tool implementation: request/status/attach against boon-core.
 import { registerRemoteCdpBrowserProfile } from "openclaw/plugin-sdk/browser-profile-config";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import { createSubsystemLogger } from "openclaw/plugin-sdk/logging-core";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginStateKeyedStore } from "openclaw/plugin-sdk/plugin-state-runtime";
 import {
@@ -66,6 +67,8 @@ function nextRecheckDelayMs(previousCheckCount: number): number {
 const CLEAR_RECHECK_RETRY_ATTEMPTS = 3;
 export const CLEAR_RECHECK_RETRY_DELAY_MS = 200;
 
+const log = createSubsystemLogger("browser-handoff");
+
 function sleepBeforeRetry(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -107,6 +110,9 @@ async function scheduleRecheck(
 ): Promise<boolean> {
   const sessionKey = context.runSessionKey ?? context.sessionKey;
   if (!sessionKey) {
+    // Logged rather than silent: without this, a broken automatic-resume
+    // chain is indistinguishable from "working as intended, hasn't fired yet".
+    log.warn(`site=${params.site} recheck not scheduled: no sessionKey/runSessionKey in context`);
     return false;
   }
   let cleared = false;
@@ -118,6 +124,9 @@ async function scheduleRecheck(
     await sleepBeforeRetry(CLEAR_RECHECK_RETRY_DELAY_MS);
   }
   if (!cleared) {
+    log.warn(
+      `site=${params.site} recheck not scheduled: could not confirm prior schedule cleared after ${CLEAR_RECHECK_RETRY_ATTEMPTS} attempts`,
+    );
     return false;
   }
   const job = await api.session.workflow.scheduleSessionTurn({
@@ -137,7 +146,14 @@ async function scheduleRecheck(
     tag: browserHandoffScheduleTag(params.site),
     deliveryMode: "none",
   });
-  return Boolean(job);
+  if (!job) {
+    // The host scheduler logs its own generic failure reason, but not this
+    // handoff's site — without this, the same silent-diagnosis gap reopens
+    // one layer down.
+    log.warn(`site=${params.site} recheck not scheduled: scheduleSessionTurn returned no job`);
+    return false;
+  }
+  return true;
 }
 
 /**

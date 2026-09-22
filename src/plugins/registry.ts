@@ -125,7 +125,7 @@ import {
 import { createModelCatalogRegistrationHandlers } from "./model-catalog-registration.js";
 import { normalizeRegisteredProvider } from "./provider-validation.js";
 import { createEmptyPluginRegistry } from "./registry-empty.js";
-import { isPluginRegistryActivated, isPluginRegistryRetired } from "./registry-lifecycle.js";
+import { isPluginRegistryActivated } from "./registry-lifecycle.js";
 import type {
   PluginHttpRouteRegistration as RegistryTypesPluginHttpRouteRegistration,
   PluginRecord,
@@ -134,6 +134,7 @@ import type {
   PluginTextTransformsRegistration,
   PluginTrustedToolPolicyRegistryRegistration,
 } from "./registry-types.js";
+import { isPluginRegistrySuperseded } from "./runtime.js";
 export type {
   PluginReloadRegistration,
   PluginRuntimeLifecycleRegistryRegistration,
@@ -2755,8 +2756,11 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     // turn can legitimately install its OWN registry as globally "active" (e.g. on
     // a config-drift cache miss in ensureStandaloneRuntimePluginRegistryLoaded),
     // which doesn't mean THIS plugin's own registry was torn down.
+    // isPluginRegistrySuperseded (not the raw retired flag) also catches a
+    // registry replaced by a fresh same-cache-key generation while it was
+    // never the direct previousRegistry for that swap -- see its own doc.
     const isLoadedRecordInActiveRegistry = () =>
-      !isPluginRegistryRetired(registry) &&
+      !isPluginRegistrySuperseded(registry) &&
       isPluginRegistryActivated(registry) &&
       isLoadedRecordInRegistry();
     const isActivatingLoadedRecord = () =>
@@ -2766,7 +2770,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
       !registry.plugins.some((plugin) => plugin.id === record.id);
     const shouldCommitWorkflowSideEffect = () =>
       sideEffectGuard.active &&
-      !isPluginRegistryRetired(registry) &&
+      !isPluginRegistrySuperseded(registry) &&
       (isActivatingLoadedRecord() ||
         (isPluginRegistryActivated(registry) && isLoadedRecordInRegistry()));
     return buildPluginApi({

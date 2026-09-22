@@ -2,12 +2,11 @@
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import type { GlobalHookRunnerRegistry } from "./hook-registry.types.js";
 import type { HookRunner } from "./hooks.js";
-import { isPluginRegistryRetired } from "./registry-lifecycle.js";
 import type {
   PluginRegistry,
   PluginTrustedToolPolicyRegistryRegistration,
 } from "./registry-types.js";
-import { collectLivePluginRegistries } from "./runtime.js";
+import { collectLivePluginRegistries, isPluginRegistrySuperseded } from "./runtime.js";
 
 type TrustedPolicyHookRunnerRegistry = GlobalHookRunnerRegistry & {
   trustedToolPolicies?: PluginTrustedToolPolicyRegistryRegistration[];
@@ -36,11 +35,13 @@ function collectHookRegistrySources(
     if (!registry || seen.has(registry)) {
       return;
     }
-    // Retired registries were superseded by a newer activation; dispatching
-    // their hooks would resurrect stale config closures. Only lastInitialized
-    // can be retired here (the live registries below are active/pinned, never
-    // retired); SDK-supplied registries are not PluginRegistry and never match.
-    if (isPluginRegistryRetired(registry as PluginRegistry)) {
+    // Superseded registries (explicitly retired, or replaced by a fresh
+    // same-cache-key generation) were displaced by a newer activation;
+    // dispatching their hooks would resurrect stale config closures. Only
+    // lastInitialized can be superseded here (the live registries below are
+    // active/pinned, never superseded); SDK-supplied registries are not
+    // PluginRegistry and never match.
+    if (isPluginRegistrySuperseded(registry as PluginRegistry)) {
       return;
     }
     seen.add(registry);
