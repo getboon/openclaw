@@ -800,6 +800,70 @@ describe("plugin scheduled turns", () => {
     expectSessionTurnHandle(handle, "job-from-tool-execution");
   });
 
+  it("unschedules a session turn by tag from the same never-activated, toolExecutionSnapshot registry", async () => {
+    const activeFixture = createPluginRegistryFixture();
+    activeFixture.registry.registry.plugins.push(
+      createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
+    );
+    setActivePluginRegistry(activeFixture.registry.registry);
+
+    const toolExecutionRegistry = createPluginRegistry({
+      logger: {
+        info() {},
+        warn() {},
+        error() {},
+        debug() {},
+      },
+      runtime: {} as PluginRuntime,
+      hostServices: { cron },
+      activateGlobalSideEffects: false,
+      toolExecutionSnapshot: true,
+    });
+    const record = createPluginRecord({
+      id: WORKFLOW_PLUGIN_ID,
+      name: "Workflow Plugin",
+      origin: "bundled",
+    });
+    toolExecutionRegistry.registry.plugins.push(record);
+    const api = toolExecutionRegistry.createApi(record, { config: {} });
+
+    const addedJobs: CronJob[] = [];
+    const removedJobIds = new Set<string>();
+    workflowMocks.cronAdd.mockImplementation(async (body: CronJobCreate) => {
+      const job = makeCronJob({ id: "job-from-tool-execution-unschedule", ...body });
+      addedJobs.push(job);
+      return job;
+    });
+    workflowMocks.cronListPage.mockImplementation(async () => ({
+      jobs: addedJobs.filter((job) => !removedJobIds.has(job.id)),
+      total: addedJobs.length,
+      offset: 0,
+      limit: 200,
+      hasMore: false,
+      nextOffset: null,
+    }));
+    workflowMocks.cronRemove.mockImplementation(async (id: string) => {
+      removedJobIds.add(id);
+      return { ok: true, removed: true };
+    });
+
+    const handle = await api.session.workflow.scheduleSessionTurn({
+      sessionKey: MAIN_SESSION_KEY,
+      message: "wake",
+      delayMs: 1,
+      tag: "nudge",
+    });
+    expectSessionTurnHandle(handle, "job-from-tool-execution-unschedule");
+
+    const result = await api.session.workflow.unscheduleSessionTurnsByTag({
+      sessionKey: MAIN_SESSION_KEY,
+      tag: "nudge",
+    });
+
+    expect(result.removed).toBeGreaterThan(0);
+    expect(workflowMocks.cronRemove).toHaveBeenCalledWith("job-from-tool-execution-unschedule");
+  });
+
   it("refuses to schedule a session turn on a registry installed active with side effects off (the migration-provider pattern)", async () => {
     const registryWithSideEffectsOff = createPluginRegistry({
       logger: {

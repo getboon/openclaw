@@ -367,6 +367,28 @@ describe("getCompatibleActivePluginRegistry", () => {
     expect(resolving).not.toBe(plain);
   });
 
+  it("separates toolExecutionScoped in the loader cache key so a tool-discovery-scan snapshot cannot be reused for a tool's own execute() snapshot", () => {
+    const baseOptions = {
+      config: {
+        plugins: {
+          allow: ["demo"],
+          load: { paths: ["/tmp/demo.js"] },
+        },
+      },
+      activate: false,
+      toolDiscovery: true,
+      onlyPluginIds: ["demo"],
+    };
+
+    const unscoped = testing.resolvePluginLoadCacheContext(baseOptions).cacheKey;
+    const toolExecutionScoped = testing.resolvePluginLoadCacheContext({
+      ...baseOptions,
+      toolExecutionScoped: true,
+    }).cacheKey;
+
+    expect(toolExecutionScoped).not.toBe(unscoped);
+  });
+
   it("does not embed raw resolved plugin config env values in the loader cache key", () => {
     const { cacheKey } = testing.resolvePluginLoadCacheContext({
       config: {
