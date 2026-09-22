@@ -224,6 +224,14 @@ export type PluginLoadOptions = {
    */
   preferBuiltPluginArtifacts?: boolean;
   toolDiscovery?: boolean;
+  /**
+   * Marks a registry as a plugin tool's own per-invocation execute() snapshot
+   * (see createCachedDescriptorPluginTool in tools.ts) rather than any other
+   * never-activated load (tool-discovery descriptor scans, the CLI-only
+   * registry). Durable side-effect APIs use this to fall back to the real
+   * active registry instead of this snapshot's own unusable activation state.
+   */
+  toolExecutionScoped?: boolean;
   activate?: boolean;
   loadModules?: boolean;
   throwOnLoadError?: boolean;
@@ -2012,6 +2020,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         hostServices: options.hostServices,
       }),
       activateGlobalSideEffects: shouldActivate,
+      toolExecutionSnapshot: options.toolExecutionScoped === true,
     });
 
     const suppliedManifestRegistry = options.manifestRegistry;

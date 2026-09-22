@@ -2760,14 +2760,14 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     // registry replaced by a fresh same-cache-key generation while it was
     // never the direct previousRegistry for that swap -- see its own doc.
     //
-    // A tool's own execute() handler resolves a fresh, narrow, never-activated
-    // registry scoped to just this plugin on every invocation (see
-    // createCachedDescriptorPluginTool), so isPluginRegistryActivated(registry)
-    // is permanently false there even though the plugin is genuinely loaded
-    // gateway-wide -- fall back to checking the real active registry by id in
-    // that case instead of this snapshot's own (unusable) activation state.
+    // Never-activated tool snapshots must validate durable side effects against the
+    // loaded plugin in the current active registry, not the snapshot's own registry.
+    // Gated on toolExecutionSnapshot (not just "never activated") so this fallback
+    // stays scoped to createCachedDescriptorPluginTool's per-invocation snapshots --
+    // other never-activated, side-effects-off loads (tool-discovery descriptor scans,
+    // the CLI-only registry) keep the strict, registry-local check below.
     const isLoadedRecordInActiveRegistry = () => {
-      if (!isPluginRegistryActivated(registry)) {
+      if (registryParams.toolExecutionSnapshot === true && !isPluginRegistryActivated(registry)) {
         return isPluginLoadedInActiveRegistry(record.id);
       }
       return !isPluginRegistrySuperseded(registry) && isLoadedRecordInRegistry();
@@ -3057,19 +3057,15 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                   };
                 }
               },
-              // Only reject outright when THIS registry was itself installed
-              // as the real active/pinned one with side effects deliberately
-              // off (e.g. the migration-provider registry). A tool's own
-              // execute() handler instead resolves a narrow, NEVER-activated
-              // per-invocation registry every call (see
-              // createCachedDescriptorPluginTool) -- activateGlobalSideEffects
-              // is permanently false there too, but isLoadedRecordInActiveRegistry
-              // (passed as shouldCommit) already falls back to checking the
-              // real active registry by id for that specific case.
+              // Reject outright unless this is either the real active/pinned
+              // registry, or a plugin tool's own per-invocation execute()
+              // snapshot (toolExecutionSnapshot -- see createCachedDescriptorPluginTool).
+              // Other never-activated, side-effects-off loads (tool-discovery
+              // descriptor scans, the CLI-only registry) stay rejected here.
               scheduleSessionTurn: async (schedule) => {
                 if (
                   registryParams.activateGlobalSideEffects === false &&
-                  isPluginRegistryActivated(registry)
+                  !(registryParams.toolExecutionSnapshot === true)
                 ) {
                   return undefined;
                 }
@@ -3087,7 +3083,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
               unscheduleSessionTurnsByTag: async (request) => {
                 if (
                   registryParams.activateGlobalSideEffects === false &&
-                  isPluginRegistryActivated(registry)
+                  !(registryParams.toolExecutionSnapshot === true)
                 ) {
                   return { removed: 0, failed: 0 };
                 }
