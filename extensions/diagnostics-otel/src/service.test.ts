@@ -54,12 +54,15 @@ const telemetryState = vi.hoisted(() => {
 
 const sdkStart = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const sdkShutdown = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const meterProviderShutdown = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const logEmit = vi.hoisted(() => vi.fn());
 const logShutdown = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const traceExporterCtor = vi.hoisted(() => vi.fn());
 const metricExporterCtor = vi.hoisted(() => vi.fn());
 const logExporterCtor = vi.hoisted(() => vi.fn());
 const spanProcessorCtor = vi.hoisted(() => vi.fn());
+const tracerProviderCtor = vi.hoisted(() => vi.fn());
+const globalGetTracer = vi.hoisted(() => vi.fn(() => telemetryState.tracer));
 const unhandledRejectionHandlerState = vi.hoisted(() => {
   let handlers: Array<(reason: unknown) => boolean> = [];
   return {
@@ -84,7 +87,7 @@ vi.mock("@opentelemetry/api", () => ({
     getMeter: () => telemetryState.meter,
   },
   trace: {
-    getTracer: () => telemetryState.tracer,
+    getTracer: globalGetTracer,
     setSpanContext: telemetryState.tracer.setSpanContext,
   },
   TraceFlags: {
@@ -96,13 +99,6 @@ vi.mock("@opentelemetry/api", () => ({
   },
   SpanKind: {
     CLIENT: 2,
-  },
-}));
-
-vi.mock("@opentelemetry/sdk-node", () => ({
-  NodeSDK: class {
-    start = sdkStart;
-    shutdown = sdkShutdown;
   },
 }));
 
@@ -140,9 +136,24 @@ vi.mock("@opentelemetry/sdk-logs", () => ({
 
 vi.mock("@opentelemetry/sdk-metrics", () => ({
   PeriodicExportingMetricReader: function PeriodicExportingMetricReader() {},
+  MeterProvider: class {
+    constructor() {
+      sdkStart();
+    }
+    getMeter = () => telemetryState.meter;
+    shutdown = meterProviderShutdown;
+  },
 }));
 
 vi.mock("@opentelemetry/sdk-trace-base", () => ({
+  BasicTracerProvider: class {
+    constructor(config?: unknown) {
+      tracerProviderCtor(config);
+      sdkStart();
+    }
+    getTracer = () => telemetryState.tracer;
+    shutdown = sdkShutdown;
+  },
   BatchSpanProcessor: function BatchSpanProcessor(exporter?: unknown, options?: unknown) {
     spanProcessorCtor(exporter, options);
   },
@@ -150,12 +161,24 @@ vi.mock("@opentelemetry/sdk-trace-base", () => ({
   TraceIdRatioBasedSampler: function TraceIdRatioBasedSampler() {},
 }));
 
-vi.mock("@opentelemetry/resources", () => ({
-  resourceFromAttributes: vi.fn((attrs: Record<string, unknown>) => attrs),
-  Resource: function Resource(_value?: unknown) {
-    // Constructor shape required by the mocked OpenTelemetry API.
-  },
-}));
+vi.mock("@opentelemetry/resources", () => {
+  const mergeable = (base: Record<string, unknown>): Record<string, unknown> => ({
+    ...base,
+    merge: (other: Record<string, unknown>) => mergeable({ ...base, ...other }),
+  });
+  return {
+    defaultResource: vi.fn(() => mergeable({ "telemetry.sdk.language": "nodejs" })),
+    detectResources: vi.fn(() => ({ "host.name": "test-host", "process.pid": 4242 })),
+    envDetector: {},
+    hostDetector: {},
+    osDetector: {},
+    processDetector: {},
+    resourceFromAttributes: vi.fn((attrs: Record<string, unknown>) => attrs),
+    Resource: function Resource(_value?: unknown) {
+      // Constructor shape required by the mocked OpenTelemetry API.
+    },
+  };
+});
 
 vi.mock("@opentelemetry/semantic-conventions", () => ({
   ATTR_SERVICE_NAME: "service.name",
@@ -482,7 +505,6 @@ function emitTrustedToolExecutionCompletedWithContent(
 
 afterAll(() => {
   vi.doUnmock("@opentelemetry/api");
-  vi.doUnmock("@opentelemetry/sdk-node");
   vi.doUnmock("@opentelemetry/exporter-metrics-otlp-proto");
   vi.doUnmock("@opentelemetry/exporter-trace-otlp-proto");
   vi.doUnmock("@opentelemetry/exporter-logs-otlp-proto");
@@ -507,7 +529,10 @@ describe("diagnostics-otel service", () => {
     telemetryState.meter.createCounter.mockClear();
     telemetryState.meter.createHistogram.mockClear();
     sdkStart.mockClear();
+    tracerProviderCtor.mockClear();
+    globalGetTracer.mockClear();
     sdkShutdown.mockClear();
+    meterProviderShutdown.mockClear();
     logEmit.mockReset();
     logShutdown.mockClear();
     traceExporterCtor.mockClear();
@@ -1373,6 +1398,62 @@ describe("diagnostics-otel service", () => {
     expect(runDurationRecordCall?.[1]?.["openclaw.outcome"]).toBe("blocked");
     expect(runDurationRecordCall?.[1]?.["openclaw.blocked_by"]).toBe("policy-plugin");
     expect(JSON.stringify(telemetryState)).not.toContain("matched secret prompt");
+
+    await service.stop?.(ctx);
+  });
+
+  test("takes its tracer from the provider it owns, not the global one", async () => {
+    // Global provider registration is first-writer-wins: reading the tracer off
+    // the global API hands our spans to whichever SDK registered first, and they
+    // are exported on its terms or not at all.
+    const service = createDiagnosticsOtelService();
+    const ctx = createTraceOnlyContext(OTEL_TEST_ENDPOINT);
+    await service.start(ctx);
+
+    expect(tracerProviderCtor).toHaveBeenCalledTimes(1);
+    expect(globalGetTracer).not.toHaveBeenCalled();
+
+    emitDiagnosticEvent({
+      type: "run.completed",
+      runId: "run-owned-tracer",
+      provider: "openai",
+      model: "gpt-5.5",
+      outcome: "completed",
+      durationMs: 100,
+    });
+    await flushDiagnosticEvents();
+
+    expect(startedSpanCall("openclaw.run")).toBeDefined();
+    await service.stop?.(ctx);
+  });
+
+  test("keeps the resource attributes NodeSDK used to detect", async () => {
+    // Without these, two gateways are indistinguishable in the trace backend.
+    const service = createDiagnosticsOtelService();
+    const ctx = createTraceOnlyContext(OTEL_TEST_ENDPOINT);
+    await service.start(ctx);
+
+    const providerConfig = tracerProviderCtor.mock.calls[0]?.[0] as
+      | { resource?: Record<string, unknown> }
+      | undefined;
+    expect(providerConfig?.resource).toMatchObject({
+      "service.name": "openclaw",
+      "host.name": "test-host",
+      "process.pid": 4242,
+      "telemetry.sdk.language": "nodejs",
+    });
+
+    await service.stop?.(ctx);
+  });
+
+  test("joins the global tracer when a host process preloaded the SDK", async () => {
+    process.env.OPENCLAW_OTEL_PRELOADED = "1";
+    const service = createDiagnosticsOtelService();
+    const ctx = createTraceOnlyContext(OTEL_TEST_ENDPOINT);
+    await service.start(ctx);
+
+    expect(tracerProviderCtor).not.toHaveBeenCalled();
+    expect(globalGetTracer).toHaveBeenCalled();
 
     await service.stop?.(ctx);
   });
