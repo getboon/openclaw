@@ -531,30 +531,46 @@ export async function runSubagentAnnounceFlow(params: {
       startedAt: params.startedAt,
       endedAt: params.endedAt,
     });
-    // ENG-19951: a plain registry lookup by this child's own session key --
+    // A plain registry lookup by this child's own session key --
     // independent of which text-source `reply` came from above. Falls back to
     // the frozen delivery payload copy, mirroring
     // selectChildCompletionAuditTrace's precedence in
     // subagent-announce-output.ts, so a suspended-delivery/restart edge where
     // completion state was reset but the payload retained its copy still
     // surfaces evidence here instead of only on the multi-child path.
+    //
+    // The lookup is by childSessionKey, but a persistent-session child can
+    // have started a NEW run under the same key before this announcement
+    // (for an OLDER run) is delivered -- guard on runId so a newer run's
+    // trace is never misattributed to this one; fall back to no evidence
+    // rather than risk attaching the wrong run's tool calls.
     const ownRegistryRun = subagentRegistryRuntime?.getLatestSubagentRunByChildSessionKey?.(
       params.childSessionKey,
     );
     const ownAuditTrace =
-      ownRegistryRun?.completion?.resultAuditTrace ??
-      ownRegistryRun?.delivery?.payload?.frozenAuditTrace;
-    const directChildToolEvidence: SubagentToolEvidence[] = childCompletionFindings
-      ? multiChildToolEvidence
-      : ownAuditTrace?.toolInvocations?.length
-        ? [
-            {
-              childSessionKey: params.childSessionKey,
-              toolInvocations: ownAuditTrace.toolInvocations,
-              visibleTools: ownAuditTrace.visibleTools ?? [],
-            },
-          ]
-        : [];
+      ownRegistryRun?.runId === params.childRunId
+        ? (ownRegistryRun?.completion?.resultAuditTrace ??
+          ownRegistryRun?.delivery?.payload?.frozenAuditTrace)
+        : undefined;
+    // Own evidence (this session's own tool calls) and multi-child evidence
+    // (settled descendants') are independent sources -- a child can have
+    // both, or either alone. Gating one on the other's presence (e.g. on
+    // childCompletionFindings, a text string that can be falsy even when
+    // multiChildToolEvidence was already collected) silently discards
+    // whichever source didn't win the gate; always combine both instead.
+    const ownEvidenceEntry: SubagentToolEvidence[] = ownAuditTrace?.toolInvocations?.length
+      ? [
+          {
+            childSessionKey: params.childSessionKey,
+            toolInvocations: ownAuditTrace.toolInvocations,
+            visibleTools: ownAuditTrace.visibleTools ?? [],
+          },
+        ]
+      : [];
+    const directChildToolEvidence: SubagentToolEvidence[] = [
+      ...ownEvidenceEntry,
+      ...multiChildToolEvidence,
+    ];
     const completionEvent: AgentInternalEvent = {
       type: "task_completion",
       source: announceType === "cron job" ? "cron" : "subagent",

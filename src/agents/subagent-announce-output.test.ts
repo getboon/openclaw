@@ -336,7 +336,7 @@ describe("buildChildCompletionFindings", () => {
 });
 
 describe("collectChildCompletionToolEvidence", () => {
-  it("carries childToolEvidence for every child that has a frozen audit trace (ENG-19951)", () => {
+  it("carries childToolEvidence for every child that has a frozen audit trace", () => {
     const rows = [
       {
         childSessionKey: "child-a",
@@ -362,6 +362,52 @@ describe("collectChildCompletionToolEvidence", () => {
         createdAt: 2,
         outcome: { status: "ok" as const },
         completion: { resultText: "concrete done" },
+      },
+    ];
+    const evidence = collectChildCompletionToolEvidence(rows);
+    expect(evidence).toEqual([
+      {
+        childSessionKey: "child-a",
+        toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+        visibleTools: ["takeoff_dispatch"],
+      },
+    ]);
+  });
+
+  it("prefers the frozen delivery payload's trace when completion.resultAuditTrace exists but has no invocations", () => {
+    const rows = [
+      {
+        childSessionKey: "child-a",
+        task: "run steel scope",
+        createdAt: 1,
+        outcome: { status: "ok" as const },
+        completion: {
+          resultText: "steel done",
+          // A retry/resume cycle can leave an empty trace on completion
+          // while an earlier real trace survives on the frozen payload.
+          resultAuditTrace: {
+            schemaVersion: 1 as const,
+            visibleTools: [],
+            toolInvocations: [],
+            evidence: [],
+            confidence: "medium" as const,
+            disposition: "completed" as const,
+            reason: "no_tools_visible" as const,
+          },
+        },
+        delivery: {
+          payload: {
+            frozenAuditTrace: {
+              schemaVersion: 1 as const,
+              visibleTools: ["takeoff_dispatch"],
+              toolInvocations: [{ name: "takeoff_dispatch", status: "ok" as const }],
+              evidence: [],
+              confidence: "high" as const,
+              disposition: "completed" as const,
+              reason: "tool_execution_succeeded" as const,
+            },
+          },
+        },
       },
     ];
     const evidence = collectChildCompletionToolEvidence(rows);
