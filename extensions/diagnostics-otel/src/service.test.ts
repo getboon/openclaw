@@ -1984,6 +1984,34 @@ describe("diagnostics-otel service", () => {
     await service.stop?.(ctx);
   });
 
+  test("keeps model usage in the turn trace when its parent span is not tracked", async () => {
+    const service = createDiagnosticsOtelService();
+    const ctx = createOtelContext(OTEL_TEST_ENDPOINT, { traces: true, metrics: true });
+    await service.start(ctx);
+
+    emitTrustedDiagnosticEvent({
+      type: "model.usage",
+      provider: "openai",
+      model: "gpt-5.4",
+      usage: { input: 10, output: 5 },
+      durationMs: 40,
+      trace: {
+        traceId: TRACE_ID,
+        spanId: GRANDCHILD_SPAN_ID,
+        parentSpanId: CHILD_SPAN_ID,
+        traceFlags: "01",
+      },
+    });
+    await flushDiagnosticEvents();
+
+    const usageCall = startedSpanCall("openclaw.model.usage");
+    const parent = (usageCall?.[2] as { spanContext?: { traceId?: string; spanId?: string } })
+      ?.spanContext;
+    expect(parent?.traceId).toBe(TRACE_ID);
+    expect(parent?.spanId).toBe(CHILD_SPAN_ID);
+    await service.stop?.(ctx);
+  });
+
   test("bounds agent identifiers on model usage metric attributes", async () => {
     const service = createDiagnosticsOtelService();
     const ctx = createOtelContext(OTEL_TEST_ENDPOINT, { metrics: true });
@@ -3844,8 +3872,15 @@ describe("diagnostics-otel service", () => {
       },
     });
 
-    expect(telemetryState.tracer.setSpanContext).not.toHaveBeenCalled();
-    expect(startedSpanCall("openclaw.model.usage")?.[2]).toBeUndefined();
+    // Retained run contexts are gone: the late usage span links through the
+    // event's own (remote) trace context, not a retained span object.
+    const lateUsageParent = (
+      startedSpanCall("openclaw.model.usage")?.[2] as
+        | { spanContext?: { spanId?: string; isRemote?: boolean } }
+        | undefined
+    )?.spanContext;
+    expect(lateUsageParent?.isRemote).toBe(true);
+    expect(lateUsageParent?.spanId).toBe(CHILD_SPAN_ID);
     await service.stop?.(ctx);
   });
 
@@ -3881,6 +3916,30 @@ describe("diagnostics-otel service", () => {
       },
     });
 
+    // Positive control: while the run context is still retained, a late usage
+    // span resolves the retained (non-remote) span context of the run.
+    telemetryState.tracer.startSpan.mockClear();
+    emitTrustedDiagnosticEvent({
+      type: "model.usage",
+      provider: "openai",
+      model: "gpt-5.4",
+      usage: { input: 1, output: 1, total: 2 },
+      durationMs: 10,
+      trace: {
+        traceId: TRACE_ID,
+        spanId: "3333333333333333",
+        parentSpanId: CHILD_SPAN_ID,
+        traceFlags: "01",
+      },
+    });
+    await flushDiagnosticEvents();
+    const retainedUsageParent = (
+      startedSpanCall("openclaw.model.usage")?.[2] as
+        | { spanContext?: { spanId?: string; isRemote?: boolean } }
+        | undefined
+    )?.spanContext;
+    expect(retainedUsageParent?.isRemote).toBeUndefined();
+
     await service.stop?.(ctx);
     await service.start(ctx);
     telemetryState.tracer.setSpanContext.mockClear();
@@ -3900,8 +3959,15 @@ describe("diagnostics-otel service", () => {
       },
     });
 
-    expect(telemetryState.tracer.setSpanContext).not.toHaveBeenCalled();
-    expect(startedSpanCall("openclaw.model.usage")?.[2]).toBeUndefined();
+    // Retained run contexts are gone: the late usage span links through the
+    // event's own (remote) trace context, not a retained span object.
+    const lateUsageParent = (
+      startedSpanCall("openclaw.model.usage")?.[2] as
+        | { spanContext?: { spanId?: string; isRemote?: boolean } }
+        | undefined
+    )?.spanContext;
+    expect(lateUsageParent?.isRemote).toBe(true);
+    expect(lateUsageParent?.spanId).toBe(CHILD_SPAN_ID);
     await service.stop?.(ctx);
   });
 

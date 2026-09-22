@@ -2412,8 +2412,11 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
           usage.cacheWrite,
         );
 
+        // model.usage is emitted after the run settles, so its parent span may no
+        // longer be tracked; fall back to the event's own trace context instead of
+        // starting a fresh trace that detaches tokens and cost from the turn.
         const span = spanWithDuration("openclaw.model.usage", spanAttrs, evt.durationMs, {
-          parentContext: activeTrustedParentContext(evt, metadata),
+          parentContext: activeInternalOrTrustedContext(evt, metadata),
           endTimeMs: evt.ts,
         });
         span.end(evt.ts);
