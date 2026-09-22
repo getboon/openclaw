@@ -16,10 +16,13 @@ have happened. This causes eval judges to flag real, grounded results as
 
 Root cause, confirmed against the `getboon/openclaw` fork source and live
 production logs (see linked RCA on the ticket): `attachAgentDecisionTrace`
-(`src/auto-reply/reply/agent-runner.ts:2423`) builds the delivered reply's
+(`src/auto-reply/reply/agent-runner.ts:2434`, called via `buildAgentDecisionTrace`
+at `:2427` — line numbers as shipped; this was the root-cause finding against
+the pre-fix codebase, cited here at current post-fix line numbers) builds the
+delivered reply's
 `audit_trace` from `runResult.meta.toolSummary` alone — which is
 `attemptToolSummary`, computed per-attempt from `attempt.toolMetas`
-(`src/agents/embedded-agent-runner/run.ts:3739`). When a parent yields waiting
+(`src/agents/embedded-agent-runner/run.ts:3815` as shipped). When a parent yields waiting
 on a subagent, the attempt that resumes and composes the final reply is a
 **fresh embedded-run attempt** with its own, freshly-initialized
 `attempt.toolMetas` — nothing carries the subagent's tool-call evidence
@@ -161,7 +164,7 @@ behavior because it simply never looks at a field it doesn't know exists.
 
 ### 3.3 Where evidence enters the completion event: `AgentTaskCompletionInternalEvent`
 
-`AgentTaskCompletionInternalEvent` (`src/agents/internal-events.ts:23`) gains
+`AgentTaskCompletionInternalEvent` (`src/agents/internal-events.ts:37`) gains
 an optional `childToolEvidence?: SubagentToolEvidence[]` field — an **array**
 from the start, not a single value, so the single-child and multi-child-wake
 cases use one shape (see 3.5). `SubagentToolEvidence` is a small new type:
@@ -223,7 +226,7 @@ Confirmed `internalEvents` is already a first-class parameter on
 `RunEmbeddedAgentParams` (`run/params.ts:269`) and is already available,
 unmodified, in the exact same top-level `run.ts` function scope where
 `attemptToolSummary` is computed (`params.internalEvents`, same function that
-contains the `buildTraceToolSummary` call at `run.ts:3739`) — no new plumbing
+contains the `buildTraceToolSummary` call at `run.ts:3815` as shipped) — no new plumbing
 needed to get the data there at all.
 
 Confirmed `buildTraceToolSummary`'s return type, `ToolSummaryTrace`
@@ -234,14 +237,17 @@ Confirmed `buildTraceToolSummary`'s return type, `ToolSummaryTrace`
 of this section relied on, but it means the merge can happen immediately
 after `buildTraceToolSummary` returns, entirely inside `run.ts`, as a plain
 array concatenation — no reshape, no new field on `runResult.meta`, and
-**no change to `agent-runner.ts` at all** (it already reads
+**no change to `agent-runner.ts` for this merge specifically** (it already reads
 `runResult.meta.toolSummary` and passes it straight to
 `buildAgentDecisionTrace`; if `toolSummary.invocations` already contains the
 merged set by the time `agent-runner.ts` sees it, there's nothing left for
-that layer to do).
+that layer to do to consume the merged summary). `agent-runner.ts` does still
+need the separate `recordSubagentReplyAuditTrace` call described in 3.1/§4 —
+a different, independent change, not part of this merge.
 
 Concretely, right after `const attemptToolSummary = buildTraceToolSummary({...})`
-(`run.ts:3739`):
+(as shipped, `run.ts:3815` — this section's original draft cited `run.ts:3739`,
+before later tasks' edits shifted line numbers):
 
 ```ts
 const delegatedInvocations = collectDelegatedToolInvocationsFromInternalEvents(
@@ -250,7 +256,13 @@ const delegatedInvocations = collectDelegatedToolInvocationsFromInternalEvents(
 const mergedAttemptToolSummary =
   delegatedInvocations.invocations.length > 0
     ? {
-        ...attemptToolSummary,
+        calls: (attemptToolSummary?.calls ?? 0) + delegatedInvocations.invocations.length,
+        tools: [
+          ...new Set([
+            ...(attemptToolSummary?.tools ?? []),
+            ...delegatedInvocations.invocations.map((invocation) => invocation.name),
+          ]),
+        ],
         invocations: [
           ...(attemptToolSummary?.invocations ?? []),
           ...delegatedInvocations.invocations,
@@ -265,9 +277,19 @@ const mergedAttemptToolSummary =
     : attemptToolSummary;
 ```
 
-(`mergedAttemptToolSummary` replaces `attemptToolSummary` at its 4 existing
-consumption sites, `run.ts:3816/4059/4150/4289` — a rename, not new call
-sites.) `collectDelegatedToolInvocationsFromInternalEvents` is a new,
+(As shipped this became an exported, independently-tested pure function,
+`mergeDelegatedToolEvidenceIntoSummary`, rather than staying inline — a later
+review round found the inline version untestable in isolation. The `calls`/
+`tools` accounting above was also added post-review: the first draft only
+folded delegated entries into `invocations`/`visibleTools`, leaving `calls`/
+`tools` at the parent's own values — undercounting delegated activity for
+exactly the case this fix targets, since `toolSummary.calls` gates
+`agent-runner.ts`'s `calls <= 0` check and feeds its `tools=N` label.)
+
+`mergedAttemptToolSummary` replaces `attemptToolSummary` at its 4 existing
+consumption sites (as shipped, `run.ts:3902/4145/4236/4375` — a rename, not
+new call sites; this section's original draft cited `3816/4059/4150/4289`).
+`collectDelegatedToolInvocationsFromInternalEvents` is a new,
 small, pure function (same shape/spirit as the existing
 `collectPendingMediaFromInternalEvents` in `embedded-agent-subscribe.ts:135`,
 a direct precedent for "extract a specific structured payload out of
@@ -319,7 +341,7 @@ correctly in 3.3.
 
 **Nested grandchildren:** confirmed structurally — there is exactly **one**
 call site for `attachAgentDecisionTrace`/`buildAgentDecisionTrace` in the
-entire repo (`agent-runner.ts:2423`), with no subagent-specific bypass. A
+entire repo (`agent-runner.ts:2434`), with no subagent-specific bypass. A
 subagent's own run, when it resumes after yielding on its own grandchild,
 goes through the identical path and therefore gets the identical merge
 applied to **its own** reply before that reply is frozen as `completion.resultAuditTrace`
@@ -368,12 +390,21 @@ evidence when it's genuinely available; it introduces no new way to fail.
   `internalEvents` with a `task_completion` entry carrying `childToolEvidence`,
   returns those invocations tagged `viaSubagent: true`; given `undefined`/`[]`/
   events with no `childToolEvidence`, returns `{invocations: [], visibleTools: []}`.
-- Unit: the `run.ts` merge — given an attempt with N direct tool calls and
-  `params.internalEvents` carrying M delegated ones, `mergedAttemptToolSummary.invocations`
-  has N+M entries, the M delegated ones tagged `viaSubagent: true`; feeding
-  that into the existing, unmodified `buildAgentDecisionTrace` shows
-  disposition math (`successfulCalls`/`failedCalls`/etc.) counts them the
-  same as direct invocations.
+- Unit: the `run.ts` merge (function name as shipped:
+  `mergeDelegatedToolEvidenceIntoSummary`) — given an attempt with N direct
+  tool calls and `params.internalEvents` carrying M delegated ones,
+  `mergedAttemptToolSummary.invocations` has N+M entries, the M delegated ones
+  tagged `viaSubagent: true`. Feeding that into `buildAgentDecisionTrace`
+  shows the aggregate disposition counts (`successfulCalls`/`failedCalls`/
+  `blockedCalls`/`partialCalls`) count delegated invocations the same as
+  direct ones — but **not** the terminal-message detection: as shipped,
+  `terminalInvocation = allInvocations.findLast((entry) => !entry.viaSubagent)`
+  (`agent-decision-trace.ts:160`) deliberately _excludes_ delegated entries,
+  since they're appended after the attempt's own and must never be mistaken
+  for this attempt's own terminal action (a real bug a review round caught:
+  without the exclusion, a delegating turn's recovered-failure disposition
+  silently downgraded from `tool_execution_succeeded` to
+  `tool_execution_partial`).
 - Unit: merge is a no-op when `params.internalEvents` is absent or has no
   `task_completion` entries — `mergedAttemptToolSummary` is reference-equal
   to `attemptToolSummary` (no new object allocated), so

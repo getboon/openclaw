@@ -1,5 +1,15 @@
 # ENG-19951: Subagent Audit-Trace Evidence Implementation Plan
 
+> **Status: implemented.** Every task below is complete and shipped on
+> `fix/eng-19951-subagent-audit-trace`. This plan is retained as the historical
+> record of how the fix was built (including two redesigns caught mid-execution
+> — see the superseded-design notes on Tasks 3/5/6) and the reasoning behind
+> each decision, not as work still to be executed. A handful of task steps
+> below describe implementation details (a specific line/count/literal) that
+> drifted once later tasks refactored the code they describe; each such spot
+> is called out inline rather than silently left to mislead a reader diffing
+> this plan against the shipped code.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make a parent agent's delivered reply carry a completing subagent's tool-call evidence in its own `audit_trace`, so eval judges (and anything else reading the trace) see proof of delegated work instead of an empty trace for a turn that genuinely used tools via a spawned subagent.
@@ -16,7 +26,7 @@
 - No existing exported function's signature or behavior changes. New capability is added via sibling functions, never by editing an existing function's contract.
 - The merge in `run.ts` must be provably a no-op (same object reference, not just "empty array") when there's no subagent evidence to merge, so a non-delegating turn's trace-building is untouched.
 - All new code follows existing patterns in the touched files: `vitest` (`describe`/`it`/`expect`), the project's existing null/undefined-coalescing style (`??`), and TSDoc comments only where the WHY isn't obvious from the code.
-- Every task's test command: `npx vitest run <path>` from the repo root (`/Users/williamsboonworkspace/Documents/Documents/workspacee1/openclaw/openclaw/.claude/worktrees/eng-19951-subagent-trace`).
+- Every task's test command: `npx vitest run <path>` from the repo root.
 
 ---
 
@@ -404,13 +414,17 @@ export function recordSubagentReplyAuditTrace(
   if (!latest) {
     return;
   }
-  latest.completion = {
-    ...(latest.completion ?? { required: false }),
-    resultAuditTrace: auditTrace,
-  };
+  ensureCompletionState(latest).resultAuditTrace = auditTrace;
   persistSubagentRuns();
 }
 ```
+
+(Note: the shipped implementation uses the existing `ensureCompletionState` helper from
+`subagent-delivery-state.js`, not a hand-rolled `{ ...(latest.completion ?? { required: false }) }`
+spread — the latter would mislabel a run with `expectsCompletionMessage: true` as
+`required: false` the first time its completion state is created, since
+`ensureCompletionState` derives `required` from `expectsCompletionMessage`, not a
+hardcoded default.)
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1113,7 +1127,9 @@ export function collectDelegatedToolInvocationsFromInternalEvents(
 
 If `ToolSummaryTrace`/`RunEmbeddedAgentParams` aren't already imported in `run.ts` at the point `buildTraceToolSummary` is defined, check their existing import there (both types are already used by `buildTraceToolSummary` itself, per its signature, so no new import should be needed).
 
-- [ ] **Step 4: Merge at the `attemptToolSummary` computation site**
+- [x] **Step 4: Merge at the `attemptToolSummary` computation site** — done, but not as this step originally described.
+
+**Post-implementation note:** a later cubic-dev-ai review round (still on this same PR) found the inline merge below untestable in isolation, so it was extracted into an exported pure function, `mergeDelegatedToolEvidenceIntoSummary` (`run.ts`), which is what actually shipped. The literal string `toolSummary: attemptToolSummary` this step's own instructions ask a reader to grep for **no longer exists anywhere in the file** — there is now a single call site (`mergeDelegatedToolEvidenceIntoSummary(attemptToolSummary, delegatedToolEvidence)`) feeding `mergedAttemptToolSummary`, which each of the (still 4) consumption sites reference. Do not attempt to re-run this step's grep-and-rename procedure; it will find nothing and, if forced, would duplicate the existing helper. Kept below only as the historical record of the first working shape of the merge, before extraction.
 
 At `run.ts:3739` (re-verify current line before editing — Tasks 1-6 don't touch this file), change:
 
@@ -1226,9 +1242,9 @@ git add -A
 git commit -m "test(subagent): end-to-end coverage for delegated audit-trace evidence (ENG-19951)"
 ```
 
-- [ ] **Step 6: Update the spec's status line**
+- [x] **Step 6: Update the spec's status line** — already done; verify rather than edit.
 
-Change line 4 of `docs/specs/2026-09-18-eng19951-subagent-audit-trace-design.md` from `**Status:** design approved by ticket owner, ready for writing-plans.` to `**Status:** implemented, see commits on fix/eng-19951-subagent-audit-trace.`
+The spec already carries the target text (`**Status:** implemented, see commits on fix/eng-19951-subagent-audit-trace.`) as shipped, so this step is a verification, not an edit — the "from" text below never existed in the shipped spec. Kept for historical accuracy of what this step originally asked for: change line 4 of `docs/specs/2026-09-18-eng19951-subagent-audit-trace-design.md` from `**Status:** design approved by ticket owner, ready for writing-plans.` to `**Status:** implemented, see commits on fix/eng-19951-subagent-audit-trace.`
 
 ```bash
 git add docs/specs/2026-09-18-eng19951-subagent-audit-trace-design.md
@@ -1241,7 +1257,7 @@ git commit -m "docs(specs): mark ENG-19951 design as implemented"
 
 **Two real issues found and fixed during self-review, documented here so the reasoning isn't lost:**
 
-- **Task 5 originally planned to swap which dependency `freezeRunResultAtCompletion` calls.** Reading the actual test file (`subagent-registry-lifecycle.test.ts:172-200`) showed `captureSubagentCompletionReply` is a **required** constructor param that ~15 individual tests override per-test — swapping it for a differently-named dependency would have silently broken every one of them (their mocks would simply stop being called). Fixed by adding `captureSubagentCompletionReplyWithTrace` as a new **optional** field with a fallback to the existing required one, the same additive pattern used everywhere else in this plan, just applied to a DI parameter instead of a data field. Task 5 as written now includes the `subagent-registry.ts` production wiring this requires — don't skip that step, or the fix compiles and tests pass but never actually freezes a trace outside tests.
+- **Superseded by the Task 3 registry-direct-write redesign below:** Task 5 originally planned to swap which dependency `freezeRunResultAtCompletion` calls. Reading the actual test file (`subagent-registry-lifecycle.test.ts:172-200`) showed `captureSubagentCompletionReply` is a **required** constructor param that ~15 individual tests override per-test — swapping it for a differently-named dependency would have silently broken every one of them (their mocks would simply stop being called). That draft fixed it by adding a new optional `captureSubagentCompletionReplyWithTrace` DI field. **This entire design is moot as shipped**: once Task 3 became a direct registry write (`recordSubagentReplyAuditTrace`, independent of and earlier than the freeze), `freezeRunResultAtCompletion` needed zero changes — see Task 5's own "Superseded design note" below, which is the design that actually shipped. This bullet is kept only as a record of a design path that was considered and abandoned, not as a step to execute.
 - **Task 6 initially missed that `runSubagentAnnounceFlow` has a third source for `reply`** — `params.roundOneReply`, a pre-supplied text that bypasses the read-with-trace path entirely. This is now explicitly documented as an acknowledged, deliberate gap (same treatment as the spec's pre-yield-attempt and live-progress-lane scope-outs) rather than silently unhandled.
 
 Both corrections came from actually reading the test files' real structure before writing test code, not from re-deriving it from the spec's citations. Do the same for the remaining lower-confidence items below.
