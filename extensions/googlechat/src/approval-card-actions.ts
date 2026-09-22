@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { ExecApprovalDecision } from "openclaw/plugin-sdk/approval-runtime";
+import { pruneMapToMaxSize } from "openclaw/plugin-sdk/collection-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { GoogleChatActionParameter, GoogleChatEvent } from "./types.js";
 
@@ -25,6 +26,8 @@ export type GoogleChatApprovalCardBinding = {
 
 const approvalCardBindings = new Map<string, GoogleChatApprovalCardBinding>();
 const approvalCardResolvingTokens = new Set<string>();
+const GOOGLECHAT_APPROVAL_CARD_BINDING_MAX_ENTRIES = 1024;
+const GOOGLECHAT_MANUAL_APPROVAL_SUPPRESSION_MAX_ENTRIES = 1024;
 
 type GoogleChatManualApprovalSuppressionPayload = {
   text?: string;
@@ -107,13 +110,47 @@ export function readGoogleChatApprovalActionToken(event: GoogleChatEvent): strin
   return normalizeOptionalString(params[GOOGLECHAT_APPROVAL_TOKEN_PARAM]) ?? null;
 }
 
+// approvalCardBindings and manualApprovalFollowupSuppressions are independent
+// maps with independent size caps, keyed differently (token vs approvalId). A
+// plain pruneMapToMaxSize on the bindings map can evict a token whose
+// suppression entry survives -- leaving that approval unreachable via the
+// (now-unknown) card token AND silently suppressed as manual /approve text.
+// Evict bindings one at a time and drop the matching suppression only when no
+// other live binding still covers that approvalId.
+function pruneApprovalCardBindingsAndOrphanedSuppressions(): void {
+  while (approvalCardBindings.size > GOOGLECHAT_APPROVAL_CARD_BINDING_MAX_ENTRIES) {
+    const oldest = approvalCardBindings.entries().next();
+    if (oldest.done) {
+      break;
+    }
+    const [evictedToken, evictedBinding] = oldest.value;
+    approvalCardBindings.delete(evictedToken);
+    // Preserve in-flight markers across LRU eviction so a resent token cannot
+    // be claimed while its original resolution is still running.
+    const key = manualApprovalFollowupSuppressionKey(evictedBinding.approvalId);
+    if (!key) {
+      continue;
+    }
+    const stillBound = Array.from(approvalCardBindings.values()).some(
+      (binding) => manualApprovalFollowupSuppressionKey(binding.approvalId) === key,
+    );
+    if (!stillBound) {
+      manualApprovalFollowupSuppressions.delete(key);
+    }
+  }
+}
+
 export function registerGoogleChatApprovalCardBinding(
   binding: GoogleChatApprovalCardBinding,
 ): boolean {
   if (binding.expiresAtMs <= Date.now()) {
     return false;
   }
+  if (approvalCardBindings.has(binding.token)) {
+    approvalCardBindings.delete(binding.token);
+  }
   approvalCardBindings.set(binding.token, binding);
+  pruneApprovalCardBindingsAndOrphanedSuppressions();
   registerGoogleChatManualApprovalFollowupSuppression({
     approvalId: binding.approvalId,
     approvalKind: binding.approvalKind,
@@ -156,7 +193,14 @@ export function registerGoogleChatManualApprovalFollowupSuppression(
   if (!key) {
     return false;
   }
+  if (manualApprovalFollowupSuppressions.has(key)) {
+    manualApprovalFollowupSuppressions.delete(key);
+  }
   manualApprovalFollowupSuppressions.set(key, suppression);
+  pruneMapToMaxSize(
+    manualApprovalFollowupSuppressions,
+    GOOGLECHAT_MANUAL_APPROVAL_SUPPRESSION_MAX_ENTRIES,
+  );
   return true;
 }
 

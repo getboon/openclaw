@@ -44,6 +44,7 @@ import {
   type ReplyDispatchBeforeDeliver,
   type ReplyDispatcher,
 } from "./reply-dispatcher.js";
+import type { RouteReplyResult } from "./route-reply.js";
 import { resolveRoutedDeliveryThreadId } from "./routed-delivery-thread.js";
 import { buildTestCtx } from "./test-ctx.js";
 
@@ -53,7 +54,11 @@ type ResolveInboundConversationParams = Parameters<
 >[0];
 
 const mocks = vi.hoisted(() => ({
-  routeReply: vi.fn(async (_params: unknown) => ({ ok: true, messageId: "mock" })),
+  routeReply: vi.fn<(_params: unknown) => Promise<RouteReplyResult>>(async () => ({
+    ok: true,
+    delivered: true,
+    messageId: "mock",
+  })),
   tryFastAbortFromMessage: vi.fn<() => Promise<AbortResult>>(async () => ({
     handled: false,
     aborted: false,
@@ -1032,7 +1037,7 @@ describe("dispatchReplyFromConfig", () => {
     replyRunTesting.resetReplyRunRegistry();
     resetInboundDedupe();
     mocks.routeReply.mockReset();
-    mocks.routeReply.mockResolvedValue({ ok: true, messageId: "mock" });
+    mocks.routeReply.mockResolvedValue({ ok: true, delivered: true, messageId: "mock" });
     acpMocks.listAcpSessionEntries.mockReset().mockResolvedValue([]);
     diagnosticMocks.logMessageQueued.mockClear();
     diagnosticMocks.logMessageProcessed.mockClear();
@@ -7808,7 +7813,7 @@ describe("before_dispatch hook", () => {
   beforeEach(() => {
     resetInboundDedupe();
     mocks.routeReply.mockReset();
-    mocks.routeReply.mockResolvedValue({ ok: true, messageId: "mock" });
+    mocks.routeReply.mockResolvedValue({ ok: true, delivered: true, messageId: "mock" });
     threadInfoMocks.parseSessionThreadInfo.mockReset();
     threadInfoMocks.parseSessionThreadInfo.mockImplementation(parseGenericThreadSessionInfo);
     ttsMocks.state.synthesizeFinalAudio = false;

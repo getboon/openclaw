@@ -1257,6 +1257,28 @@ describe("sendMessageTelegram", () => {
     expect(chunks.every((chunk) => chunk.length <= 4000)).toBe(true);
   });
 
+  it("applies the reply target only to the first chunk when text splits, but keeps the thread id on every chunk", async () => {
+    botApi.sendMessage.mockResolvedValue({ message_id: 54, chat: { id: "123" } });
+    const markdown = `# Long\n\n${"**section** with _style_ and `code`\n".repeat(3000)}`;
+
+    await sendMessageTelegram("123", markdown, {
+      cfg: TELEGRAM_TEST_CFG,
+      token: "tok",
+      messageThreadId: 271,
+      replyToMessageId: 500,
+    });
+
+    expect(botApi.sendMessage.mock.calls.length).toBeGreaterThan(1);
+    const paramsByCall = botApi.sendMessage.mock.calls.map(
+      (call) => call[2] as Record<string, unknown> | undefined,
+    );
+    expect(paramsByCall[0]?.reply_to_message_id).toBe(500);
+    expect(paramsByCall.slice(1).every((params) => params?.reply_to_message_id === undefined)).toBe(
+      true,
+    );
+    expect(paramsByCall.every((params) => params?.message_thread_id === 271)).toBe(true);
+  });
+
   it("chunks long inline markdown through the HTML text path", async () => {
     botApi.sendMessage.mockResolvedValue({ message_id: 52, chat: { id: "123" } });
     const markdown = `**${"A".repeat(70_000)}**`;

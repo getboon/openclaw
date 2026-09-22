@@ -107,12 +107,19 @@ export function shouldSkipPluginValidationForDoctorConfigPreflight(
   return isTruthyEnvValue(env.OPENCLAW_UPDATE_IN_PROGRESS);
 }
 
-function noteStateMigrationResult(result: { changes: string[]; warnings: string[] }): void {
+function noteStateMigrationResult(result: {
+  changes: string[];
+  warnings: string[];
+  notices?: string[];
+}): void {
   if (result.changes.length > 0) {
     note(result.changes.map((entry) => `- ${entry}`).join("\n"), "Doctor changes");
   }
   if (result.warnings.length > 0) {
     note(result.warnings.map((entry) => `- ${entry}`).join("\n"), "Doctor warnings");
+  }
+  if (result.notices && result.notices.length > 0) {
+    note(result.notices.map((entry) => `- ${entry}`).join("\n"), "Doctor notes");
   }
 }
 
@@ -130,6 +137,8 @@ export async function runDoctorConfigPreflight(
     recoverCorruptTargetStore?: boolean;
     invalidConfigNote?: string | false;
     beforeStateMigrations?: (snapshot?: ConfigFileSnapshot) => Promise<boolean>;
+    /** Explicit doctor repair may import approval state from the default state directory. */
+    crossStateDirImports?: boolean;
   } = {},
 ): Promise<DoctorConfigPreflightResult> {
   const stateMigrations =
@@ -205,10 +214,16 @@ export async function runDoctorConfigPreflight(
           cfg: baseConfig,
           env: process.env,
           recoverCorruptTargetStore: options.recoverCorruptTargetStore,
+          crossStateDirImports: options.crossStateDirImports,
         }),
       );
     } else {
-      noteStateMigrationResult(await autoMigrateLegacyTaskStateSidecars({ env: process.env }));
+      noteStateMigrationResult(
+        await autoMigrateLegacyTaskStateSidecars({
+          env: process.env,
+          crossStateDirImports: options.crossStateDirImports,
+        }),
+      );
     }
   }
 

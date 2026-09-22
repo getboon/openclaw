@@ -146,6 +146,11 @@ type ToolTranscriptResultInput = {
 };
 
 export class CodexAppServerEventProjector {
+  // Last non-empty mirrored-session snapshot this run has actually read. A
+  // transient ENOENT on an active run (e.g. mid-compaction) must not present
+  // as "no history" to the compaction hooks -- fall back to this instead of
+  // regressing to empty when the read comes back empty for an active run.
+  private lastMirroredSessionMessages: AgentMessage[] = [];
   private readonly assistantTextByItem = new Map<string, string>();
   private readonly assistantItemOrder: string[] = [];
   private readonly assistantPhaseByItem = new Map<string, string>();
@@ -1933,14 +1938,21 @@ export class CodexAppServerEventProjector {
   }
 
   private async readMirroredSessionMessages(): Promise<AgentMessage[]> {
-    return (
-      (await readCodexMirroredSessionHistoryMessages({
-        agentId: this.params.agentId,
-        sessionFile: this.params.sessionFile,
-        sessionId: this.params.sessionId,
-        sessionKey: this.params.sessionKey,
-      })) ?? []
-    );
+    const messages = await readCodexMirroredSessionHistoryMessages({
+      agentId: this.params.agentId,
+      sessionFile: this.params.sessionFile,
+      sessionId: this.params.sessionId,
+      sessionKey: this.params.sessionKey,
+    });
+    if (messages && messages.length > 0) {
+      this.lastMirroredSessionMessages = messages;
+      return messages;
+    }
+    // A missing/unreadable mirror is expected for a brand-new session (no
+    // prior successful read yet), but for an active run that has already
+    // mirrored history, treat it as a transient read failure and keep the
+    // last known-good snapshot instead of silently regressing to empty.
+    return this.lastMirroredSessionMessages;
   }
 
   private createAssistantMessage(text: string): AssistantMessage {

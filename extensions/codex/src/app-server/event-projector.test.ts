@@ -925,8 +925,12 @@ describe("CodexAppServerEventProjector", () => {
 
     expect(result.aborted).toBe(false);
     expect(result.assistantTexts).toEqual([]);
+    // ENG-18810: explain-mode's generic branch returns the fixed "run command"
+    // copy instead of the compacted raw command line (which would leak cwd/pipe
+    // internals into customer-facing surfaces), so this no-visible-answer-guard
+    // case no longer surfaces "workspace" in the meta text.
     expect(result.toolMetas).toEqual([
-      expect.objectContaining({ toolName: "bash", meta: expect.stringContaining("workspace") }),
+      expect.objectContaining({ toolName: "bash", meta: "run command" }),
     ]);
   });
 
@@ -3509,7 +3513,11 @@ describe("CodexAppServerEventProjector", () => {
     const toolProgressText = onToolResult.mock.calls
       .map(([payload]) => (payload as { text?: string }).text ?? "")
       .join("\n");
-    expect(toolProgressText).toContain("log_activity.sh");
+    // ENG-18810: explain-mode's generic branch returns the fixed "run command"
+    // copy instead of leaking the raw script path/name into customer-facing
+    // progress text -- the leak this test's own name warns against.
+    expect(toolProgressText).toContain("run command");
+    expect(toolProgressText).not.toContain("log_activity.sh");
 
     const result = projector.buildResult(buildEmptyToolTelemetry());
     expect(result.messagesSnapshot.some((message) => message.role === "toolResult")).toBe(true);
@@ -4059,6 +4067,61 @@ describe("CodexAppServerEventProjector", () => {
     );
     expect(afterContext.runId).toBe("run-1");
     expect(afterContext.sessionId).toBe("session-1");
+  });
+
+  it("keeps the last known-good mirrored history when a later compaction's read hits ENOENT", async () => {
+    const beforeCompaction = vi.fn();
+    const afterCompaction = vi.fn();
+    initializeGlobalHookRunner(
+      createMockPluginRegistry([
+        { hookName: "before_compaction", handler: beforeCompaction },
+        { hookName: "after_compaction", handler: afterCompaction },
+      ]),
+    );
+    const params = await createParams();
+    const projector = await createProjector(params);
+
+    await projector.handleNotification(
+      forCurrentTurn("item/started", {
+        item: { type: "contextCompaction", id: "compact-1" },
+      }),
+    );
+    await projector.handleNotification(
+      forCurrentTurn("item/completed", {
+        item: { type: "contextCompaction", id: "compact-1" },
+      }),
+    );
+    expect(
+      requireRecord(mockCallArg(beforeCompaction, 0, 0, "beforeCompaction"), "before payload")
+        .messageCount,
+    ).toBe(1);
+
+    // Simulate an active run whose mirror file becomes transiently unreadable.
+    await fs.rm(params.sessionFile);
+
+    await projector.handleNotification(
+      forCurrentTurn("item/started", {
+        item: { type: "contextCompaction", id: "compact-2" },
+      }),
+    );
+    await projector.handleNotification(
+      forCurrentTurn("item/completed", {
+        item: { type: "contextCompaction", id: "compact-2" },
+      }),
+    );
+
+    const secondBeforePayload = requireRecord(
+      mockCallArg(beforeCompaction, 1, 0, "beforeCompaction"),
+      "second before payload",
+    );
+    // Without the fix, this regresses to 0 -- the ENOENT read is silently
+    // treated as "no history" instead of keeping the last known-good snapshot.
+    expect(secondBeforePayload.messageCount).toBe(1);
+    const secondAfterPayload = requireRecord(
+      mockCallArg(afterCompaction, 1, 0, "afterCompaction"),
+      "second after payload",
+    );
+    expect(secondAfterPayload.messageCount).toBe(1);
   });
 
   it("projects codex hook started and completed notifications into agent events", async () => {

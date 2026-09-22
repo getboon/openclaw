@@ -80,4 +80,34 @@ describe("dispatchChannelMessageAction trusted sender guard", () => {
 
     expect(handleAction).toHaveBeenCalledOnce();
   });
+
+  it("allows an operator.admin-scoped Gateway caller without a trusted sender id", async () => {
+    // Plugins like iMessage and MS Teams honor operator.admin as an
+    // alternative to owner provenance inside their own handleAction; this
+    // outer gate must not reject those calls before they get there.
+    await dispatchChannelMessageAction({
+      channel: "discord",
+      action: "kick",
+      cfg: {} as OpenClawConfig,
+      params: { guildId: "g1", userId: "u1" },
+      toolContext: { currentChannelProvider: "discord" },
+      gatewayClientScopes: ["operator.admin"],
+    });
+
+    expect(handleAction).toHaveBeenCalledOnce();
+  });
+
+  it("still rejects a Gateway caller with unrelated scopes and no trusted sender id", async () => {
+    await expect(
+      dispatchChannelMessageAction({
+        channel: "discord",
+        action: "kick",
+        cfg: {} as OpenClawConfig,
+        params: { guildId: "g1", userId: "u1" },
+        toolContext: { currentChannelProvider: "discord" },
+        gatewayClientScopes: ["operator.read"],
+      }),
+    ).rejects.toThrow("Trusted sender identity is required for discord:kick");
+    expect(handleAction).not.toHaveBeenCalled();
+  });
 });

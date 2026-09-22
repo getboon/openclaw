@@ -28,6 +28,13 @@ export type RetryOptions = RetryConfig & {
   shouldRetry?: (err: unknown, attempt: number) => boolean;
   retryAfterMs?: (err: unknown) => number | undefined;
   onRetry?: (info: RetryInfo) => void;
+  /**
+   * When provided, an abort during the backoff delay ends the wait
+   * immediately instead of sleeping out the full delay and rerunning `fn`
+   * with an already-aborted signal. The loop stops retrying and the last
+   * error propagates, same as if attempts were exhausted.
+   */
+  signal?: AbortSignal;
 };
 
 const DEFAULT_RETRY_CONFIG = {
@@ -193,10 +200,42 @@ export async function retryAsync<T>(
         label: options.label,
       });
       if (delay > 0) {
-        await sleep(delay);
+        const abortedDuringDelay = await sleepOrAbort(delay, options.signal);
+        if (abortedDuringDelay) {
+          break;
+        }
       }
     }
   }
 
   throw toErrorObject(lastErr ?? new Error("Retry failed"), "Non-Error thrown");
+}
+
+/**
+ * Sleeps for `ms`, resolving early with `true` if `signal` aborts first. A
+ * caller that aborts mid-backoff gets the loop stopped promptly instead of
+ * waiting out the full delay and rerunning the operation with a signal that
+ * is already aborted.
+ */
+function sleepOrAbort(ms: number, signal?: AbortSignal): Promise<boolean> {
+  if (!signal) {
+    return sleep(ms).then(() => false);
+  }
+  if (signal.aborted) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timeout);
+      resolve(true);
+    };
+    const timeout = setTimeout(
+      () => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(false);
+      },
+      resolveTimerTimeoutMs(ms, 0, 0),
+    );
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }

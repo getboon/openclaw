@@ -610,7 +610,7 @@ describe("qa mock openai server", () => {
     expect(errorOutput.output[0]?.content?.[0]?.text).toBe("TOOL_PROGRESS_ERROR_OK");
   });
 
-  it("uses the latest user prompt path for tool-progress plans", async () => {
+  it("uses the latest user tool-progress prompt kind and target for plans", async () => {
     const server = await startMockServer();
 
     const response = await fetch(`${server.baseUrl}/v1/responses`, {
@@ -627,9 +627,6 @@ describe("qa mock openai server", () => {
           makeUserInput(
             "Tool progress error QA check: read `latest-missing-progress-target.txt` before answering. After the read fails, reply exactly `LATEST_PROGRESS_OK`.",
           ),
-          makeUserInput(
-            "Continue with the QA scenario plan and report worked, failed, and blocked items.",
-          ),
         ],
       }),
     });
@@ -639,6 +636,61 @@ describe("qa mock openai server", () => {
     expect(body).toContain('"name":"read"');
     expect(body).toContain("latest-missing-progress-target.txt");
     expect(body).not.toContain("older-progress-target.txt");
+
+    const command = "sleep 2; cat 'current-progress-target.txt'";
+    const currentNormal = await postResponses(server, {
+      stream: true,
+      input: [
+        makeUserInput(
+          "Tool progress error QA check: read `stale-missing-progress-target.txt` before answering. After the read fails, reply exactly `STALE_PROGRESS_OK`.",
+        ),
+        {
+          type: "function_call_output",
+          call_id: "call_stale_progress_read",
+          output: JSON.stringify({ error: "ENOENT: stale turn" }),
+        },
+        makeUserInput(
+          `Tool progress QA check: call the exec tool exactly once with this exact command before answering: \`${command}\`. After that command completes, reply exactly \`CURRENT_PROGRESS_OK\`.`,
+        ),
+      ],
+    });
+
+    expect(currentNormal.status).toBe(200);
+    const currentNormalBody = await currentNormal.text();
+    expect(currentNormalBody).toContain('"name":"exec"');
+    expect(currentNormalBody).toContain(command);
+    expect(currentNormalBody).not.toContain("stale-missing-progress-target.txt");
+  });
+
+  it("does not recover tool-progress directives from an earlier user turn", async () => {
+    const server = await startMockServer();
+
+    const response = await fetch(`${server.baseUrl}/v1/responses`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        stream: true,
+        input: [
+          makeUserInput(
+            "Tool progress QA check: read `stale-progress-target.txt` before answering. After the read completes, reply exactly `STALE_PROGRESS_OK`.",
+          ),
+          {
+            type: "function_call_output",
+            call_id: "call_stale_progress_read",
+            output: JSON.stringify({ text: "stale turn" }),
+          },
+          makeUserInput("Summarize the current turn in one short sentence."),
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).not.toContain('"name":"read"');
+    expect(body).not.toContain("stale-progress-target.txt");
+    expect(body).not.toContain("STALE_PROGRESS_OK");
   });
 
   it("prefers path-like refs over generic quoted keys in prompts", async () => {
@@ -3304,6 +3356,53 @@ describe("qa mock openai server", () => {
     expect(outputText(await toolResult.json())).toContain("Attachment: /tmp/qa-lighthouse.png");
   });
 
+  it("completes background image generation from the current internal completion event", async () => {
+    const server = await startMockServer();
+    const prompt = "Image generation check: generate a QA lighthouse image.";
+    const imagePlan = await expectResponsesJson<{ output?: Array<{ type?: string }> }>(server, {
+      stream: false,
+      input: [makeUserInput(prompt)],
+    });
+    expect(imagePlan.output?.[0]?.type).toBe("function_call");
+
+    const completion = await expectResponsesJson<{
+      output?: Array<{ content?: Array<{ text?: string }> }>;
+    }>(server, {
+      stream: false,
+      input: [
+        makeUserInput(prompt),
+        {
+          type: "function_call",
+          name: "image_generate",
+          call_id: "call_mock_image_generate_1",
+          arguments: JSON.stringify({
+            prompt: "A QA lighthouse",
+            filename: "qa-lighthouse.png",
+          }),
+        },
+        {
+          type: "function_call_output",
+          call_id: "call_mock_image_generate_1",
+          output: JSON.stringify({
+            content: [{ type: "text", text: "Background image generation started." }],
+            details: { async: true, status: "started" },
+          }),
+        },
+        makeUserInput(
+          [
+            "[Internal task completion event]",
+            "source: image_generation",
+            "status: completed successfully",
+            "Generated media:",
+            "MEDIA:/tmp/qa-lighthouse.png",
+          ].join("\n"),
+        ),
+      ],
+    });
+
+    expect(outputText(completion)).toContain("MEDIA:/tmp/qa-lighthouse.png");
+  });
+
   it("plans QA tool-search calls for instruction-declared Codex dynamic tools", async () => {
     const server = await startMockServer();
 
@@ -3929,6 +4028,32 @@ describe("qa mock openai server", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       text: "Reply with only this exact marker: WHATSAPP_QA_AUDIO_TRANSCRIPT_OK",
+    });
+  });
+
+  it("serves the Matrix voice preflight transcription contract for the request prompt", async () => {
+    const server = await startQaMockOpenAiServer({
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      await server.stop();
+    });
+
+    const response = await fetch(`${server.baseUrl}/v1/audio/transcriptions`, {
+      method: "POST",
+      headers: {
+        "content-type": "multipart/form-data; boundary=qa",
+      },
+      body:
+        '--qa\r\ncontent-disposition: form-data; name="file"; filename="audio.wav"\r\n\r\n' +
+        `${"voice".repeat(16_000)}\r\n--qa\r\ncontent-disposition: form-data; name="prompt"\r\n\r\n` +
+        "MATRIX_QA_VOICE_PREFLIGHT_TRIGGER\r\n--qa--\r\n",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      text: "MATRIX_QA_VOICE_PREFLIGHT_MENTION reply with only this exact marker: MATRIX_QA_VOICE_PREFLIGHT_OK",
     });
   });
 

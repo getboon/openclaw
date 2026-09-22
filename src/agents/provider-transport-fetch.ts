@@ -45,6 +45,15 @@ import {
 const DEFAULT_MAX_SDK_RETRY_WAIT_SECONDS = 60;
 const OPENAI_SDK_STREAM_CONTENT_SNIFF_BYTES = 2 * 1024;
 const log = createSubsystemLogger("provider-transport-fetch");
+
+/** Max bytes for an entire JSON body synthesized into SSE frames. Prevents OOM
+ *  when a hostile streaming endpoint returns a never-ending JSON response
+ *  without Content-Length. */
+const SSE_SYNTHESIZE_JSON_MAX_BYTES = 16 * 1024 * 1024;
+
+/** Max decoded characters buffered while waiting for the next SSE event boundary. */
+const SSE_SANITIZE_BUFFER_MAX_CHARS = 16 * 1024 * 1024;
+
 const BLOCKED_EXACT_ORIGIN_TRUST_HOSTNAME_LABELS = new Set(["instance-data"]);
 const PLAIN_DECIMAL_NUMBER_RE = /^\d+(?:\.\d+)?$/;
 const RETRY_AFTER_HTTP_DATE_RE =
@@ -102,6 +111,7 @@ function sanitizeOpenAISdkSseResponse(
     const encoder = new TextEncoder();
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let buffer = "";
+    let totalBytes = 0;
     const sseBody = new ReadableStream<Uint8Array>({
       start() {
         reader = source.getReader();
@@ -120,9 +130,17 @@ function sanitizeOpenAISdkSseResponse(
               controller.close();
               return;
             }
+            const nextTotalBytes = totalBytes + chunk.value.byteLength;
+            if (nextTotalBytes > SSE_SYNTHESIZE_JSON_MAX_BYTES) {
+              throw new Error(
+                `Streaming JSON body exceeded ${SSE_SYNTHESIZE_JSON_MAX_BYTES} bytes while synthesizing SSE frames`,
+              );
+            }
+            totalBytes = nextTotalBytes;
             buffer += decoder.decode(chunk.value, { stream: true });
           }
         } catch (error) {
+          await reader?.cancel(error).catch(() => {});
           controller.error(error);
         }
       },
@@ -157,6 +175,11 @@ function sanitizeOpenAISdkSseResponse(
     for (;;) {
       const boundary = findSseEventBoundary(buffer);
       if (!boundary) {
+        if (buffer.length > SSE_SANITIZE_BUFFER_MAX_CHARS) {
+          throw new Error(
+            `SSE response exceeded max buffer size (${SSE_SANITIZE_BUFFER_MAX_CHARS} chars) without event boundary`,
+          );
+        }
         return enqueued;
       }
       const block = buffer.slice(0, boundary.index);
@@ -167,6 +190,7 @@ function sanitizeOpenAISdkSseResponse(
       if (hasReadableSseData(block)) {
         controller.enqueue(encoder.encode(`${block}${separator}`));
         enqueued += 1;
+        return enqueued;
       }
     }
   };
@@ -178,6 +202,10 @@ function sanitizeOpenAISdkSseResponse(
     async pull(controller) {
       try {
         for (;;) {
+          const pending = enqueueSanitized(controller, "");
+          if (pending > 0) {
+            return;
+          }
           const chunk = await reader?.read();
           if (!chunk || chunk.done) {
             const tail = decoder.decode();
@@ -200,6 +228,7 @@ function sanitizeOpenAISdkSseResponse(
           }
         }
       } catch (error) {
+        await reader?.cancel(error).catch(() => {});
         controller.error(error);
       }
     },

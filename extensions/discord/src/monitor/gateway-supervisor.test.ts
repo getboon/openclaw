@@ -1,6 +1,17 @@
 // Discord tests cover gateway supervisor plugin behavior.
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
+
+const { gatewayLogError } = vi.hoisted(() => ({ gatewayLogError: vi.fn() }));
+
+vi.mock("openclaw/plugin-sdk/runtime-env", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("openclaw/plugin-sdk/runtime-env")>();
+  return {
+    ...actual,
+    createSubsystemLogger: () => ({ error: gatewayLogError }),
+  };
+});
+
 import {
   classifyDiscordGatewayEvent,
   DiscordGatewayLifecycleError,
@@ -115,44 +126,120 @@ describe("createDiscordGatewaySupervisor", () => {
     supervisor.dispose();
   });
 
-  it("keeps suppressing late gateway errors after dispose", () => {
+  it("keeps a single late error guard after repeated dispose", () => {
     const emitter = new EventEmitter();
-    const runtime = { error: vi.fn() };
-    const supervisor = createDiscordGatewaySupervisor({
-      gateway: { emitter },
-      isDisallowedIntentsError: () => false,
-      runtime: runtime as never,
-    });
+    gatewayLogError.mockClear();
 
-    supervisor.dispose();
+    for (let index = 0; index < 3; index += 1) {
+      const supervisor = createDiscordGatewaySupervisor({
+        gateway: { emitter },
+        isDisallowedIntentsError: () => false,
+        runtime: { error: vi.fn() } as never,
+      });
 
-    emitter.emit("error", new Error("Max reconnect attempts (0) reached after close code 1005"));
-    expect(runtime.error).toHaveBeenCalledTimes(1);
-    expect(String(firstErrorArg(runtime))).toContain(
-      "suppressed late gateway reconnect-exhausted error after dispose",
+      expect(emitter.listenerCount("error")).toBe(1);
+      supervisor.dispose();
+      expect(emitter.listenerCount("error")).toBe(1);
+      const error = new Error(`late gateway error ${index}`);
+      expect(() => emitter.emit("error", error)).not.toThrow();
+      emitter.emit("error", error);
+    }
+
+    expect(emitter.listenerCount("error")).toBe(1);
+    expect(gatewayLogError).toHaveBeenCalledTimes(3);
+    expect(gatewayLogError).toHaveBeenLastCalledWith(
+      "suppressed late gateway error after dispose: Error: late gateway error 2",
     );
   });
 
-  it("dedupes identical late gateway errors after dispose", () => {
+  it("bounds the late-error dedup set so a stream of distinct errors can't grow it forever", () => {
     const emitter = new EventEmitter();
-    const runtime = { error: vi.fn() };
+    gatewayLogError.mockClear();
+
     const supervisor = createDiscordGatewaySupervisor({
       gateway: { emitter },
       isDisallowedIntentsError: () => false,
-      runtime: runtime as never,
+      runtime: { error: vi.fn() } as never,
     });
-
     supervisor.dispose();
-    const first = new TypeError();
-    first.stack = "TypeError\n    at gatewayCrash (discord-gateway.js:12:34)";
-    const second = new TypeError();
-    second.stack = "TypeError\n    at gatewayCrash (discord-gateway.js:12:34)";
-    emitter.emit("error", first);
-    emitter.emit("error", second);
 
-    expect(runtime.error).toHaveBeenCalledTimes(1);
-    expect(String(firstErrorArg(runtime))).toContain(
-      "suppressed late gateway fatal error after dispose: TypeError @ gatewayCrash (discord-gateway.js:12:34)",
+    const firstMessage = "late gateway error 0";
+    emitter.emit("error", new Error(firstMessage));
+    expect(gatewayLogError).toHaveBeenCalledWith(
+      `suppressed late gateway error after dispose: Error: ${firstMessage}`,
+    );
+
+    // Push the dedup set well past its bound with distinct messages.
+    for (let index = 1; index <= 250; index += 1) {
+      emitter.emit("error", new Error(`late gateway error ${index}`));
+    }
+
+    gatewayLogError.mockClear();
+    // The very first message should have been evicted by now, so it logs again
+    // instead of staying silently deduped forever.
+    emitter.emit("error", new Error(firstMessage));
+    expect(gatewayLogError).toHaveBeenCalledWith(
+      `suppressed late gateway error after dispose: Error: ${firstMessage}`,
+    );
+  });
+
+  it("does not let an older overlapping supervisor's dispose shadow a newer supervisor still owning the emitter", () => {
+    const emitter = new EventEmitter();
+    gatewayLogError.mockClear();
+    const runtimeA = { error: vi.fn() };
+    const runtimeB = { error: vi.fn() };
+
+    const supervisorA = createDiscordGatewaySupervisor({
+      gateway: { emitter },
+      isDisallowedIntentsError: () => false,
+      runtime: runtimeA as never,
+    });
+    // A newer supervisor takes over the same emitter before A disposes.
+    const supervisorB = createDiscordGatewaySupervisor({
+      gateway: { emitter },
+      isDisallowedIntentsError: () => false,
+      runtime: runtimeB as never,
+    });
+    supervisorB.attachLifecycle(vi.fn());
+
+    // A's delayed dispose must not install the shared late-error guard over B.
+    supervisorA.dispose();
+    expect(gatewayLogError).not.toHaveBeenCalled();
+
+    const liveHandler = vi.fn();
+    supervisorB.attachLifecycle(liveHandler);
+    emitter.emit("error", new Error("still active under B"));
+    expect(liveHandler).toHaveBeenCalledTimes(1);
+    expect(gatewayLogError).not.toHaveBeenCalled();
+
+    // Once the actual current owner disposes, the guard installs normally.
+    supervisorB.dispose();
+    emitter.emit("error", new Error("late gateway error after B disposes"));
+    expect(gatewayLogError).toHaveBeenCalledWith(
+      "suppressed late gateway error after dispose: Error: late gateway error after B disposes",
+    );
+  });
+
+  it("still installs the late error guard when an unrelated error listener is present at dispose", () => {
+    const emitter = new EventEmitter();
+    gatewayLogError.mockClear();
+    const otherListener = vi.fn();
+    emitter.on("error", otherListener);
+
+    const supervisor = createDiscordGatewaySupervisor({
+      gateway: { emitter },
+      isDisallowedIntentsError: () => false,
+      runtime: { error: vi.fn() } as never,
+    });
+    supervisor.dispose();
+
+    // The other listener later goes away (its owner cleaned up independently);
+    // our guard must still be attached or this emit would throw unhandled.
+    emitter.off("error", otherListener);
+    const error = new Error("late gateway error after unrelated listener removed");
+    expect(() => emitter.emit("error", error)).not.toThrow();
+    expect(gatewayLogError).toHaveBeenCalledWith(
+      "suppressed late gateway error after dispose: Error: late gateway error after unrelated listener removed",
     );
   });
 });

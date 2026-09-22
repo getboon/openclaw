@@ -84,8 +84,10 @@ async function waitForFile(filePath) {
 }
 
 async function writeJsonFile(filePath, value) {
-  // The parent polls for this file, so publish it atomically.
-  const tempPath = \`\${filePath}.tmp\`;
+  // The parent treats file existence as the readiness signal, so publish
+  // atomically; PID-suffix the temp name so concurrent children in the same
+  // directory can't collide on the same temp path.
+  const tempPath = filePath + "." + process.pid + ".tmp";
   await fs.writeFile(tempPath, \`\${JSON.stringify(value, null, 2)}\\n\`, "utf8");
   await fs.rename(tempPath, filePath);
 }
@@ -195,7 +197,6 @@ describe("reply session initialization concurrency", () => {
           stdio: ["ignore", "pipe", "pipe"],
         },
       );
-
       await waitForFile(readyPath);
       const snapshot = await readJsonFile<{ currentEntry?: unknown; revision: string }>(readyPath);
       expect(snapshot.revision).toBe(JSON.stringify({ sessionId: "existing-session" }));

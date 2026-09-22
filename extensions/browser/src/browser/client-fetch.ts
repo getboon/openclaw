@@ -6,6 +6,7 @@
  */
 import { parseBrowserHttpUrl } from "openclaw/plugin-sdk/browser-config";
 import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
+import { readResponseWithLimit } from "openclaw/plugin-sdk/response-limit-runtime";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
@@ -103,6 +104,13 @@ function withLoopbackBrowserAuth(
 const BROWSER_TOOL_MODEL_HINT =
   "Do NOT retry the browser tool — it will keep failing. " +
   "Use an alternative approach or inform the user that the browser is currently unavailable.";
+
+const BROWSER_ERROR_BODY_LIMIT_BYTES = 16 * 1024;
+// `response/body` supports 5M characters; 32 MiB covers worst-case JSON escaping while staying
+// bounded. This default only fits that endpoint's own contract -- callers with a genuinely
+// uncapped request (e.g. snapshot's maxChars=0) must pass their own maxResponseBytes override
+// instead of silently inheriting this cap.
+const BROWSER_SUCCESS_BODY_LIMIT_BYTES = 32 * 1024 * 1024;
 
 function isRateLimitStatus(status: number): boolean {
   return status === 429;
@@ -232,7 +240,7 @@ function enhanceBrowserFetchError(url: string, err: unknown, timeoutMs: number):
 
 async function fetchHttpJson<T>(
   url: string,
-  init: RequestInit & { timeoutMs?: number },
+  init: RequestInit & { timeoutMs?: number; maxResponseBytes?: number },
 ): Promise<T> {
   const timeoutMs = resolveBrowserFetchTimeoutMs(init.timeoutMs);
   const ctrl = new AbortController();
@@ -267,10 +275,22 @@ async function fetchHttpJson<T>(
           `${resolveBrowserRateLimitMessage(url)} ${BROWSER_TOOL_MODEL_HINT}`,
         );
       }
-      const text = await res.text().catch(() => "");
+      // Overflow cancels the stream and releases its reader lock before the guarded fetch below.
+      const body = await readResponseWithLimit(res, BROWSER_ERROR_BODY_LIMIT_BYTES).catch(
+        () => undefined,
+      );
+      const text = body ? new TextDecoder().decode(body) : "";
       throw new BrowserServiceError(text || `HTTP ${res.status}`);
     }
-    return (await res.json()) as T;
+    const body = await readResponseWithLimit(
+      res,
+      init.maxResponseBytes ?? BROWSER_SUCCESS_BODY_LIMIT_BYTES,
+      {
+        onOverflow: ({ maxBytes }) =>
+          new BrowserServiceError(`Browser control response exceeded ${maxBytes} bytes`),
+      },
+    );
+    return JSON.parse(new TextDecoder().decode(body)) as T;
   } finally {
     clearTimeout(t);
     await release?.();
@@ -283,14 +303,18 @@ async function fetchHttpJson<T>(
 /** Fetch JSON from browser control over HTTP or local dispatcher transport. */
 export async function fetchBrowserJson<T>(
   url: string,
-  init?: RequestInit & { timeoutMs?: number },
+  init?: RequestInit & { timeoutMs?: number; maxResponseBytes?: number },
 ): Promise<T> {
   const timeoutMs = resolveBrowserFetchTimeoutMs(init?.timeoutMs);
   let isDispatcherPath = false;
   try {
     if (isAbsoluteHttp(url)) {
       const httpInit = withLoopbackBrowserAuth(url, init);
-      return await fetchHttpJson<T>(url, { ...httpInit, timeoutMs });
+      return await fetchHttpJson<T>(url, {
+        ...httpInit,
+        timeoutMs,
+        maxResponseBytes: init?.maxResponseBytes,
+      });
     }
     isDispatcherPath = true;
     const { dispatchBrowserControlRequest } = await import("./local-dispatch.runtime.js");

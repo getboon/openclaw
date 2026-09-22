@@ -7,12 +7,17 @@ import { describe, expect, it, beforeEach, vi } from "vitest";
 const { createMatrixQaClient } = vi.hoisted(() => ({
   createMatrixQaClient: vi.fn(),
 }));
-const { createMatrixQaE2eeScenarioClient, runMatrixQaE2eeBootstrap, startMatrixQaFaultProxy } =
-  vi.hoisted(() => ({
-    createMatrixQaE2eeScenarioClient: vi.fn(),
-    runMatrixQaE2eeBootstrap: vi.fn(),
-    startMatrixQaFaultProxy: vi.fn(),
-  }));
+const {
+  createMatrixQaE2eeScenarioClient,
+  loadMatrixQaE2eeRuntime,
+  runMatrixQaE2eeBootstrap,
+  startMatrixQaFaultProxy,
+} = vi.hoisted(() => ({
+  createMatrixQaE2eeScenarioClient: vi.fn(),
+  loadMatrixQaE2eeRuntime: vi.fn(),
+  runMatrixQaE2eeBootstrap: vi.fn(),
+  startMatrixQaFaultProxy: vi.fn(),
+}));
 const {
   formatMatrixQaCliCommand,
   redactMatrixQaCliOutput,
@@ -32,6 +37,7 @@ vi.mock("../../substrate/client.js", () => ({
 }));
 vi.mock("../../substrate/e2ee-client.js", () => ({
   createMatrixQaE2eeScenarioClient,
+  loadMatrixQaE2eeRuntime,
   runMatrixQaE2eeBootstrap,
 }));
 vi.mock("../../substrate/fault-proxy.js", () => ({
@@ -53,6 +59,7 @@ import type { MatrixQaObservedEvent } from "../../substrate/events.js";
 import {
   MATRIX_QA_MEDIA_TYPE_COVERAGE_CASES,
   MATRIX_QA_VOICE_PREFLIGHT_FILENAME,
+  MATRIX_QA_VOICE_PREFLIGHT_MENTION,
   MATRIX_QA_VOICE_PREFLIGHT_REPLY_MARKER,
 } from "./scenario-media-fixtures.js";
 import {
@@ -364,6 +371,13 @@ describe("matrix live qa scenarios", () => {
   beforeEach(() => {
     createMatrixQaClient.mockReset();
     createMatrixQaE2eeScenarioClient.mockReset();
+    loadMatrixQaE2eeRuntime.mockReset().mockResolvedValue({
+      openMatrixInboundDedupeStoreOptions: ({ stateDir }: { stateDir?: string }) => ({
+        namespace: "inbound-dedupe",
+        maxEntries: 20_000,
+        env: { ...process.env, OPENCLAW_STATE_DIR: stateDir },
+      }),
+    });
     runMatrixQaE2eeBootstrap.mockReset();
     runMatrixQaOpenClawCli.mockReset();
     startMatrixQaOpenClawCli.mockReset();
@@ -1139,13 +1153,9 @@ describe("matrix live qa scenarios", () => {
           },
         },
       });
-      const proxyStop = vi.fn().mockResolvedValue(undefined);
-      const proxyHits = vi.fn().mockReturnValue([]);
-      startMatrixQaFaultProxy.mockResolvedValue({
-        baseUrl: "http://127.0.0.1:39879",
-        hits: proxyHits,
-        stop: proxyStop,
-      });
+      const faultProxyHits = vi.fn().mockReturnValue([]);
+      const installFaultRule = vi.fn();
+      const removeFaultRule = vi.fn();
       let replyToken = "";
       const driverStop = vi.fn().mockResolvedValue(undefined);
       const driverClient = {
@@ -1181,6 +1191,11 @@ describe("matrix live qa scenarios", () => {
         gatewayRuntimeEnv: {
           OPENCLAW_CONFIG_PATH: gatewayConfigPath,
           PATH: process.env.PATH,
+        },
+        faultProxy: {
+          hits: faultProxyHits,
+          installRule: installFaultRule,
+          removeRule: removeFaultRule,
         },
         outputDir,
         restartGatewayAfterStateMutation,
@@ -1236,11 +1251,13 @@ describe("matrix live qa scenarios", () => {
         "http://127.0.0.1:28008/",
       );
       expect(restoredConfig.channels.matrix.accounts.sut.network).toEqual({ existing: true });
-      expect(restartGatewayAfterStateMutation).toHaveBeenCalledTimes(2);
-      expect(proxyStop).toHaveBeenCalledTimes(1);
+      expect(restartGatewayAfterStateMutation).toHaveBeenCalledTimes(1);
+      expect(startMatrixQaFaultProxy).not.toHaveBeenCalled();
+      expect(installFaultRule).toHaveBeenCalledTimes(1);
+      expect(removeFaultRule).toHaveBeenCalledWith("sync-state-after-missing-encryption");
 
-      const proxyArgs = mockObjectArg(startMatrixQaFaultProxy, "startMatrixQaFaultProxy") as {
-        rules: Array<{
+      const [faultRule] = installFaultRule.mock.calls[0] as [
+        {
           match: (params: {
             bearerToken?: string;
             headers: Record<string, string>;
@@ -1266,14 +1283,11 @@ describe("matrix live qa scenarios", () => {
                 headers: Headers;
                 status: number;
               }>;
-        }>;
-        targetBaseUrl?: unknown;
-      };
-      const [faultRule] = proxyArgs.rules;
+        },
+      ];
       if (!faultRule) {
         throw new Error("expected Matrix QA fault proxy rule");
       }
-      expect(proxyArgs.targetBaseUrl).toBe("http://127.0.0.1:28008/");
       expect(
         faultRule.match({
           bearerToken: "sut-token",
@@ -2058,7 +2072,7 @@ describe("matrix live qa scenarios", () => {
             accountId: "runtime-default",
             eventId: "$first-trigger",
             roomId: staleSyncRoomId,
-            stateRoot,
+            stateRoot: accountDir,
           });
         }
         return {
@@ -3379,6 +3393,52 @@ describe("matrix live qa scenarios", () => {
     expect(artifacts.reply?.tokenMatched).toBe(true);
   });
 
+  it("accepts a final replacement as Matrix command completion", async () => {
+    const previewEventId = "$tool-progress-command-final-replacement-preview";
+    mockMatrixQaRoomClient({
+      driverEventId: "$tool-progress-command-final-replacement-trigger",
+      events: [
+        {
+          event: matrixQaMessageEvent({
+            kind: "notice",
+            eventId: previewEventId,
+            body: "Working\n`🛠️ print text → run sleep 2`",
+          }),
+          since: "driver-sync-preview",
+        },
+        {
+          event: ({ sendTextMessage }) =>
+            matrixQaMessageEvent({
+              kind: "notice",
+              eventId: "$tool-progress-command-final-replacement",
+              body: readMatrixQaReplyDirective(
+                mockMessageBody(sendTextMessage, "sendTextMessage"),
+                "MATRIX_QA_TOOL_PROGRESS_COMMAND",
+              ),
+              relatesTo: {
+                relType: "m.replace",
+                eventId: previewEventId,
+              },
+            }),
+          since: "driver-sync-final",
+        },
+      ],
+    });
+
+    const scenario = requireMatrixQaScenario("matrix-room-tool-progress-command-preview");
+
+    const result = await runMatrixQaScenario(scenario, matrixQaScenarioContext());
+    const artifacts = result.artifacts as {
+      previewBodyPreview?: unknown;
+      previewEventId?: unknown;
+      reply?: { eventId?: unknown; tokenMatched?: unknown };
+    };
+    expect(artifacts.previewBodyPreview).toMatch(/^MATRIX_QA_TOOL_PROGRESS_COMMAND_/);
+    expect(artifacts.previewEventId).toBe(previewEventId);
+    expect(artifacts.reply?.eventId).toBe("$tool-progress-command-final-replacement");
+    expect(artifacts.reply?.tokenMatched).toBe(true);
+  });
+
   it("reports Matrix tool progress preview candidates when the progress wait times out", async () => {
     const previewEvent = matrixQaMessageEvent({
       kind: "notice",
@@ -4047,9 +4107,9 @@ describe("matrix live qa scenarios", () => {
           event: matrixQaMessageEvent({
             kind: "message",
             eventId: "$tool-progress-mention-edit",
-            body: "Working...\n- `read matrix-progress-@room-@alice:matrix-qa.test-!room:matrix-qa.test.txt failed`",
+            body: "Working...\n- `exec printf '@room @alice:matrix-qa.test !room:matrix-qa.test\\n'; sleep 2`",
             formattedBody:
-              "Working...<br><ul><li><code>read matrix-progress-@room-@alice:matrix-qa.test-!room:matrix-qa.test.txt failed</code></li></ul>",
+              "Working...<br><ul><li><code>exec printf '@room @alice:matrix-qa.test !room:matrix-qa.test\\n'; sleep 2</code></li></ul>",
             mentions: {},
             relatesTo: {
               relType: "m.replace",
@@ -4092,9 +4152,12 @@ describe("matrix live qa scenarios", () => {
     expect(artifacts.reply?.eventId).toBe("$tool-progress-mention-final");
     const prompt = mockMessageBody(sendTextMessage, "sendTextMessage");
     expect(prompt).toContain(
-      "read the missing workspace file `matrix-progress-@room-@alice:matrix-qa.test-!room:matrix-qa.test.txt` before answering",
+      "call the exec tool exactly once with this exact command before answering",
     );
-    expect(prompt).toContain("The QA harness must observe that failed read");
+    expect(prompt).toContain(
+      "printf '@room @alice:matrix-qa.test !room:matrix-qa.test\\n'; sleep 2",
+    );
+    expect(prompt).toContain("mention-looking text inert");
   });
 
   it("rejects active Matrix mentions in final-first tool-progress previews", async () => {
@@ -4117,9 +4180,9 @@ describe("matrix live qa scenarios", () => {
           event: matrixQaMessageEvent({
             kind: "message",
             eventId: "$tool-progress-mention-final-first-progress",
-            body: "Working...\n- `read matrix-progress-@room-@alice:matrix-qa.test-!room:matrix-qa.test.txt failed`",
+            body: "Working...\n- `exec printf '@room @alice:matrix-qa.test !room:matrix-qa.test\\n'; sleep 2`",
             formattedBody:
-              "Working...<br><ul><li><code>read matrix-progress-@room-@alice:matrix-qa.test-!room:matrix-qa.test.txt failed</code></li></ul>",
+              "Working...<br><ul><li><code>exec printf '@room @alice:matrix-qa.test !room:matrix-qa.test\\n'; sleep 2</code></li></ul>",
             mentions: {
               room: true,
               userIds: ["@alice:matrix-qa.test"],
@@ -4136,7 +4199,7 @@ describe("matrix live qa scenarios", () => {
       /active mentions/,
     );
     expect(mockMessageBody(sendTextMessage, "sendTextMessage")).toContain(
-      "read the missing workspace file",
+      "call the exec tool exactly once",
     );
   });
 
@@ -4160,9 +4223,9 @@ describe("matrix live qa scenarios", () => {
           event: matrixQaMessageEvent({
             kind: "message",
             eventId: "$tool-progress-mention-top-level-progress",
-            body: "⚠️ 🛠️ `show matrix-progress-@room-@alice:matrix-qa.test-!room:matrix-qa.test.txt (workspace)` failed",
+            body: "⚠️ 🛠️ `exec printf '@room @alice:matrix-qa.test !room:matrix-qa.test\\n'; sleep 2`",
             formattedBody:
-              "<p>⚠️ 🛠️ <code>show matrix-progress-@room-@alice:matrix-qa.test-!room:matrix-qa.test.txt (workspace)</code> failed</p>",
+              "<p>⚠️ 🛠️ <code>exec printf '@room @alice:matrix-qa.test !room:matrix-qa.test\\n'; sleep 2</code></p>",
             mentions: {},
           }),
           since: "driver-sync-progress",
@@ -4180,7 +4243,7 @@ describe("matrix live qa scenarios", () => {
       reply?: { eventId?: unknown };
     };
     expect(artifacts.previewEventId).toBe("$tool-progress-mention-top-level-progress");
-    expect(artifacts.previewFormattedBodyPreview).toContain("<code>show matrix-progress-@room");
+    expect(artifacts.previewFormattedBodyPreview).toContain("<code>exec printf '@room");
     expect(artifacts.previewMentions).toEqual({});
     expect(artifacts.reply?.eventId).toBe("$tool-progress-mention-top-level-final");
   });
@@ -4192,9 +4255,9 @@ describe("matrix live qa scenarios", () => {
     const previewEvent = matrixQaMessageEvent({
       kind: "message",
       eventId: "$tool-progress-mention-stale-preview",
-      body: "Working...\n- `read matrix-progress-@room-@alice:matrix-qa.test-!room:matrix-qa.test.txt failed`",
+      body: "Working...\n- `exec printf '@room @alice:matrix-qa.test !room:matrix-qa.test\\n'; sleep 2`",
       formattedBody:
-        "Working...<br><ul><li><code>read matrix-progress-@room-@alice:matrix-qa.test-!room:matrix-qa.test.txt failed</code></li></ul>",
+        "Working...<br><ul><li><code>exec printf '@room @alice:matrix-qa.test !room:matrix-qa.test\\n'; sleep 2</code></li></ul>",
       mentions: {},
     });
     const waitForRoomEvent = vi
@@ -4711,7 +4774,14 @@ describe("matrix live qa scenarios", () => {
 
     const scenario = requireMatrixQaScenario("matrix-voice-preflight-mention");
     expect(scenario.configOverrides?.audio?.enabled).toBe(true);
-    expect(scenario.configOverrides?.groupMentionPatterns).toEqual(["\\S"]);
+    expect(scenario.configOverrides?.audio).toMatchObject({
+      models: [{ model: "gpt-4o-transcribe", provider: "openai" }],
+      prompt: "MATRIX_QA_VOICE_PREFLIGHT_TRIGGER",
+    });
+    expect(scenario.configOverrides?.groupMentionPatterns).toEqual([
+      MATRIX_QA_VOICE_PREFLIGHT_MENTION,
+    ]);
+    expect(scenario.providerMode).toBe("mock-openai");
 
     const result = await runMatrixQaScenario(scenario, {
       baseUrl: "http://127.0.0.1:28008/",

@@ -50,6 +50,7 @@ type PromptDecisionParams = {
   failoverFailure: boolean;
   failoverReason: FailoverReason | null;
   harnessOwnsTransport?: boolean;
+  promptTimeoutFallbackSafe?: boolean;
   profileRotated: boolean;
 };
 
@@ -75,10 +76,11 @@ type RunFailoverDecisionParams =
   | AssistantDecisionParams;
 
 function shouldEscalateRetryLimit(reason: FailoverReason | null): boolean {
+  // model_not_found is deliberately NOT excluded: it should still escalate to
+  // the configured fallback chain (upstream #97571) rather than fail closed.
   return Boolean(
     reason &&
     reason !== "timeout" &&
-    reason !== "model_not_found" &&
     reason !== "format" &&
     reason !== "session_expired" &&
     reason !== "edge_blocked",
@@ -196,6 +198,14 @@ export function resolveRunFailoverDecision(params: RunFailoverDecisionParams): R
       };
     }
     if (params.harnessOwnsTransport && params.failoverReason === "timeout") {
+      // Plugin harness lifecycle timeouts must stay inside the harness boundary;
+      // only prompt request timeouts proven replay-safe may enter model fallback.
+      if (params.promptTimeoutFallbackSafe === true && params.fallbackConfigured) {
+        return {
+          action: "fallback_model",
+          reason: "timeout",
+        };
+      }
       return {
         action: "surface_error",
         reason: params.failoverReason,

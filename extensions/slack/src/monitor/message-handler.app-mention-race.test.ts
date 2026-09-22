@@ -1,12 +1,23 @@
 // Slack tests cover message handler.app mention race plugin behavior.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const prepareSlackMessageMock =
-  vi.fn<
-    (params: {
-      opts: { source: "message" | "app_mention"; wasMentioned?: boolean };
-    }) => Promise<unknown>
-  >();
+type TestHistoryEntry = {
+  sender: string;
+  body: string;
+  messageId?: string;
+};
+
+const prepareSlackMessageMock = vi.fn<
+  (params: {
+    ctx: { channelHistories: Map<string, TestHistoryEntry[]> };
+    message: { ts?: string };
+    opts: {
+      source: "message" | "app_mention";
+      wasMentioned?: boolean;
+      shouldRecordDroppedHistory?: () => boolean;
+    };
+  }) => Promise<unknown>
+>();
 const dispatchPreparedSlackMessageMock = vi.fn<(prepared: unknown) => Promise<void>>();
 
 vi.mock("openclaw/plugin-sdk/channel-inbound", async () => {
@@ -59,6 +70,7 @@ vi.mock("./message-handler/dispatch.js", () => ({
 
 let createSlackMessageHandler: typeof import("./message-handler.js").createSlackMessageHandler;
 let SlackRetryableInboundError: typeof import("./message-handler.js").SlackRetryableInboundError;
+let RETRYABLE_FLUSH_RETRY_DELAY_MS: typeof import("./message-handler.js").RETRYABLE_FLUSH_RETRY_DELAY_MS;
 let clearSlackInboundDeliveryStateForTest: typeof import("./inbound-delivery-state.js").clearSlackInboundDeliveryStateForTest;
 let clearSlackRuntime: typeof import("../runtime.js").clearSlackRuntime;
 let setSlackRuntime: typeof import("../runtime.js").setSlackRuntime;
@@ -86,12 +98,19 @@ function createMarkMessageSeen() {
   };
 }
 
-function createTestHandler() {
+function createTestHandler(
+  params: {
+    botUserId?: string;
+    channelHistories?: Map<string, TestHistoryEntry[]>;
+  } = {},
+) {
   const seenMessages = createMarkMessageSeen();
   return createSlackMessageHandler({
     ctx: {
       cfg: {},
       accountId: "default",
+      botUserId: params.botUserId ?? "U_BOT",
+      channelHistories: params.channelHistories ?? new Map(),
       app: { client: {} },
       runtime: {},
       markMessageSeen: seenMessages["markMessageSeen"],
@@ -139,7 +158,7 @@ async function createInFlightMessageScenario(ts: string) {
 
 describe("createSlackMessageHandler app_mention race handling", () => {
   beforeAll(async () => {
-    ({ createSlackMessageHandler, SlackRetryableInboundError } =
+    ({ createSlackMessageHandler, SlackRetryableInboundError, RETRYABLE_FLUSH_RETRY_DELAY_MS } =
       await import("./message-handler.js"));
     ({ clearSlackInboundDeliveryStateForTest } = await import("./inbound-delivery-state.js"));
     ({ clearSlackRuntime, setSlackRuntime } = await import("../runtime.js"));
@@ -172,6 +191,67 @@ describe("createSlackMessageHandler app_mention race handling", () => {
     await sendMentionEvent(handler, "1700000000.000100");
 
     expect(prepareSlackMessageMock).toHaveBeenCalledTimes(2);
+    expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("prevents a late message copy from queuing after app_mention dispatch", async () => {
+    const channelHistories = new Map<string, TestHistoryEntry[]>();
+    let releaseMessagePrepare: (() => void) | undefined;
+    const messagePrepareGate = new Promise<void>((resolve) => {
+      releaseMessagePrepare = resolve;
+    });
+    prepareSlackMessageMock.mockImplementation(async ({ ctx, message, opts }) => {
+      if (opts.source === "message") {
+        await messagePrepareGate;
+        if (opts.shouldRecordDroppedHistory?.() !== false) {
+          ctx.channelHistories.set("history", [
+            { sender: "Alice", body: "<@U_BOT> hello", messageId: message.ts ?? "unknown" },
+          ]);
+        }
+        return null;
+      }
+      return { ctxPayload: {} };
+    });
+    const handler = createTestHandler({ botUserId: "", channelHistories });
+
+    const messagePending = sendMessageEvent(handler, "1700000000.000120");
+    await Promise.resolve();
+    await sendMentionEvent(handler, "1700000000.000120");
+    releaseMessagePrepare?.();
+    await messagePending;
+
+    expect(channelHistories.get("history") ?? []).toEqual([]);
+    expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses a concurrent message copy while app_mention is preparing", async () => {
+    let shouldRecordDroppedHistory: (() => boolean) | undefined;
+    let signalMessagePrepareStarted: (() => void) | undefined;
+    const messagePrepareStarted = new Promise<void>((resolve) => {
+      signalMessagePrepareStarted = resolve;
+    });
+    let releaseMessagePrepare: (() => void) | undefined;
+    const messagePrepareGate = new Promise<void>((resolve) => {
+      releaseMessagePrepare = resolve;
+    });
+    prepareSlackMessageMock.mockImplementation(async ({ opts }) => {
+      if (opts.source === "message") {
+        shouldRecordDroppedHistory = opts.shouldRecordDroppedHistory;
+        signalMessagePrepareStarted?.();
+        await messagePrepareGate;
+        return null;
+      }
+      expect(shouldRecordDroppedHistory?.()).toBe(false);
+      return { ctxPayload: {} };
+    });
+    const handler = createTestHandler({ botUserId: "" });
+
+    const messagePending = sendMessageEvent(handler, "1700000000.000130");
+    await messagePrepareStarted;
+    await sendMentionEvent(handler, "1700000000.000130");
+    releaseMessagePrepare?.();
+    await messagePending;
+
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(1);
   });
 
@@ -267,7 +347,7 @@ describe("createSlackMessageHandler app_mention race handling", () => {
     await expect(sendMessageEvent(handler, "1700000000.000250")).resolves.toBeUndefined();
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
 
     expect(prepareSlackMessageMock).toHaveBeenCalledTimes(2);
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(2);
@@ -281,13 +361,13 @@ describe("createSlackMessageHandler app_mention race handling", () => {
     const handler = createTestHandler();
 
     await expect(sendMessageEvent(handler, "1700000000.000260")).resolves.toBeUndefined();
-    await vi.advanceTimersByTimeAsync(1_000);
-    await vi.advanceTimersByTimeAsync(1_000);
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
     // 1 initial attempt + 3 retries (retryAttempt 1..3) exhausts RETRYABLE_FLUSH_MAX_ATTEMPTS.
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(4);
 
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(4);
   });
 
@@ -337,5 +417,59 @@ describe("createSlackMessageHandler app_mention race handling", () => {
     expect(lookup).toHaveBeenCalledWith("default:C1:1700000000.000350");
     expect(prepareSlackMessageMock).toHaveBeenCalledTimes(1);
     expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("records dropped history when a trusted app_mention's dispatch fails for good", async () => {
+    const channelHistories = new Map<string, TestHistoryEntry[]>();
+    prepareSlackMessageMock.mockResolvedValue({
+      ctxPayload: {},
+      turn: {
+        history: {
+          historyMap: channelHistories,
+          historyKey: "C1",
+          limit: 10,
+        },
+      },
+    });
+    dispatchPreparedSlackMessageMock.mockRejectedValueOnce(new Error("post-send failure"));
+
+    const handler = createTestHandler({ channelHistories });
+
+    await expect(sendMentionEvent(handler, "1700000000.000400")).rejects.toThrow(
+      "post-send failure",
+    );
+
+    expect(channelHistories.get("C1")).toMatchObject([
+      { sender: "unknown", body: "<@U_BOT> hello", messageId: "1700000000.000400" },
+    ]);
+  });
+
+  it("records dropped history once app_mention retries are exhausted", async () => {
+    vi.useFakeTimers();
+    const channelHistories = new Map<string, TestHistoryEntry[]>();
+    prepareSlackMessageMock.mockResolvedValue({
+      ctxPayload: {},
+      turn: {
+        history: {
+          historyMap: channelHistories,
+          historyKey: "C1",
+          limit: 10,
+        },
+      },
+    });
+    dispatchPreparedSlackMessageMock.mockRejectedValue(new SlackRetryableInboundError("retry me"));
+
+    const handler = createTestHandler({ channelHistories });
+
+    await expect(sendMentionEvent(handler, "1700000000.000410")).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
+    await vi.advanceTimersByTimeAsync(RETRYABLE_FLUSH_RETRY_DELAY_MS);
+    // 1 initial attempt + 3 retries exhausts RETRYABLE_FLUSH_MAX_ATTEMPTS.
+    expect(dispatchPreparedSlackMessageMock).toHaveBeenCalledTimes(4);
+
+    expect(channelHistories.get("C1")).toMatchObject([
+      { sender: "unknown", body: "<@U_BOT> hello", messageId: "1700000000.000410" },
+    ]);
   });
 });

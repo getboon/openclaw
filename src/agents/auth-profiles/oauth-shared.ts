@@ -159,6 +159,23 @@ export function isSafeToAdoptMainStoreOAuthIdentity(
   });
 }
 
+/**
+ * Returns true when a freshly refreshed credential may force-persist over a
+ * concurrent CAS-losing write to the same profile slot. Legacy profiles with
+ * no tracked identity can't be identity-matched either way, so a same-provider
+ * write to the same slot is the only ownership signal available; treating
+ * that as unsafe would permanently discard a valid rotation on every race.
+ */
+export function isSafeToForcePersistOAuthRefreshRotation(
+  existing: OAuthCredential | undefined,
+  incoming: OAuthCredential,
+): boolean {
+  return isSafeOAuthIdentityTransition(existing, incoming, {
+    whenExistingCredentialMissing: false,
+    whenExistingIdentityMissing: true,
+  });
+}
+
 /** Returns true when an external CLI credential should bootstrap stored OAuth. */
 export function shouldBootstrapFromExternalCliCredential(params: {
   existing: OAuthCredential | undefined;

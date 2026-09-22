@@ -87,6 +87,13 @@ The default approval socket follows the same root:
 `$OPENCLAW_STATE_DIR/exec-approvals.sock`, or
 `~/.openclaw/exec-approvals.sock` when the variable is unset.
 
+Releases before 2026.6.11 always kept the file in `~/.openclaw`. If
+`OPENCLAW_STATE_DIR` points somewhere else and an approvals file still exists
+in the default directory, run `openclaw doctor --fix` once to import it into
+the state directory (the original is archived with a `.migrated` suffix).
+OpenClaw never imports it automatically: a gateway pointed at a temporary or
+staging state directory must not capture the default installation's approvals.
+
 Example schema:
 
 ```json
@@ -195,9 +202,13 @@ Examples that strict mode catches:
 - `lua -e`
 - `osascript -e`
 
-In strict mode these commands still need explicit approval, and
-`allow-always` does not persist new allowlist entries for them
-automatically.
+In strict mode these commands need reviewer or explicit approval. With
+`tools.exec.mode: "auto"`, the reviewer may grant one low-risk execution when
+the command has an enforceable plan; otherwise OpenClaw asks a human.
+`Codex app-server` command approvals that reach the reviewer fallback ask a
+human because their approval requests do not expose an enforceable resolved
+executable.
+`allow-always` does not persist new allowlist entries for inline-eval commands.
 
 ### `tools.exec.commandHighlighting`
 

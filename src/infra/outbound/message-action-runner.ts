@@ -44,6 +44,8 @@ import { stripUnsupportedCitationControlMarkers } from "../../shared/text/citati
 import { stripFormattedReasoningMessage } from "../../shared/text/formatted-reasoning-message.js";
 import { parseInlineDirectives } from "../../utils/directive-tags.js";
 import {
+  GATEWAY_CLIENT_MODES,
+  GATEWAY_CLIENT_NAMES,
   INTERNAL_MESSAGE_CHANNEL,
   type GatewayClientMode,
   type GatewayClientName,
@@ -200,22 +202,78 @@ function resolveGatewayActionOptions(gateway?: MessageActionRunnerGateway) {
   return resolveOutboundMessageGatewayOptions(gateway);
 }
 
+const MESSAGE_ACTION_RECONCILIATION_TIMEOUT_MS = 60_000;
+const MESSAGE_ACTION_RECONCILIATION_MAX_MS = 9 * 60_000;
+
 async function callGatewayMessageAction<T>(params: {
   gateway?: MessageActionRunnerGateway;
   actionParams: Record<string, unknown>;
+  abortSignal?: AbortSignal;
 }): Promise<T> {
-  const { callGatewayLeastPrivilege } = await loadMessageActionGatewayRuntime();
+  const { callGateway, callGatewayLeastPrivilege, isGatewayTransportError } =
+    await loadMessageActionGatewayRuntime();
   const gateway = resolveGatewayActionOptions(params.gateway);
-  return await callGatewayLeastPrivilege<T>({
+  const callParams = {
     url: gateway.url,
     token: gateway.token,
     method: "message.action",
     params: params.actionParams,
-    timeoutMs: gateway.timeoutMs,
+    timeoutMs: gateway.timeoutMs ?? undefined,
+    signal: params.abortSignal,
     clientName: gateway.clientName,
     clientDisplayName: gateway.clientDisplayName,
     mode: gateway.mode,
-  });
+  };
+  const isTrustedBackendBridge =
+    gateway.clientName === GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT &&
+    gateway.mode === GATEWAY_CLIENT_MODES.BACKEND;
+  const requesterAccountId = normalizeOptionalString(params.actionParams.requesterAccountId);
+  const requesterSenderId = normalizeOptionalString(params.actionParams.requesterSenderId);
+  const carriesTrustedRequester =
+    isTrustedBackendBridge &&
+    (requesterAccountId !== undefined ||
+      requesterSenderId !== undefined ||
+      params.actionParams.senderIsOwner !== undefined);
+  type GatewayActionCallOptions = typeof callParams;
+  const invokeGatewayAction = async (options: GatewayActionCallOptions): Promise<T> => {
+    if (!carriesTrustedRequester) {
+      return await callGatewayLeastPrivilege<T>(options);
+    }
+    // Trusted requester fields come from inbound server context. The RPC needs
+    // admin scope to prove provenance; the Gateway downscopes the handler call.
+    return await callGateway<T>({ ...options, scopes: ["operator.admin"] });
+  };
+  try {
+    return await invokeGatewayAction(callParams);
+  } catch (error) {
+    if (
+      !isGatewayTransportError(error) ||
+      error.kind !== "timeout" ||
+      params.actionParams.action !== "send"
+    ) {
+      throw error;
+    }
+    throwIfAborted(params.abortSignal);
+  }
+
+  const reconciliationSignal = params.abortSignal
+    ? AbortSignal.any([
+        params.abortSignal,
+        AbortSignal.timeout(MESSAGE_ACTION_RECONCILIATION_MAX_MS),
+      ])
+    : undefined;
+  const reconciliationCall = {
+    ...callParams,
+    // v6.11 does not support the newer null/handshake-only timeout contract.
+    // Give the single reconciliation call the same hard bound as its signal.
+    timeoutMs: params.abortSignal
+      ? MESSAGE_ACTION_RECONCILIATION_MAX_MS
+      : Math.max(callParams.timeoutMs ?? 0, MESSAGE_ACTION_RECONCILIATION_TIMEOUT_MS),
+    signal: reconciliationSignal,
+  };
+  // A caller-side timeout does not cancel Gateway work. Reattach once with the
+  // unchanged idempotency key so the live Gateway can join the original work.
+  return await invokeGatewayAction(reconciliationCall);
 }
 
 async function resolveGatewayActionIdempotencyKey(idempotencyKey?: string): Promise<string> {
@@ -656,6 +714,7 @@ async function runGatewayPluginMessageActionOrNull(params: {
   }
   const payload = await callGatewayMessageAction<unknown>({
     gateway: params.gateway,
+    abortSignal: params.input.abortSignal,
     actionParams: {
       channel: params.channel,
       action: params.action,
