@@ -741,12 +741,9 @@ async function createRealSession(
     {},
   );
 
-  // Wired up before connect(), not after: transport.stderr is a PassThrough
-  // the SDK returns immediately, safe to drain before the child process even
-  // spawns (see StdioClientTransport's own stderr getter docstring). Draining
-  // only on a successful connect left exactly the failure case this stderr
-  // capture exists for -- a hung or failing MCP handshake -- with no stderr
-  // at all, discarding whatever the subprocess itself logged about why.
+  // Attach before connect(), not after -- StdioClientTransport's stderr
+  // PassThrough is safe to drain pre-spawn, and draining only post-connect
+  // discarded the subprocess's own error on exactly a hung/failed handshake.
   const getStderr = drainStderr(transport);
   const ready = (async () => {
     try {
