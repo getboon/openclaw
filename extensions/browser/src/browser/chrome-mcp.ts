@@ -741,13 +741,18 @@ async function createRealSession(
     {},
   );
 
-  let getStderr = () => "";
+  // Wired up before connect(), not after: transport.stderr is a PassThrough
+  // the SDK returns immediately, safe to drain before the child process even
+  // spawns (see StdioClientTransport's own stderr getter docstring). Draining
+  // only on a successful connect left exactly the failure case this stderr
+  // capture exists for -- a hung or failing MCP handshake -- with no stderr
+  // at all, discarding whatever the subprocess itself logged about why.
+  const getStderr = drainStderr(transport);
   const ready = (async () => {
     try {
       await withChromeMcpHandshakeTimeout(
         (async () => {
           await client.connect(transport);
-          getStderr = drainStderr(transport);
           const tools = await client.listTools();
           if (!tools.tools.some((tool) => tool.name === "list_pages")) {
             throw new Error("Chrome MCP server did not expose the expected navigation tools.");
