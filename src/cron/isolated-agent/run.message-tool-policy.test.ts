@@ -32,6 +32,7 @@ const { createCronPromptExecutor } = await import("./run-executor.js");
 function makeMessageToolPolicyJob(
   delivery: Record<string, unknown> = { mode: "none" },
   payload: Record<string, unknown> = { kind: "agentTurn", message: "send a message" },
+  overrides: Record<string, unknown> = {},
 ) {
   return {
     id: "message-tool-policy",
@@ -40,6 +41,7 @@ function makeMessageToolPolicyJob(
     sessionTarget: "isolated",
     payload,
     delivery,
+    ...overrides,
   } as never;
 }
 
@@ -404,7 +406,7 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
 
     await runCronIsolatedAgentTurn({
       ...makeParams(),
-      job: { ...makeMessageToolPolicyJob({ mode: "none" }), sessionKey },
+      job: makeMessageToolPolicyJob({ mode: "none" }, undefined, { sessionKey }),
     });
 
     // requested stays false (cron itself must not auto-announce), but
@@ -1425,7 +1427,7 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
 
     const result = await runCronIsolatedAgentTurn({
       ...makeParams(),
-      job: { ...makeMessageToolPolicyJob(), sessionKey },
+      job: makeMessageToolPolicyJob(undefined, undefined, { sessionKey }),
     });
 
     // resolveDeliveryTargetMock's beforeEach default (channel:"messagechat", to:"123")
