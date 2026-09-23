@@ -309,6 +309,15 @@ export function getActivePluginRegistry(): PluginRegistry | null {
   return asPluginRegistry(state.activeRegistry);
 }
 
+// Never-activated tool snapshots must validate durable side effects against the
+// loaded plugin in the current active registry, not the snapshot's own registry.
+export function isPluginLoadedInActiveRegistry(pluginId: string): boolean {
+  const active = getActivePluginRegistry();
+  return (
+    active?.plugins.some((plugin) => plugin.id === pluginId && plugin.status === "loaded") ?? false
+  );
+}
+
 export function getActivePluginRegistryWorkspaceDir(): string | undefined {
   return state.workspaceDir ?? undefined;
 }

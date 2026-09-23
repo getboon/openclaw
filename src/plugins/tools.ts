@@ -686,6 +686,7 @@ function createCachedDescriptorPluginTool(params: {
       const loadOptions = buildPluginRuntimeLoadOptions(params.loadContext, {
         activate: false,
         toolDiscovery: true,
+        toolExecutionScoped: true,
         onlyPluginIds: [pluginId],
         ...(params.runtimeOptions ? { runtimeOptions: params.runtimeOptions } : {}),
       });

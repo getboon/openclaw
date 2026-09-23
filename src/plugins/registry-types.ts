@@ -493,6 +493,8 @@ export type PluginRegistryParams = {
     cron?: import("../cron/service-contract.js").CronServiceContract;
   };
   activateGlobalSideEffects?: boolean;
+  /** Set only for a plugin tool's own per-invocation execute() snapshot registry. */
+  toolExecutionSnapshot?: boolean;
 };
 
 export type PluginRegistrationMode = import("./types.js").PluginRegistrationMode;
