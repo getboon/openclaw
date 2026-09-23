@@ -144,6 +144,7 @@ import { createEmptyPluginRegistry } from "./registry-empty.js";
 import type { PluginRegistryParams } from "./registry-types.js";
 import { createPluginRegistry, type PluginRecord, type PluginRegistry } from "./registry.js";
 import {
+  clearActivePluginHostServices,
   getActivePluginRegistry,
   getActivePluginRegistryKey,
   getActivePluginRuntimeSubagentMode,
@@ -436,6 +437,11 @@ export function clearActivatedPluginRuntimeState(): void {
   clearEmbeddingProviders();
   clearMemoryEmbeddingProviders();
   clearMemoryPluginState();
+  // Ties the shared hostServices reference to this activation's own lifecycle:
+  // called at the start of every real reload (see loadOpenClawPlugins), so a
+  // reload that doesn't pass hostServices this time genuinely loses it instead
+  // of keeping an earlier activation's (possibly now-stale/mocked) reference.
+  clearActivePluginHostServices();
 }
 
 export function clearPluginRegistryLoadCache(): void {

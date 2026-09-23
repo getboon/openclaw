@@ -330,6 +330,17 @@ export function getActivePluginHostServices(): PluginRegistryParams["hostService
   return state.hostServices;
 }
 
+// setActivePluginRegistry only updates state.hostServices when a caller explicitly
+// provides it, so a real activation without hostServices can't clobber an earlier
+// one that had them (see its own doc). That means it never clears on its own --
+// callers that tear down or reset shared plugin runtime state (clearActivatedPluginRuntimeState,
+// test afterEach hooks) must clear it explicitly instead, or a stale/mocked cron
+// service from an earlier activation would keep flowing into later toolDiscovery
+// snapshot fallbacks (getHostCronService in registry.ts).
+export function clearActivePluginHostServices(): void {
+  state.hostServices = undefined;
+}
+
 export function requireActivePluginRegistry(): PluginRegistry {
   if (!state.activeRegistry) {
     state.activeRegistry = createEmptyPluginRegistry();
@@ -544,6 +555,7 @@ export function resetPluginRuntimeStateForTest(): void {
   state.workspaceDir = null;
   state.runtimeSubagentMode = "default";
   state.importedPluginIds.clear();
+  state.hostServices = undefined;
   syncPluginAgentEventBridge();
   // Also clear the plugin host-hook runtime singleton (run context map,
   // scheduler-job records, pending agent-event handlers, closedRunIds set).

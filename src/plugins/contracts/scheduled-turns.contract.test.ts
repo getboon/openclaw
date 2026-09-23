@@ -272,13 +272,11 @@ describe("plugin scheduled turns", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    // clearPluginLoaderCache -> clearActivatedPluginRuntimeState also clears the
+    // shared hostServices reference, so no mocked cron leaks into later tests.
     clearPluginLoaderCache();
     clearPluginHostRuntimeState();
-    // Pass an explicit {} (not undefined) so the shared hostServices reference
-    // itself resets between tests too -- setActivePluginRegistry only updates
-    // it when a value is explicitly given, to avoid a real activation without
-    // hostServices clobbering an earlier one that had them.
-    setActivePluginRegistry(createEmptyPluginRegistry(), undefined, undefined, undefined, {});
+    setActivePluginRegistry(createEmptyPluginRegistry());
   });
 
   it("builds tagged and untagged cron names", () => {
