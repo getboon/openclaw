@@ -165,16 +165,25 @@ function expectSessionTurnHandle(
 }
 
 /** Installs a real, activated registry with the workflow plugin loaded gateway-wide. */
-function activateWorkflowPluginFixtureRegistry(): void {
+function activateWorkflowPluginFixtureRegistry(params: { withHostServices?: boolean } = {}): void {
   const activeFixture = createPluginRegistryFixture();
   activeFixture.registry.registry.plugins.push(
     createPluginRecord({ id: WORKFLOW_PLUGIN_ID, name: "Workflow Plugin", origin: "bundled" }),
   );
-  setActivePluginRegistry(activeFixture.registry.registry);
+  setActivePluginRegistry(
+    activeFixture.registry.registry,
+    undefined,
+    undefined,
+    undefined,
+    params.withHostServices ? { cron } : undefined,
+  );
 }
 
 /** Builds a separate, never-activated, side-effects-off registry with the workflow plugin loaded. */
-function createWorkflowPluginRegistryApi(params: { toolDiscovery?: boolean } = {}) {
+function createWorkflowPluginRegistryApi(
+  params: { toolDiscovery?: boolean; withHostServices?: boolean } = {},
+) {
+  const withHostServices = params.withHostServices ?? true;
   const built = createPluginRegistry({
     logger: {
       info() {},
@@ -183,7 +192,7 @@ function createWorkflowPluginRegistryApi(params: { toolDiscovery?: boolean } = {
       debug() {},
     },
     runtime: {} as PluginRuntime,
-    hostServices: { cron },
+    ...(withHostServices ? { hostServices: { cron } } : {}),
     activateGlobalSideEffects: false,
     ...(params.toolDiscovery ? { toolDiscovery: true } : {}),
   });
@@ -265,7 +274,11 @@ describe("plugin scheduled turns", () => {
     vi.useRealTimers();
     clearPluginLoaderCache();
     clearPluginHostRuntimeState();
-    setActivePluginRegistry(createEmptyPluginRegistry());
+    // Pass an explicit {} (not undefined) so the shared hostServices reference
+    // itself resets between tests too -- setActivePluginRegistry only updates
+    // it when a value is explicitly given, to avoid a real activation without
+    // hostServices clobbering an earlier one that had them.
+    setActivePluginRegistry(createEmptyPluginRegistry(), undefined, undefined, undefined, {});
   });
 
   it("builds tagged and untagged cron names", () => {
@@ -807,6 +820,28 @@ describe("plugin scheduled turns", () => {
     });
 
     expectSessionTurnHandle(handle, "job-from-tool-discovery");
+  });
+
+  it("falls back to the real active registry's cron service when the toolDiscovery snapshot has no hostServices of its own", async () => {
+    // Live regression: createCachedDescriptorPluginTool's own load-options resolution
+    // never carries hostServices forward (see PluginRuntimeLoadContext), so any
+    // ephemeral toolDiscovery snapshot's own registryParams.hostServices is
+    // undefined. getHostCronService must fall back to the real gateway's live
+    // cron service (installed via setActivePluginRegistry) instead of failing.
+    activateWorkflowPluginFixtureRegistry({ withHostServices: true });
+    const { api } = createWorkflowPluginRegistryApi({
+      toolDiscovery: true,
+      withHostServices: false,
+    });
+
+    workflowMocks.cronAdd.mockResolvedValue(makeCronJob({ id: "job-from-shared-cron-fallback" }));
+    const handle = await api.session.workflow.scheduleSessionTurn({
+      sessionKey: MAIN_SESSION_KEY,
+      message: "wake",
+      delayMs: 1,
+    });
+
+    expectSessionTurnHandle(handle, "job-from-shared-cron-fallback");
   });
 
   it("schedules a session turn from a never-activated, toolDiscovery registry scoped to MULTIPLE plugins (a discovery scan, not a single-plugin execute() snapshot)", async () => {

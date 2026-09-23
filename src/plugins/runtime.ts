@@ -18,7 +18,7 @@ import {
   markPluginRegistryRetired,
   recordPluginRegistryCacheKey,
 } from "./registry-lifecycle.js";
-import type { PluginRegistry } from "./registry-types.js";
+import type { PluginRegistry, PluginRegistryParams } from "./registry-types.js";
 import { getActivePluginChannelRegistrySnapshotFromState } from "./runtime-channel-state.js";
 import {
   PLUGIN_REGISTRY_STATE,
@@ -283,6 +283,7 @@ export function setActivePluginRegistry(
   cacheKey?: string,
   runtimeSubagentMode: "default" | "explicit" | "gateway-bindable" = "default",
   workspaceDir?: string,
+  hostServices?: PluginRegistryParams["hostServices"],
 ) {
   const previousRegistry = asPluginRegistry(state.activeRegistry);
   state.activeRegistry = registry;
@@ -295,6 +296,9 @@ export function setActivePluginRegistry(
   recordPluginRegistryCacheKey(registry, state.key);
   state.workspaceDir = workspaceDir ?? null;
   state.runtimeSubagentMode = runtimeSubagentMode;
+  if (hostServices !== undefined) {
+    state.hostServices = hostServices;
+  }
   syncPluginAgentEventBridge();
   if (!previousRegistry || previousRegistry === registry) {
     return;
@@ -320,6 +324,10 @@ export function isPluginLoadedInActiveRegistry(pluginId: string): boolean {
 
 export function getActivePluginRegistryWorkspaceDir(): string | undefined {
   return state.workspaceDir ?? undefined;
+}
+
+export function getActivePluginHostServices(): PluginRegistryParams["hostServices"] {
+  return state.hostServices;
 }
 
 export function requireActivePluginRegistry(): PluginRegistry {

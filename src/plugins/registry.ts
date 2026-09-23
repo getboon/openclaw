@@ -134,7 +134,11 @@ import type {
   PluginTextTransformsRegistration,
   PluginTrustedToolPolicyRegistryRegistration,
 } from "./registry-types.js";
-import { isPluginLoadedInActiveRegistry, isPluginRegistrySuperseded } from "./runtime.js";
+import {
+  getActivePluginHostServices,
+  isPluginLoadedInActiveRegistry,
+  isPluginRegistrySuperseded,
+} from "./runtime.js";
 export type {
   PluginReloadRegistration,
   PluginRuntimeLifecycleRegistryRegistration,
@@ -414,7 +418,13 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
   ).toSorted();
   registry.coreGatewayMethodNames = coreGatewayMethodNames;
   const coreGatewayMethods = new Set(coreGatewayMethodNames);
-  const getHostCronService = () => registryParams.hostServices?.cron;
+  // Ephemeral tool-resolution registries (toolDiscovery snapshots) never carry
+  // their own hostServices -- see PluginRuntimeLoadContext -- so fall back to
+  // the real gateway's live cron service. Cron is a genuine process-wide
+  // singleton, so this is always the correct instance regardless of which
+  // registry's api happened to be used to reach this call.
+  const getHostCronService = () =>
+    registryParams.hostServices?.cron ?? getActivePluginHostServices()?.cron;
   const pluginHookRollback = new Map<string, HookRollbackEntry[]>();
   const pluginsWithChannelRegistrationConflict = new Set<string>();
   const pluginSideEffectGuards = new Map<string, Set<PluginSideEffectGuard>>();
