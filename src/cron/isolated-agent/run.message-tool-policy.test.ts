@@ -394,16 +394,17 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
     });
   });
 
-  it('still resolves an implicit target for bare delivery.mode "none", so an agent-initiated message has somewhere to go', async () => {
+  it('still resolves an implicit target for bare delivery.mode "none" via the job\'s own session, so an agent-initiated message has somewhere to go', async () => {
     mockRunCronFallbackPassthrough();
     resolveCronDeliveryPlanMock.mockReturnValue({
       requested: false,
       mode: "none",
     });
+    const sessionKey = "cron:message-tool-policy";
 
     await runCronIsolatedAgentTurn({
       ...makeParams(),
-      job: makeMessageToolPolicyJob({ mode: "none" }),
+      job: { ...makeMessageToolPolicyJob({ mode: "none" }), sessionKey },
     });
 
     // requested stays false (cron itself must not auto-announce), but
@@ -411,8 +412,14 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
     // message(action="send") call has a real channel/to to fall back to --
     // a bare "none" job silently skipping this left that call with nothing to
     // target and no way to report a terminal result (e.g. a silently
-    // scheduled recheck).
-    expect(resolveDeliveryTargetMock).toHaveBeenCalled();
+    // scheduled recheck). Asserting the call args (not just that it ran) is
+    // what proves this resolves via the job's own session identity, not a
+    // keyless call the #91613 guard would otherwise have to refuse.
+    expect(resolveDeliveryTargetMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ channel: "last", sessionKey }),
+    );
     expect(runEmbeddedAgentMock).toHaveBeenCalledTimes(1);
     const embeddedRun = expectEmbeddedRunFields({
       disableMessageTool: false,
@@ -623,38 +630,6 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
       fallbackUsed: false,
       delivered: true,
     });
-  });
-
-  it('still resolves implicit "last" context for delivery.mode none with channel "last", for the same reason as the bare case', async () => {
-    mockRunCronFallbackPassthrough();
-    resolveCronDeliveryPlanMock.mockReturnValue({
-      requested: false,
-      mode: "none",
-      channel: "last",
-    });
-
-    await runCronIsolatedAgentTurn({
-      ...makeParams(),
-      job: {
-        id: "message-tool-policy",
-        name: "Message Tool Policy",
-        schedule: { kind: "every", everyMs: 60_000 },
-        sessionTarget: "isolated",
-        payload: { kind: "agentTurn", message: "send a message" },
-        delivery: { mode: "none" },
-      } as never,
-    });
-
-    expect(resolveDeliveryTargetMock).toHaveBeenCalled();
-    expect(runEmbeddedAgentMock).toHaveBeenCalledTimes(1);
-    const embeddedRun = expectEmbeddedRunFields({
-      disableMessageTool: false,
-      forceMessageTool: false,
-    });
-    expect(embeddedRun.messageChannel).toBe("messagechat");
-    // "123" is this describe block's beforeEach default for resolveDeliveryTargetMock,
-    // not the generic harness default ("test-target").
-    expect(embeddedRun.messageTo).toBe("123");
   });
 
   it("resolves implicit last-target context for delivery.mode none with only accountId", async () => {
@@ -1446,14 +1421,26 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
     runEmbeddedAgentMock.mockResolvedValue(
       makeMessageToolRunResult([{ tool: "message", provider: "messagechat", to: "123" }]),
     );
+    const sessionKey = "cron:message-tool-policy";
 
-    const result = await runCronIsolatedAgentTurn(makeParams());
+    const result = await runCronIsolatedAgentTurn({
+      ...makeParams(),
+      job: { ...makeMessageToolPolicyJob(), sessionKey },
+    });
 
-    expect(dispatchCronDeliveryMock).toHaveBeenCalledTimes(1);
     // resolveDeliveryTargetMock's beforeEach default (channel:"messagechat", to:"123")
     // now resolves for this session-scoped "none" job, matching the agent's own
     // message-tool send exactly -- so the send is verified against a real target
     // instead of being left unverifiable by the old short-circuited empty result.
+    // Asserting the call args (not just that it ran) is what proves this
+    // resolves via the job's own session identity, not a keyless call the
+    // #91613 guard would otherwise have to refuse.
+    expect(resolveDeliveryTargetMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ channel: "last", sessionKey }),
+    );
+    expect(dispatchCronDeliveryMock).toHaveBeenCalledTimes(1);
     expectDispatchFields({
       deliveryRequested: false,
       sourceDeliveryOutcome: {
