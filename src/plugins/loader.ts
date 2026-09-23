@@ -224,14 +224,6 @@ export type PluginLoadOptions = {
    */
   preferBuiltPluginArtifacts?: boolean;
   toolDiscovery?: boolean;
-  /**
-   * Marks a registry as a plugin tool's own per-invocation execute() snapshot
-   * (see createCachedDescriptorPluginTool in tools.ts) rather than any other
-   * never-activated load (tool-discovery descriptor scans, the CLI-only
-   * registry). Durable side-effect APIs use this to fall back to the real
-   * active registry instead of this snapshot's own unusable activation state.
-   */
-  toolExecutionScoped?: boolean;
   activate?: boolean;
   loadModules?: boolean;
   throwOnLoadError?: boolean;
@@ -444,6 +436,13 @@ export function clearActivatedPluginRuntimeState(): void {
   clearEmbeddingProviders();
   clearMemoryEmbeddingProviders();
   clearMemoryPluginState();
+  // Deliberately does NOT clear the shared hostServices reference here: this
+  // runs at the start of EVERY real reload (see loadOpenClawPlugins), including
+  // ones with no reason to know about hostServices at all (e.g. ensureRuntimePluginsLoaded's
+  // post-startup pre-warm reload) -- clearing unconditionally would wipe a
+  // valid reference the real gateway boot set moments earlier. setActivePluginRegistry's
+  // own "only update when explicitly given" rule already protects production;
+  // resetPluginRuntimeStateForTest (test-only) clears it explicitly instead.
 }
 
 export function clearPluginRegistryLoadCache(): void {
@@ -1029,7 +1028,6 @@ function buildCacheKey(params: {
   pluginSdkResolution?: PluginSdkResolutionPreference;
   coreGatewayMethodNames?: string[];
   activate?: boolean;
-  toolExecutionScoped?: boolean;
 }): string {
   const discoveryContext = resolvePluginDiscoveryContext({
     workspaceDir: params.workspaceDir,
@@ -1078,13 +1076,6 @@ function buildCacheKey(params: {
   const runtimeSubagentMode = params.runtimeSubagentMode ?? "default";
   const gatewayMethodsKey = JSON.stringify(params.coreGatewayMethodNames ?? []);
   const activationMode = params.activate === false ? "snapshot" : "active";
-  // A registry's toolExecutionSnapshot marker is baked in at createPluginRegistry
-  // time and never recomputed for a cache hit -- without this in the key, a
-  // cached snapshot loaded without the marker (e.g. a tool-discovery scan) could
-  // be reused for a call that needs it, silently reintroducing the bug the
-  // marker exists to fix (see isLoadedRecordInActiveRegistry in registry.ts).
-  const toolExecutionScopeMode =
-    params.toolExecutionScoped === true ? "tool-execution" : "unscoped";
   return `${roots.workspace ?? ""}::${roots.global ?? ""}::${roots.stock ?? ""}::${JSON.stringify({
     bundledPackage,
     devSourceRoot,
@@ -1093,7 +1084,7 @@ function buildCacheKey(params: {
     installs,
     loadPaths,
     activationMetadataKey: params.activationMetadataKey ?? "",
-  })}::${scopeKey}::${setupOnlyKey}::${setupOnlyModeKey}::${setupOnlyRequirementKey}::${startupChannelMode}::${bundledArtifactMode}::${rawConfigEnvMode}::${moduleLoadMode}::${discoveryMode}::${runtimeSubagentMode}::${params.pluginSdkResolution ?? "auto"}::${gatewayMethodsKey}::${activationMode}::${toolExecutionScopeMode}`;
+  })}::${scopeKey}::${setupOnlyKey}::${setupOnlyModeKey}::${setupOnlyRequirementKey}::${startupChannelMode}::${bundledArtifactMode}::${rawConfigEnvMode}::${moduleLoadMode}::${discoveryMode}::${runtimeSubagentMode}::${params.pluginSdkResolution ?? "auto"}::${gatewayMethodsKey}::${activationMode}`;
 }
 
 function matchesScopedPluginRequest(params: {
@@ -1434,7 +1425,6 @@ function resolvePluginLoadCacheContext(options: PluginLoadOptions = {}) {
     pluginSdkResolution: options.pluginSdkResolution,
     ...(coreGatewayMethodNames !== undefined && { coreGatewayMethodNames }),
     activate: options.activate,
-    toolExecutionScoped: options.toolExecutionScoped,
   });
   return {
     env,
@@ -1827,11 +1817,12 @@ function activatePluginRegistry(
   cacheKey: string,
   runtimeSubagentMode: "default" | "explicit" | "gateway-bindable",
   workspaceDir?: string,
+  hostServices?: PluginLoadOptions["hostServices"],
 ): void {
   // Always re-initialize: the global runner resolves hooks from the live
   // registry set (active + pinned surfaces), so activation order and scope
   // cannot drop hooks the way the old preserve-one-runner gate did (#91918).
-  setActivePluginRegistry(registry, cacheKey, runtimeSubagentMode, workspaceDir);
+  setActivePluginRegistry(registry, cacheKey, runtimeSubagentMode, workspaceDir, hostServices);
   initializeGlobalHookRunner(registry);
 }
 
@@ -1847,6 +1838,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         `empty-plugin-scope::${resolveRuntimeSubagentMode(options.runtimeOptions)}::${options.workspaceDir ?? ""}`,
         resolveRuntimeSubagentMode(options.runtimeOptions),
         options.workspaceDir,
+        options.hostServices,
       );
     }
     return emptyRegistry;
@@ -1905,6 +1897,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
           cached.cacheKey,
           cached.runtimeSubagentMode,
           options.workspaceDir,
+          options.hostServices,
         );
       }
       return cached.state.registry;
@@ -2029,7 +2022,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         hostServices: options.hostServices,
       }),
       activateGlobalSideEffects: shouldActivate,
-      toolExecutionSnapshot: options.toolExecutionScoped === true,
+      toolDiscovery: options.toolDiscovery === true,
     });
 
     const suppliedManifestRegistry = options.manifestRegistry;
@@ -2988,7 +2981,13 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
       );
     }
     if (shouldActivate) {
-      activatePluginRegistry(registry, cacheKey, runtimeSubagentMode, options.workspaceDir);
+      activatePluginRegistry(
+        registry,
+        cacheKey,
+        runtimeSubagentMode,
+        options.workspaceDir,
+        options.hostServices,
+      );
     }
     return registry;
   } finally {
