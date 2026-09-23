@@ -475,7 +475,18 @@ export async function prepareDispatchOperationContext(state: PrepareDispatchDeli
         })
       : false;
     commitInboundDedupeIfClaimed();
-    recordProcessed("completed", { reason: "reply_operation_aborted" });
+    // This turn never produced a delivered reply (see droppedBeforeOutput above,
+    // which independently gates the user-visible "try again" notice) - "completed"
+    // here would misreport a dropped/aborted turn as a successful one to anyone
+    // reading the message.processed diagnostic log/event (Loki, diagnostics-otel
+    // counters, etc). Every other reply_operation_aborted call site (the
+    // chat-send steering path in chat-send-message-injection.ts, and the
+    // messageInjectionAborted branch in dispatch-from-config.finalize.ts) already
+    // records "skipped" for this same reason, and the audit-terminal projection
+    // (dispatch-from-config.audit.ts) independently reclassifies this reason to
+    // outcome:"skipped" regardless of what is passed here - so this brings the
+    // raw diagnostic outcome in line with what every other layer already reports.
+    recordProcessed("skipped", { reason: "reply_operation_aborted" });
     markIdle("message_completed");
     state.completeDispatchReplyOperation();
     return attachSourceReplyDeliveryMode({
