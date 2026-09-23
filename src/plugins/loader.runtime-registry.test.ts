@@ -367,7 +367,7 @@ describe("getCompatibleActivePluginRegistry", () => {
     expect(resolving).not.toBe(plain);
   });
 
-  it("separates toolDiscovery in the loader cache key so a normal runtime load cannot be reused for a tool-discovery/execution registry", () => {
+  it("separates toolDiscovery in the loader cache key so a non-discovery load cannot be reused for a tool-discovery/execution registry", () => {
     const baseOptions = {
       config: {
         plugins: {

@@ -799,14 +799,14 @@ describe("plugin scheduled turns", () => {
     activateWorkflowPluginFixtureRegistry();
     const { api } = createWorkflowPluginRegistryApi({ toolDiscovery: true });
 
-    workflowMocks.cronAdd.mockResolvedValue(makeCronJob({ id: "job-from-tool-execution" }));
+    workflowMocks.cronAdd.mockResolvedValue(makeCronJob({ id: "job-from-tool-discovery" }));
     const handle = await api.session.workflow.scheduleSessionTurn({
       sessionKey: MAIN_SESSION_KEY,
       message: "wake",
       delayMs: 1,
     });
 
-    expectSessionTurnHandle(handle, "job-from-tool-execution");
+    expectSessionTurnHandle(handle, "job-from-tool-discovery");
   });
 
   it("schedules a session turn from a never-activated, toolDiscovery registry scoped to MULTIPLE plugins (a discovery scan, not a single-plugin execute() snapshot)", async () => {
@@ -853,7 +853,7 @@ describe("plugin scheduled turns", () => {
     const addedJobs: CronJob[] = [];
     const removedJobIds = new Set<string>();
     workflowMocks.cronAdd.mockImplementation(async (body: CronJobCreate) => {
-      const job = makeCronJob({ id: "job-from-tool-execution-unschedule", ...body });
+      const job = makeCronJob({ id: "job-from-tool-discovery-unschedule", ...body });
       addedJobs.push(job);
       return job;
     });
@@ -876,7 +876,7 @@ describe("plugin scheduled turns", () => {
       delayMs: 1,
       tag: "nudge",
     });
-    expectSessionTurnHandle(handle, "job-from-tool-execution-unschedule");
+    expectSessionTurnHandle(handle, "job-from-tool-discovery-unschedule");
 
     const result = await api.session.workflow.unscheduleSessionTurnsByTag({
       sessionKey: MAIN_SESSION_KEY,
@@ -884,7 +884,7 @@ describe("plugin scheduled turns", () => {
     });
 
     expect(result.removed).toBeGreaterThan(0);
-    expect(workflowMocks.cronRemove).toHaveBeenCalledWith("job-from-tool-execution-unschedule");
+    expect(workflowMocks.cronRemove).toHaveBeenCalledWith("job-from-tool-discovery-unschedule");
   });
 
   it("refuses to schedule a session turn on a registry installed active with side effects off (the migration-provider pattern)", async () => {
