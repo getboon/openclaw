@@ -142,7 +142,9 @@ async function scheduleRecheck(
       `browser_handoff with action="status" and site="${params.site}" and read its actual result —`,
       `do not skip this call or answer from memory.`,
       `This check runs silently: once you have that fresh result, if it says ready, failed, or`,
-      `expired, use the message tool (action="send") to tell the customer now; if it says pending,`,
+      `expired, use the message tool (action="send") to tell the customer now, before any other`,
+      `tool call — a follow-up step like action=attach or the browser tool can still fail or hang,`,
+      `and the customer must not be left with no reply because of that. If it says pending,`,
       `end your turn without sending anything — do not explain, do not apologize, just stop.`,
     ].join(" "),
     delayMs: params.delayMs,
@@ -336,8 +338,16 @@ async function handleStatus(
     status: "ready",
     ...(result.profileName ? { profileName: result.profileName } : {}),
   });
+  // Tell the model to message the customer before it does anything else,
+  // not after. Live-observed failure mode this ordering guards against: the
+  // model reads "call action=attach next" as the immediate next step, then a
+  // failing/slow follow-up browser attach (e.g. a Chrome MCP handshake
+  // timeout) leaves the customer with no reply at all -- even though this
+  // status result already had everything needed to confirm sign-in.
   return textResult(
-    `The customer finished signing in to "${params.site}". Call action=attach with the same site to finish setup.`,
+    `The customer finished signing in to "${params.site}". Use the message tool ` +
+      `(action="send") to tell them now, before doing anything else. Only after that, ` +
+      `call action=attach with the same site to finish setup.`,
   );
 }
 
