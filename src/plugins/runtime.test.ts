@@ -351,12 +351,22 @@ describe("setActivePluginRegistry", () => {
     expect(getActivePluginHostServices()?.cron).toBe(cron);
   });
 
-  it("clears the shared hostServices reference via clearActivatedPluginRuntimeState (shared test/reload teardown)", () => {
+  it("does not clear the shared hostServices reference via clearActivatedPluginRuntimeState (runs on every real reload, including ones unaware of hostServices)", () => {
     const cron = {} as import("../cron/service-contract.js").CronServiceContract;
     setActivePluginRegistry(createEmptyPluginRegistry(), undefined, undefined, undefined, { cron });
     expect(getActivePluginHostServices()?.cron).toBe(cron);
 
     clearActivatedPluginRuntimeState();
+
+    expect(getActivePluginHostServices()?.cron).toBe(cron);
+  });
+
+  it("clears the shared hostServices reference via resetPluginRuntimeStateForTest (test-only teardown)", () => {
+    const cron = {} as import("../cron/service-contract.js").CronServiceContract;
+    setActivePluginRegistry(createEmptyPluginRegistry(), undefined, undefined, undefined, { cron });
+    expect(getActivePluginHostServices()?.cron).toBe(cron);
+
+    resetPluginRuntimeStateForTest();
 
     expect(getActivePluginHostServices()?.cron).toBeUndefined();
   });

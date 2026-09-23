@@ -29,6 +29,7 @@ import { createEmptyPluginRegistry } from "../registry-empty.js";
 import { isPluginRegistryActivated, isPluginRegistryRetired } from "../registry-lifecycle.js";
 import { createPluginRegistry } from "../registry.js";
 import {
+  clearActivePluginHostServices,
   isPluginRegistrySuperseded,
   pinActivePluginChannelRegistry,
   releasePinnedPluginChannelRegistry,
@@ -272,11 +273,15 @@ describe("plugin scheduled turns", () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    // clearPluginLoaderCache -> clearActivatedPluginRuntimeState also clears the
-    // shared hostServices reference, so no mocked cron leaks into later tests.
     clearPluginLoaderCache();
     clearPluginHostRuntimeState();
     setActivePluginRegistry(createEmptyPluginRegistry());
+    // clearActivatedPluginRuntimeState (used by clearPluginLoaderCache above)
+    // deliberately does NOT clear the shared hostServices reference -- it also
+    // runs on production reloads that have no reason to know about hostServices
+    // and shouldn't wipe a real one. Clear it explicitly here instead so this
+    // file's mocked cron never leaks into another test file in the same worker.
+    clearActivePluginHostServices();
   });
 
   it("builds tagged and untagged cron names", () => {

@@ -144,7 +144,6 @@ import { createEmptyPluginRegistry } from "./registry-empty.js";
 import type { PluginRegistryParams } from "./registry-types.js";
 import { createPluginRegistry, type PluginRecord, type PluginRegistry } from "./registry.js";
 import {
-  clearActivePluginHostServices,
   getActivePluginRegistry,
   getActivePluginRegistryKey,
   getActivePluginRuntimeSubagentMode,
@@ -437,11 +436,13 @@ export function clearActivatedPluginRuntimeState(): void {
   clearEmbeddingProviders();
   clearMemoryEmbeddingProviders();
   clearMemoryPluginState();
-  // Ties the shared hostServices reference to this activation's own lifecycle:
-  // called at the start of every real reload (see loadOpenClawPlugins), so a
-  // reload that doesn't pass hostServices this time genuinely loses it instead
-  // of keeping an earlier activation's (possibly now-stale/mocked) reference.
-  clearActivePluginHostServices();
+  // Deliberately does NOT clear the shared hostServices reference here: this
+  // runs at the start of EVERY real reload (see loadOpenClawPlugins), including
+  // ones with no reason to know about hostServices at all (e.g. ensureRuntimePluginsLoaded's
+  // post-startup pre-warm reload) -- clearing unconditionally would wipe a
+  // valid reference the real gateway boot set moments earlier. setActivePluginRegistry's
+  // own "only update when explicitly given" rule already protects production;
+  // resetPluginRuntimeStateForTest (test-only) clears it explicitly instead.
 }
 
 export function clearPluginRegistryLoadCache(): void {
