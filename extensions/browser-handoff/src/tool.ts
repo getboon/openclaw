@@ -44,15 +44,19 @@ export type BrowserHandoffToolContext = {
 
 // Recheck backoff: fast at first (a human might finish a plain login in
 // seconds), backing off because most of the wait is 2FA/CAPTCHA the human is
-// actively doing, not something worth polling tightly for. The total-wait cap
+// actively doing, not something worth polling tightly for. Capped at 2
+// minutes (steady-state: one check every 2 min instead of every 5) rather
+// than a longer cap: a real increase in poll volume during boon-core's own
+// async profile-snapshot step (observed taking ~20+ minutes on its own), but
+// one traded deliberately for catching that step's terminal result sooner
+// once the human part of the wait is already over. The total-wait cap
 // matches Anchor's own default session max_duration (180 minutes, confirmed
 // against docs.anchorbrowser.io/advanced/session-timeout) rather than an
-// arbitrary "human gave up" guess: boon-core's async profile-snapshot step
-// has been observed taking ~20+ minutes on its own after a real sign-in, and
-// waiting past Anchor's own hard session cap has no upside anyway, since
-// that underlying session is gone regardless of what this cap says.
+// arbitrary "human gave up" guess: waiting past Anchor's own hard session cap
+// has no upside anyway, since that underlying session is gone regardless of
+// what this cap says.
 const FIRST_RECHECK_DELAY_MS = 30_000;
-const MAX_RECHECK_DELAY_MS = 5 * 60_000;
+const MAX_RECHECK_DELAY_MS = 2 * 60_000;
 const RECHECK_BACKOFF_MULTIPLIER = 2;
 const MAX_TOTAL_WAIT_MS = 180 * 60_000;
 
