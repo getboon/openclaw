@@ -224,14 +224,6 @@ export type PluginLoadOptions = {
    */
   preferBuiltPluginArtifacts?: boolean;
   toolDiscovery?: boolean;
-  /**
-   * Marks a registry as a plugin tool's own per-invocation execute() snapshot
-   * (see createCachedDescriptorPluginTool in tools.ts) rather than any other
-   * never-activated load (tool-discovery descriptor scans, the CLI-only
-   * registry). Durable side-effect APIs use this to fall back to the real
-   * active registry instead of this snapshot's own unusable activation state.
-   */
-  toolExecutionScoped?: boolean;
   activate?: boolean;
   loadModules?: boolean;
   throwOnLoadError?: boolean;
@@ -1029,7 +1021,6 @@ function buildCacheKey(params: {
   pluginSdkResolution?: PluginSdkResolutionPreference;
   coreGatewayMethodNames?: string[];
   activate?: boolean;
-  toolExecutionScoped?: boolean;
 }): string {
   const discoveryContext = resolvePluginDiscoveryContext({
     workspaceDir: params.workspaceDir,
@@ -1078,13 +1069,6 @@ function buildCacheKey(params: {
   const runtimeSubagentMode = params.runtimeSubagentMode ?? "default";
   const gatewayMethodsKey = JSON.stringify(params.coreGatewayMethodNames ?? []);
   const activationMode = params.activate === false ? "snapshot" : "active";
-  // A registry's toolExecutionSnapshot marker is baked in at createPluginRegistry
-  // time and never recomputed for a cache hit -- without this in the key, a
-  // cached snapshot loaded without the marker (e.g. a tool-discovery scan) could
-  // be reused for a call that needs it, silently reintroducing the bug the
-  // marker exists to fix (see isLoadedRecordInActiveRegistry in registry.ts).
-  const toolExecutionScopeMode =
-    params.toolExecutionScoped === true ? "tool-execution" : "unscoped";
   return `${roots.workspace ?? ""}::${roots.global ?? ""}::${roots.stock ?? ""}::${JSON.stringify({
     bundledPackage,
     devSourceRoot,
@@ -1093,7 +1077,7 @@ function buildCacheKey(params: {
     installs,
     loadPaths,
     activationMetadataKey: params.activationMetadataKey ?? "",
-  })}::${scopeKey}::${setupOnlyKey}::${setupOnlyModeKey}::${setupOnlyRequirementKey}::${startupChannelMode}::${bundledArtifactMode}::${rawConfigEnvMode}::${moduleLoadMode}::${discoveryMode}::${runtimeSubagentMode}::${params.pluginSdkResolution ?? "auto"}::${gatewayMethodsKey}::${activationMode}::${toolExecutionScopeMode}`;
+  })}::${scopeKey}::${setupOnlyKey}::${setupOnlyModeKey}::${setupOnlyRequirementKey}::${startupChannelMode}::${bundledArtifactMode}::${rawConfigEnvMode}::${moduleLoadMode}::${discoveryMode}::${runtimeSubagentMode}::${params.pluginSdkResolution ?? "auto"}::${gatewayMethodsKey}::${activationMode}`;
 }
 
 function matchesScopedPluginRequest(params: {
@@ -1434,7 +1418,6 @@ function resolvePluginLoadCacheContext(options: PluginLoadOptions = {}) {
     pluginSdkResolution: options.pluginSdkResolution,
     ...(coreGatewayMethodNames !== undefined && { coreGatewayMethodNames }),
     activate: options.activate,
-    toolExecutionScoped: options.toolExecutionScoped,
   });
   return {
     env,
@@ -2029,7 +2012,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         hostServices: options.hostServices,
       }),
       activateGlobalSideEffects: shouldActivate,
-      toolExecutionSnapshot: options.toolExecutionScoped === true,
+      toolDiscovery: options.toolDiscovery === true,
     });
 
     const suppliedManifestRegistry = options.manifestRegistry;

@@ -493,8 +493,13 @@ export type PluginRegistryParams = {
     cron?: import("../cron/service-contract.js").CronServiceContract;
   };
   activateGlobalSideEffects?: boolean;
-  /** Set only for a plugin tool's own per-invocation execute() snapshot registry. */
-  toolExecutionSnapshot?: boolean;
+  /**
+   * Mirrors PluginLoadOptions.toolDiscovery: this registry was built to resolve
+   * or execute plugin tools and is never installed as the active/channel/http-route
+   * registry (see ensureStandaloneRuntimePluginRegistryLoaded), regardless of how
+   * many plugins it scopes to. Never true for the migration-provider registry.
+   */
+  toolDiscovery?: boolean;
 };
 
 export type PluginRegistrationMode = import("./types.js").PluginRegistrationMode;

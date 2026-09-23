@@ -367,7 +367,7 @@ describe("getCompatibleActivePluginRegistry", () => {
     expect(resolving).not.toBe(plain);
   });
 
-  it("separates toolExecutionScoped in the loader cache key so a tool-discovery-scan snapshot cannot be reused for a tool's own execute() snapshot", () => {
+  it("separates toolDiscovery in the loader cache key so a normal runtime load cannot be reused for a tool-discovery/execution registry", () => {
     const baseOptions = {
       config: {
         plugins: {
@@ -376,17 +376,16 @@ describe("getCompatibleActivePluginRegistry", () => {
         },
       },
       activate: false,
-      toolDiscovery: true,
       onlyPluginIds: ["demo"],
     };
 
-    const unscoped = testing.resolvePluginLoadCacheContext(baseOptions).cacheKey;
-    const toolExecutionScoped = testing.resolvePluginLoadCacheContext({
+    const withoutDiscovery = testing.resolvePluginLoadCacheContext(baseOptions).cacheKey;
+    const withDiscovery = testing.resolvePluginLoadCacheContext({
       ...baseOptions,
-      toolExecutionScoped: true,
+      toolDiscovery: true,
     }).cacheKey;
 
-    expect(toolExecutionScoped).not.toBe(unscoped);
+    expect(withDiscovery).not.toBe(withoutDiscovery);
   });
 
   it("does not embed raw resolved plugin config env values in the loader cache key", () => {

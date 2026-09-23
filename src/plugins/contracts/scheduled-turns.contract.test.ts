@@ -174,7 +174,7 @@ function activateWorkflowPluginFixtureRegistry(): void {
 }
 
 /** Builds a separate, never-activated, side-effects-off registry with the workflow plugin loaded. */
-function createWorkflowPluginRegistryApi(params: { toolExecutionSnapshot?: boolean } = {}) {
+function createWorkflowPluginRegistryApi(params: { toolDiscovery?: boolean } = {}) {
   const built = createPluginRegistry({
     logger: {
       info() {},
@@ -185,7 +185,7 @@ function createWorkflowPluginRegistryApi(params: { toolExecutionSnapshot?: boole
     runtime: {} as PluginRuntime,
     hostServices: { cron },
     activateGlobalSideEffects: false,
-    ...(params.toolExecutionSnapshot ? { toolExecutionSnapshot: true } : {}),
+    ...(params.toolDiscovery ? { toolDiscovery: true } : {}),
   });
   const record = createPluginRecord({
     id: WORKFLOW_PLUGIN_ID,
@@ -795,9 +795,9 @@ describe("plugin scheduled turns", () => {
     },
   );
 
-  it("schedules a session turn from a never-activated, toolExecutionSnapshot registry when the plugin is loaded in the real active registry", async () => {
+  it("schedules a session turn from a never-activated, toolDiscovery registry when the plugin is loaded in the real active registry", async () => {
     activateWorkflowPluginFixtureRegistry();
-    const { api } = createWorkflowPluginRegistryApi({ toolExecutionSnapshot: true });
+    const { api } = createWorkflowPluginRegistryApi({ toolDiscovery: true });
 
     workflowMocks.cronAdd.mockResolvedValue(makeCronJob({ id: "job-from-tool-execution" }));
     const handle = await api.session.workflow.scheduleSessionTurn({
@@ -809,9 +809,46 @@ describe("plugin scheduled turns", () => {
     expectSessionTurnHandle(handle, "job-from-tool-execution");
   });
 
-  it("unschedules a session turn by tag from the same never-activated, toolExecutionSnapshot registry", async () => {
+  it("schedules a session turn from a never-activated, toolDiscovery registry scoped to MULTIPLE plugins (a discovery scan, not a single-plugin execute() snapshot)", async () => {
+    // Live regression: a multi-plugin tool-discovery scan (built by resolvePluginTools
+    // for plugins not covered by cached descriptors) is a DIFFERENT registry than the
+    // single-plugin snapshot createCachedDescriptorPluginTool resolves per invocation --
+    // both must fall back to the real active registry, not just the single-plugin case.
     activateWorkflowPluginFixtureRegistry();
-    const { api } = createWorkflowPluginRegistryApi({ toolExecutionSnapshot: true });
+    const built = createPluginRegistry({
+      logger: {
+        info() {},
+        warn() {},
+        error() {},
+        debug() {},
+      },
+      runtime: {} as PluginRuntime,
+      hostServices: { cron },
+      activateGlobalSideEffects: false,
+      toolDiscovery: true,
+    });
+    const otherRecord = createPluginRecord({ id: "canvas", name: "Canvas", origin: "bundled" });
+    const record = createPluginRecord({
+      id: WORKFLOW_PLUGIN_ID,
+      name: "Workflow Plugin",
+      origin: "bundled",
+    });
+    built.registry.plugins.push(otherRecord, record);
+    const api = built.createApi(record, { config: {} });
+
+    workflowMocks.cronAdd.mockResolvedValue(makeCronJob({ id: "job-from-discovery-scan" }));
+    const handle = await api.session.workflow.scheduleSessionTurn({
+      sessionKey: MAIN_SESSION_KEY,
+      message: "wake",
+      delayMs: 1,
+    });
+
+    expectSessionTurnHandle(handle, "job-from-discovery-scan");
+  });
+
+  it("unschedules a session turn by tag from the same never-activated, toolDiscovery registry", async () => {
+    activateWorkflowPluginFixtureRegistry();
+    const { api } = createWorkflowPluginRegistryApi({ toolDiscovery: true });
 
     const addedJobs: CronJob[] = [];
     const removedJobIds = new Set<string>();
@@ -864,10 +901,9 @@ describe("plugin scheduled turns", () => {
     expect(workflowMocks.cronAdd).not.toHaveBeenCalled();
   });
 
-  it("refuses to schedule a session turn on a never-activated registry that is NOT a toolExecutionSnapshot, even if the plugin is loaded in the real active registry", async () => {
+  it("refuses to schedule a session turn on a never-activated registry that is NOT toolDiscovery, even if the plugin is loaded in the real active registry", async () => {
     activateWorkflowPluginFixtureRegistry();
-    // Mirrors a tool-discovery descriptor scan or the CLI-only registry: never
-    // activated and side effects off, but not marked toolExecutionSnapshot.
+    // Mirrors the CLI-only registry: never activated and side effects off, but not toolDiscovery.
     const { api } = createWorkflowPluginRegistryApi();
 
     const handle = await api.session.workflow.scheduleSessionTurn({
