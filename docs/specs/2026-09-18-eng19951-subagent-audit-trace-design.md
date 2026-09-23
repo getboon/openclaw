@@ -263,6 +263,15 @@ const mergedAttemptToolSummary =
             ...delegatedInvocations.invocations.map((invocation) => invocation.name),
           ]),
         ],
+        ...(attemptToolSummary?.failures !== undefined
+          ? { failures: attemptToolSummary.failures }
+          : {}),
+        ...(attemptToolSummary?.totalToolTimeMs !== undefined
+          ? { totalToolTimeMs: attemptToolSummary.totalToolTimeMs }
+          : {}),
+        ...(attemptToolSummary?.unrecoveredFailures !== undefined
+          ? { unrecoveredFailures: attemptToolSummary.unrecoveredFailures }
+          : {}),
         invocations: [
           ...(attemptToolSummary?.invocations ?? []),
           ...delegatedInvocations.invocations,

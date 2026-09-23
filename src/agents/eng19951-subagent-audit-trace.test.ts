@@ -28,6 +28,7 @@ type AgentCallResponse = { runId?: string; status: string; error?: string };
 type RegistryRow = {
   runId?: string;
   childSessionKey: string;
+  requesterSessionKey?: string;
   task?: string;
   createdAt?: number;
   endedAt?: number;
@@ -414,9 +415,17 @@ describe("delegated audit-trace evidence reaches the parent's final trace", () =
       disposition: "completed",
       reason: "tool_execution_succeeded",
     };
+    registryRows.map.set("agent:main:subagent:silent-descendant", {
+      runId: "run-silent-descendant",
+      childSessionKey: "agent:main:subagent:silent-descendant",
+      requesterSessionKey: "agent:main:subagent:parent-of-silent",
+      completion: { required: true, resultAuditTrace: descendantTrace },
+    });
     subagentRegistryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([
       {
+        runId: "run-silent-descendant",
         childSessionKey: "agent:main:subagent:silent-descendant",
+        requesterSessionKey: "agent:main:subagent:parent-of-silent",
         task: "silent scope",
         createdAt: 1,
         outcome: { status: "ok" },
@@ -476,9 +485,17 @@ describe("delegated audit-trace evidence reaches the parent's final trace", () =
       childSessionKey: "agent:main:subagent:mid",
       completion: { required: true, resultAuditTrace: ownTrace },
     });
+    registryRows.map.set("agent:main:subagent:mid-descendant", {
+      runId: "run-mid-descendant",
+      childSessionKey: "agent:main:subagent:mid-descendant",
+      requesterSessionKey: "agent:main:subagent:mid",
+      completion: { required: true, resultAuditTrace: descendantTrace },
+    });
     subagentRegistryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([
       {
+        runId: "run-mid-descendant",
         childSessionKey: "agent:main:subagent:mid-descendant",
+        requesterSessionKey: "agent:main:subagent:mid",
         task: "descendant scope",
         createdAt: 1,
         outcome: { status: "ok" },
@@ -514,6 +531,65 @@ describe("delegated audit-trace evidence reaches the parent's final trace", () =
       status: "ok",
       viaSubagent: true,
     });
+  });
+
+  it("multi-child: excludes a descendant's tool evidence once its registry row shows it was reparented onto a different run", async () => {
+    // filterCurrentDirectChildCompletionRows drops a directChildren row once
+    // the registry's own record for that childSessionKey disagrees on
+    // runId/requesterSessionKey (superseded by a retry/reparent) -- prove
+    // that guard actually excludes the stale row's evidence, not just that
+    // evidence flows through when there's nothing to filter.
+    const staleDescendantTrace: AgentDecisionTrace = {
+      schemaVersion: 1,
+      visibleTools: ["takeoff_dispatch"],
+      toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+      evidence: [],
+      confidence: "high",
+      disposition: "completed",
+      reason: "tool_execution_succeeded",
+    };
+    // The registry's current record for this childSessionKey shows a
+    // DIFFERENT runId than the stale row below -- the child was reparented
+    // onto a fresh run since this directChildren snapshot was taken.
+    registryRows.map.set("agent:main:subagent:reparented-descendant", {
+      runId: "run-reparented-descendant-v2",
+      childSessionKey: "agent:main:subagent:reparented-descendant",
+      requesterSessionKey: "agent:main:subagent:parent-of-reparented",
+      completion: { required: true },
+    });
+    subagentRegistryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([
+      {
+        runId: "run-reparented-descendant-v1",
+        childSessionKey: "agent:main:subagent:reparented-descendant",
+        requesterSessionKey: "agent:main:subagent:parent-of-reparented",
+        task: "stale scope",
+        createdAt: 1,
+        outcome: { status: "ok" },
+        completion: { resultText: "stale done", resultAuditTrace: staleDescendantTrace },
+      },
+    ]);
+
+    await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:parent-of-reparented",
+      childRunId: "run-parent-of-reparented",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "telegram", to: "-100123" },
+      task: "outer scope",
+      timeoutMs: 10,
+      cleanup: "keep",
+      waitForCompletion: false,
+      outcome: { status: "ok" },
+      roundOneReply: "outer scope complete.",
+      expectsCompletionMessage: true,
+    });
+
+    const internalEvents = requireAgentCallInternalEvents(0);
+    const parentAuditTrace = computeResumedTurnAuditTrace(internalEvents);
+
+    expect(parentAuditTrace.toolInvocations).not.toContainEqual(
+      expect.objectContaining({ name: "takeoff_dispatch" }),
+    );
   });
 
   it("orphaned child: no resultAuditTrace on the registry row -- delivery still succeeds, no delegated evidence added, no crash", async () => {
