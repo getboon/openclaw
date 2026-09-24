@@ -70,7 +70,8 @@ export function summarizeBoonExecCommand(words: string[]): string | undefined {
   }
 
   if (bin === "boon-projects") {
-    const subcommand = positionalArgs(words, 1)[0];
+    const positional = positionalArgs(words, 1);
+    const subcommand = positional[0];
     switch (subcommand) {
       case "projects":
       case "project":
@@ -97,6 +98,13 @@ export function summarizeBoonExecCommand(words: string[]): string | undefined {
       case "detect-circuit-words":
       case "resolve-circuit-regex":
         return "analyzing circuits";
+      case "schedule":
+        // `schedule append` writes to the page's stored schedule; every other
+        // action (currently just `list`) only reads it. Distinct labels so the
+        // trajectory shows whether this step wrote something, since eval
+        // scenarios (ENG-20405) key a deterministic assert off this text to
+        // prove a schedule was actually persisted, not just claimed in prose.
+        return positional[1] === "append" ? "storing the schedule" : "checking the stored schedule";
       default:
         return "working with project data";
     }

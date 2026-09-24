@@ -89,6 +89,18 @@ describe("summarizeBoonExecCommand", () => {
     );
   });
 
+  it("distinguishes schedule append (a write) from schedule list/other (a read)", () => {
+    expect(summarizeBoonExecCommand(["boon-projects", "schedule", "append", "514", "758"])).toBe(
+      "storing the schedule",
+    );
+    expect(summarizeBoonExecCommand(["boon-projects", "schedule", "list", "514", "758"])).toBe(
+      "checking the stored schedule",
+    );
+    expect(summarizeBoonExecCommand(["boon-projects", "schedule"])).toBe(
+      "checking the stored schedule",
+    );
+  });
+
   it.each([
     ["page-text", "extracting text from file.pdf"],
     ["pages-text", "extracting text from file.pdf"],
