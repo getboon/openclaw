@@ -1325,25 +1325,26 @@ export function addSubagentRunForTests(entry: SubagentRunRecord) {
  */
 export function recordSubagentReplyAuditTrace(
   childSessionKey: string,
+  runId: string,
   auditTrace: AgentDecisionTrace,
 ): void {
   const key = childSessionKey.trim();
   if (!key) {
     return;
   }
-  let latest: SubagentRunRecord | null = null;
-  for (const entry of subagentRuns.values()) {
-    if (entry.childSessionKey !== key) {
-      continue;
-    }
-    if (!latest || entry.createdAt > latest.createdAt) {
-      latest = entry;
-    }
-  }
-  if (!latest) {
+  // Match on BOTH childSessionKey and runId -- a persistent session can have
+  // a newer run already registered under the same key before an older run's
+  // reply finishes computing its trace. Resolving by "latest createdAt for
+  // this key" alone would write the older run's trace onto the newer run's
+  // row (misattribution), which then gets silently clobbered the moment the
+  // newer run completes and records its own trace. Every read site already
+  // guards on runId (see subagent-announce.ts's ownRegistryRun check); the
+  // write must use the same identity, not a weaker one.
+  const entry = subagentRuns.get(runId);
+  if (!entry || entry.childSessionKey !== key) {
     return;
   }
-  ensureCompletionState(latest).resultAuditTrace = auditTrace;
+  ensureCompletionState(entry).resultAuditTrace = auditTrace;
   persistSubagentRuns();
 }
 

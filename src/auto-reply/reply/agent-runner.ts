@@ -2437,7 +2437,7 @@ export async function runReplyAgent(params: {
         // row here, at the only point it's ever computed — the session
         // transcript is written earlier (inside the embedded-agent-runner),
         // before this trace exists, so it can never be read back from there.
-        recordSubagentReplyAuditTrace(sessionKey, auditTrace);
+        recordSubagentReplyAuditTrace(sessionKey, runId, auditTrace);
       }
     }
     const contextManagement = {

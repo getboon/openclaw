@@ -558,12 +558,25 @@ export async function runSubagentAnnounceFlow(params: {
     // childCompletionFindings, a text string that can be falsy even when
     // multiChildToolEvidence was already collected) silently discards
     // whichever source didn't win the gate; always combine both instead.
-    const ownEvidenceEntry: SubagentToolEvidence[] = ownAuditTrace?.toolInvocations?.length
+    //
+    // `ownAuditTrace.toolInvocations` can ALREADY contain descendant evidence
+    // merged in by run.ts's own mergeDelegatedToolEvidenceIntoSummary (tagged
+    // viaSubagent: true) if this session itself resumed after a delegated
+    // completion earlier in its own turn. Those entries must NOT be
+    // forwarded again here -- multiChildToolEvidence independently re-reads
+    // that same descendant's registry row fresh, so forwarding both would
+    // double-count the same tool call in whatever ancestor eventually
+    // consumes this completion event. Only this session's own direct calls
+    // belong in its own evidence entry.
+    const ownDirectInvocations = (ownAuditTrace?.toolInvocations ?? []).filter(
+      (invocation) => invocation.viaSubagent !== true,
+    );
+    const ownEvidenceEntry: SubagentToolEvidence[] = ownDirectInvocations.length
       ? [
           {
             childSessionKey: params.childSessionKey,
-            toolInvocations: ownAuditTrace.toolInvocations,
-            visibleTools: ownAuditTrace.visibleTools ?? [],
+            toolInvocations: ownDirectInvocations,
+            visibleTools: ownAuditTrace?.visibleTools ?? [],
           },
         ]
       : [];

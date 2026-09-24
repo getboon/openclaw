@@ -636,6 +636,7 @@ describe("delegated audit-trace evidence reaches the parent's final trace", () =
     registryRows.map.set("agent:main:subagent:c1:subagent:grandchild", {
       runId: "run-grandchild",
       childSessionKey: "agent:main:subagent:c1:subagent:grandchild",
+      requesterSessionKey: "agent:main:subagent:c1",
       completion: { required: true, resultAuditTrace: grandchildTrace },
     });
 
@@ -664,6 +665,24 @@ describe("delegated audit-trace evidence reaches the parent's final trace", () =
       completion: { required: true, resultAuditTrace: c1OwnAuditTrace },
     });
 
+    // The grandchild's row is `cleanup: "keep"`, so a real registry still
+    // legitimately lists it as C1's direct child at Hop 2 -- reflect that
+    // here rather than leaving the default empty mock, which would silently
+    // hide whether descendant evidence actually survives the trip (ENG-19951
+    // regression: this is exactly the source multiChildToolEvidence must
+    // supply once own-evidence forwarding excludes already-delegated entries).
+    subagentRegistryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([
+      {
+        runId: "run-grandchild",
+        childSessionKey: "agent:main:subagent:c1:subagent:grandchild",
+        requesterSessionKey: "agent:main:subagent:c1",
+        task: "run grandchild scope",
+        createdAt: 1,
+        outcome: { status: "ok" },
+        completion: { resultText: "grandchild scope complete.", resultAuditTrace: grandchildTrace },
+      },
+    ]);
+
     // Hop 2: C1 completes, announces to the top-level parent. No special-
     // casing for "this child's evidence came from two hops down" anywhere --
     // it's just another registry row read the exact same way.
@@ -691,5 +710,91 @@ describe("delegated audit-trace evidence reaches the parent's final trace", () =
     });
     expect(topLevelAuditTrace.disposition).toBe("completed");
     expect(topLevelAuditTrace.reason).toBe("tool_execution_succeeded");
+  });
+
+  it("nested grandchild: does not double-count the grandchild's tool call when C1's own directChildren listing still includes it at Hop 2 (ENG-19951 regression)", async () => {
+    const grandchildTrace: AgentDecisionTrace = {
+      schemaVersion: 1,
+      visibleTools: ["takeoff_dispatch"],
+      toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+      evidence: [],
+      confidence: "high",
+      disposition: "completed",
+      reason: "tool_execution_succeeded",
+    };
+    registryRows.map.set("agent:main:subagent:c1:subagent:grandchild", {
+      runId: "run-grandchild",
+      childSessionKey: "agent:main:subagent:c1:subagent:grandchild",
+      requesterSessionKey: "agent:main:subagent:c1",
+      completion: { required: true, resultAuditTrace: grandchildTrace },
+    });
+
+    // Hop 1: grandchild completes, announces to mid-level child C1.
+    await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:c1:subagent:grandchild",
+      childRunId: "run-grandchild",
+      requesterSessionKey: "agent:main:subagent:c1",
+      requesterDisplayKey: "c1",
+      task: "run grandchild scope",
+      timeoutMs: 10,
+      cleanup: "keep",
+      waitForCompletion: false,
+      outcome: { status: "ok" },
+      roundOneReply: "grandchild scope complete.",
+      expectsCompletionMessage: true,
+    });
+    const c1InternalEvents = requireAgentCallInternalEvents(0);
+    // C1's own trace already has the grandchild's evidence merged in
+    // (tagged viaSubagent: true) via run.ts, exactly as production computes
+    // it for C1's own resumed turn.
+    const c1OwnAuditTrace = computeResumedTurnAuditTrace(c1InternalEvents);
+    registryRows.map.set("agent:main:subagent:c1", {
+      runId: "run-c1",
+      childSessionKey: "agent:main:subagent:c1",
+      completion: { required: true, resultAuditTrace: c1OwnAuditTrace },
+    });
+
+    // Unlike the "no special-casing" test above, mock C1's own
+    // directChildren listing at Hop 2 to reflect what a real registry still
+    // legitimately returns: the grandchild's row, current and un-reparented.
+    subagentRegistryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([
+      {
+        runId: "run-grandchild",
+        childSessionKey: "agent:main:subagent:c1:subagent:grandchild",
+        requesterSessionKey: "agent:main:subagent:c1",
+        task: "run grandchild scope",
+        createdAt: 1,
+        outcome: { status: "ok" },
+        completion: { resultText: "grandchild scope complete.", resultAuditTrace: grandchildTrace },
+      },
+    ]);
+
+    // Hop 2: C1 completes, announces to the top-level parent.
+    await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:c1",
+      childRunId: "run-c1",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "telegram", to: "-100123" },
+      task: "run c1 task",
+      timeoutMs: 10,
+      cleanup: "keep",
+      waitForCompletion: false,
+      outcome: { status: "ok" },
+      roundOneReply: "c1 task complete.",
+      expectsCompletionMessage: true,
+    });
+    const topLevelInternalEvents = requireAgentCallInternalEvents(1);
+    const topLevelAuditTrace = computeResumedTurnAuditTrace(topLevelInternalEvents);
+
+    const takeoffDispatchCount = topLevelAuditTrace.toolInvocations.filter(
+      (invocation) => invocation.name === "takeoff_dispatch",
+    ).length;
+    expect(takeoffDispatchCount).toBe(1);
+    expect(topLevelAuditTrace.toolInvocations).toContainEqual({
+      name: "takeoff_dispatch",
+      status: "ok",
+      viaSubagent: true,
+    });
   });
 });

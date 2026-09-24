@@ -357,7 +357,7 @@ describe("subagent registry seam flow", () => {
       disposition: "completed" as const,
       reason: "tool_execution_succeeded" as const,
     };
-    mod.recordSubagentReplyAuditTrace("agent:main:subagent:child-1", auditTrace);
+    mod.recordSubagentReplyAuditTrace("agent:main:subagent:child-1", "run-1", auditTrace);
 
     const found = mod.getLatestSubagentRunByChildSessionKey("agent:main:subagent:child-1");
     expect(found?.completion?.resultAuditTrace).toEqual(auditTrace);
@@ -377,15 +377,19 @@ describe("subagent registry seam flow", () => {
     const persistCallCountBefore = mocks.persistSubagentRunsToDisk.mock.calls.length;
 
     expect(() =>
-      mod.recordSubagentReplyAuditTrace("agent:main:subagent:does-not-exist", {
-        schemaVersion: 1,
-        visibleTools: [],
-        toolInvocations: [],
-        evidence: [],
-        confidence: "medium",
-        disposition: "completed",
-        reason: "no_tools_visible",
-      }),
+      mod.recordSubagentReplyAuditTrace(
+        "agent:main:subagent:does-not-exist",
+        "run-does-not-exist",
+        {
+          schemaVersion: 1,
+          visibleTools: [],
+          toolInvocations: [],
+          evidence: [],
+          confidence: "medium",
+          disposition: "completed",
+          reason: "no_tools_visible",
+        },
+      ),
     ).not.toThrow();
 
     // No row matches "does-not-exist", so this returns before
@@ -395,6 +399,81 @@ describe("subagent registry seam flow", () => {
       mod.getLatestSubagentRunByChildSessionKey("agent:main:subagent:unrelated")?.completion,
     ).toBeUndefined();
     expect(mocks.persistSubagentRunsToDisk.mock.calls.length).toBe(persistCallCountBefore);
+  });
+
+  it("no-ops when the runId doesn't match the row for that childSessionKey (ENG-19951 regression)", () => {
+    mod.addSubagentRunForTests({
+      runId: "run-real",
+      childSessionKey: "agent:main:subagent:mismatch",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "real run",
+      cleanup: "keep",
+      createdAt: 1_000,
+    });
+    const persistCallCountBefore = mocks.persistSubagentRunsToDisk.mock.calls.length;
+
+    mod.recordSubagentReplyAuditTrace("agent:main:subagent:mismatch", "run-stale-or-wrong", {
+      schemaVersion: 1,
+      visibleTools: [],
+      toolInvocations: [],
+      evidence: [],
+      confidence: "medium",
+      disposition: "completed",
+      reason: "no_tools_visible",
+    });
+
+    expect(
+      mod.getLatestSubagentRunByChildSessionKey("agent:main:subagent:mismatch")?.completion,
+    ).toBeUndefined();
+    expect(mocks.persistSubagentRunsToDisk.mock.calls.length).toBe(persistCallCountBefore);
+  });
+
+  it("does not misattribute an older run's trace onto a newer run sharing the same childSessionKey (ENG-19951 regression)", () => {
+    // A persistent childSessionKey can have a newer run already registered
+    // before an older run's own reply finishes computing its trace -- the
+    // write must target the run that's actually finishing, not whichever row
+    // currently has the latest createdAt for that key.
+    mod.addSubagentRunForTests({
+      runId: "run-1-older",
+      childSessionKey: "agent:main:subagent:persistent",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "older run",
+      cleanup: "keep",
+      createdAt: 1_000,
+    });
+    mod.addSubagentRunForTests({
+      runId: "run-2-newer",
+      childSessionKey: "agent:main:subagent:persistent",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "newer run, started before run-1-older finished",
+      cleanup: "keep",
+      createdAt: 2_000,
+    });
+
+    const olderAuditTrace = {
+      schemaVersion: 1 as const,
+      visibleTools: ["takeoff_dispatch"],
+      toolInvocations: [{ name: "takeoff_dispatch", status: "ok" as const }],
+      evidence: [],
+      confidence: "high" as const,
+      disposition: "completed" as const,
+      reason: "tool_execution_succeeded" as const,
+    };
+    mod.recordSubagentReplyAuditTrace(
+      "agent:main:subagent:persistent",
+      "run-1-older",
+      olderAuditTrace,
+    );
+
+    const older = mod.getLatestSubagentRunByChildSessionKey("agent:main:subagent:persistent");
+    // getLatestSubagentRunByChildSessionKey still resolves "latest by
+    // createdAt" -- that's run-2-newer -- so the assertion that matters is
+    // that run-2-newer's row was NOT mutated by the older run's write.
+    expect(older?.runId).toBe("run-2-newer");
+    expect(older?.completion?.resultAuditTrace).toBeUndefined();
   });
 
   it("uses the disk-aware run snapshot for maintenance preservation", () => {

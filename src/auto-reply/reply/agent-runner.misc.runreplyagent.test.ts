@@ -571,6 +571,7 @@ describe("runReplyAgent auto-compaction token update", () => {
     expect(subagentRegistryMocks.recordSubagentReplyAuditTraceMock).toHaveBeenCalledTimes(1);
     expect(subagentRegistryMocks.recordSubagentReplyAuditTraceMock).toHaveBeenCalledWith(
       sessionKey,
+      expect.any(String),
       expect.objectContaining({
         schemaVersion: 1,
         visibleTools: ["buildingconnected_list_projects", "read"],
