@@ -797,4 +797,79 @@ describe("delegated audit-trace evidence reaches the parent's final trace", () =
       viaSubagent: true,
     });
   });
+
+  it("nested grandchild: preserves the grandchild's tool call via C1's own merged trace when the grandchild's registry row was cleaned up before Hop 2 (ENG-19951 regression)", async () => {
+    const grandchildTrace: AgentDecisionTrace = {
+      schemaVersion: 1,
+      visibleTools: ["takeoff_dispatch"],
+      toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+      evidence: [],
+      confidence: "high",
+      disposition: "completed",
+      reason: "tool_execution_succeeded",
+    };
+    registryRows.map.set("agent:main:subagent:c1:subagent:grandchild", {
+      runId: "run-grandchild",
+      childSessionKey: "agent:main:subagent:c1:subagent:grandchild",
+      requesterSessionKey: "agent:main:subagent:c1",
+      completion: { required: true, resultAuditTrace: grandchildTrace },
+    });
+
+    // Hop 1: grandchild completes, announces to mid-level child C1. Once
+    // this event is delivered, the grandchild's registry row is a
+    // `cleanup: "delete"` row that's now gone (simulated below by simply
+    // never populating listSubagentRunsForRequester for Hop 2) -- C1's own
+    // merged trace, computed here, is the ONLY remaining record of the
+    // grandchild's tool call.
+    await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:c1:subagent:grandchild",
+      childRunId: "run-grandchild",
+      requesterSessionKey: "agent:main:subagent:c1",
+      requesterDisplayKey: "c1",
+      task: "run grandchild scope",
+      timeoutMs: 10,
+      cleanup: "delete",
+      waitForCompletion: false,
+      outcome: { status: "ok" },
+      roundOneReply: "grandchild scope complete.",
+      expectsCompletionMessage: true,
+    });
+    const c1InternalEvents = requireAgentCallInternalEvents(0);
+    const c1OwnAuditTrace = computeResumedTurnAuditTrace(c1InternalEvents);
+    registryRows.map.set("agent:main:subagent:c1", {
+      runId: "run-c1",
+      childSessionKey: "agent:main:subagent:c1",
+      completion: { required: true, resultAuditTrace: c1OwnAuditTrace },
+    });
+
+    // The grandchild's row is gone by the time C1 announces -- listing C1's
+    // direct children now legitimately returns nothing for it (default mock
+    // return value, left unset here).
+
+    // Hop 2: C1 completes, announces to the top-level parent.
+    await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:c1",
+      childRunId: "run-c1",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "telegram", to: "-100123" },
+      task: "run c1 task",
+      timeoutMs: 10,
+      cleanup: "keep",
+      waitForCompletion: false,
+      outcome: { status: "ok" },
+      roundOneReply: "c1 task complete.",
+      expectsCompletionMessage: true,
+    });
+    const topLevelInternalEvents = requireAgentCallInternalEvents(1);
+    const topLevelAuditTrace = computeResumedTurnAuditTrace(topLevelInternalEvents);
+
+    // The grandchild's evidence must survive via C1's own merged trace,
+    // even though multiChildToolEvidence had nothing fresh to offer.
+    expect(topLevelAuditTrace.toolInvocations).toContainEqual({
+      name: "takeoff_dispatch",
+      status: "ok",
+      viaSubagent: true,
+    });
+  });
 });

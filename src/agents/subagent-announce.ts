@@ -562,15 +562,30 @@ export async function runSubagentAnnounceFlow(params: {
     // `ownAuditTrace.toolInvocations` can ALREADY contain descendant evidence
     // merged in by run.ts's own mergeDelegatedToolEvidenceIntoSummary (tagged
     // viaSubagent: true) if this session itself resumed after a delegated
-    // completion earlier in its own turn. Those entries must NOT be
-    // forwarded again here -- multiChildToolEvidence independently re-reads
-    // that same descendant's registry row fresh, so forwarding both would
-    // double-count the same tool call in whatever ancestor eventually
-    // consumes this completion event. Only this session's own direct calls
-    // belong in its own evidence entry.
-    const ownDirectInvocations = (ownAuditTrace?.toolInvocations ?? []).filter(
-      (invocation) => invocation.viaSubagent !== true,
+    // completion earlier in its own turn. Forwarding those again here would
+    // double-count the same tool call, since multiChildToolEvidence
+    // independently re-reads that same descendant's registry row fresh --
+    // but that fresh read can come back empty (the descendant's row was
+    // cleaned up after its completion event was already delivered), in
+    // which case ownAuditTrace's merged copy is the ONLY surviving evidence
+    // and dropping it unconditionally would lose it outright. Dedupe by
+    // content against whatever multiChildToolEvidence actually refreshed,
+    // rather than blindly excluding every viaSubagent-tagged entry: drop an
+    // own-trace entry only when a matching fresh copy exists to replace it.
+    const refreshedInvocationSignatures = new Set(
+      multiChildToolEvidence.flatMap((entry) =>
+        entry.toolInvocations.map(
+          (invocation) => `${invocation.name} ${invocation.status} ${invocation.detail ?? ""}`,
+        ),
+      ),
     );
+    const ownDirectInvocations = (ownAuditTrace?.toolInvocations ?? []).filter((invocation) => {
+      if (invocation.viaSubagent !== true) {
+        return true;
+      }
+      const signature = `${invocation.name} ${invocation.status} ${invocation.detail ?? ""}`;
+      return !refreshedInvocationSignatures.has(signature);
+    });
     const ownEvidenceEntry: SubagentToolEvidence[] = ownDirectInvocations.length
       ? [
           {
