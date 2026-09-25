@@ -193,6 +193,23 @@ export async function resolveDeliveryTarget(
   // sessionKey, no stored/creation delivery context) and therefore fell back to the SHARED
   // agent-main session bucket. See the #91613 refusal below.
   const usedSharedMainFallback = mainEntry !== undefined && main === mainEntry;
+  // True when a sessionKey WAS given but canonicalizes to the exact same shared agent-main
+  // bucket as the keyless fallback above -- e.g. a dmScope:"main" cron, where every DM peer's
+  // runSessionKey collapses onto `agent:<id>:main`. usedSharedMainFallback alone misses this:
+  // loadSessionEntry(threadSessionKey) still succeeds (it's a real, existing session file), so
+  // `main` becomes `threadEntry`, never literally `=== mainEntry`, even though threadSessionKey
+  // and mainSessionKey are the identical string and threadEntry IS that same shared, mutable,
+  // last-writer-wins file every other DM peer also reads and writes.
+  //
+  // Deliberately separate from usedSharedMainFallback, not OR'd into it unconditionally: a cron
+  // with its OWN distinct (but not-yet-materialized) sessionKey also has main===mainEntry by
+  // coincidence of loadSessionEntry returning undefined for that key, and that case must stay
+  // exempt (see the "KEYED cron... falls back to the main entry" test) — only a sessionKey that
+  // canonicalizes to the literal shared bucket counts here, not merely "resolution fell through".
+  const sessionKeyIsSharedMainBucket =
+    threadSessionKey !== undefined && threadSessionKey === mainSessionKey;
+  const resolvesToSharedMainBucket =
+    (!rawSessionKey && usedSharedMainFallback) || sessionKeyIsSharedMainBucket;
 
   const preliminary = resolveSessionDeliveryTarget({
     entry: main,
@@ -318,28 +335,30 @@ export async function resolveDeliveryTarget(
     }
   }
 
-  // Issue #91613: refuse a KEYLESS implicit isolated cron whose delivery target was only inherited
-  // from the SHARED agent-main session bucket's last recipient. That bucket is last-writer-wins
-  // across every conversation the agent handles, so the inherited `lastTo` can be a different
+  // Issue #91613: refuse an implicit isolated cron whose delivery target was only inherited from
+  // the SHARED agent-main session bucket's last recipient. That bucket is last-writer-wins across
+  // every conversation the agent handles, so the inherited `lastTo` can be a different
   // conversation's room — the wrong room — which the durable delivery queue then replays verbatim
   // after a restart. Returning ok:false (instead of a separate flag callers must remember to check)
   // routes the refusal through the delivery dispatch !ok gate, the failure-notification path, and
   // the delivery preview alike: every consumer honors ok:false, the dispatch gate refuses the send
   // WITHOUT reaching the durable enqueue, so recovery replays nothing. (The agent turn still runs;
   // only delivery is refused, at the dispatch gate — there is no pre-execution preflight.) Narrowed:
-  //   - keyless only (`!rawSessionKey`) — a cron with its own session key/target resolves via that
-  //     session, not the shared bucket, so it is never refused here;
+  //   - resolvesToSharedMainBucket — covers both a genuinely keyless cron (falls back to the
+  //     shared bucket outright) AND a cron with its OWN sessionKey that still canonicalizes to
+  //     that identical shared bucket (dmScope:"main" collapses every DM peer's runSessionKey onto
+  //     `agent:<id>:main` — see sessionKeyIsSharedMainBucket above). A cron whose session key
+  //     resolves to a genuinely distinct, per-conversation session is never refused here;
   //   - evaluated AFTER the allowFrom reroute above (`toCandidate === resolved.lastTo`) — a cron
   //     whose stale target was rerouted to a configured allow-from peer is delivering to that
   //     allowed peer, not the inherited room, so it is not refused.
   //   - does not have turnSourceChannel — when turnSource context is present, the target
   //     is safely captured from the originating channel, not contaminated session state.
   if (
-    !rawSessionKey &&
+    resolvesToSharedMainBucket &&
     mode === "implicit" &&
     !explicitTo &&
     !jobPayload.turnSourceChannel &&
-    usedSharedMainFallback &&
     toCandidate != null &&
     toCandidate === resolved.lastTo
   ) {

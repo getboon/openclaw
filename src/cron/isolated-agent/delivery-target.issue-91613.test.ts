@@ -292,6 +292,55 @@ describe("resolveDeliveryTarget — issue #91613 cross-room drain fix", () => {
     }
   });
 
+  it('REFUSES a cron whose OWN sessionKey canonicalizes to the shared agent-main bucket (dmScope:"main")', async () => {
+    // Under dmScope:"main", every DM peer's runSessionKey collapses onto the identical
+    // `agent:<id>:main` key — a NON-empty sessionKey (unlike the keyless cases above), but
+    // still the exact same shared, last-writer-wins bucket. browser-handoff schedules its
+    // recheck as `session:<runSessionKey>`, so this is the literal shape that job resolves to.
+    setLastSessionEntry({
+      sessionId: "sess-peer-b",
+      lastChannel: "alpha",
+      lastTo: "room:peer-b",
+    });
+
+    const result = await resolveDeliveryTarget(makeCfg({ channels: { alpha: {} } }), AGENT_ID, {
+      channel: "last",
+      to: undefined,
+      sessionKey: "agent:test:main",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain("shared");
+    }
+  });
+
+  it("interleaved two peers under dmScope:\"main\": peer A's terminal-result recheck must not drain to peer B's room", async () => {
+    // Peer A's browser-handoff flow schedules a recheck against the shared dmScope:"main"
+    // session (its own runSessionKey, but that key IS agent:<id>:main). Before that recheck
+    // fires, peer B messages the SAME agent, overwriting the shared bucket's lastChannel/lastTo
+    // to B's own room — last-writer-wins. Peer A's recheck then resolves delivery via
+    // channel:"last" against that same shared session. Without this fix, A's terminal result
+    // (e.g. "you're signed in") would be delivered to B's room instead of A's.
+    setLastSessionEntry({
+      sessionId: "sess-peer-b-overwrote-shared-bucket",
+      lastChannel: "alpha",
+      lastTo: "room:peer-b",
+    });
+
+    const peerARecheckResult = await resolveDeliveryTarget(
+      makeCfg({ channels: { alpha: {} } }),
+      AGENT_ID,
+      { channel: "last", to: undefined, sessionKey: "agent:test:main" },
+    );
+
+    // Refused, not silently delivered to peer B's room.
+    expect(peerARecheckResult.ok).toBe(false);
+    if (!peerARecheckResult.ok) {
+      expect(peerARecheckResult.to).toBeUndefined();
+    }
+  });
+
   it("negative: a keyless cron rerouted by allowFrom to an allowed peer is delivered, not refused", async () => {
     // The shared bucket's stale lastTo ("room:denied") is OUTSIDE the channel allowFrom policy, so
     // the resolver reroutes delivery to the configured allowed peer. Because the final target
