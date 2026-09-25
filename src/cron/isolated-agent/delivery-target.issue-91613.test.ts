@@ -21,6 +21,7 @@ const { extractDeliveryInfoMock } = vi.hoisted(() => ({
 vi.mock("../../config/sessions/main-session.js", () => ({
   canonicalizeMainSessionAlias: vi.fn(({ sessionKey }) => sessionKey),
   resolveAgentMainSessionKey: vi.fn().mockReturnValue("agent:test:main"),
+  resolveMainSessionKey: vi.fn().mockReturnValue("global"),
 }));
 
 vi.mock("../../config/sessions/delivery-info.js", () => ({
@@ -338,6 +339,33 @@ describe("resolveDeliveryTarget — issue #91613 cross-room drain fix", () => {
     expect(peerARecheckResult.ok).toBe(false);
     if (!peerARecheckResult.ok) {
       expect(peerARecheckResult.to).toBeUndefined();
+    }
+  });
+
+  it('REFUSES a cron whose OWN sessionKey canonicalizes to the shared "global" bucket (session.scope:"global")', async () => {
+    // Under session.scope:"global", every peer/channel collapses onto the literal "global"
+    // session bucket (see deriveSessionKey/canonicalizeSessionKeyForAgent) -- the same class of
+    // shared, last-writer-wins bucket as dmScope:"main" above, just reached via global scope
+    // instead of DM-scope collapsing. A recheck job scheduled against that literal key must be
+    // refused the same way, not silently delivered to whichever peer wrote it last.
+    setSessionStore({
+      global: {
+        sessionId: "sess-peer-b-global",
+        updatedAt: 1000,
+        lastChannel: "alpha",
+        lastTo: "room:peer-b",
+      },
+    });
+
+    const result = await resolveDeliveryTarget(
+      makeCfg({ channels: { alpha: {} }, session: { scope: "global" } }),
+      AGENT_ID,
+      { channel: "last", to: undefined, sessionKey: "global" },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain("shared");
     }
   });
 

@@ -3,7 +3,10 @@ import { normalizeOptionalThreadValue } from "@openclaw/normalization-core/strin
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { resolveExplicitDeliveryTargetCompat } from "../../channels/plugins/target-parsing-loaded.js";
 import type { ChannelId } from "../../channels/plugins/types.public.js";
-import { resolveAgentMainSessionKey } from "../../config/sessions/main-session.js";
+import {
+  resolveAgentMainSessionKey,
+  resolveMainSessionKey,
+} from "../../config/sessions/main-session.js";
 import { resolveStorePath } from "../../config/sessions/paths.js";
 import { loadSessionEntry } from "../../config/sessions/session-accessor.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
@@ -159,7 +162,15 @@ export async function resolveDeliveryTarget(
   const deliveryTargetRuntime = await loadDeliveryTargetRuntime();
 
   const sessionCfg = cfg.session;
-  const mainSessionKey = resolveAgentMainSessionKey({ cfg, agentId });
+  // Global-scope agents share one literal "global" session bucket (see
+  // resolveCronAwarenessMainSessionKey in delivery-dispatch.ts for the same
+  // pattern); resolveAgentMainSessionKey alone doesn't know about scope and
+  // would point mainEntry/sessionKeyIsSharedMainBucket at an "agent:<id>:main"
+  // file the real live session never writes to under global scope.
+  const mainSessionKey =
+    sessionCfg?.scope === "global"
+      ? resolveMainSessionKey(cfg)
+      : resolveAgentMainSessionKey({ cfg, agentId });
   const storePath = resolveStorePath(sessionCfg?.store, { agentId });
 
   // Look up thread-specific session first (e.g. agent:main:main:thread:1234),
