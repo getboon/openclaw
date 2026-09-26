@@ -2076,7 +2076,15 @@ export async function dispatchReplyFromConfig(
     turnSkipped?: DispatchTurnSkipReason;
   }): DispatchFromConfigResult => {
     commitInboundDedupeIfClaimed();
-    recordProcessed("completed", { reason: "reply_operation_aborted" });
+    // This turn never produced a delivered reply - it was dropped before dispatch
+    // or aborted mid-flight (the underlying reply operation it was piggybacking on
+    // was force-resolved as aborted). "completed" here misreports a dropped/aborted
+    // turn as a successful one in the message.processed diagnostic log/event that
+    // Loki, dashboards, and the diagnostics-otel counters read verbatim - nothing
+    // downstream corrects it. finishReplyOperationBusyDispatch above already uses
+    // "skipped" for the analogous non-delivery case ("reply-operation-active");
+    // this brings this sibling path in line.
+    recordProcessed("skipped", { reason: "reply_operation_aborted" });
     markIdle("message_completed");
     completeDispatchReplyOperation();
     if (opts?.turnSkipped) {
