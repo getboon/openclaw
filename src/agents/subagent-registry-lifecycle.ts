@@ -4,6 +4,7 @@
  * Completes/fails task runs, clears delivery state, emits lifecycle events, and cleans attached resources.
  */
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
+import type { AgentDecisionTrace } from "../auto-reply/reply-payload.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import type { cleanupBrowserSessionsForLifecycleEnd } from "../browser-lifecycle-cleanup.js";
 import type { callGateway as defaultCallGateway } from "../gateway/call.js";
@@ -109,6 +110,25 @@ function shouldPreservePublishedExplicitRunTimeout(params: { entry: SubagentRunR
     return true;
   }
   return false;
+}
+
+/**
+ * Shallow-copies an audit trace (including its array fields) before freezing
+ * it onto a delivery payload, so later mutation or reassignment of
+ * `completion.resultAuditTrace` never retroactively changes the frozen copy.
+ */
+function snapshotAuditTraceForFreeze(
+  trace: AgentDecisionTrace | undefined,
+): AgentDecisionTrace | undefined {
+  if (!trace) {
+    return trace;
+  }
+  return {
+    ...trace,
+    visibleTools: [...trace.visibleTools],
+    toolInvocations: trace.toolInvocations.map((invocation) => ({ ...invocation })),
+    evidence: trace.evidence.map((entry) => ({ ...entry })),
+  };
 }
 
 function resolveExpiredExplicitRunDeadlineMs(params: {
@@ -546,6 +566,9 @@ export function createSubagentRegistryLifecycleController(params: {
       frozenResultText: entry.delivery?.payload?.frozenResultText ?? entry.completion?.resultText,
       fallbackFrozenResultText:
         entry.delivery?.payload?.fallbackFrozenResultText ?? entry.completion?.fallbackResultText,
+      frozenAuditTrace: snapshotAuditTraceForFreeze(
+        entry.delivery?.payload?.frozenAuditTrace ?? entry.completion?.resultAuditTrace,
+      ),
       wakeOnDescendantSettle:
         entry.delivery?.payload?.wakeOnDescendantSettle ?? entry.wakeOnDescendantSettle,
     };
@@ -580,6 +603,7 @@ export function createSubagentRegistryLifecycleController(params: {
       outcome: entry.outcome,
       frozenResultText: entry.completion?.resultText,
       fallbackFrozenResultText: entry.completion?.fallbackResultText,
+      frozenAuditTrace: snapshotAuditTraceForFreeze(entry.completion?.resultAuditTrace),
     };
     return true;
   };

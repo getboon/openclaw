@@ -120,6 +120,8 @@ export type ToolSummaryTrace = {
     status: "ok" | "partial" | "error" | "blocked";
     /** Real error text for a blocked pre-execution-failure call; absent otherwise. */
     detail?: string;
+    /** Set when this invocation was made by a delegated subagent, not this attempt. */
+    viaSubagent?: boolean;
   }>;
   /**
    * Errored calls still unresolved when the turn ended. `undefined` means the

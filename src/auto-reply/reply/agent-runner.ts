@@ -19,6 +19,7 @@ import { resolveFastModeState } from "../../agents/fast-mode.js";
 import { resolveAgentIdentity } from "../../agents/identity.js";
 import { resolveModelAuthMode } from "../../agents/model-auth.js";
 import { isCliProvider } from "../../agents/model-selection.js";
+import { recordSubagentReplyAuditTrace } from "../../agents/subagent-registry.js";
 import { deriveContextPromptTokens, hasNonzeroUsage, normalizeUsage } from "../../agents/usage.js";
 import { enqueueCommitmentExtraction } from "../../commitments/runtime.js";
 import type { OpenClawConfig } from "../../config/config.js";
@@ -44,6 +45,7 @@ import type { PluginHookReplyUsageState } from "../../plugins/hook-types.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
 import { shouldPreserveUserFacingSessionStateForInputProvenance } from "../../sessions/input-provenance.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
+import { isSubagentSessionKey } from "../../sessions/session-key-utils.js";
 import {
   normalizeDeliveryContext,
   type DeliveryContext,
@@ -430,6 +432,8 @@ type TraceToolSummaryView = {
     name: string;
     status: "ok" | "partial" | "error" | "blocked";
     detail?: string;
+    /** Set when this invocation was made by a delegated subagent, not this attempt. */
+    viaSubagent?: boolean;
   }>;
   /**
    * Errored calls still unresolved when the turn ended. `undefined` means the
@@ -2420,16 +2424,21 @@ export async function runReplyAgent(params: {
     if (!isHeartbeat) {
       // Attach before verbose, raw-trace, and usage decorations so audit facts
       // stay on the terminal assistant reply instead of diagnostic payloads.
-      finalPayloads = attachAgentDecisionTrace(
-        finalPayloads,
-        buildAgentDecisionTrace({
-          toolSummary,
-          completion,
-          error: runResult.meta?.error,
-          failureSignal: runResult.meta?.failureSignal,
-          payloads: finalPayloads,
-        }),
-      );
+      const auditTrace = buildAgentDecisionTrace({
+        toolSummary,
+        completion,
+        error: runResult.meta?.error,
+        failureSignal: runResult.meta?.failureSignal,
+        payloads: finalPayloads,
+      });
+      finalPayloads = attachAgentDecisionTrace(finalPayloads, auditTrace);
+      if (sessionKey && isSubagentSessionKey(sessionKey)) {
+        // capture the child's own audit trace onto its registry
+        // row here, at the only point it's ever computed — the session
+        // transcript is written earlier (inside the embedded-agent-runner),
+        // before this trace exists, so it can never be read back from there.
+        recordSubagentReplyAuditTrace(sessionKey, runId, auditTrace);
+      }
     }
     const contextManagement = {
       ...(typeof activeSessionEntry?.compactionCount === "number"

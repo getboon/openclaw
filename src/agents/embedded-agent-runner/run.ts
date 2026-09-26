@@ -486,6 +486,82 @@ function createScopedAuthProfileStore(
     : createEmptyAuthProfileStore();
 }
 
+/**
+ * Extracts tool evidence a completing subagent already computed, carried on
+ * any task_completion internalEvents this attempt consumed. Mirrors the
+ * existing collectPendingMediaFromInternalEvents pattern in
+ * embedded-agent-subscribe.ts -- same idea, different payload. Every
+ * returned invocation is tagged viaSubagent so it's distinguishable from
+ * tool calls this attempt made directly.
+ */
+export function collectDelegatedToolInvocationsFromInternalEvents(
+  internalEvents: RunEmbeddedAgentParams["internalEvents"],
+): { invocations: NonNullable<ToolSummaryTrace["invocations"]>; visibleTools: string[] } {
+  if (!internalEvents?.length) {
+    return { invocations: [], visibleTools: [] };
+  }
+  const invocations: NonNullable<ToolSummaryTrace["invocations"]> = [];
+  const visibleTools = new Set<string>();
+  for (const event of internalEvents) {
+    if (event.type !== "task_completion" || !event.childToolEvidence?.length) {
+      continue;
+    }
+    for (const child of event.childToolEvidence) {
+      for (const invocation of child.toolInvocations ?? []) {
+        invocations.push({ ...invocation, viaSubagent: true });
+      }
+      for (const tool of child.visibleTools ?? []) {
+        visibleTools.add(tool);
+      }
+    }
+  }
+  return { invocations, visibleTools: [...visibleTools] };
+}
+
+/**
+ * Merges delegated tool evidence into a parent's own attempt
+ * summary. Appends delegated invocations AFTER the parent's own, so any
+ * consumer treating the last invocation as "this attempt's own terminal
+ * action" (e.g. buildAgentDecisionTrace's hasSuccessfulTerminalMessage) must
+ * filter out viaSubagent entries first -- delegated evidence is additive
+ * context, never this attempt's own terminal action. Pure passthrough
+ * (identical reference) when there's nothing to merge, so the common
+ * non-delegating case is a true no-op.
+ */
+export function mergeDelegatedToolEvidenceIntoSummary(
+  attemptToolSummary: ToolSummaryTrace | undefined,
+  delegatedToolEvidence: ReturnType<typeof collectDelegatedToolInvocationsFromInternalEvents>,
+): ToolSummaryTrace | undefined {
+  if (delegatedToolEvidence.invocations.length === 0) {
+    return attemptToolSummary;
+  }
+  return {
+    calls: (attemptToolSummary?.calls ?? 0) + delegatedToolEvidence.invocations.length,
+    tools: [
+      ...new Set([
+        ...(attemptToolSummary?.tools ?? []),
+        ...delegatedToolEvidence.invocations.map((invocation) => invocation.name),
+      ]),
+    ],
+    ...(attemptToolSummary?.failures !== undefined
+      ? { failures: attemptToolSummary.failures }
+      : {}),
+    ...(attemptToolSummary?.totalToolTimeMs !== undefined
+      ? { totalToolTimeMs: attemptToolSummary.totalToolTimeMs }
+      : {}),
+    ...(attemptToolSummary?.unrecoveredFailures !== undefined
+      ? { unrecoveredFailures: attemptToolSummary.unrecoveredFailures }
+      : {}),
+    invocations: [...(attemptToolSummary?.invocations ?? []), ...delegatedToolEvidence.invocations],
+    visibleTools: [
+      ...new Set([
+        ...(attemptToolSummary?.visibleTools ?? []),
+        ...delegatedToolEvidence.visibleTools,
+      ]),
+    ],
+  };
+}
+
 export function buildTraceToolSummary(params: {
   toolMetas?: Array<{
     toolName: string;
@@ -3742,6 +3818,16 @@ async function runEmbeddedAgentInternal(
             hadFailure: Boolean(attempt.lastToolError),
             toolFailures: attempt.toolFailures,
           });
+          // merge in tool evidence a completing subagent already
+          // computed for its own reply -- the session transcript never
+          // carries it (see subagent-registry.ts's recordSubagentReplyAuditTrace).
+          const delegatedToolEvidence = collectDelegatedToolInvocationsFromInternalEvents(
+            params.internalEvents,
+          );
+          const mergedAttemptToolSummary = mergeDelegatedToolEvidenceIntoSummary(
+            attemptToolSummary,
+            delegatedToolEvidence,
+          );
           const failureSignal = resolveEmbeddedRunFailureSignal({
             trigger: params.trigger,
             lastToolError: attempt.lastToolError,
@@ -3813,7 +3899,7 @@ async function runEmbeddedAgentInternal(
                       },
                     }
                   : {}),
-                toolSummary: attemptToolSummary,
+                toolSummary: mergedAttemptToolSummary,
                 ...(failureSignal ? { failureSignal } : {}),
                 agentHarnessResultClassification: attempt.agentHarnessResultClassification,
               },
@@ -4056,7 +4142,7 @@ async function runEmbeddedAgentInternal(
                   fallbackSafe: incompleteTurnFallbackSafe,
                   terminalPresentation: terminalToolPresentation !== undefined,
                 },
-                toolSummary: attemptToolSummary,
+                toolSummary: mergedAttemptToolSummary,
                 ...(failureSignal ? { failureSignal } : {}),
                 agentHarnessResultClassification: attempt.agentHarnessResultClassification,
               },
@@ -4147,7 +4233,7 @@ async function runEmbeddedAgentInternal(
                   fallbackSafe: incompleteTurnFallbackSafe,
                   terminalPresentation: terminalToolPresentation !== undefined,
                 },
-                toolSummary: attemptToolSummary,
+                toolSummary: mergedAttemptToolSummary,
                 ...(failureSignal ? { failureSignal } : {}),
                 agentHarnessResultClassification: attempt.agentHarnessResultClassification,
               },
@@ -4286,7 +4372,7 @@ async function runEmbeddedAgentInternal(
                 ...(params.verboseLevel ? { verbose: params.verboseLevel } : {}),
                 ...(params.blockReplyBreak ? { blockStreaming: params.blockReplyBreak } : {}),
               },
-              toolSummary: attemptToolSummary,
+              toolSummary: mergedAttemptToolSummary,
               ...(failureSignal ? { failureSignal } : {}),
               completion: {
                 ...(stopReason ? { stopReason } : {}),

@@ -51,6 +51,16 @@ const { subagentRegistryRuntimeMock } = vi.hoisted(() => ({
     listSubagentRunsForRequester: vi.fn(() => []),
     replaceSubagentRunAfterSteer: vi.fn(() => true),
     resolveRequesterForChildSession: vi.fn(() => null),
+    getLatestSubagentRunByChildSessionKey: vi.fn(
+      ():
+        | {
+            runId: string;
+            childSessionKey: string;
+            completion?: { required?: boolean; resultAuditTrace?: unknown };
+            delivery?: { payload?: { frozenAuditTrace?: unknown } };
+          }
+        | undefined => undefined,
+    ),
   },
 }));
 
@@ -105,6 +115,7 @@ vi.mock("./subagent-announce-delivery.js", () => ({
     directOrigin?: { channel?: string; to?: string; accountId?: string; threadId?: string };
     requesterSessionOrigin?: { provider?: string; channel?: string };
     bestEffortDeliver?: boolean;
+    internalEvents?: unknown;
   }) => {
     deliverSubagentAnnouncementArgsMock(params);
     // The delivery mock preserves the key branch: active Discord requester
@@ -137,6 +148,7 @@ vi.mock("./subagent-announce-delivery.js", () => ({
       params: {
         sessionKey: params.targetRequesterSessionKey,
         message: params.triggerMessage,
+        internalEvents: params.internalEvents,
         deliver:
           !params.requesterIsSubagent &&
           effectiveOrigin?.channel !== "webchat" &&
@@ -325,6 +337,120 @@ describe("subagent announce seam flow", () => {
     subagentRegistryRuntimeMock.replaceSubagentRunAfterSteer.mockReturnValue(true);
     subagentRegistryRuntimeMock.resolveRequesterForChildSession.mockReset();
     subagentRegistryRuntimeMock.resolveRequesterForChildSession.mockReturnValue(null);
+    subagentRegistryRuntimeMock.getLatestSubagentRunByChildSessionKey.mockReset();
+    subagentRegistryRuntimeMock.getLatestSubagentRunByChildSessionKey.mockReturnValue(undefined);
+  });
+
+  it("populates childToolEvidence on the completion event from the registry-recorded audit trace", async () => {
+    const auditTrace = {
+      schemaVersion: 1,
+      visibleTools: ["takeoff_dispatch"],
+      toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+      evidence: [{ kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok" }],
+      confidence: "high",
+      disposition: "completed",
+      reason: "tool_execution_succeeded",
+    };
+    subagentRegistryRuntimeMock.getLatestSubagentRunByChildSessionKey.mockReturnValueOnce({
+      runId: "run-channel-isolation-fixture",
+      childSessionKey: "agent:main:subagent:fixture",
+      completion: { required: true, resultAuditTrace: auditTrace },
+    });
+
+    await runCompletionFixture({ roundOneReply: "All 7 scopes completed." });
+
+    const call = requireAgentCall();
+    const message = (call.params as { message?: string })?.message ?? "";
+    expect(message).toContain("All 7 scopes completed.");
+    const internalEvents = (
+      call.params as { internalEvents?: Array<{ childToolEvidence?: unknown }> }
+    )?.internalEvents;
+    expect(internalEvents?.[0]?.childToolEvidence).toEqual([
+      {
+        childSessionKey: "agent:main:subagent:fixture",
+        toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+        visibleTools: ["takeoff_dispatch"],
+      },
+    ]);
+  });
+
+  it("falls back to the frozen delivery payload's audit trace when completion.resultAuditTrace is absent", async () => {
+    const auditTrace = {
+      schemaVersion: 1,
+      visibleTools: ["takeoff_dispatch"],
+      toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+      evidence: [{ kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok" }],
+      confidence: "high",
+      disposition: "completed",
+      reason: "tool_execution_succeeded",
+    };
+    // Simulates a suspended-delivery/restart edge: completion state was reset
+    // (no resultAuditTrace) but the frozen delivery payload copy survived.
+    subagentRegistryRuntimeMock.getLatestSubagentRunByChildSessionKey.mockReturnValueOnce({
+      runId: "run-channel-isolation-fixture",
+      childSessionKey: "agent:main:subagent:fixture",
+      completion: { required: true },
+      delivery: { payload: { frozenAuditTrace: auditTrace } },
+    });
+
+    await runCompletionFixture({ roundOneReply: "All 7 scopes completed." });
+
+    const call = requireAgentCall();
+    const internalEvents = (
+      call.params as { internalEvents?: Array<{ childToolEvidence?: unknown }> }
+    )?.internalEvents;
+    expect(internalEvents?.[0]?.childToolEvidence).toEqual([
+      {
+        childSessionKey: "agent:main:subagent:fixture",
+        toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+        visibleTools: ["takeoff_dispatch"],
+      },
+    ]);
+  });
+
+  it("does not attach a different run's audit trace when a persistent child has since started a newer run under the same session key", async () => {
+    const newerRunAuditTrace = {
+      schemaVersion: 1,
+      visibleTools: ["takeoff_dispatch"],
+      toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+      evidence: [{ kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok" }],
+      confidence: "high",
+      disposition: "completed",
+      reason: "tool_execution_succeeded",
+    };
+    // The registry lookup is by childSessionKey only, so for a persistent
+    // session it can return a NEWER run's row than the one this
+    // announcement is actually for -- assert that mismatched runId never
+    // leaks that newer run's tool evidence onto this announcement.
+    subagentRegistryRuntimeMock.getLatestSubagentRunByChildSessionKey.mockReturnValueOnce({
+      runId: "run-newer-invocation-of-persistent-child",
+      childSessionKey: "agent:main:subagent:fixture",
+      completion: { required: true, resultAuditTrace: newerRunAuditTrace },
+    });
+
+    await runCompletionFixture({ roundOneReply: "All 7 scopes completed." });
+
+    const call = requireAgentCall();
+    const internalEvents = (
+      call.params as { internalEvents?: Array<{ childToolEvidence?: unknown }> }
+    )?.internalEvents;
+    expect(internalEvents?.[0]?.childToolEvidence).toBeUndefined();
+  });
+
+  it("leaves childToolEvidence undefined and still delivers when no registry row has an audit trace (true no-op guarantee)", async () => {
+    // getLatestSubagentRunByChildSessionKey returns undefined by default
+    // (beforeEach) -- confirms a regression that always attached
+    // childToolEvidence (even empty evidence) would be caught, since that
+    // would break the "no-op when nothing was delegated" guarantee
+    // run.ts's merge relies on.
+    const didAnnounce = await runCompletionFixture({ roundOneReply: "All 7 scopes completed." });
+
+    expect(didAnnounce).toBe(true);
+    const call = requireAgentCall();
+    const internalEvents = (
+      call.params as { internalEvents?: Array<{ childToolEvidence?: unknown }> }
+    )?.internalEvents;
+    expect(internalEvents?.[0]?.childToolEvidence).toBeUndefined();
   });
 
   it("suppresses ANNOUNCE_SKIP delivery while still deleting the child session", async () => {

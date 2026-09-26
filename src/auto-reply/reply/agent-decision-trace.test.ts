@@ -288,6 +288,33 @@ describe("buildAgentDecisionTrace", () => {
     });
   });
 
+  it("does not let delegated (viaSubagent) evidence appended after the parent's own terminal message defeat the recovered-turn disposition", () => {
+    // run.ts appends delegated invocations after the parent's own, so the
+    // literal last array entry can be a subagent's tool call even though the
+    // parent's own terminal action -- the thing hasSuccessfulTerminalMessage
+    // is meant to detect -- was still a successful "message" send.
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 4,
+        tools: ["sessions_spawn", "exec", "message"],
+        failures: 1,
+        visibleTools: ["sessions_spawn", "exec", "message"],
+        invocations: [
+          { name: "sessions_spawn", status: "error" },
+          { name: "exec", status: "ok" },
+          { name: "message", status: "ok" },
+          { name: "takeoff_dispatch", status: "ok", viaSubagent: true },
+        ],
+        unrecoveredFailures: 0,
+      },
+      payloads: [{ text: "The work is complete." }],
+    });
+
+    expect(trace.disposition).toBe("completed");
+    expect(trace.reason).toBe("tool_execution_succeeded");
+    expect(trace.confidence).toBe("medium");
+  });
+
   it("keeps a recovered failure partial when the terminal tool is not message", () => {
     const trace = buildAgentDecisionTrace({
       toolSummary: {
@@ -419,6 +446,38 @@ describe("buildAgentDecisionTrace", () => {
     expect(trace.reason).toBe("tool_execution_partial");
     expect(trace.confidence).toBe("medium");
     expect(trace.evidence).toEqual([{ kind: "tool_outcome", tool: "pdf", status: "partial" }]);
+  });
+
+  it("carries viaSubagent through to both toolInvocations and evidence when set on input", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["takeoff_dispatch"],
+        failures: 0,
+        visibleTools: ["takeoff_dispatch"],
+        invocations: [{ name: "takeoff_dispatch", status: "ok", viaSubagent: true }],
+      },
+    });
+    expect(trace.toolInvocations).toEqual([
+      { name: "takeoff_dispatch", status: "ok", viaSubagent: true },
+    ]);
+    expect(trace.evidence).toEqual([
+      { kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok", viaSubagent: true },
+    ]);
+  });
+
+  it("omits viaSubagent from both outputs when not set on input", () => {
+    const trace = buildAgentDecisionTrace({
+      toolSummary: {
+        calls: 1,
+        tools: ["read"],
+        failures: 0,
+        visibleTools: ["read"],
+        invocations: [{ name: "read", status: "ok" }],
+      },
+    });
+    expect(trace.toolInvocations).toEqual([{ name: "read", status: "ok" }]);
+    expect(trace.evidence).toEqual([{ kind: "tool_outcome", tool: "read", status: "ok" }]);
   });
 });
 

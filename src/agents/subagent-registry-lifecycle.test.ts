@@ -1050,7 +1050,22 @@ describe("subagent registry lifecycle hardening", () => {
       endedAt: 4_000,
       endedReason: SUBAGENT_ENDED_REASON_COMPLETE,
       expectsCompletionMessage: true,
-      completion: { required: true, resultText: "final answer" },
+      completion: {
+        required: true,
+        resultText: "final answer",
+        // recordSubagentReplyAuditTrace lands this before any
+        // pending-delivery-payload build ever happens; this task only
+        // forwards it, never sets it.
+        resultAuditTrace: {
+          schemaVersion: 1,
+          visibleTools: ["takeoff_dispatch"],
+          toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+          evidence: [{ kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok" }],
+          confidence: "high",
+          disposition: "completed",
+          reason: "tool_execution_succeeded",
+        },
+      },
       delivery: { status: "pending", lastError: "gateway request timeout for agent" },
       outcome: { status: "ok" },
       retainAttachmentsOnKeep: true,
@@ -1074,6 +1089,7 @@ describe("subagent registry lifecycle hardening", () => {
       childSessionKey: entry.childSessionKey,
       childRunId: entry.runId,
       frozenResultText: "final answer",
+      frozenAuditTrace: entry.completion?.resultAuditTrace,
     });
     expect(entry.delivery?.suspendedAt).toBeTypeOf("number");
     expect(entry.delivery?.suspendedReason).toBe("retry-limit");
@@ -1097,6 +1113,53 @@ describe("subagent registry lifecycle hardening", () => {
         "Required completion delivery failed before reaching the requester: gateway request timeout for agent.",
     });
     expect(persist).toHaveBeenCalled();
+  });
+
+  it("freezes an independent snapshot of the audit trace, not a reference to completion.resultAuditTrace", async () => {
+    const persist = vi.fn();
+    const entry = createRunEntry({
+      endedAt: 4_000,
+      endedReason: SUBAGENT_ENDED_REASON_COMPLETE,
+      expectsCompletionMessage: true,
+      completion: {
+        required: true,
+        resultText: "final answer",
+        resultAuditTrace: {
+          schemaVersion: 1,
+          visibleTools: ["takeoff_dispatch"],
+          toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+          evidence: [{ kind: "tool_outcome", tool: "takeoff_dispatch", status: "ok" }],
+          confidence: "high",
+          disposition: "completed",
+          reason: "tool_execution_succeeded",
+        },
+      },
+      delivery: { status: "pending", lastError: "gateway request timeout for agent" },
+      outcome: { status: "ok" },
+      retainAttachmentsOnKeep: true,
+    });
+
+    const controller = createLifecycleController({
+      entry,
+      persist,
+      captureSubagentCompletionReply: vi.fn(async () => undefined),
+    });
+
+    await controller.finalizeResumedAnnounceGiveUp({
+      runId: entry.runId,
+      entry,
+      reason: "retry-limit",
+    });
+
+    const frozenTrace = entry.delivery?.payload?.frozenAuditTrace;
+    // Mutate the source in place after freezing -- the frozen payload copy
+    // must not observe this, or a later reset/replace of completion state
+    // would retroactively corrupt an already-delivered payload's evidence.
+    entry.completion!.resultAuditTrace!.toolInvocations.push({
+      name: "mutated_after_freeze",
+      status: "ok",
+    });
+    expect(frozenTrace?.toolInvocations).toEqual([{ name: "takeoff_dispatch", status: "ok" }]);
   });
 
   it.each([

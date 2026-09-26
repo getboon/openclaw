@@ -23,6 +23,12 @@ export type AgentDecisionTrace = {
      * veto and for ok/error entries. Additive — old consumers ignore it.
      */
     detail?: string;
+    /**
+     * Set when this invocation's evidence came from a subagent the current
+     * turn delegated to, not from a tool the current attempt ran
+     * directly. Additive — absent for every direct invocation, as before.
+     */
+    viaSubagent?: boolean;
   }>;
   evidence: Array<{
     kind: "tool_outcome";
@@ -30,6 +36,8 @@ export type AgentDecisionTrace = {
     status: AgentDecisionTraceToolStatus;
     /** See toolInvocations[].detail — same pre-execution failure error text. */
     detail?: string;
+    /** See toolInvocations[].viaSubagent — same delegation marker. */
+    viaSubagent?: boolean;
   }>;
   confidence: "high" | "medium" | "low";
   disposition: "completed" | "permission_required" | "refused" | "failed" | "unverified";

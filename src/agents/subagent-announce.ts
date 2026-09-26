@@ -24,6 +24,7 @@ import {
   formatAgentInternalEventsForPlainPrompt,
   formatAgentInternalEventsForPrompt,
   type AgentInternalEvent,
+  type SubagentToolEvidence,
 } from "./internal-events.js";
 import {
   deliverSubagentAnnouncement,
@@ -39,6 +40,7 @@ import {
   applySubagentWaitOutcome,
   buildChildCompletionFindings,
   buildCompactAnnounceStatsLine,
+  collectChildCompletionToolEvidence,
   dedupeLatestChildCompletionRows,
   filterCurrentDirectChildCompletionRows,
   readLatestSubagentOutputWithRetry,
@@ -322,6 +324,7 @@ export async function runSubagentAnnounceFlow(params: {
       requesterDepth >= 1 || isCronSessionKey(targetRequesterSessionKey);
 
     let childCompletionFindings: string | undefined;
+    let multiChildToolEvidence: SubagentToolEvidence[] = [];
     let subagentRegistryRuntime:
       | Awaited<ReturnType<typeof loadSubagentRegistryRuntime>>
       | undefined;
@@ -353,15 +356,15 @@ export async function runSubagentAnnounceFlow(params: {
           },
         );
         if (Array.isArray(directChildren) && directChildren.length > 0) {
-          childCompletionFindings = buildChildCompletionFindings(
-            dedupeLatestChildCompletionRows(
-              filterCurrentDirectChildCompletionRows(directChildren, {
-                requesterSessionKey: params.childSessionKey,
-                getLatestSubagentRunByChildSessionKey:
-                  subagentRegistryRuntime.getLatestSubagentRunByChildSessionKey,
-              }),
-            ),
+          const filteredChildren = dedupeLatestChildCompletionRows(
+            filterCurrentDirectChildCompletionRows(directChildren, {
+              requesterSessionKey: params.childSessionKey,
+              getLatestSubagentRunByChildSessionKey:
+                subagentRegistryRuntime.getLatestSubagentRunByChildSessionKey,
+            }),
           );
+          childCompletionFindings = buildChildCompletionFindings(filteredChildren);
+          multiChildToolEvidence = collectChildCompletionToolEvidence(filteredChildren);
         }
       }
     } catch {
@@ -528,6 +531,74 @@ export async function runSubagentAnnounceFlow(params: {
       startedAt: params.startedAt,
       endedAt: params.endedAt,
     });
+    // A plain registry lookup by this child's own session key --
+    // independent of which text-source `reply` came from above. Falls back to
+    // the frozen delivery payload copy, mirroring
+    // selectChildCompletionAuditTrace's precedence in
+    // subagent-announce-output.ts, so a suspended-delivery/restart edge where
+    // completion state was reset but the payload retained its copy still
+    // surfaces evidence here instead of only on the multi-child path.
+    //
+    // The lookup is by childSessionKey, but a persistent-session child can
+    // have started a NEW run under the same key before this announcement
+    // (for an OLDER run) is delivered -- guard on runId so a newer run's
+    // trace is never misattributed to this one; fall back to no evidence
+    // rather than risk attaching the wrong run's tool calls.
+    const ownRegistryRun = subagentRegistryRuntime?.getLatestSubagentRunByChildSessionKey?.(
+      params.childSessionKey,
+    );
+    const ownAuditTrace =
+      ownRegistryRun?.runId === params.childRunId
+        ? (ownRegistryRun?.completion?.resultAuditTrace ??
+          ownRegistryRun?.delivery?.payload?.frozenAuditTrace)
+        : undefined;
+    // Own evidence (this session's own tool calls) and multi-child evidence
+    // (settled descendants') are independent sources -- a child can have
+    // both, or either alone. Gating one on the other's presence (e.g. on
+    // childCompletionFindings, a text string that can be falsy even when
+    // multiChildToolEvidence was already collected) silently discards
+    // whichever source didn't win the gate; always combine both instead.
+    //
+    // `ownAuditTrace.toolInvocations` can ALREADY contain descendant evidence
+    // merged in by run.ts's own mergeDelegatedToolEvidenceIntoSummary (tagged
+    // viaSubagent: true) if this session itself resumed after a delegated
+    // completion earlier in its own turn. Forwarding those again here would
+    // double-count the same tool call, since multiChildToolEvidence
+    // independently re-reads that same descendant's registry row fresh --
+    // but that fresh read can come back empty (the descendant's row was
+    // cleaned up after its completion event was already delivered), in
+    // which case ownAuditTrace's merged copy is the ONLY surviving evidence
+    // and dropping it unconditionally would lose it outright. Dedupe by
+    // content against whatever multiChildToolEvidence actually refreshed,
+    // rather than blindly excluding every viaSubagent-tagged entry: drop an
+    // own-trace entry only when a matching fresh copy exists to replace it.
+    const refreshedInvocationSignatures = new Set(
+      multiChildToolEvidence.flatMap((entry) =>
+        entry.toolInvocations.map(
+          (invocation) => `${invocation.name} ${invocation.status} ${invocation.detail ?? ""}`,
+        ),
+      ),
+    );
+    const ownDirectInvocations = (ownAuditTrace?.toolInvocations ?? []).filter((invocation) => {
+      if (invocation.viaSubagent !== true) {
+        return true;
+      }
+      const signature = `${invocation.name} ${invocation.status} ${invocation.detail ?? ""}`;
+      return !refreshedInvocationSignatures.has(signature);
+    });
+    const ownEvidenceEntry: SubagentToolEvidence[] = ownDirectInvocations.length
+      ? [
+          {
+            childSessionKey: params.childSessionKey,
+            toolInvocations: ownDirectInvocations,
+            visibleTools: ownAuditTrace?.visibleTools ?? [],
+          },
+        ]
+      : [];
+    const directChildToolEvidence: SubagentToolEvidence[] = [
+      ...ownEvidenceEntry,
+      ...multiChildToolEvidence,
+    ];
     const completionEvent: AgentInternalEvent = {
       type: "task_completion",
       source: announceType === "cron job" ? "cron" : "subagent",
@@ -540,6 +611,7 @@ export async function runSubagentAnnounceFlow(params: {
       result: findings,
       statsLine,
       replyInstruction,
+      ...(directChildToolEvidence.length > 0 ? { childToolEvidence: directChildToolEvidence } : {}),
     };
     const internalEvents: AgentInternalEvent[] = [completionEvent];
     const triggerMessage = buildAnnounceSteerMessage(internalEvents);

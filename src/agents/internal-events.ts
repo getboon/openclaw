@@ -3,6 +3,7 @@
  * Sanitizes background task completion events into protected runtime-context
  * blocks or plain prompt text.
  */
+import type { AgentDecisionTrace } from "../auto-reply/reply-payload.js";
 import {
   formatGeneratedAttachmentLines,
   mediaUrlsFromGeneratedAttachments,
@@ -20,6 +21,19 @@ import {
 } from "./internal-runtime-context.js";
 import { wrapPromptDataBlock } from "./sanitize-for-prompt.js";
 
+/**
+ * Structured tool-call evidence a completing subagent already computed for
+ * its own reply, carried alongside the completion event so the
+ * resuming parent's own audit trace can include delegated work. One entry
+ * per settled child in a wake — never rendered into the prompt (see
+ * formatTaskCompletionEvent below, which never reads this field).
+ */
+export type SubagentToolEvidence = {
+  childSessionKey: string;
+  toolInvocations: AgentDecisionTrace["toolInvocations"];
+  visibleTools: string[];
+};
+
 type AgentTaskCompletionInternalEvent = {
   type: typeof AGENT_INTERNAL_EVENT_TYPE_TASK_COMPLETION;
   source: AgentInternalEventSource;
@@ -34,6 +48,13 @@ type AgentTaskCompletionInternalEvent = {
   mediaUrls?: string[];
   statsLine?: string;
   replyInstruction: string;
+  /**
+   * Structured tool-call evidence carried alongside the completion, one
+   * entry per settled child in this wake. Never rendered into the prompt —
+   * formatTaskCompletionEvent below only ever reads the prose fields above.
+   * Consumed downstream (run.ts) to merge into the parent's own audit trace.
+   */
+  childToolEvidence?: SubagentToolEvidence[];
 };
 
 type TaskCompletionPromptMode = "plain" | "protected";
