@@ -1,0 +1,19 @@
+scripts/plugin-sdk-surface-report.mjs
+  s_bdbecec0b2d5b0::t_d824429b16f5e8 205-206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3a729dd3574a11f47643895a02da6d3cd8588885",
+  "prompts": {},
+  "sessions": {
+    "s_bdbecec0b2d5b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e12c774-ade0-4fec-bfe3-1be251f34711",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
