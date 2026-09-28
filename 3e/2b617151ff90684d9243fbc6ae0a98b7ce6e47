@@ -1,0 +1,35 @@
+src/agents/subagent-registry-lifecycle.ts
+  s_bdbecec0b2d5b0::t_b541bb9ba818f6 902
+  s_bdbecec0b2d5b0::t_017a7b4c0ec0cb 804-817
+  s_bdbecec0b2d5b0::t_753a4c152d3031 1080
+  s_bdbecec0b2d5b0::t_51e14dbab3d5fb 1031-1033
+src/agents/subagent-announce.ts
+  s_bdbecec0b2d5b0::t_0c3527056c9549 270
+  s_bdbecec0b2d5b0::t_06b57f7b6a11ab 606
+src/agents/subagent-announce.test.ts
+  s_bdbecec0b2d5b0::t_0e1f2081fab5d9 610-613
+  s_bdbecec0b2d5b0::t_2544fa29f58f97 584-609
+src/agents/subagent-registry-lifecycle.test.ts
+  s_bdbecec0b2d5b0::t_0fb5a45e7b99a1 707-709,714
+  s_bdbecec0b2d5b0::t_247dd085790313 3,15,89,694-706,710-713,715-725
+  s_bdbecec0b2d5b0::t_096273bf30d1b0 726-767
+src/agents/subagent-completion-owner.ts
+  s_bdbecec0b2d5b0::t_dbdfe4af3207e3 34-40
+  s_bdbecec0b2d5b0::t_e80110d04d27d3 41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3e2b617151ff90684d9243fbc6ae0a98b7ce6e47",
+  "prompts": {},
+  "sessions": {
+    "s_bdbecec0b2d5b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e12c774-ade0-4fec-bfe3-1be251f34711",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
