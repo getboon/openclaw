@@ -49,6 +49,8 @@ function createReplyOperation(): TestReplyOperation {
     phase: "queued",
     result: null,
     startedAt: 0,
+    lastActivityAtMs: Date.now(),
+    recordActivity: vi.fn<ReplyOperation["recordActivity"]>(),
     setPhase: vi.fn<ReplyOperation["setPhase"]>(),
     updateSessionId: vi.fn<ReplyOperation["updateSessionId"]>(),
     attachBackend: vi.fn(),

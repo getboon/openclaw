@@ -1,6 +1,6 @@
 # Changelog
 
-## 2026.6.11-boon.47
+## 2026.6.34-boon.1
 
 ### Changes
 

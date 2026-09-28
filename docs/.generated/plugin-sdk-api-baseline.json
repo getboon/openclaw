@@ -127,7 +127,7 @@
           "exportName": "onDiagnosticEvent",
           "kind": "function",
           "source": {
-            "line": 1295,
+            "line": 1297,
             "path": "src/infra/diagnostic-events.ts"
           }
         },
@@ -280,7 +280,7 @@
           "exportName": "ChannelCapabilities",
           "kind": "type",
           "source": {
-            "line": 304,
+            "line": 305,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -352,7 +352,7 @@
           "exportName": "ChannelMessageActionAdapter",
           "kind": "type",
           "source": {
-            "line": 740,
+            "line": 743,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -361,7 +361,7 @@
           "exportName": "ChannelMessageActionContext",
           "kind": "type",
           "source": {
-            "line": 687,
+            "line": 690,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -613,7 +613,7 @@
           "exportName": "DiagnosticEventPayload",
           "kind": "type",
           "source": {
-            "line": 727,
+            "line": 729,
             "path": "src/infra/diagnostic-events.ts"
           }
         },
@@ -1378,7 +1378,7 @@
           "exportName": "UnifiedModelCatalogEntry",
           "kind": "type",
           "source": {
-            "line": 169,
+            "line": 183,
             "path": "packages/model-catalog-core/src/model-catalog-types.ts"
           }
         },
@@ -1387,7 +1387,7 @@
           "exportName": "UnifiedModelCatalogKind",
           "kind": "type",
           "source": {
-            "line": 151,
+            "line": 165,
             "path": "packages/model-catalog-core/src/model-catalog-types.ts"
           }
         },
@@ -1414,7 +1414,7 @@
           "exportName": "UnifiedModelCatalogSource",
           "kind": "type",
           "source": {
-            "line": 159,
+            "line": 173,
             "path": "packages/model-catalog-core/src/model-catalog-types.ts"
           }
         },
@@ -1715,7 +1715,7 @@
           "exportName": "calculateAuthProfileCooldownMs",
           "kind": "function",
           "source": {
-            "line": 410,
+            "line": 431,
             "path": "src/agents/auth-profiles/usage.ts"
           }
         },
@@ -1760,7 +1760,7 @@
           "exportName": "clearAuthProfileCooldown",
           "kind": "function",
           "source": {
-            "line": 980,
+            "line": 946,
             "path": "src/agents/auth-profiles/usage.ts"
           }
         },
@@ -1796,7 +1796,7 @@
           "exportName": "completeWithPreparedSimpleCompletionModel",
           "kind": "function",
           "source": {
-            "line": 340,
+            "line": 341,
             "path": "src/agents/simple-completion-runtime.ts"
           }
         },
@@ -2507,7 +2507,7 @@
           "exportName": "markAuthProfileBlockedUntil",
           "kind": "function",
           "source": {
-            "line": 866,
+            "line": 856,
             "path": "src/agents/auth-profiles/usage.ts"
           }
         },
@@ -2516,7 +2516,7 @@
           "exportName": "markAuthProfileCooldown",
           "kind": "function",
           "source": {
-            "line": 961,
+            "line": 927,
             "path": "src/agents/auth-profiles/usage.ts"
           }
         },
@@ -2525,7 +2525,7 @@
           "exportName": "markAuthProfileFailure",
           "kind": "function",
           "source": {
-            "line": 703,
+            "line": 724,
             "path": "src/agents/auth-profiles/usage.ts"
           }
         },
@@ -2534,7 +2534,7 @@
           "exportName": "markAuthProfileSuccess",
           "kind": "function",
           "source": {
-            "line": 263,
+            "line": 266,
             "path": "src/agents/auth-profiles/profiles.ts"
           }
         },
@@ -2750,7 +2750,7 @@
           "exportName": "prepareSimpleCompletionModel",
           "kind": "function",
           "source": {
-            "line": 197,
+            "line": 198,
             "path": "src/agents/simple-completion-runtime.ts"
           }
         },
@@ -2759,7 +2759,7 @@
           "exportName": "prepareSimpleCompletionModelForAgent",
           "kind": "function",
           "source": {
-            "line": 291,
+            "line": 292,
             "path": "src/agents/simple-completion-runtime.ts"
           }
         },
@@ -2867,7 +2867,7 @@
           "exportName": "refreshOAuthCredentialForRuntime",
           "kind": "function",
           "source": {
-            "line": 218,
+            "line": 221,
             "path": "src/agents/auth-profiles/oauth.ts"
           }
         },
@@ -3101,7 +3101,7 @@
           "exportName": "resolveApiKeyForProfile",
           "kind": "function",
           "source": {
-            "line": 347,
+            "line": 350,
             "path": "src/agents/auth-profiles/oauth.ts"
           }
         },
@@ -3443,7 +3443,7 @@
           "exportName": "resolveProfileUnusableUntilForDisplay",
           "kind": "function",
           "source": {
-            "line": 536,
+            "line": 557,
             "path": "src/agents/auth-profiles/usage.ts"
           }
         },
@@ -3452,7 +3452,7 @@
           "exportName": "resolveProfilesUnavailableReason",
           "kind": "function",
           "source": {
-            "line": 331,
+            "line": 352,
             "path": "src/agents/auth-profiles/usage.ts"
           }
         },
@@ -3587,7 +3587,7 @@
           "exportName": "resolveSimpleCompletionSelectionForAgent",
           "kind": "function",
           "source": {
-            "line": 85,
+            "line": 86,
             "path": "src/agents/simple-completion-runtime.ts"
           }
         },
@@ -3767,7 +3767,7 @@
           "exportName": "setAuthProfileOrder",
           "kind": "function",
           "source": {
-            "line": 74,
+            "line": 77,
             "path": "src/agents/auth-profiles/profiles.ts"
           }
         },
@@ -4019,7 +4019,7 @@
           "exportName": "upsertAuthProfile",
           "kind": "function",
           "source": {
-            "line": 161,
+            "line": 164,
             "path": "src/agents/auth-profiles/profiles.ts"
           }
         },
@@ -4028,7 +4028,7 @@
           "exportName": "upsertAuthProfileWithLock",
           "kind": "function",
           "source": {
-            "line": 176,
+            "line": 179,
             "path": "src/agents/auth-profiles/profiles.ts"
           }
         },
@@ -4141,7 +4141,7 @@
           }
         },
         {
-          "declaration": "export const DEFAULT_MODEL: \"gpt-5.5\";",
+          "declaration": "export const DEFAULT_MODEL: \"gpt-5.6-sol\";",
           "exportName": "DEFAULT_MODEL",
           "kind": "const",
           "source": {
@@ -4298,7 +4298,7 @@
           "exportName": "AgentSimpleCompletionSelection",
           "kind": "type",
           "source": {
-            "line": 64,
+            "line": 65,
             "path": "src/agents/simple-completion-runtime.ts"
           }
         },
@@ -4586,7 +4586,7 @@
           "exportName": "PreparedSimpleCompletionModel",
           "kind": "type",
           "source": {
-            "line": 54,
+            "line": 55,
             "path": "src/agents/simple-completion-runtime.ts"
           }
         },
@@ -4595,7 +4595,7 @@
           "exportName": "PreparedSimpleCompletionModelForAgent",
           "kind": "type",
           "source": {
-            "line": 73,
+            "line": 74,
             "path": "src/agents/simple-completion-runtime.ts"
           }
         },
@@ -4721,7 +4721,7 @@
           "exportName": "SimpleCompletionModelOptions",
           "kind": "type",
           "source": {
-            "line": 47,
+            "line": 48,
             "path": "src/agents/simple-completion-runtime.ts"
           }
         },
@@ -4784,7 +4784,7 @@
           "exportName": "TokenExpiryState",
           "kind": "type",
           "source": {
-            "line": 22,
+            "line": 23,
             "path": "src/agents/auth-profiles/credential-state.ts"
           }
         },
@@ -7040,7 +7040,7 @@
           "exportName": "BaseProbeResult",
           "kind": "type",
           "source": {
-            "line": 817,
+            "line": 820,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -7049,7 +7049,7 @@
           "exportName": "BaseTokenResolution",
           "kind": "type",
           "source": {
-            "line": 823,
+            "line": 826,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -7094,7 +7094,7 @@
           "exportName": "ChannelCapabilities",
           "kind": "type",
           "source": {
-            "line": 304,
+            "line": 305,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -7121,7 +7121,7 @@
           "exportName": "ChannelDirectoryEntry",
           "kind": "type",
           "source": {
-            "line": 674,
+            "line": 677,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -7184,7 +7184,7 @@
           "exportName": "ChannelGroupContext",
           "kind": "type",
           "source": {
-            "line": 264,
+            "line": 265,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -7202,7 +7202,7 @@
           "exportName": "ChannelLogSink",
           "kind": "type",
           "source": {
-            "line": 257,
+            "line": 258,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -7211,7 +7211,7 @@
           "exportName": "ChannelMessageActionAdapter",
           "kind": "type",
           "source": {
-            "line": 740,
+            "line": 743,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -7220,7 +7220,7 @@
           "exportName": "ChannelMessageActionContext",
           "kind": "type",
           "source": {
-            "line": 687,
+            "line": 690,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -7346,7 +7346,7 @@
           "exportName": "ChannelStructuredComponents",
           "kind": "type",
           "source": {
-            "line": 365,
+            "line": 366,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -7355,7 +7355,7 @@
           "exportName": "ChannelThreadingContext",
           "kind": "type",
           "source": {
-            "line": 455,
+            "line": 456,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -7364,7 +7364,7 @@
           "exportName": "ChannelThreadingToolContext",
           "kind": "type",
           "source": {
-            "line": 470,
+            "line": 471,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -7373,7 +7373,7 @@
           "exportName": "ChannelToolSend",
           "kind": "type",
           "source": {
-            "line": 722,
+            "line": 725,
             "path": "src/channels/plugins/types.core.ts"
           }
         }
@@ -8461,7 +8461,7 @@
           "exportName": "SourceReplyDeliveryMode",
           "kind": "type",
           "source": {
-            "line": 37,
+            "line": 38,
             "path": "src/auto-reply/get-reply-options.types.ts"
           }
         },
@@ -8782,7 +8782,7 @@
           "exportName": "hasControlCommand",
           "kind": "function",
           "source": {
-            "line": 14,
+            "line": 15,
             "path": "src/auto-reply/command-detection.ts"
           }
         },
@@ -8791,7 +8791,7 @@
           "exportName": "hasInlineCommandTokens",
           "kind": "function",
           "source": {
-            "line": 85,
+            "line": 86,
             "path": "src/auto-reply/command-detection.ts"
           }
         },
@@ -8818,7 +8818,7 @@
           "exportName": "isControlCommandMessage",
           "kind": "function",
           "source": {
-            "line": 57,
+            "line": 58,
             "path": "src/auto-reply/command-detection.ts"
           }
         },
@@ -9106,7 +9106,7 @@
           "exportName": "shouldComputeCommandAuthorized",
           "kind": "function",
           "source": {
-            "line": 94,
+            "line": 102,
             "path": "src/auto-reply/command-detection.ts"
           }
         },
@@ -9850,7 +9850,7 @@
           "exportName": "parseStrictPositiveInteger",
           "kind": "function",
           "source": {
-            "line": 259,
+            "line": 262,
             "path": "packages/normalization-core/src/number-coercion.ts"
           }
         },
@@ -10093,7 +10093,7 @@
           "exportName": "BaseProbeResult",
           "kind": "type",
           "source": {
-            "line": 817,
+            "line": 820,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -10120,7 +10120,7 @@
           "exportName": "ChannelDirectoryEntry",
           "kind": "type",
           "source": {
-            "line": 674,
+            "line": 677,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -10129,7 +10129,7 @@
           "exportName": "ChannelGroupContext",
           "kind": "type",
           "source": {
-            "line": 264,
+            "line": 265,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -10138,7 +10138,7 @@
           "exportName": "ChannelMessageActionContext",
           "kind": "type",
           "source": {
-            "line": 687,
+            "line": 690,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -10156,7 +10156,7 @@
           "exportName": "ChannelMessagingAdapter",
           "kind": "type",
           "source": {
-            "line": 491,
+            "line": 492,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -10183,7 +10183,7 @@
           "exportName": "ChannelOutboundSessionRoute",
           "kind": "type",
           "source": {
-            "line": 386,
+            "line": 387,
             "path": "src/channels/plugins/types.core.ts"
           }
         },
@@ -11281,7 +11281,7 @@
           "exportName": "UnifiedModelCatalogEntry",
           "kind": "type",
           "source": {
-            "line": 169,
+            "line": 183,
             "path": "packages/model-catalog-core/src/model-catalog-types.ts"
           }
         },
@@ -11290,7 +11290,7 @@
           "exportName": "UnifiedModelCatalogKind",
           "kind": "type",
           "source": {
-            "line": 151,
+            "line": 165,
             "path": "packages/model-catalog-core/src/model-catalog-types.ts"
           }
         },
@@ -11317,7 +11317,7 @@
           "exportName": "UnifiedModelCatalogSource",
           "kind": "type",
           "source": {
-            "line": 159,
+            "line": 173,
             "path": "packages/model-catalog-core/src/model-catalog-types.ts"
           }
         },
@@ -11447,7 +11447,7 @@
           "exportName": "readConfigFileSnapshot",
           "kind": "function",
           "source": {
-            "line": 2740,
+            "line": 2749,
             "path": "src/config/io.ts"
           }
         },
@@ -12848,7 +12848,7 @@
           "exportName": "UnifiedModelCatalogEntry",
           "kind": "type",
           "source": {
-            "line": 169,
+            "line": 183,
             "path": "packages/model-catalog-core/src/model-catalog-types.ts"
           }
         },
@@ -12857,7 +12857,7 @@
           "exportName": "UnifiedModelCatalogKind",
           "kind": "type",
           "source": {
-            "line": 151,
+            "line": 165,
             "path": "packages/model-catalog-core/src/model-catalog-types.ts"
           }
         },
@@ -12884,7 +12884,7 @@
           "exportName": "UnifiedModelCatalogSource",
           "kind": "type",
           "source": {
-            "line": 159,
+            "line": 173,
             "path": "packages/model-catalog-core/src/model-catalog-types.ts"
           }
         }
@@ -13232,7 +13232,7 @@
           "exportName": "applyAgentDefaultModelPrimary",
           "kind": "function",
           "source": {
-            "line": 290,
+            "line": 378,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13241,7 +13241,7 @@
           "exportName": "applyOnboardAuthAgentModelsAndProviders",
           "kind": "function",
           "source": {
-            "line": 262,
+            "line": 348,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13250,7 +13250,7 @@
           "exportName": "applyOpencodeZenModelDefault",
           "kind": "function",
           "source": {
-            "line": 327,
+            "line": 415,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13259,7 +13259,7 @@
           "exportName": "applyProviderConfigWithDefaultModel",
           "kind": "function",
           "source": {
-            "line": 381,
+            "line": 469,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13268,7 +13268,7 @@
           "exportName": "applyProviderConfigWithDefaultModelPreset",
           "kind": "function",
           "source": {
-            "line": 403,
+            "line": 491,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13277,7 +13277,7 @@
           "exportName": "applyProviderConfigWithDefaultModels",
           "kind": "function",
           "source": {
-            "line": 346,
+            "line": 434,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13286,7 +13286,7 @@
           "exportName": "applyProviderConfigWithDefaultModelsPreset",
           "kind": "function",
           "source": {
-            "line": 449,
+            "line": 537,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13295,7 +13295,7 @@
           "exportName": "applyProviderConfigWithModelCatalog",
           "kind": "function",
           "source": {
-            "line": 495,
+            "line": 583,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13304,7 +13304,7 @@
           "exportName": "applyProviderConfigWithModelCatalogPreset",
           "kind": "function",
           "source": {
-            "line": 528,
+            "line": 616,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13313,7 +13313,7 @@
           "exportName": "createDefaultModelPresetAppliers",
           "kind": "function",
           "source": {
-            "line": 431,
+            "line": 519,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13322,7 +13322,7 @@
           "exportName": "createDefaultModelsPresetAppliers",
           "kind": "function",
           "source": {
-            "line": 477,
+            "line": 565,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13331,7 +13331,7 @@
           "exportName": "createModelCatalogPresetAppliers",
           "kind": "function",
           "source": {
-            "line": 554,
+            "line": 642,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13340,7 +13340,7 @@
           "exportName": "ensureModelAllowlistEntry",
           "kind": "function",
           "source": {
-            "line": 572,
+            "line": 660,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13367,7 +13367,7 @@
           "exportName": "withAgentModelAliases",
           "kind": "function",
           "source": {
-            "line": 245,
+            "line": 253,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13376,7 +13376,7 @@
           "exportName": "OPENCODE_ZEN_DEFAULT_MODEL",
           "kind": "const",
           "source": {
-            "line": 40,
+            "line": 43,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13385,7 +13385,7 @@
           "exportName": "AgentModelAliasEntry",
           "kind": "type",
           "source": {
-            "line": 27,
+            "line": 30,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         },
@@ -13430,7 +13430,7 @@
           "exportName": "ProviderOnboardPresetAppliers",
           "kind": "type",
           "source": {
-            "line": 43,
+            "line": 46,
             "path": "src/plugin-sdk/provider-onboard.ts"
           }
         }
@@ -13666,7 +13666,7 @@
           }
         },
         {
-          "declaration": "export function consultRealtimeVoiceAgent(params: { cfg: OpenClawConfig; agentRuntime: { defaults: { model: \"gpt-5.5\"; provider: \"openai\"; }; resolveAgentDir: (cfg: OpenClawConfig, agentId: string, env?: ProcessEnv) => string; ... 9 more ...; session: { ...; }; }; ... 21 more ...; fallbackText?: string | undefined; }): Promise<...>;",
+          "declaration": "export function consultRealtimeVoiceAgent(params: { cfg: OpenClawConfig; agentRuntime: { defaults: { model: \"gpt-5.6-sol\"; provider: \"openai\"; }; resolveAgentDir: (cfg: OpenClawConfig, agentId: string, env?: ProcessEnv) => string; ... 9 more ...; session: { ...; }; }; ... 21 more ...; fallbackText?: string | undefined; }): Promise<...>;",
           "exportName": "consultRealtimeVoiceAgent",
           "kind": "function",
           "source": {
@@ -14950,7 +14950,7 @@
           "exportName": "buildTtsSupplementMediaPayload",
           "kind": "function",
           "source": {
-            "line": 190,
+            "line": 192,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15004,7 +15004,7 @@
           "exportName": "getReplyPayloadToolFailureDigest",
           "kind": "function",
           "source": {
-            "line": 278,
+            "line": 280,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15013,7 +15013,7 @@
           "exportName": "getReplyPayloadTtsSupplement",
           "kind": "function",
           "source": {
-            "line": 145,
+            "line": 147,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15049,7 +15049,7 @@
           "exportName": "isFastModeAutoProgressPayload",
           "kind": "function",
           "source": {
-            "line": 107,
+            "line": 109,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15076,7 +15076,7 @@
           "exportName": "isReplyPayloadNonTerminalToolErrorWarning",
           "kind": "function",
           "source": {
-            "line": 273,
+            "line": 275,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15085,7 +15085,7 @@
           "exportName": "isReplyPayloadTtsSupplement",
           "kind": "function",
           "source": {
-            "line": 161,
+            "line": 163,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15094,7 +15094,7 @@
           "exportName": "markReplyPayloadAsTtsSupplement",
           "kind": "function",
           "source": {
-            "line": 168,
+            "line": 170,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15202,7 +15202,7 @@
           "exportName": "FAST_MODE_AUTO_PROGRESS_KIND",
           "kind": "const",
           "source": {
-            "line": 105,
+            "line": 107,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15256,7 +15256,7 @@
           "exportName": "ReplyPayloadTtsSupplement",
           "kind": "type",
           "source": {
-            "line": 112,
+            "line": 114,
             "path": "src/auto-reply/reply-payload.ts"
           }
         },
@@ -15732,7 +15732,7 @@
           "exportName": "asObject",
           "kind": "function",
           "source": {
-            "line": 19,
+            "line": 20,
             "path": "src/agents/provider-http-errors.ts"
           }
         },
@@ -15741,7 +15741,7 @@
           "exportName": "assertOkOrThrowProviderError",
           "kind": "function",
           "source": {
-            "line": 273,
+            "line": 288,
             "path": "src/agents/provider-http-errors.ts"
           }
         },
@@ -15750,7 +15750,7 @@
           "exportName": "createProviderHttpError",
           "kind": "function",
           "source": {
-            "line": 248,
+            "line": 263,
             "path": "src/agents/provider-http-errors.ts"
           }
         },
@@ -15759,7 +15759,7 @@
           "exportName": "extractProviderErrorDetail",
           "kind": "function",
           "source": {
-            "line": 187,
+            "line": 202,
             "path": "src/agents/provider-http-errors.ts"
           }
         },
@@ -15768,7 +15768,7 @@
           "exportName": "extractProviderRequestId",
           "kind": "function",
           "source": {
-            "line": 192,
+            "line": 207,
             "path": "src/agents/provider-http-errors.ts"
           }
         },
@@ -15777,7 +15777,7 @@
           "exportName": "formatProviderErrorPayload",
           "kind": "function",
           "source": {
-            "line": 90,
+            "line": 105,
             "path": "src/agents/provider-http-errors.ts"
           }
         },
@@ -15786,7 +15786,7 @@
           "exportName": "formatProviderHttpErrorMessage",
           "kind": "function",
           "source": {
-            "line": 232,
+            "line": 247,
             "path": "src/agents/provider-http-errors.ts"
           }
         },
@@ -15858,7 +15858,7 @@
           "exportName": "readResponseTextLimited",
           "kind": "function",
           "source": {
-            "line": 36,
+            "line": 37,
             "path": "src/agents/provider-http-errors.ts"
           }
         },
@@ -15912,7 +15912,7 @@
           "exportName": "truncateErrorDetail",
           "kind": "function",
           "source": {
-            "line": 26,
+            "line": 27,
             "path": "src/agents/provider-http-errors.ts"
           }
         },
@@ -16665,7 +16665,7 @@
           "exportName": "createAuthRateLimiter",
           "kind": "function",
           "source": {
-            "line": 134,
+            "line": 137,
             "path": "src/gateway/auth-rate-limit.ts"
           }
         },
@@ -17025,7 +17025,7 @@
           "exportName": "AuthRateLimiter",
           "kind": "interface",
           "source": {
-            "line": 76,
+            "line": 78,
             "path": "src/gateway/auth-rate-limit.ts"
           }
         },

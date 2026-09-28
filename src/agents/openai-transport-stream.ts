@@ -98,6 +98,8 @@ import { stripSystemPromptCacheBoundary } from "./system-prompt-cache-boundary.j
 import { transformTransportMessages } from "./transport-message-transform.js";
 import {
   assignTransportErrorDetails,
+  failTransportStream,
+  finalizeTransportStream,
   mergeTransportMetadata,
   sanitizeTransportPayloadText,
 } from "./transport-stream-shared.js";
@@ -1808,7 +1810,7 @@ async function processResponsesStream(
             input_tokens?: number;
             output_tokens?: number;
             total_tokens?: number;
-            input_tokens_details?: { cached_tokens?: number };
+            input_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
             output_tokens_details?: { reasoning_tokens?: number };
             service_tier?: ResponseCreateParamsStreaming["service_tier"];
             status?: string;
@@ -1816,19 +1818,20 @@ async function processResponsesStream(
         | undefined;
       if (usage) {
         const cachedTokens = usage.input_tokens_details?.cached_tokens || 0;
+        const cacheWriteTokens = usage.input_tokens_details?.cache_write_tokens || 0;
         const inputTokens = usage.input_tokens || 0;
         const outputTokens = usage.output_tokens || 0;
         const reasoningTokens = usage.output_tokens_details?.reasoning_tokens;
-        const input = Math.max(0, inputTokens - cachedTokens);
+        const input = Math.max(0, inputTokens - cachedTokens - cacheWriteTokens);
         output.usage = {
           input,
           output: outputTokens,
           cacheRead: cachedTokens,
-          cacheWrite: 0,
+          cacheWrite: cacheWriteTokens,
           ...(typeof reasoningTokens === "number" && Number.isFinite(reasoningTokens)
             ? { reasoningTokens }
             : {}),
-          totalTokens: input + outputTokens + cachedTokens,
+          totalTokens: input + outputTokens + cachedTokens + cacheWriteTokens,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
         };
       }
@@ -2802,15 +2805,9 @@ export function createOpenAICompletionsTransportStreamFn(): StreamFn {
           signal: options?.signal,
           emitReasoning,
         });
-        if (options?.signal?.aborted) {
-          throw new Error("Request was aborted");
-        }
-        stream.push({ type: "done", reason: output.stopReason as never, message: output as never });
-        stream.end();
+        finalizeTransportStream({ stream, output, signal: options?.signal });
       } catch (error) {
-        assignTransportErrorDetails(output, error, options?.signal);
-        stream.push({ type: "error", reason: output.stopReason as never, error: output as never });
-        stream.end();
+        failTransportStream({ stream, output, signal: options?.signal, error });
       }
     })();
     return eventStream as unknown as ReturnType<StreamFn>;
@@ -2977,7 +2974,6 @@ async function processOpenAICompletionsStream(
       currentBlock = null;
       flushPendingPostToolCallDeltas();
     }
-    output.stopReason = "toolUse";
     recoveredDeepSeekToolCallIndex += 1;
     const block: ToolCallBlock = {
       type: "toolCall",
@@ -3247,6 +3243,8 @@ async function processOpenAICompletionsStream(
   if (output.stopReason === "toolUse" && !hasToolCalls) {
     output.stopReason = "stop";
   }
+  // Tool-call recovery is executable only after an explicit provider terminal.
+  // EOF alone can mean transport truncation, even when the recovered call parses.
   if (sawStopFinishReason && output.stopReason === "stop" && hasToolCalls && !hasVisibleText) {
     output.stopReason = "toolUse";
   }
