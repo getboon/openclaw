@@ -1,0 +1,27 @@
+docs/.generated/plugin-sdk-api-baseline.sha256
+  s_bdbecec0b2d5b0::t_77ae218c0dc65f 1-2
+src/auto-reply/reply-payload.ts
+  s_bdbecec0b2d5b0::t_0556d2181e2c5d 2-6,258-259,289-299
+src/auto-reply/reply/agent-runner-execution.test.ts
+  s_bdbecec0b2d5b0::t_4ad86606da8a01 21,5824-5847,5941-5945
+src/auto-reply/reply/agent-runner-execution.ts
+  s_bdbecec0b2d5b0::t_a7d9bb65eb1edb 74,101-104,1124-1130,1132,1137,3436,3443,3507-3509,3512
+src/plugin-sdk/reply-payload.ts
+  s_bdbecec0b2d5b0::t_c076fa43fc8b88 18,28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "73a196ff5bc49012c2ed0a617752a6a6143ac219",
+  "prompts": {},
+  "sessions": {
+    "s_bdbecec0b2d5b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e12c774-ade0-4fec-bfe3-1be251f34711",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
