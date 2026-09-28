@@ -31,6 +31,14 @@ export type SubagentCompletionRequest = {
   endedAt?: number;
   label?: string;
   signal?: AbortSignal;
+  /**
+   * True when the owner will not be called again for this completion, even if
+   * this attempt fails retryably. A suspended completion (cleanup "keep",
+   * outcome ok) can still reach the requester via steering on its next turn.
+   * Computed before the call, so a late expiry or new pending descendants can
+   * still change the real outcome.
+   */
+  finalAttempt?: boolean;
 };
 
 export type SubagentCompletionResult =

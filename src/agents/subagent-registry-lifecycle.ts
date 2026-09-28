@@ -801,6 +801,20 @@ export function createSubagentRegistryLifecycleController(params: {
     });
   };
 
+  // One retry policy for both the post-failure decision and the owner's
+  // pre-call finalAttempt flag; a second copy would let the two disagree.
+  const resolveCleanupDecision = (entry: SubagentRunRecord, now: number) =>
+    resolveDeferredCleanupDecision({
+      entry,
+      now,
+      activeDescendantRuns: Math.max(0, params.countPendingDescendantRuns(entry.childSessionKey)),
+      announceExpiryMs: ANNOUNCE_EXPIRY_MS,
+      announceCompletionHardExpiryMs: ANNOUNCE_COMPLETION_HARD_EXPIRY_MS,
+      maxAnnounceRetryCount: MAX_ANNOUNCE_RETRY_COUNT,
+      deferDescendantDelayMs: MIN_ANNOUNCE_RETRY_DELAY_MS,
+      resolveAnnounceRetryDelayMs,
+    });
+
   const finalizeSubagentCleanup = async (
     runId: string,
     cleanup: "delete" | "keep",
@@ -885,16 +899,7 @@ export function createSubagentRegistryLifecycleController(params: {
     }
 
     const now = Date.now();
-    const deferredDecision = resolveDeferredCleanupDecision({
-      entry,
-      now,
-      activeDescendantRuns: Math.max(0, params.countPendingDescendantRuns(entry.childSessionKey)),
-      announceExpiryMs: ANNOUNCE_EXPIRY_MS,
-      announceCompletionHardExpiryMs: ANNOUNCE_COMPLETION_HARD_EXPIRY_MS,
-      maxAnnounceRetryCount: MAX_ANNOUNCE_RETRY_COUNT,
-      deferDescendantDelayMs: MIN_ANNOUNCE_RETRY_DELAY_MS,
-      resolveAnnounceRetryDelayMs,
-    });
+    const deferredDecision = resolveCleanupDecision(entry, now);
 
     if (deferredDecision.kind === "defer-descendants") {
       ensureDeliveryState(entry).lastAttemptAt = now;
@@ -1023,6 +1028,9 @@ export function createSubagentRegistryLifecycleController(params: {
     }
     const pendingPayload = loadPendingFinalDeliveryPayload(entry);
     const requesterOrigin = normalizeDeliveryContext(pendingPayload.requesterOrigin);
+    // A retryable failure leaves the entry as it is now, so this predicts the
+    // decision finalizeSubagentCleanup makes after the attempt fails.
+    const finalAttempt = resolveCleanupDecision(entry, Date.now()).kind === "give-up";
     let latestDeliveryError = getDeliveryLastError(entry);
     const finalizeAnnounceCleanup = async (didAnnounce: boolean) => {
       const shouldCreditPriorDelivery =
@@ -1069,6 +1077,7 @@ export function createSubagentRegistryLifecycleController(params: {
         expectsCompletionMessage: pendingPayload.expectsCompletionMessage,
         wakeOnDescendantSettle: pendingPayload.wakeOnDescendantSettle === true,
         claimedOwnerChannel: entry.delivery?.ownerChannel,
+        finalAttempt,
         onDeliveryResult: (delivery) => {
           recordAnnounceDeliveryResult(entry, delivery);
           if (delivery.path === "owner") {
