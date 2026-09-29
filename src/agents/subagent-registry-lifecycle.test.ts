@@ -1,6 +1,6 @@
 // Subagent registry lifecycle tests cover completion, cleanup, announce retry,
 // detached task status, and resource retirement around child-run endings.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { CallGatewayOptions } from "../gateway/call.js";
 import {
   buildAnnounceIdFromChildRun,
@@ -12,6 +12,7 @@ import {
   SUBAGENT_ENDED_REASON_ERROR,
   SUBAGENT_ENDED_REASON_KILLED,
 } from "./subagent-lifecycle-events.js";
+import { resolveDeferredCleanupDecision } from "./subagent-registry-cleanup.js";
 import { createSubagentRegistryLifecycleController } from "./subagent-registry-lifecycle.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
@@ -85,7 +86,7 @@ vi.mock("./subagent-announce.js", () => ({
 
 vi.mock("./subagent-registry-cleanup.js", () => ({
   resolveCleanupCompletionReason: () => SUBAGENT_ENDED_REASON_COMPLETE,
-  resolveDeferredCleanupDecision: () => ({ kind: "give-up", reason: "retry-limit" }),
+  resolveDeferredCleanupDecision: vi.fn(() => ({ kind: "give-up", reason: "retry-limit" })),
 }));
 
 vi.mock("./subagent-registry-helpers.js", () => ({
@@ -688,6 +689,80 @@ describe("subagent registry lifecycle hardening", () => {
     await vi.waitFor(() => expect(entry.delivery?.lastDropReason).toBe("owner_terminal"));
     expect(runSubagentAnnounceFlow).toHaveBeenCalledTimes(1);
     expect(persist).toHaveBeenCalled();
+  });
+
+  it.each([
+    [2, true],
+    [0, false],
+  ])(
+    "when attemptCount is %i the announce flow gets finalAttempt=%s",
+    async (attemptCount, finalAttempt) => {
+      // The real retry policy decides finality; the file-level mock always gives up.
+      const actualCleanup = await vi.importActual<typeof import("./subagent-registry-cleanup.js")>(
+        "./subagent-registry-cleanup.js",
+      );
+      vi.mocked(resolveDeferredCleanupDecision).mockImplementation(
+        actualCleanup.resolveDeferredCleanupDecision,
+      );
+      onTestFinished(() => {
+        vi.mocked(resolveDeferredCleanupDecision).mockReset();
+      });
+      const entry = createRunEntry({
+        endedAt: Date.now(),
+        expectsCompletionMessage: true,
+        delivery: { status: "pending", attemptCount },
+      });
+      const runSubagentAnnounceFlow = vi.fn(async () => true);
+
+      createLifecycleController({
+        entry,
+        runSubagentAnnounceFlow,
+      }).startSubagentAnnounceCleanupFlow(entry.runId, entry);
+
+      expectFields(firstCallArg(runSubagentAnnounceFlow), { finalAttempt });
+    },
+  );
+
+  it("marks the last keep/ok attempt final and suspends it instead of failing", async () => {
+    const actualCleanup = await vi.importActual<typeof import("./subagent-registry-cleanup.js")>(
+      "./subagent-registry-cleanup.js",
+    );
+    vi.mocked(resolveDeferredCleanupDecision).mockImplementation(
+      actualCleanup.resolveDeferredCleanupDecision,
+    );
+    onTestFinished(() => {
+      vi.mocked(resolveDeferredCleanupDecision).mockReset();
+    });
+    const entry = createRunEntry({
+      cleanup: "keep",
+      endedAt: Date.now(),
+      endedReason: SUBAGENT_ENDED_REASON_COMPLETE,
+      expectsCompletionMessage: true,
+      outcome: { status: "ok" },
+      delivery: { status: "pending", attemptCount: 2 },
+    });
+    const runSubagentAnnounceFlow = vi.fn(
+      async (announceParams: {
+        onDeliveryResult?: (delivery: SubagentAnnounceDeliveryResult) => void;
+      }) => {
+        announceParams.onDeliveryResult?.({
+          delivered: false,
+          path: "owner",
+          ownerChannel: "anychat-boon-web",
+          error: "callback 503",
+        });
+        return false;
+      },
+    );
+
+    createLifecycleController({
+      entry,
+      runSubagentAnnounceFlow,
+    }).startSubagentAnnounceCleanupFlow(entry.runId, entry);
+
+    expectFields(firstCallArg(runSubagentAnnounceFlow), { finalAttempt: true });
+    await vi.waitFor(() => expect(entry.delivery?.status).toBe("suspended"));
+    expect(entry.delivery?.suspendedReason).toBe("retry-limit");
   });
 
   it("skips announce delivery when completion messages are disabled", async () => {

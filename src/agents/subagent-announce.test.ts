@@ -581,6 +581,36 @@ describe("subagent announce seam flow", () => {
     registration.dispose();
   });
 
+  it.each([true, false])(
+    "tells the completion owner finalAttempt=%s as passed by the lifecycle",
+    async (finalAttempt) => {
+      const deliver = vi.fn(async () => ({ status: "delivered" as const }));
+      registerSubagentCompletionOwner({
+        channel: "anychat-boon-web",
+        accepts: () => true,
+        deliver,
+      });
+
+      await runSubagentAnnounceFlow({
+        childSessionKey: "agent:main:subagent:anychat",
+        childRunId: "run-anychat-owner-final-attempt",
+        requesterSessionKey: "agent:main:main",
+        requesterDisplayKey: "main",
+        requesterOrigin: { channel: "anychat-boon-web", to: "thread-1", threadId: "1" },
+        task: "deliver completion",
+        timeoutMs: 10,
+        cleanup: "keep",
+        waitForCompletion: false,
+        outcome: { status: "ok" },
+        roundOneReply: "done",
+        expectsCompletionMessage: true,
+        finalAttempt,
+      });
+
+      expect(deliver).toHaveBeenCalledWith(expect.objectContaining({ finalAttempt }));
+    },
+  );
+
   it("returns owner pending without legacy delivery", async () => {
     const deliver = vi.fn(async () => ({ status: "pending" as const, error: "busy" }));
     registerSubagentCompletionOwner({

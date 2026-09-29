@@ -18,7 +18,7 @@ import {
   createUserTurnTranscriptRecorder,
   type PersistedUserTurnMessage,
 } from "../../sessions/user-turn-transcript.js";
-import { getReplyPayloadMetadata } from "../reply-payload.js";
+import { getReplyPayloadGatewayFailure, getReplyPayloadMetadata } from "../reply-payload.js";
 import type { TemplateContext } from "../templating.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
@@ -5824,6 +5824,30 @@ describe("runAgentTurnWithFallback", () => {
     }
   });
 
+  it("tells the channel why an all-models-failed turn stopped: billing", async () => {
+    state.runWithModelFallbackMock.mockRejectedValueOnce(
+      Object.assign(new Error("All models failed (1): openai/gpt-5.5: 402 (billing)"), {
+        name: "FallbackSummaryError",
+        attempts: [{ provider: "openai", model: "gpt-5.5", error: "402", reason: "billing" }],
+      }),
+    );
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback({
+      ...createMinimalRunAgentTurnParams({ followupRun: createFollowupRun() }),
+      sessionKey: "main",
+      getActiveSessionEntry: () => undefined,
+    });
+
+    expect(result.kind).toBe("final");
+    if (result.kind === "final") {
+      expect(getReplyPayloadGatewayFailure(result.payload)).toEqual({
+        code: "token_allocation_exhausted",
+        retryAffordance: "requires_billing_action",
+      });
+    }
+  });
+
   function makePureTransientSummaryError(): Error {
     return Object.assign(
       new Error(
@@ -5917,6 +5941,11 @@ describe("runAgentTurnWithFallback", () => {
         expect(text).not.toMatch(/blocked|cloudflare|render|gateway|waf/i);
         expect(text).not.toContain("All models");
         expect(text).not.toContain("boon-llm-gateway");
+        // Terminal: the "retrying automatically" class is downgraded, never claimed.
+        expect(getReplyPayloadGatewayFailure(result.payload)).toEqual({
+          code: "agent_failed_transient_after_retries",
+          retryAffordance: "user_can_retry",
+        });
       }
     } finally {
       vi.useRealTimers();
