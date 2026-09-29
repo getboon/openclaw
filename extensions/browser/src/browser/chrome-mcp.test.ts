@@ -1388,7 +1388,7 @@ describe("chrome MCP page parsing", () => {
     const navigateCall = callToolMock.mock.calls.find(
       ([call]) => call.name === "navigate_page",
     )?.[0];
-    expect(navigateCall?.arguments?.timeout).toBe(20_000);
+    expect(navigateCall?.arguments?.timeout).toBe(130_000);
   });
 
   it("caps the navigate_page safety-net timeout", () => {
@@ -1423,8 +1423,8 @@ describe("chrome MCP page parsing", () => {
     // advancement, before the expect below attaches its handler.
     void navPromise.catch(() => {});
 
-    // Advance past the 25 s safety-net (CHROME_MCP_NAVIGATE_TIMEOUT_MS 20 s + 5 s buffer).
-    await vi.advanceTimersByTimeAsync(25_001);
+    // Advance past the 135 s safety-net (CHROME_MCP_NAVIGATE_TIMEOUT_MS 130 s + 5 s buffer).
+    await vi.advanceTimersByTimeAsync(135_001);
 
     await expect(navPromise).rejects.toThrow(/Chrome MCP "navigate_page".*timed out/);
 
