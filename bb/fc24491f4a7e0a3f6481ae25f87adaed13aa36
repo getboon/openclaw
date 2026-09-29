@@ -1,0 +1,35 @@
+extensions/acpx/npm-shrinkwrap.json
+  s_bdbecec0b2d5b0::t_bac4f0f58eb5bc 1407-1409
+extensions/lobster/npm-shrinkwrap.json
+  s_07f89830011e78::t_354fef07b792d6 56-58
+npm-shrinkwrap.json
+  s_bdbecec0b2d5b0::t_dad3a161558188 2399-2401
+pnpm-lock.yaml
+  s_bdbecec0b2d5b0::t_245b5805d19909 16,5563-5564,11051,11812
+pnpm-workspace.yaml
+  s_bdbecec0b2d5b0::t_648b9e0707960f 105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bbfc24491f4a7e0a3f6481ae25f87adaed13aa36",
+  "prompts": {},
+  "sessions": {
+    "s_07f89830011e78": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f2fb7dce-7798-4f0d-ae1b-83a91106e8b4",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    },
+    "s_bdbecec0b2d5b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e12c774-ade0-4fec-bfe3-1be251f34711",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
