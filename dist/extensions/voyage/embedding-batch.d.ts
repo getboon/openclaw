@@ -1,0 +1,29 @@
+import { So as withRemoteHttpResponse, Zo as uploadBatchJsonlFile, as as EmbeddingBatchExecutionParams, ds as postJsonWithRetry } from "../../types-D56T6DDo.js";
+import { n as VoyageEmbeddingClient } from "../../embedding-provider-BzDaLmRY.js";
+
+//#region extensions/voyage/embedding-batch.d.ts
+/**
+ * Voyage Batch API Input Line format.
+ * See: https://docs.voyageai.com/docs/batch-inference
+ */
+type VoyageBatchRequest = {
+  custom_id: string;
+  body: {
+    input: string | string[];
+  };
+};
+type VoyageBatchDeps = {
+  now: () => number;
+  sleep: (ms: number) => Promise<void>;
+  postJsonWithRetry: typeof postJsonWithRetry;
+  uploadBatchJsonlFile: typeof uploadBatchJsonlFile;
+  withRemoteHttpResponse: typeof withRemoteHttpResponse;
+};
+declare function runVoyageEmbeddingBatches(params: {
+  client: VoyageEmbeddingClient;
+  agentId: string;
+  requests: VoyageBatchRequest[];
+  deps?: Partial<VoyageBatchDeps>;
+} & EmbeddingBatchExecutionParams): Promise<Map<string, number[]>>;
+//#endregion
+export { runVoyageEmbeddingBatches };

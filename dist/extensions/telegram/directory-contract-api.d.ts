@@ -1,0 +1,2 @@
+import { n as listTelegramDirectoryPeersFromConfig, t as listTelegramDirectoryGroupsFromConfig } from "../../directory-config-DCsH2bTE.js";
+export { listTelegramDirectoryGroupsFromConfig, listTelegramDirectoryPeersFromConfig };

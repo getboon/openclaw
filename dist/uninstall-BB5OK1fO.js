@@ -1,0 +1,2 @@
+import { a as formatUninstallSlotResetPreview, c as resolveUninstallChannelConfigKeys, i as formatUninstallActionLabels, n as applyPluginUninstallDirectoryRemoval, o as planPluginUninstall, t as UNINSTALL_ACTION_LABELS } from "./uninstall-bKAJ_TR0.js";
+export { UNINSTALL_ACTION_LABELS, applyPluginUninstallDirectoryRemoval, formatUninstallActionLabels, formatUninstallSlotResetPreview, planPluginUninstall, resolveUninstallChannelConfigKeys };

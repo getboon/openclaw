@@ -1,0 +1,2 @@
+import { a as resolvePluginMetadataSnapshot, i as loadPluginMetadataSnapshot, n as isPluginMetadataSnapshotCompatible, o as resolvePluginMetadataSnapshotMemoEnvFingerprint, r as listPluginOriginsFromMetadataSnapshot, t as clearLoadPluginMetadataSnapshotMemo } from "./plugin-metadata-snapshot-LFbHtBWe.js";
+export { clearLoadPluginMetadataSnapshotMemo, isPluginMetadataSnapshotCompatible, listPluginOriginsFromMetadataSnapshot, loadPluginMetadataSnapshot, resolvePluginMetadataSnapshot, resolvePluginMetadataSnapshotMemoEnvFingerprint };

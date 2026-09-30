@@ -1,0 +1,18 @@
+import type { SandboxFsBridge } from "./sandbox/fs-bridge.js";
+export type SandboxedBridgeMediaPathConfig = {
+    root: string;
+    bridge: SandboxFsBridge;
+    workspaceOnly?: boolean;
+};
+export declare function createSandboxBridgeReadFile(params: {
+    sandbox: Pick<SandboxedBridgeMediaPathConfig, "root" | "bridge">;
+    maxBytes?: number;
+}): (filePath: string) => Promise<Buffer>;
+export declare function resolveSandboxedBridgeMediaPath(params: {
+    sandbox: SandboxedBridgeMediaPathConfig;
+    mediaPath: string;
+    inboundFallbackDir?: string;
+}): Promise<{
+    resolved: string;
+    rewrittenFrom?: string;
+}>;

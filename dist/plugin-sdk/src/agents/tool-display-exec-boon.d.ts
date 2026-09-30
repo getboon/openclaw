@@ -1,0 +1,3 @@
+export declare const BOON_EXEC_BINARIES: readonly ["agent-config", "boon-conversations", "boon-estimation", "boon-file-host", "boon-mep-design", "boon-projects", "boon-skill-creator", "boon-specs", "boon-summarize", "document-ai", "docx-tools", "electrical-feeder-sheet", "electrical-lighting-wildcards", "electrical-validate", "excel-tools", "fetch-history", "markitdown", "outlook", "pdf-index", "pdf-tools", "procore", "structural-validate"];
+/** Summarizes Boon skill CLI invocations without exposing shell arguments. */
+export declare function summarizeBoonExecCommand(words: string[]): string | undefined;
