@@ -36,10 +36,14 @@ mint the sign-in link, hand it off, wait, then reuse the resulting session.
    customer whether they finished signing in; if they did but you're past the
    window, start over with a fresh `action="request_login"` rather than losing
    the task.
-4. When status reports the customer is done, call `browser_handoff` with
-   `action="attach"` and the same `site`. This registers the resulting session as
-   a reusable browser profile and returns its name.
-5. Continue the original task with the `browser` tool, passing `profile=<name>`
+4. When status reports the customer is done, use the `message` tool
+   (`action="send"`) to tell them now, before doing anything else — a later step
+   can still fail or hang, and the customer must not be left with no reply
+   because of that.
+5. Call `browser_handoff` with `action="attach"` and the same `site`. This
+   registers the resulting session as a reusable browser profile and returns
+   its name.
+6. Continue the original task with the `browser` tool, passing `profile=<name>`
    from the attach reply.
 
 Later runs against the same site can reuse the same profile directly with the

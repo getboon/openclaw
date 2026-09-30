@@ -10,9 +10,19 @@ export function resolveCronAgentSessionKey(params: {
   mainKey?: string | undefined;
   cfg?: { session?: { scope?: SessionScope; mainKey?: string } };
 }): string {
+  const trimmed = params.sessionKey.trim();
+  // Global-scope agents route every peer/channel through the literal "global"
+  // bucket (see deriveSessionKey/canonicalizeSessionKeyForAgent), bypassing
+  // per-agent prefixing entirely. toAgentStoreSessionKey below doesn't know
+  // about that literal-key bypass and would mangle "global" into a synthetic
+  // "agent:<id>:global" key nothing ever writes to, orphaning a global-scope
+  // cron job's own sessionKey from the real shared session file.
+  if (params.cfg?.session?.scope === "global" && trimmed.toLowerCase() === "global") {
+    return "global";
+  }
   const raw = toAgentStoreSessionKey({
     agentId: params.agentId,
-    requestKey: params.sessionKey.trim(),
+    requestKey: trimmed,
     mainKey: params.mainKey,
   });
   // Canonicalize so "agent:<id>:main" → "agent:<id>:<configuredMainKey>"

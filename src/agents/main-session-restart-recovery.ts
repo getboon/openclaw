@@ -46,6 +46,7 @@ import {
 } from "./embedded-agent-runner/run-state.js";
 import { resolveAgentSessionDirs } from "./session-dirs.js";
 import type { SessionLockInspection } from "./session-write-lock.js";
+import { buildTurnResumeInstruction } from "./turn-resume-instruction.js";
 
 const log = createSubsystemLogger("main-session-restart-recovery");
 
@@ -421,21 +422,6 @@ function resolveMainSessionResumeBlockReason(messages: unknown[]): string | null
   return null;
 }
 
-function buildResumeMessage(pendingFinalDeliveryText?: string | null): string {
-  const base =
-    "[System] Your previous turn was interrupted by a gateway restart while " +
-    "OpenClaw was waiting on tool/model work. Continue from the existing " +
-    "transcript and finish the interrupted response.";
-  const sanitizedPendingText =
-    typeof pendingFinalDeliveryText === "string"
-      ? sanitizePendingFinalDeliveryText(pendingFinalDeliveryText)
-      : "";
-  if (sanitizedPendingText) {
-    return `${base}\n\nNote: The interrupted final reply was captured: "${sanitizedPendingText}"`;
-  }
-  return base;
-}
-
 async function markSessionFailed(params: {
   storePath: string;
   sessionKey: string;
@@ -578,7 +564,7 @@ async function resumeMainSession(params: {
   });
   try {
     const agentParams: Record<string, unknown> = {
-      message: buildResumeMessage(sanitizedPendingText),
+      message: buildTurnResumeInstruction("gateway_restart", sanitizedPendingText),
       sessionKey: params.sessionKey,
       idempotencyKey: crypto.randomUUID(),
       deliver: Boolean(deliveryContext),

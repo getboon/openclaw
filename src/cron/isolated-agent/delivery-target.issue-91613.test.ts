@@ -21,6 +21,7 @@ const { extractDeliveryInfoMock } = vi.hoisted(() => ({
 vi.mock("../../config/sessions/main-session.js", () => ({
   canonicalizeMainSessionAlias: vi.fn(({ sessionKey }) => sessionKey),
   resolveAgentMainSessionKey: vi.fn().mockReturnValue("agent:test:main"),
+  resolveMainSessionKey: vi.fn().mockReturnValue("global"),
 }));
 
 vi.mock("../../config/sessions/delivery-info.js", () => ({
@@ -289,6 +290,82 @@ describe("resolveDeliveryTarget — issue #91613 cross-room drain fix", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.to).toBe("room:keyed-fallback");
+    }
+  });
+
+  it('REFUSES a cron whose OWN sessionKey canonicalizes to the shared agent-main bucket (dmScope:"main")', async () => {
+    // Under dmScope:"main", every DM peer's runSessionKey collapses onto the identical
+    // `agent:<id>:main` key — a NON-empty sessionKey (unlike the keyless cases above), but
+    // still the exact same shared, last-writer-wins bucket. browser-handoff schedules its
+    // recheck as `session:<runSessionKey>`, so this is the literal shape that job resolves to.
+    setLastSessionEntry({
+      sessionId: "sess-peer-b",
+      lastChannel: "alpha",
+      lastTo: "room:peer-b",
+    });
+
+    const result = await resolveDeliveryTarget(makeCfg({ channels: { alpha: {} } }), AGENT_ID, {
+      channel: "last",
+      to: undefined,
+      sessionKey: "agent:test:main",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain("shared");
+    }
+  });
+
+  it("interleaved two peers under dmScope:\"main\": peer A's terminal-result recheck must not drain to peer B's room", async () => {
+    // Peer A's browser-handoff flow schedules a recheck against the shared dmScope:"main"
+    // session (its own runSessionKey, but that key IS agent:<id>:main). Before that recheck
+    // fires, peer B messages the SAME agent, overwriting the shared bucket's lastChannel/lastTo
+    // to B's own room — last-writer-wins. Peer A's recheck then resolves delivery via
+    // channel:"last" against that same shared session. Without this fix, A's terminal result
+    // (e.g. "you're signed in") would be delivered to B's room instead of A's.
+    setLastSessionEntry({
+      sessionId: "sess-peer-b-overwrote-shared-bucket",
+      lastChannel: "alpha",
+      lastTo: "room:peer-b",
+    });
+
+    const peerARecheckResult = await resolveDeliveryTarget(
+      makeCfg({ channels: { alpha: {} } }),
+      AGENT_ID,
+      { channel: "last", to: undefined, sessionKey: "agent:test:main" },
+    );
+
+    // Refused, not silently delivered to peer B's room.
+    expect(peerARecheckResult.ok).toBe(false);
+    if (!peerARecheckResult.ok) {
+      expect(peerARecheckResult.to).toBeUndefined();
+    }
+  });
+
+  it('REFUSES a cron whose OWN sessionKey canonicalizes to the shared "global" bucket (session.scope:"global")', async () => {
+    // Under session.scope:"global", every peer/channel collapses onto the literal "global"
+    // session bucket (see deriveSessionKey/canonicalizeSessionKeyForAgent) -- the same class of
+    // shared, last-writer-wins bucket as dmScope:"main" above, just reached via global scope
+    // instead of DM-scope collapsing. A recheck job scheduled against that literal key must be
+    // refused the same way, not silently delivered to whichever peer wrote it last.
+    setSessionStore({
+      global: {
+        sessionId: "sess-peer-b-global",
+        updatedAt: 1000,
+        lastChannel: "alpha",
+        lastTo: "room:peer-b",
+      },
+    });
+
+    const result = await resolveDeliveryTarget(
+      makeCfg({ channels: { alpha: {} }, session: { scope: "global" } }),
+      AGENT_ID,
+      { channel: "last", to: undefined, sessionKey: "global" },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain("shared");
     }
   });
 

@@ -367,6 +367,27 @@ describe("getCompatibleActivePluginRegistry", () => {
     expect(resolving).not.toBe(plain);
   });
 
+  it("separates toolDiscovery in the loader cache key so a non-discovery load cannot be reused for a tool-discovery/execution registry", () => {
+    const baseOptions = {
+      config: {
+        plugins: {
+          allow: ["demo"],
+          load: { paths: ["/tmp/demo.js"] },
+        },
+      },
+      activate: false,
+      onlyPluginIds: ["demo"],
+    };
+
+    const withoutDiscovery = testing.resolvePluginLoadCacheContext(baseOptions).cacheKey;
+    const withDiscovery = testing.resolvePluginLoadCacheContext({
+      ...baseOptions,
+      toolDiscovery: true,
+    }).cacheKey;
+
+    expect(withDiscovery).not.toBe(withoutDiscovery);
+  });
+
   it("does not embed raw resolved plugin config env values in the loader cache key", () => {
     const { cacheKey } = testing.resolvePluginLoadCacheContext({
       config: {
