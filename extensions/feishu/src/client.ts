@@ -133,15 +133,20 @@ function createTimeoutHttpInstance(defaultTimeoutMs: number): Lark.HttpInstance 
     return { timeout: defaultTimeoutMs, ...opts } as Lark.HttpRequestOptions<D>;
   }
 
+  // Explicit `Promise<any>` return annotations pin each wrapper against axios's
+  // own default response type rather than letting it flow from Lark's generic
+  // `R` on HttpInstance — axios's newer `request<T, R = AxiosResponseDefault>`
+  // generic shares that type-parameter name, and without this the two collide
+  // under contextual inference and the conditional response type never reduces.
   return {
-    request: (opts) => base.request(injectTimeout(opts)),
-    get: (url, opts) => base.get(url, injectTimeout(opts)),
-    post: (url, data, opts) => base.post(url, data, injectTimeout(opts)),
-    put: (url, data, opts) => base.put(url, data, injectTimeout(opts)),
-    patch: (url, data, opts) => base.patch(url, data, injectTimeout(opts)),
-    delete: (url, opts) => base.delete(url, injectTimeout(opts)),
-    head: (url, opts) => base.head(url, injectTimeout(opts)),
-    options: (url, opts) => base.options(url, injectTimeout(opts)),
+    request: (opts): Promise<any> => base.request(injectTimeout(opts)),
+    get: (url, opts): Promise<any> => base.get(url, injectTimeout(opts)),
+    post: (url, data, opts): Promise<any> => base.post(url, data, injectTimeout(opts)),
+    put: (url, data, opts): Promise<any> => base.put(url, data, injectTimeout(opts)),
+    patch: (url, data, opts): Promise<any> => base.patch(url, data, injectTimeout(opts)),
+    delete: (url, opts): Promise<any> => base.delete(url, injectTimeout(opts)),
+    head: (url, opts): Promise<any> => base.head(url, injectTimeout(opts)),
+    options: (url, opts): Promise<any> => base.options(url, injectTimeout(opts)),
   };
 }
 
