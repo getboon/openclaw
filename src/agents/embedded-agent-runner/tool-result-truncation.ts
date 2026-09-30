@@ -84,6 +84,8 @@ const AGGREGATE_TOOL_RESULT_CONTEXT_SHARE = 0.5;
  */
 const MIN_KEEP_CHARS = 2_000;
 const RECOVERY_MIN_KEEP_CHARS = 0;
+// Warn once per session; bounded so a long-lived gateway does not retain every session key.
+const AGGREGATE_RECOVERY_WARNING_MAX_SESSIONS = 1_000;
 const aggregateToolResultRecoveryWarnings = new Set<string>();
 
 type ToolResultTruncationOptions = {
@@ -93,14 +95,8 @@ type ToolResultTruncationOptions = {
 
 const DEFAULT_SUFFIX = (truncatedChars: number) =>
   formatContextLimitTruncationNotice(truncatedChars);
-/**
- * Suffixes for AGGREGATE elision of older history.
- *
- * These results came from calls that SUCCEEDED; their text was dropped only to fit
- * the context window. DEFAULT_SUFFIX's "rerun with narrower args" hint is correct for
- * a single oversized fresh result but actively misleading here: the model cannot tell
- * an elided success from a tool failure and reports its tooling as broken.
- */
+// Aggregate elision drops text from calls that succeeded, so its notice must say so;
+// DEFAULT_SUFFIX's "rerun" hint makes the model read elided successes as tool failures.
 const AGGREGATE_HISTORY_SUFFIX = (truncatedChars: number) =>
   `[tool call succeeded; ${Math.max(1, Math.floor(truncatedChars))} chars of this older ` +
   `result were truncated from context to fit the window; not an error. Rerun only if you ` +
@@ -135,6 +131,13 @@ function logToolResultSessionTruncation(params: {
   if (aggregateToolResultRecoveryWarnings.has(sessionLogKey)) {
     log.info(message);
     return;
+  }
+  if (aggregateToolResultRecoveryWarnings.size >= AGGREGATE_RECOVERY_WARNING_MAX_SESSIONS) {
+    // Set iterates in insertion order, so the first entry is the oldest session.
+    const oldest = aggregateToolResultRecoveryWarnings.values().next();
+    if (!oldest.done) {
+      aggregateToolResultRecoveryWarnings.delete(oldest.value);
+    }
   }
   aggregateToolResultRecoveryWarnings.add(sessionLogKey);
   log.warn(

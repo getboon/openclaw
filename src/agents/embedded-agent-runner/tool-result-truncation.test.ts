@@ -1077,6 +1077,53 @@ describe("truncateOversizedToolResultsInSession", () => {
   });
 });
 
+describe("truncateOversizedToolResultsInSessionManager aggregate warning", () => {
+  it("warns again for an early session once more than 1000 other sessions have warned", async () => {
+    // The warn-once set is module state; load a fresh module so earlier tests cannot pre-fill it.
+    vi.resetModules();
+    const { log } = await import("./logger.js");
+    const { truncateOversizedToolResultsInSessionManager } =
+      await import("./tool-result-truncation.js");
+    const warnSpy = vi.spyOn(log, "warn").mockImplementation(() => {});
+    vi.spyOn(log, "info").mockImplementation(() => {});
+    const truncateWithAggregatePressure = (sessionKey: string) => {
+      const sessionManager = SessionManager.inMemory();
+      sessionManager.appendMessage(makeUserMessage("hello"));
+      sessionManager.appendMessage(makeAssistantMessage("calling tools"));
+      sessionManager.appendMessage(makeToolResult("a".repeat(400), "call_1"));
+      sessionManager.appendMessage(makeToolResult("b".repeat(400), "call_2"));
+      truncateOversizedToolResultsInSessionManager({
+        sessionManager,
+        sessionKey,
+        contextWindowTokens: 128_000,
+        maxCharsOverride: 1_000,
+        aggregateMaxCharsOverride: 400,
+      });
+    };
+    const aggregateWarningsFor = (sessionKey: string) =>
+      warnSpy.mock.calls.filter(
+        ([message]) =>
+          message.includes("aggregate tool-result pressure detected") &&
+          message.includes(`sessionKey=${sessionKey}`),
+      ).length;
+
+    try {
+      truncateWithAggregatePressure("agent:main:early");
+      truncateWithAggregatePressure("agent:main:early");
+      expect(aggregateWarningsFor("agent:main:early")).toBe(1);
+
+      for (let i = 0; i < 1_000; i += 1) {
+        truncateWithAggregatePressure(`agent:main:other-${i}`);
+      }
+      truncateWithAggregatePressure("agent:main:early");
+
+      expect(aggregateWarningsFor("agent:main:early")).toBe(2);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});
+
 describe("truncateToolResultText head+tail strategy", () => {
   it("preserves error content at the tail when present", () => {
     const head = "Line 1\n".repeat(500);
