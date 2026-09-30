@@ -133,20 +133,24 @@ function createTimeoutHttpInstance(defaultTimeoutMs: number): Lark.HttpInstance 
     return { timeout: defaultTimeoutMs, ...opts } as Lark.HttpRequestOptions<D>;
   }
 
-  // Explicit `Promise<any>` return annotations pin each wrapper against axios's
-  // own default response type rather than letting it flow from Lark's generic
-  // `R` on HttpInstance — axios's newer `request<T, R = AxiosResponseDefault>`
-  // generic shares that type-parameter name, and without this the two collide
-  // under contextual inference and the conditional response type never reduces.
+  // Pins each wrapper against axios's own default response type rather than
+  // letting it flow from Lark's generic `R` on HttpInstance — axios's newer
+  // `request<T, R = AxiosResponseDefault>` generic shares that type-parameter
+  // name, and without this the two collide under contextual inference and the
+  // conditional response type never reduces. `any` matches Lark's own default
+  // when its R is left unspecified.
+  // oxlint-disable-next-line typescript/no-explicit-any
+  type WrapperResponse = Promise<any>;
+
   return {
-    request: (opts): Promise<any> => base.request(injectTimeout(opts)),
-    get: (url, opts): Promise<any> => base.get(url, injectTimeout(opts)),
-    post: (url, data, opts): Promise<any> => base.post(url, data, injectTimeout(opts)),
-    put: (url, data, opts): Promise<any> => base.put(url, data, injectTimeout(opts)),
-    patch: (url, data, opts): Promise<any> => base.patch(url, data, injectTimeout(opts)),
-    delete: (url, opts): Promise<any> => base.delete(url, injectTimeout(opts)),
-    head: (url, opts): Promise<any> => base.head(url, injectTimeout(opts)),
-    options: (url, opts): Promise<any> => base.options(url, injectTimeout(opts)),
+    request: (opts): WrapperResponse => base.request(injectTimeout(opts)),
+    get: (url, opts): WrapperResponse => base.get(url, injectTimeout(opts)),
+    post: (url, data, opts): WrapperResponse => base.post(url, data, injectTimeout(opts)),
+    put: (url, data, opts): WrapperResponse => base.put(url, data, injectTimeout(opts)),
+    patch: (url, data, opts): WrapperResponse => base.patch(url, data, injectTimeout(opts)),
+    delete: (url, opts): WrapperResponse => base.delete(url, injectTimeout(opts)),
+    head: (url, opts): WrapperResponse => base.head(url, injectTimeout(opts)),
+    options: (url, opts): WrapperResponse => base.options(url, injectTimeout(opts)),
   };
 }
 
