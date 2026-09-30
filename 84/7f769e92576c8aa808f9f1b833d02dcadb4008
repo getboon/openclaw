@@ -1,0 +1,26 @@
+src/agents/embedded-agent-runner/tool-result-truncation.ts
+  s_bdbecec0b2d5b0::t_6ffe2894c3a136 87-88
+  s_bdbecec0b2d5b0::t_54dff891da32fa 98-99
+  s_bdbecec0b2d5b0::t_a1c35025dca04e 135,141
+  s_bdbecec0b2d5b0::t_15ffc330d26eb0 136-140
+src/agents/embedded-agent-runner/run/preemptive-compaction.test.ts
+  s_bdbecec0b2d5b0::t_d2ead0c68d7419 420-423,449-451
+src/agents/embedded-agent-runner/tool-result-truncation.test.ts
+  s_bdbecec0b2d5b0::t_a23acc78a34ec9 1080-1126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "847f769e92576c8aa808f9f1b833d02dcadb4008",
+  "prompts": {},
+  "sessions": {
+    "s_bdbecec0b2d5b0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e12c774-ade0-4fec-bfe3-1be251f34711",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
