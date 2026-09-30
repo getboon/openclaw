@@ -16,6 +16,7 @@ import type {
   PluginHookModelCallEndedEvent,
   PluginHookSessionEndEvent,
   PluginHookSubagentEndedEvent,
+  PluginHookToolContext,
 } from "openclaw/plugin-sdk/types";
 import {
   describeModelCallError,
@@ -69,6 +70,10 @@ export function buildModelCallEndedCapture(
       // ENG-16922: the discriminator the Rohan 5xx alert splits on —
       // upstream_provider_5xx (Bedrock/Anthropic relayed) vs gateway_origin_5xx.
       error_class: event.errorClass,
+      // A tag, not just contexts.run below — tags are indexed/searchable,
+      // so this is what lets a session's errors be found by session, not
+      // just read once you already have the event.
+      session_id: event.sessionId,
     }),
     fingerprint: fingerprintOf(
       "model_call_ended",
@@ -143,6 +148,9 @@ export function buildAgentEndCapture(
 export function buildAfterToolCallCapture(
   event: PluginHookAfterToolCallEvent,
   host: string,
+  // The event carries no session field; PluginHookToolContext (the hook's
+  // second handler arg) does. Optional, same reasoning as agent_end's ctx.
+  ctx?: Pick<PluginHookToolContext, "sessionId">,
 ): SentryCapture | null {
   if (!event.error) {
     return null;
@@ -160,6 +168,7 @@ export function buildAfterToolCallCapture(
     error_kind: event.errorKind,
     error_code: event.errorCode,
     exit_code: typeof event.exitCode === "number" ? String(event.exitCode) : undefined,
+    session_id: ctx?.sessionId,
   });
   // tool + errorKind/errorCode/exitCode (falling back to normalized message)
   // so a recurring failure with a different path/id/timestamp lands in one
@@ -173,7 +182,7 @@ export function buildAfterToolCallCapture(
     event.errorKind,
     event.errorCode ?? event.exitCode ?? normalizeFingerprintText(event.error),
   );
-  const contexts = { run: runContext(event.runId) };
+  const contexts = { run: runContext(event.runId, ctx?.sessionId) };
   const extra = { tool_call_id: event.toolCallId, duration_ms: event.durationMs };
   // A validation/argument-preparation rejection is a model-input problem, not
   // a host exception, but it can still signal a real schema mismatch — so
@@ -217,6 +226,7 @@ export function buildBeforeToolCallHookFailedCapture(
       hook: "before_tool_call_hook_failed",
       host,
       tool: event.toolName,
+      session_id: event.sessionId,
     }),
     // Fingerprint by tool + normalized error so repeats of the same failure
     // bucket into one issue, and different tools/errors never share a bucket.
@@ -242,7 +252,10 @@ export function buildMessageSentCapture(
   return {
     kind: "exception",
     message: event.error ?? "message_sent success=false",
-    tags: pruneTags({ hook: "message_sent", host }),
+    // No separate sessionId exists for this hook; sessionKey is already the
+    // value contexts.run reports under its session_id slot below, so the tag
+    // mirrors that rather than inventing a second identity.
+    tags: pruneTags({ hook: "message_sent", host, session_id: event.sessionKey }),
     fingerprint: fingerprintOf(
       "message_sent",
       event.error ? normalizeFingerprintText(event.error) : "success=false",
@@ -313,6 +326,7 @@ export function buildCronChangedCapture(
       action: event.action,
       status: event.status,
       delivery_status: event.deliveryStatus,
+      session_id: event.sessionId,
     }),
     fingerprint: fingerprintOf(
       "cron_changed",
@@ -379,7 +393,7 @@ export function buildSessionEndCapture(
     kind: "message",
     message: "session_end reason=unknown",
     level: "warning",
-    tags: pruneTags({ hook: "session_end", host, reason }),
+    tags: pruneTags({ hook: "session_end", host, reason, session_id: event.sessionId }),
     fingerprint: fingerprintOf("session_end", reason),
     extra: {
       session_id: event.sessionId,
