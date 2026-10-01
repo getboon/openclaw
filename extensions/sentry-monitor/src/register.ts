@@ -143,9 +143,9 @@ export function registerSentryMonitor(api: SentryMonitorApi): void {
     });
   }
   if (hookEnabled("after_tool_call")) {
-    api.on("after_tool_call", (event) => {
+    api.on("after_tool_call", (event, ctx) => {
       safe(api.logger, PLUGIN_ID, "after_tool_call", () => {
-        dispatchCapture(Sentry, buildAfterToolCallCapture(event, hostname));
+        dispatchCapture(Sentry, buildAfterToolCallCapture(event, hostname, ctx));
       });
     });
   }

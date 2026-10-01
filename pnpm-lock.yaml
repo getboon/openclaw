@@ -12,7 +12,7 @@ overrides:
   '@aws-sdk/xml-builder': 3.972.25
   hono: 4.12.25
   '@hono/node-server': 1.19.14
-  axios: 1.18.1
+  axios: 1.20.0
   fast-uri: 3.1.7
   follow-redirects: 1.16.0
   defu: 6.1.5
@@ -35,11 +35,11 @@ overrides:
   uuid: 14.0.0
   '@grpc/grpc-js': 1.14.4
   linkify-it: 5.0.2
-  brace-expansion: 5.0.9
+  brace-expansion: 5.0.11
   postcss: 8.5.22
   '@opentelemetry/propagator-jaeger': 2.9.0
-  undici@7: 7.29.0
-  undici@8: 8.9.0
+  undici@7: 7.29.1
+  undici@8: 8.10.2
   nanoid@3: 3.3.18
   nanoid@5: 5.1.16
   vite: 8.0.16
@@ -99,7 +99,7 @@ importers:
         version: 0.3.0
       '@openclaw/proxyline':
         specifier: 0.3.3
-        version: 0.3.3(undici@8.9.0)
+        version: 0.3.3(undici@8.10.2)
       '@opentelemetry/api':
         specifier: 1.9.1
         version: 1.9.1
@@ -233,8 +233,8 @@ importers:
         specifier: 6.0.3
         version: 6.0.3
       undici:
-        specifier: 8.9.0
-        version: 8.9.0
+        specifier: 8.10.2
+        version: 8.10.2
       web-push:
         specifier: 3.6.7
         version: 3.6.7
@@ -487,8 +487,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       undici:
-        specifier: 8.9.0
-        version: 8.9.0
+        specifier: 8.10.2
+        version: 8.10.2
 
   extensions/browser-handoff:
     dependencies:
@@ -741,8 +741,8 @@ importers:
         specifier: 1.1.39
         version: 1.1.39
       undici:
-        specifier: 8.9.0
-        version: 8.9.0
+        specifier: 8.10.2
+        version: 8.10.2
       ws:
         specifier: 8.21.0
         version: 8.21.0
@@ -1419,8 +1419,8 @@ importers:
   extensions/qa-matrix:
     dependencies:
       undici:
-        specifier: 8.9.0
-        version: 8.9.0
+        specifier: 8.10.2
+        version: 8.10.2
     devDependencies:
       '@openclaw/matrix':
         specifier: workspace:*
@@ -1614,8 +1614,8 @@ importers:
         specifier: 1.1.39
         version: 1.1.39
       undici:
-        specifier: 8.9.0
-        version: 8.9.0
+        specifier: 8.10.2
+        version: 8.10.2
     devDependencies:
       '@openclaw/plugin-sdk':
         specifier: workspace:*
@@ -3224,7 +3224,7 @@ packages:
     resolution: {integrity: sha512-sftHnW69NHQqLjCxBTvQ8f/eQl+peZ5pHCBQtuTWBbeuYRHZ0/GXVTmw/O/YKsShMbqPWhJB0UYtPPdvCUSS8w==}
     engines: {node: '>=22.19.0'}
     peerDependencies:
-      undici: 8.9.0
+      undici: 8.10.2
 
   '@opentelemetry/api-logs@0.219.0':
     resolution: {integrity: sha512-FFx7YnaYJlIjqWW/AG/yAZ0L/NEY724PipXXXQLdtZPbLwBGbUMTGL1i/esI56TWfTUXxhLfpgrnWJCG8aUJyg==}
@@ -4905,8 +4905,8 @@ packages:
     resolution: {integrity: sha512-dK9Z/P83C/rBfTrXXgPD3jZ+aXxx2o/P4rq8+H1JqxbXklitEeJw4CrcwMC5CkON3CX3yy2gaWnIEVYejYh0zQ==}
     engines: {node: '>=14'}
 
-  axios@1.18.1:
-    resolution: {integrity: sha512-3nTvFlvpn9Zu/RkHUqtc7/+al4UpRW5az71ap5zccp6e8RAYEzhMTecX8Dz1wWDYrPpUoB1HAQEGEAEvUr7S9g==}
+  axios@1.20.0:
+    resolution: {integrity: sha512-r8aOh8j9cGKpgQAqpzrUHnSIc6a59Y3Xf/cv8sy1DrHCkZHzQGEuoq1tARk6qSyDdtQGSDgpb9kFlruzPvrgwg==}
 
   b4a@1.8.1:
     resolution: {integrity: sha512-aiqre1Nr0B/6DgE2N5vwTc+2/oQZ4Wh1t4NznYY4E00y8LCt6NqdRv81so00oo27D8MVKTpUa/MwUUtBLXCoDw==}
@@ -5024,8 +5024,8 @@ packages:
   bowser@2.14.1:
     resolution: {integrity: sha512-tzPjzCxygAKWFOJP011oxFHs57HzIhOEracIgAePE4pqB3LikALKnSzUyU4MGs9/iCEUuHlAJTjTc5M+u7YEGg==}
 
-  brace-expansion@5.0.9:
-    resolution: {integrity: sha512-ScQ4IuvIEF1TMlP7Zt+vjJ//9zlPb2SDcxWxM3bk8s6t6GGdJ7KO1dCcTidOPJKePW30LE/2cT7wCyPho9/Wxg==}
+  brace-expansion@5.0.11:
+    resolution: {integrity: sha512-awigjhi6cLTh90bdw6+QJ9CtmJmyYhEIi70iCbc8Rozn04Fw9FeQIBjv/E22FFGuCGx1bLJyUfB64x/szUSXUg==}
     engines: {node: 20 || >=22}
 
   braces@3.0.3:
@@ -7715,12 +7715,12 @@ packages:
   undici-types@7.24.6:
     resolution: {integrity: sha512-WRNW+sJgj5OBN4/0JpHFqtqzhpbnV0GuB+OozA9gCL7a993SmU+1JBZCzLNxYsbMfIeDL+lTsphD5jN5N+n0zg==}
 
-  undici@7.29.0:
-    resolution: {integrity: sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw==}
+  undici@7.29.1:
+    resolution: {integrity: sha512-RYONW2MeafgYlkVOKYKkA/Ag7BmXqgIWCa8t1m0JcxrQg9pI9lEqRhAOruOBCbAohOa/gkCF+iPi9hrgvTzu6Q==}
     engines: {node: '>=20.18.1'}
 
-  undici@8.9.0:
-    resolution: {integrity: sha512-aWZpUj7XoGonMClx4gdDRfgBjqeA+F473aDmROQQbM9n6PRfK/u1q/a0X4wMTgcHfT8H6fpbt98PFuDUwFg2YA==}
+  undici@8.10.2:
+    resolution: {integrity: sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==}
     engines: {node: '>=22.19.0'}
 
   unhomoglyph@1.0.6:
@@ -9128,7 +9128,7 @@ snapshots:
 
   '@larksuiteoapi/node-sdk@1.66.0':
     dependencies:
-      axios: 1.18.1
+      axios: 1.20.0
       lodash.identity: 3.0.0
       lodash.merge: 4.6.2
       lodash.pickby: 4.6.0
@@ -9247,7 +9247,7 @@ snapshots:
       '@microsoft/teams.api': 2.0.12
       '@microsoft/teams.common': 2.0.12
       '@microsoft/teams.graph': 2.0.12
-      axios: 1.18.1
+      axios: 1.20.0
       cors: 2.8.6
       express: 5.2.1
       jsonwebtoken: 9.0.3
@@ -9261,7 +9261,7 @@ snapshots:
 
   '@microsoft/teams.common@2.0.12':
     dependencies:
-      axios: 1.18.1
+      axios: 1.20.0
     transitivePeerDependencies:
       - debug
       - supports-color
@@ -9439,9 +9439,9 @@ snapshots:
       jszip: 3.10.1
       tar: 7.5.21
 
-  '@openclaw/proxyline@0.3.3(undici@8.9.0)':
+  '@openclaw/proxyline@0.3.3(undici@8.10.2)':
     dependencies:
-      undici: 8.9.0
+      undici: 8.10.2
 
   '@opentelemetry/api-logs@0.219.0':
     dependencies:
@@ -10319,7 +10319,7 @@ snapshots:
       '@slack/types': 2.21.1
       '@slack/web-api': 7.16.0
       '@types/express': 5.0.6
-      axios: 1.18.1
+      axios: 1.20.0
       express: 5.2.1
       path-to-regexp: 8.4.0
       raw-body: 3.0.2
@@ -10367,7 +10367,7 @@ snapshots:
       '@slack/types': 2.21.1
       '@types/node': 25.9.1
       '@types/retry': 0.12.0
-      axios: 1.18.1
+      axios: 1.20.0
       eventemitter3: 5.0.4
       form-data: 2.5.6
       is-electron: 2.2.2
@@ -11144,7 +11144,7 @@ snapshots:
 
   audio-type@2.4.1: {}
 
-  axios@1.18.1:
+  axios@1.20.0:
     dependencies:
       follow-redirects: 1.16.0
       form-data: 2.5.6
@@ -11257,7 +11257,7 @@ snapshots:
 
   bowser@2.14.1: {}
 
-  brace-expansion@5.0.9:
+  brace-expansion@5.0.11:
     dependencies:
       balanced-match: 4.0.4
 
@@ -12395,7 +12395,7 @@ snapshots:
       saxes: 6.0.0
       symbol-tree: 3.2.4
       tough-cookie: 4.1.3
-      undici: 7.29.0
+      undici: 7.29.1
       w3c-xmlserializer: 5.0.0
       webidl-conversions: 8.0.1
       whatwg-mimetype: 5.0.0
@@ -13064,7 +13064,7 @@ snapshots:
 
   minimatch@10.2.5:
     dependencies:
-      brace-expansion: 5.0.9
+      brace-expansion: 5.0.11
 
   minimist@1.2.8: {}
 
@@ -14436,9 +14436,9 @@ snapshots:
 
   undici-types@7.24.6: {}
 
-  undici@7.29.0: {}
+  undici@7.29.1: {}
 
-  undici@8.9.0: {}
+  undici@8.10.2: {}
 
   unhomoglyph@1.0.6: {}
 
