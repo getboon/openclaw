@@ -42,8 +42,10 @@ const tempDirs: string[] = [];
 
 vi.mock("./install.js", () => ({
   installPluginFromNpmSpec: (...args: unknown[]) => installPluginFromNpmSpecMock(...args),
-  resolvePluginInstallDir: (pluginId: string, extensionsDir = "/tmp") =>
-    `${extensionsDir}/${pluginId}`,
+  resolvePluginInstallDir: (pluginId: string, extensionsDir = "/tmp") => {
+    const separator = process.platform === "win32" ? "\\" : "/";
+    return `${extensionsDir.replace(/[\\/]+$/, "")}${separator}${pluginId}`;
+  },
   PLUGIN_INSTALL_ERROR_CODE: {
     NPM_PACKAGE_NOT_FOUND: "npm_package_not_found",
   },
@@ -1079,6 +1081,45 @@ describe("updateNpmInstalledPlugins", () => {
     );
   });
 
+  it("does not apply official beta-channel sync to third-party npm specs", async () => {
+    const installPath = createInstalledPackageDir({
+      name: "@martian-engineering/lossless-claw",
+      version: "0.9.0",
+    });
+    mockNpmViewMetadata({
+      name: "@martian-engineering/lossless-claw",
+      version: "0.9.1",
+    });
+    installPluginFromNpmSpecMock.mockResolvedValue(
+      createSuccessfulNpmUpdateResult({
+        pluginId: "lossless-claw",
+        targetDir: installPath,
+        version: "0.9.1",
+        npmResolution: {
+          name: "@martian-engineering/lossless-claw",
+          version: "0.9.1",
+          resolvedSpec: "@martian-engineering/lossless-claw@0.9.1",
+        },
+      }),
+    );
+
+    await updateNpmInstalledPlugins({
+      config: createNpmInstallConfig({
+        pluginId: "lossless-claw",
+        spec: "@martian-engineering/lossless-claw",
+        installPath,
+        resolvedName: "@martian-engineering/lossless-claw",
+        resolvedSpec: "@martian-engineering/lossless-claw@0.9.0",
+        resolvedVersion: "0.9.0",
+      }),
+      pluginIds: ["lossless-claw"],
+      syncOfficialPluginInstalls: true,
+      officialPluginUpdateChannel: "beta",
+    });
+
+    expect(npmInstallCall()?.spec).toBe("@martian-engineering/lossless-claw");
+  });
+
   it("does not skip trusted official default updates when latest resolves to the installed prerelease", async () => {
     const installPath = createInstalledPackageDir({
       name: "@openclaw/acpx",
@@ -1861,7 +1902,7 @@ describe("updateNpmInstalledPlugins", () => {
     });
   });
 
-  it("falls through to npm reinstall when metadata probing fails", async () => {
+  it("falls through to npm reinstall when metadata probing fails for valid specs", async () => {
     const warn = vi.fn();
     const installPath = createInstalledPackageDir({
       name: "@martian-engineering/lossless-claw",
@@ -1894,6 +1935,107 @@ describe("updateNpmInstalledPlugins", () => {
       "Could not check lossless-claw before update; falling back to installer path: npm view failed: registry timeout",
     );
     expect(installPluginFromNpmSpecMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("records range metadata probing failures without falling through to npm reinstall", async () => {
+    const warn = vi.fn();
+    const installPath = createInstalledPackageDir({
+      name: "@martian-engineering/lossless-claw",
+      version: "0.9.0",
+    });
+    runCommandWithTimeoutMock.mockResolvedValueOnce({
+      code: 1,
+      stdout: "",
+      stderr: "registry timeout",
+    });
+    const result = await updateNpmInstalledPlugins({
+      config: createNpmInstallConfig({
+        pluginId: "lossless-claw",
+        spec: "@martian-engineering/lossless-claw@^0.9.0",
+        installPath,
+      }),
+      pluginIds: ["lossless-claw"],
+      logger: { warn },
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(installPluginFromNpmSpecMock).not.toHaveBeenCalled();
+    expect(result.changed).toBe(false);
+    expect(result.outcomes).toEqual([
+      {
+        pluginId: "lossless-claw",
+        status: "error",
+        message: "Failed to check lossless-claw: npm view failed: registry timeout",
+      },
+    ]);
+  });
+
+  it("preserves explicit policy when metadata probing fails and disableOnFailure is enabled", async () => {
+    const warn = vi.fn();
+    const installPath = createInstalledPackageDir({
+      name: "@martian-engineering/lossless-claw",
+      version: "0.9.0",
+    });
+    runCommandWithTimeoutMock.mockResolvedValueOnce({
+      code: 1,
+      stdout: "",
+      stderr: "registry timeout",
+    });
+
+    const result = await updateNpmInstalledPlugins({
+      config: {
+        plugins: {
+          allow: ["lossless-claw", "keep"],
+          deny: ["lossless-claw", "blocked"],
+          slots: {
+            memory: "lossless-claw",
+            contextEngine: "lossless-claw",
+          },
+          entries: {
+            "lossless-claw": {
+              enabled: true,
+              config: { preserved: true },
+            },
+          },
+          installs: {
+            "lossless-claw": {
+              source: "npm",
+              spec: "@martian-engineering/lossless-claw@^0.9.0",
+              installPath,
+              resolvedName: "@martian-engineering/lossless-claw",
+              resolvedVersion: "0.9.0",
+              resolvedSpec: "@martian-engineering/lossless-claw@0.9.0",
+            },
+          },
+        },
+      },
+      pluginIds: ["lossless-claw"],
+      disableOnFailure: true,
+      logger: { warn },
+    });
+
+    const message =
+      'Disabled "lossless-claw" after plugin update failure; OpenClaw will continue without it. Failed to check lossless-claw: npm view failed: registry timeout';
+    expect(warn).toHaveBeenCalledWith(message);
+    expect(installPluginFromNpmSpecMock).not.toHaveBeenCalled();
+    expect(result.changed).toBe(true);
+    expect(result.config.plugins?.entries?.["lossless-claw"]).toEqual({
+      enabled: false,
+      config: { preserved: true },
+    });
+    expect(result.config.plugins?.allow).toEqual(["lossless-claw", "keep"]);
+    expect(result.config.plugins?.deny).toEqual(["lossless-claw", "blocked"]);
+    expect(result.config.plugins?.slots).toEqual({
+      memory: "memory-core",
+      contextEngine: "legacy",
+    });
+    expect(result.outcomes).toEqual([
+      {
+        pluginId: "lossless-claw",
+        status: "skipped",
+        message,
+      },
+    ]);
   });
 
   it.each([
@@ -2466,7 +2608,7 @@ describe("updateNpmInstalledPlugins", () => {
     ]);
   });
 
-  it("clears stale plugin policy and slot references when disabling failed updates", async () => {
+  it("preserves plugin policy and clears slot references when disabling failed updates", async () => {
     const warn = vi.fn();
     installPluginFromNpmSpecMock.mockResolvedValue({
       ok: false,
@@ -2509,8 +2651,8 @@ describe("updateNpmInstalledPlugins", () => {
       enabled: false,
     });
     expect(result.config.plugins?.installs?.demo).toEqual(config.plugins.installs.demo);
-    expect(result.config.plugins?.allow).toEqual(["keep"]);
-    expect(result.config.plugins?.deny).toEqual(["blocked"]);
+    expect(result.config.plugins?.allow).toEqual(["demo", "keep"]);
+    expect(result.config.plugins?.deny).toEqual(["demo", "blocked"]);
     expect(result.config.plugins?.slots).toEqual({
       memory: "memory-core",
       contextEngine: "legacy",
@@ -2781,6 +2923,138 @@ describe("updateNpmInstalledPlugins", () => {
       spec: "openclaw-codex-app-server",
       version: "0.2.0-beta.4",
       resolvedSpec: "openclaw-codex-app-server@0.2.0-beta.4",
+    });
+  });
+
+  it("targets the exact core version for official extended-stable updates and preserves intent", async () => {
+    const installPath = createInstalledPackageDir({
+      name: "@openclaw/acpx",
+      version: "2026.7.21",
+    });
+    mockNpmViewMetadata({
+      name: "@openclaw/acpx",
+      version: "2026.7.33",
+    });
+    installPluginFromNpmSpecMock.mockResolvedValue(
+      createSuccessfulNpmUpdateResult({
+        pluginId: "acpx",
+        targetDir: installPath,
+        version: "2026.7.33",
+        npmResolution: {
+          name: "@openclaw/acpx",
+          version: "2026.7.33",
+          resolvedSpec: "@openclaw/acpx@2026.7.33",
+        },
+      }),
+    );
+
+    const result = await updateNpmInstalledPlugins({
+      config: createNpmInstallConfig({
+        pluginId: "acpx",
+        spec: "@openclaw/acpx",
+        installPath,
+        resolvedName: "@openclaw/acpx",
+        resolvedSpec: "@openclaw/acpx@2026.7.21",
+        resolvedVersion: "2026.7.21",
+      }),
+      pluginIds: ["acpx"],
+      syncOfficialPluginInstalls: true,
+      officialPluginUpdateChannel: "extended-stable",
+      coreVersion: "2026.7.33",
+    });
+
+    expectNpmUpdateCall({
+      spec: "@openclaw/acpx@2026.7.33",
+      expectedPluginId: "acpx",
+    });
+    expectRecordFields(result.config.plugins?.installs?.acpx, {
+      spec: "@openclaw/acpx",
+      version: "2026.7.33",
+      resolvedSpec: "@openclaw/acpx@2026.7.33",
+    });
+  });
+
+  it("preserves an explicit official pin during extended-stable updates", async () => {
+    const installPath = createInstalledPackageDir({
+      name: "@openclaw/acpx",
+      version: "2026.6.33",
+    });
+    installPluginFromNpmSpecMock.mockResolvedValue(
+      createSuccessfulNpmUpdateResult({
+        pluginId: "acpx",
+        targetDir: installPath,
+        version: "2026.6.33",
+      }),
+    );
+
+    await updateNpmInstalledPlugins({
+      config: createNpmInstallConfig({
+        pluginId: "acpx",
+        spec: "@openclaw/acpx@2026.6.33",
+        installPath,
+        resolvedName: "@openclaw/acpx",
+        resolvedSpec: "@openclaw/acpx@2026.6.33",
+        resolvedVersion: "2026.6.33",
+      }),
+      pluginIds: ["acpx"],
+      syncOfficialPluginInstalls: true,
+      officialPluginUpdateChannel: "extended-stable",
+      coreVersion: "2026.7.33",
+      dryRun: true,
+    });
+
+    expectNpmUpdateCall({
+      spec: "@openclaw/acpx@2026.6.33",
+      expectedPluginId: "acpx",
+    });
+  });
+
+  it("lets an explicit bare official spec opt a legacy pin into exact-core tracking", async () => {
+    const installPath = createInstalledPackageDir({
+      name: "@openclaw/acpx",
+      version: "2026.6.21",
+    });
+    mockNpmViewMetadata({
+      name: "@openclaw/acpx",
+      version: "2026.7.33",
+    });
+    installPluginFromNpmSpecMock.mockResolvedValue(
+      createSuccessfulNpmUpdateResult({
+        pluginId: "acpx",
+        targetDir: installPath,
+        version: "2026.7.33",
+        npmResolution: {
+          name: "@openclaw/acpx",
+          version: "2026.7.33",
+          resolvedSpec: "@openclaw/acpx@2026.7.33",
+        },
+      }),
+    );
+
+    const result = await updateNpmInstalledPlugins({
+      config: createNpmInstallConfig({
+        pluginId: "acpx",
+        spec: "@openclaw/acpx@2026.6.21",
+        installPath,
+        resolvedName: "@openclaw/acpx",
+        resolvedSpec: "@openclaw/acpx@2026.6.21",
+        resolvedVersion: "2026.6.21",
+      }),
+      pluginIds: ["acpx"],
+      specOverrides: { acpx: "@openclaw/acpx" },
+      syncOfficialPluginInstalls: true,
+      officialPluginUpdateChannel: "extended-stable",
+      coreVersion: "2026.7.33",
+    });
+
+    expectNpmUpdateCall({
+      spec: "@openclaw/acpx@2026.7.33",
+      expectedPluginId: "acpx",
+    });
+    expectRecordFields(result.config.plugins?.installs?.acpx, {
+      spec: "@openclaw/acpx",
+      version: "2026.7.33",
+      resolvedSpec: "@openclaw/acpx@2026.7.33",
     });
   });
 
@@ -3312,6 +3586,54 @@ describe("updateNpmInstalledPlugins", () => {
     ]);
   });
 
+  it("uses exact-core npm when an official ClawHub install falls back on extended-stable", async () => {
+    const installPath = createInstalledPackageDir({
+      name: "@openclaw/discord",
+      version: "2026.6.33",
+    });
+    installPluginFromClawHubMock.mockResolvedValueOnce({
+      ok: false,
+      code: "artifact_unavailable",
+      error: "artifact unavailable",
+    });
+    installPluginFromNpmSpecMock.mockResolvedValueOnce(
+      createSuccessfulNpmUpdateResult({
+        pluginId: "discord",
+        targetDir: "/tmp/openclaw-plugins/discord",
+        version: "2026.7.33",
+        npmResolution: {
+          name: "@openclaw/discord",
+          version: "2026.7.33",
+          resolvedSpec: "@openclaw/discord@2026.7.33",
+        },
+      }),
+    );
+
+    const result = await updateNpmInstalledPlugins({
+      config: createClawHubInstallConfig({
+        pluginId: "discord",
+        installPath,
+        clawhubUrl: "https://clawhub.ai",
+        clawhubPackage: "@openclaw/discord",
+        clawhubFamily: "code-plugin",
+        clawhubChannel: "official",
+        spec: "clawhub:@openclaw/discord",
+      }),
+      pluginIds: ["discord"],
+      syncOfficialPluginInstalls: true,
+      officialPluginUpdateChannel: "extended-stable",
+      coreVersion: "2026.7.33",
+    });
+
+    expect(npmInstallCall()?.spec).toBe("@openclaw/discord@2026.7.33");
+    expectRecordFields(result.config.plugins?.installs?.discord, {
+      source: "npm",
+      spec: "@openclaw/discord",
+      version: "2026.7.33",
+      resolvedSpec: "@openclaw/discord@2026.7.33",
+    });
+  });
+
   it("reports npm dry-run versions for trusted official ClawHub artifact fallback", async () => {
     const installPath = createInstalledPackageDir({
       name: "@openclaw/discord",
@@ -3823,6 +4145,7 @@ describe("updateNpmInstalledPlugins", () => {
   it("reuses the recorded managed extensions root when updating external plugins", async () => {
     const installPath = "/var/openclaw/extensions/demo";
     const extensionsDir = "/var/openclaw/extensions";
+    const expectedExtensionsDir = path.resolve(extensionsDir);
     installPluginFromNpmSpecMock.mockResolvedValue(
       createSuccessfulNpmUpdateResult({
         pluginId: "demo",
@@ -3906,10 +4229,10 @@ describe("updateNpmInstalledPlugins", () => {
       pluginIds: ["demo"],
     });
 
-    expect(npmInstallCall()?.extensionsDir).toBe(extensionsDir);
-    expect(clawHubInstallCall()?.extensionsDir).toBe(extensionsDir);
-    expect(marketplaceInstallCall()?.extensionsDir).toBe(extensionsDir);
-    expect(gitInstallCall()?.extensionsDir).toBe(extensionsDir);
+    expect(npmInstallCall()?.extensionsDir).toBe(expectedExtensionsDir);
+    expect(clawHubInstallCall()?.extensionsDir).toBe(expectedExtensionsDir);
+    expect(marketplaceInstallCall()?.extensionsDir).toBe(expectedExtensionsDir);
+    expect(gitInstallCall()?.extensionsDir).toBe(expectedExtensionsDir);
   });
 });
 
@@ -4265,6 +4588,62 @@ describe("syncPluginsForUpdateChannel", () => {
       spec: "@openclaw/legacy-chat",
       installPath: "/tmp/openclaw-plugins/legacy-chat",
       version: "2.0.0",
+    });
+  });
+
+  it("uses exact-core npm when an official ClawHub bridge falls back on extended-stable", async () => {
+    resolveBundledPluginSourcesMock.mockReturnValue(new Map());
+    installPluginFromClawHubMock.mockResolvedValue({
+      ok: false,
+      code: "package_not_found",
+      error: "Package not found on ClawHub.",
+    });
+    installPluginFromNpmSpecMock.mockResolvedValue(
+      createSuccessfulNpmUpdateResult({
+        pluginId: "voice-call",
+        targetDir: "/tmp/openclaw-plugins/voice-call",
+        version: "2026.7.33",
+        npmResolution: {
+          name: "@openclaw/voice-call",
+          version: "2026.7.33",
+          resolvedSpec: "@openclaw/voice-call@2026.7.33",
+        },
+      }),
+    );
+
+    const result = await syncPluginsForUpdateChannel({
+      channel: "extended-stable",
+      coreVersion: "2026.7.33",
+      externalizedBundledPluginBridges: [
+        {
+          bundledPluginId: "voice-call",
+          preferredSource: "clawhub",
+          clawhubSpec: "clawhub:@openclaw/voice-call",
+          npmSpec: "@openclaw/voice-call",
+          channelIds: ["voice-call"],
+        },
+      ],
+      config: {
+        channels: { "voice-call": { enabled: true } },
+        plugins: {
+          installs: {
+            "voice-call": {
+              source: "path",
+              sourcePath: appBundledPluginRoot("voice-call"),
+              installPath: appBundledPluginRoot("voice-call"),
+            },
+          },
+        },
+      },
+    });
+
+    expect(npmInstallCall()?.spec).toBe("@openclaw/voice-call@2026.7.33");
+    expect(npmInstallCall()?.trustedSourceLinkedOfficialInstall).toBe(true);
+    expectRecordFields(result.config.plugins?.installs?.["voice-call"], {
+      source: "npm",
+      spec: "@openclaw/voice-call",
+      version: "2026.7.33",
+      resolvedSpec: "@openclaw/voice-call@2026.7.33",
     });
   });
 

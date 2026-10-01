@@ -142,7 +142,6 @@ import {
   resolveOpenClawExecPolicyForCodexAppServer,
   shouldAutoApproveCodexAppServerApprovals,
   type CodexAppServerRuntimeOptions,
-  type OpenClawExecPolicyForCodexAppServer,
 } from "./config.js";
 import {
   type CodexProjectedContextRange,
@@ -1373,6 +1372,9 @@ export async function runCodexAppServerAttempt(
     trajectoryEndRecorded = true;
   };
   let nativeHookRelay: NativeHookRelayRegistrationHandle | undefined;
+  const nativeSubagentMonitorRef: {
+    current?: ReturnType<typeof registerCodexNativeSubagentMonitor>;
+  } = {};
   let releaseSharedClientLease: (() => void) | undefined;
   let sharedCodexClientRetiredForOneShotCleanup = false;
   const releaseSharedClientLeaseOnce = () => {
@@ -1572,6 +1574,7 @@ export async function runCodexAppServerAttempt(
     );
   const turnTerminalIdleTimeoutMs = resolveCodexTurnTerminalIdleTimeoutMs(
     options.turnTerminalIdleTimeoutMs,
+    params.runTimeoutOverrideMs,
   );
   const turnAttemptIdleTimeoutMs = Math.max(100, Math.floor(params.timeoutMs));
   let nativeHookRelayLastRenewedAt = 0;
@@ -2078,7 +2081,7 @@ export async function runCodexAppServerAttempt(
     appServer.start.transport === "stdio"
       ? (appServer.start.env?.CODEX_HOME ?? resolveCodexAppServerHomeDir(agentDir))
       : undefined;
-  registerCodexNativeSubagentMonitor({
+  nativeSubagentMonitorRef.current = registerCodexNativeSubagentMonitor({
     client,
     parentThreadId: thread.threadId,
     requesterSessionKey: params.sessionKey,
@@ -2153,9 +2156,6 @@ export async function runCodexAppServerAttempt(
             threadId: thread.threadId,
             turnId,
             nativeHookRelay,
-            execPolicy,
-            execReviewerAgentId: sessionAgentId,
-            internalExecAutoReview: appServer.approvalsReviewer === "user",
             autoApprove: shouldAutoApproveCodexAppServerApprovals(appServer),
             signal: runAbortController.signal,
           });
@@ -2833,11 +2833,13 @@ export async function runCodexAppServerAttempt(
     queueMessage: async (text: string, optionsLocal?: CodexSteeringQueueOptions) =>
       activeSteeringQueue.queue(text, optionsLocal),
     isStreaming: () => !completed && !runAbortController.signal.aborted,
+    isAbortable: () => !completed && !runAbortController.signal.aborted,
     isCompacting: () => projectorRef.current?.isCompacting() ?? false,
     sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
     cancel: () => runAbortController.abort("cancelled"),
     abort: () => runAbortController.abort("aborted"),
   };
+  params.replyOperation?.attachBackend(handle);
   setActiveEmbeddedRun(params.sessionId, handle, params.sessionKey);
   const notifyUserMessagePersisted = createCodexAppServerUserMessagePersistenceNotifier(params);
   void mirrorPromptAtTurnStartBestEffort({
@@ -3194,7 +3196,20 @@ export async function runCodexAppServerAttempt(
     if (!timedOut && !runAbortController.signal.aborted) {
       await steeringQueueRef.current?.flushPending();
     }
-    if (!timedOut) {
+    const yieldedOneShotCleanupDeferred =
+      !timedOut &&
+      params.cleanupBundleMcpOnRunEnd === true &&
+      yieldDetected &&
+      nativeSubagentMonitorRef.current?.deferUntilParentSettles(thread.threadId, async () => {
+        // Keep the parent subscription alive until native child delivery;
+        // unsubscribing first drops the completion signal that settles cleanup.
+        await unsubscribeCodexThreadBestEffort(client, {
+          threadId: thread.threadId,
+          timeoutMs: CODEX_APP_SERVER_UNSUBSCRIBE_TIMEOUT_MS,
+        });
+        await releaseSharedClientLeaseAndRetireOneShotClient();
+      });
+    if (!timedOut && !yieldedOneShotCleanupDeferred) {
       await unsubscribeCodexThreadBestEffort(client, {
         threadId: thread.threadId,
         timeoutMs: CODEX_APP_SERVER_UNSUBSCRIBE_TIMEOUT_MS,
@@ -3205,7 +3220,9 @@ export async function runCodexAppServerAttempt(
     notificationCleanup();
     requestCleanup();
     closeCleanup?.();
-    await releaseSharedClientLeaseAndRetireOneShotClient();
+    if (!yieldedOneShotCleanupDeferred) {
+      await releaseSharedClientLeaseAndRetireOneShotClient();
+    }
     if (nativeHookRelay) {
       if (shouldDelayNativeHookRelayUnregister) {
         // Codex hook subprocesses can outlive a completed app-server turn by a
@@ -3433,9 +3450,6 @@ function handleApprovalRequest(params: {
   threadId: string;
   turnId: string;
   nativeHookRelay?: NativeHookRelayRegistrationHandle;
-  execPolicy?: Pick<OpenClawExecPolicyForCodexAppServer, "mode">;
-  execReviewerAgentId?: string;
-  internalExecAutoReview?: boolean;
   autoApprove?: boolean;
   signal?: AbortSignal;
 }): Promise<JsonValue | undefined> {
@@ -3446,9 +3460,6 @@ function handleApprovalRequest(params: {
     threadId: params.threadId,
     turnId: params.turnId,
     nativeHookRelay: params.nativeHookRelay,
-    execPolicy: params.execPolicy,
-    execReviewerAgentId: params.execReviewerAgentId,
-    internalExecAutoReview: params.internalExecAutoReview,
     autoApprove: params.autoApprove,
     signal: params.signal,
   });

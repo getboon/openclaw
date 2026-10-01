@@ -191,6 +191,9 @@ const QA_AUDIO_TRANSCRIPTION_TEXT =
 const QA_GROUP_AUDIO_TRANSCRIPTION_TEXT =
   "openclawqa reply with only this exact marker after group audio preflight: WHATSAPP_QA_GROUP_AUDIO_TRANSCRIPT_OK";
 const QA_GROUP_AUDIO_MIN_MULTIPART_BODY_CHARS = 48_000;
+const QA_MATRIX_VOICE_PREFLIGHT_TRIGGER = "MATRIX_QA_VOICE_PREFLIGHT_TRIGGER";
+const QA_MATRIX_VOICE_PREFLIGHT_TRANSCRIPTION_TEXT =
+  "MATRIX_QA_VOICE_PREFLIGHT_MENTION reply with only this exact marker: MATRIX_QA_VOICE_PREFLIGHT_OK";
 const QA_MCP_CODE_MODE_API_FILE_PROMPT_RE = /mcp code mode api file qa check/i;
 
 type MockScenarioState = {
@@ -252,6 +255,9 @@ function writeOpenAiMalformedJsonError(res: ServerResponse, label: string) {
 }
 
 function transcriptionTextForAudioRequest(rawBody: string) {
+  if (rawBody.includes(QA_MATRIX_VOICE_PREFLIGHT_TRIGGER)) {
+    return QA_MATRIX_VOICE_PREFLIGHT_TRANSCRIPTION_TEXT;
+  }
   if (rawBody.length >= QA_GROUP_AUDIO_MIN_MULTIPART_BODY_CHARS) {
     return QA_GROUP_AUDIO_TRANSCRIPTION_TEXT;
   }
@@ -320,28 +326,28 @@ function buildDeterministicEmbedding(text: string, dimensions = 16) {
   return values.map((value) => Number((value / magnitude).toFixed(8)));
 }
 
-function extractLastUserText(input: ResponsesInputItem[]) {
+type CurrentUserTurn = {
+  index: number;
+  text: string;
+};
+
+function findCurrentUserTurn(input: ResponsesInputItem[]): CurrentUserTurn | undefined {
   for (let index = input.length - 1; index >= 0; index -= 1) {
     const item = input[index];
     if (item.role !== "user" || !Array.isArray(item.content)) {
       continue;
     }
-    const text = extractInputText(item.content);
-    if (text) {
-      return text;
-    }
+    return { index, text: extractInputText(item.content) };
   }
-  return "";
+  return undefined;
+}
+
+function extractLastUserText(input: ResponsesInputItem[]) {
+  return findCurrentUserTurn(input)?.text ?? "";
 }
 
 function findLastUserIndex(input: ResponsesInputItem[]) {
-  for (let index = input.length - 1; index >= 0; index -= 1) {
-    const item = input[index];
-    if (item.role === "user" && Array.isArray(item.content)) {
-      return index;
-    }
-  }
-  return -1;
+  return findCurrentUserTurn(input)?.index ?? -1;
 }
 
 function isToolOutputContinuationText(text: string) {
@@ -1243,12 +1249,33 @@ function readFirstMediaPath(value: unknown): string {
   return "";
 }
 
+function readCompletedImageGenerationMediaPath(text: string): string | undefined {
+  const eventStart = text.lastIndexOf("[Internal task completion event]");
+  if (eventStart < 0) {
+    return undefined;
+  }
+  const completionEvent = text.slice(eventStart);
+  if (
+    !/^source:\s*image_generation\s*$/im.test(completionEvent) ||
+    !/^status:\s*completed successfully\s*$/im.test(completionEvent)
+  ) {
+    return undefined;
+  }
+  return /^MEDIA:\s*([^\r\n]+)$/im.exec(completionEvent)?.[1]?.trim() || undefined;
+}
+
 function buildAssistantText(
   input: ResponsesInputItem[],
   body: Record<string, unknown>,
   scenarioState: MockScenarioState,
 ) {
   const prompt = extractLastUserText(input);
+  const completedImageMediaPath = readCompletedImageGenerationMediaPath(
+    extractAllUserTexts(input).at(-1) ?? "",
+  );
+  if (completedImageMediaPath) {
+    return `Protocol note: generated the QA lighthouse image successfully.\nMEDIA:${completedImageMediaPath}`;
+  }
   const toolOutput = extractToolOutput(input);
   const scenarioToolOutput =
     toolOutput ||
@@ -1971,6 +1998,9 @@ async function buildResponsesPayload(
   const input = Array.isArray(body.input) ? (body.input as ResponsesInputItem[]) : [];
   const prompt = extractLastUserText(input);
   const toolOutput = extractToolOutput(input);
+  const completedImageMediaPath = readCompletedImageGenerationMediaPath(
+    extractAllUserTexts(input).at(-1) ?? "",
+  );
   const allInputText = extractAllRequestTexts(input, body);
   const scenarioToolOutput =
     toolOutput ||
@@ -2017,14 +2047,22 @@ async function buildResponsesPayload(
   const canCallSessionsYield =
     hasDeclaredTool(body, "sessions_yield") ||
     QA_SUBAGENT_DIRECT_FALLBACK_PROMPT_RE.test(allInputText);
-  const buildToolProgressReadEvents = (pattern: RegExp) => {
-    const toolProgressPrompt = extractLastMatchingUserText(extractAllUserTexts(input), pattern);
+  const currentUserTurn = findCurrentUserTurn(input);
+  const toolProgressPrompt = currentUserTurn?.text ?? "";
+  const currentTurnIsToolProgress =
+    QA_TOOL_PROGRESS_ERROR_PROMPT_RE.test(toolProgressPrompt) ||
+    QA_TOOL_PROGRESS_PROMPT_RE.test(toolProgressPrompt);
+  const toolProgressToolOutput =
+    currentTurnIsToolProgress && currentUserTurn
+      ? extractToolOutput(input.slice(currentUserTurn.index))
+      : "";
+  const toolProgressToolJson = parseToolOutputJson(toolProgressToolOutput);
+  const buildToolProgressReadEvents = () => {
     return buildToolCallEventsWithArgs("read", {
       path: readTargetFromPrompt(toolProgressPrompt || prompt || allInputText),
     });
   };
-  const buildToolProgressExecEvents = (pattern: RegExp) => {
-    const toolProgressPrompt = extractLastMatchingUserText(extractAllUserTexts(input), pattern);
+  const buildToolProgressExecEvents = () => {
     const command = execCommandFromToolProgressPrompt(toolProgressPrompt || prompt || allInputText);
     return command ? buildToolCallEventsWithArgs("exec", { command }) : null;
   };
@@ -2280,25 +2318,30 @@ async function buildResponsesPayload(
       },
     ]);
   }
-  const toolProgressReplyDirective = exactReplyDirective ?? exactMarkerDirective;
-  if (QA_TOOL_PROGRESS_ERROR_PROMPT_RE.test(allInputText) && toolProgressReplyDirective) {
-    if (!toolOutput) {
-      return buildToolProgressReadEvents(QA_TOOL_PROGRESS_ERROR_PROMPT_RE);
+  const toolProgressReplyDirective =
+    extractExactReplyDirective(toolProgressPrompt) ??
+    extractExactMarkerDirective(toolProgressPrompt) ??
+    extractExactReplyDirective(toolProgressToolOutput) ??
+    extractExactMarkerDirective(toolProgressToolOutput);
+  if (QA_TOOL_PROGRESS_ERROR_PROMPT_RE.test(toolProgressPrompt)) {
+    if (!toolProgressToolOutput) {
+      return buildToolProgressReadEvents();
     }
-    return buildAssistantEvents(
-      hasToolErrorOutput(toolJson, toolOutput)
-        ? toolProgressReplyDirective
-        : "BUG-TOOL-DID-NOT-FAIL",
-    );
-  }
-  if (QA_TOOL_PROGRESS_PROMPT_RE.test(allInputText) && toolProgressReplyDirective) {
-    if (!toolOutput) {
-      return (
-        buildToolProgressExecEvents(QA_TOOL_PROGRESS_PROMPT_RE) ??
-        buildToolProgressReadEvents(QA_TOOL_PROGRESS_PROMPT_RE)
+    if (toolProgressReplyDirective) {
+      return buildAssistantEvents(
+        hasToolErrorOutput(toolProgressToolJson, toolProgressToolOutput)
+          ? toolProgressReplyDirective
+          : "BUG-TOOL-DID-NOT-FAIL",
       );
     }
-    return buildAssistantEvents(toolProgressReplyDirective);
+  }
+  if (QA_TOOL_PROGRESS_PROMPT_RE.test(toolProgressPrompt)) {
+    if (!toolProgressToolOutput) {
+      return buildToolProgressExecEvents() ?? buildToolProgressReadEvents();
+    }
+    if (toolProgressReplyDirective) {
+      return buildAssistantEvents(toolProgressReplyDirective);
+    }
   }
   if (QA_BLOCK_STREAMING_PROMPT_RE.test(allInputText) && blockStreamingMarkers) {
     if (!toolOutput) {
@@ -2791,7 +2834,7 @@ async function buildResponsesPayload(
       });
     }
   }
-  if (QA_IMAGE_GENERATION_PROMPT_RE.test(allInputText) && !toolOutput) {
+  if (QA_IMAGE_GENERATION_PROMPT_RE.test(allInputText) && !toolOutput && !completedImageMediaPath) {
     return buildToolCallEventsWithArgs("image_generate", {
       prompt: "A QA lighthouse on a dark sea with a tiny protocol droid silhouette.",
       filename: "qa-lighthouse.png",

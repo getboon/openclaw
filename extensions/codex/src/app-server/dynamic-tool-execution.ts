@@ -10,7 +10,10 @@ import {
   hasPendingInternalDiagnosticEvent,
   type DiagnosticEventPayload,
 } from "openclaw/plugin-sdk/diagnostic-runtime";
-import { parseStrictNonNegativeInteger } from "openclaw/plugin-sdk/number-runtime";
+import {
+  addTimerTimeoutGraceMs,
+  parseStrictNonNegativeInteger,
+} from "openclaw/plugin-sdk/number-runtime";
 import type { CodexDynamicToolBridge } from "./dynamic-tools.js";
 import {
   isJsonObject,
@@ -23,11 +26,14 @@ import {
 export const CODEX_DYNAMIC_TOOL_TIMEOUT_MS = 90_000;
 /** Hard cap for per-call Codex dynamic tool timeout overrides. */
 export const CODEX_DYNAMIC_TOOL_MAX_TIMEOUT_MS = 600_000;
+// timeoutSeconds is an inner tool budget. Keep enough outer-watchdog headroom
+// for bounded setup RPCs and the tool's structured timeout result to complete.
+const CODEX_DYNAMIC_TOOL_TIMEOUT_SECONDS_GRACE_MS = 30_000;
 const CODEX_DYNAMIC_IMAGE_GENERATION_TOOL_TIMEOUT_MS = 120_000;
 /** Timeout for image-understanding style dynamic tool calls. */
 export const CODEX_DYNAMIC_IMAGE_TOOL_TIMEOUT_MS = 60_000;
 /** Timeout for message-delivery dynamic tool calls. */
-export const CODEX_DYNAMIC_MESSAGE_TOOL_TIMEOUT_MS = 120_000;
+export const CODEX_DYNAMIC_MESSAGE_TOOL_TIMEOUT_MS = CODEX_DYNAMIC_TOOL_MAX_TIMEOUT_MS;
 const LOG_FIELD_MAX_LENGTH = 160;
 
 type DynamicToolTimeoutDetails = {
@@ -432,6 +438,11 @@ export function resolveDynamicToolCallTimeoutMs(params: {
   call: CodexDynamicToolCallParams;
   config: EmbeddedRunAttemptParams["config"];
 }): number {
+  // The message tool's `timeoutMs` is a Gateway transport budget. Its outer
+  // watchdog must also cover bounded same-key reconciliation after that timer.
+  if (params.call.tool === "message") {
+    return CODEX_DYNAMIC_MESSAGE_TOOL_TIMEOUT_MS;
+  }
   return clampDynamicToolTimeoutMs(
     readDynamicToolCallTimeoutMs(params.call.arguments) ??
       readConfiguredDynamicToolTimeoutMs(params.call.tool, params.config) ??
@@ -443,7 +454,14 @@ function readDynamicToolCallTimeoutMs(value: JsonValue | undefined): number | un
   if (!isJsonObject(value)) {
     return undefined;
   }
-  return readPositiveFiniteTimeoutMs(value.timeoutMs);
+  const timeoutMs = readPositiveFiniteTimeoutMs(value.timeoutMs);
+  if (timeoutMs !== undefined) {
+    return timeoutMs;
+  }
+  const timeoutSecondsMs = readDynamicToolTimeoutSecondsAsMs(value.timeoutSeconds);
+  return timeoutSecondsMs === undefined
+    ? undefined
+    : addTimerTimeoutGraceMs(timeoutSecondsMs, CODEX_DYNAMIC_TOOL_TIMEOUT_SECONDS_GRACE_MS);
 }
 
 function readConfiguredDynamicToolTimeoutMs(
@@ -478,6 +496,20 @@ function readConfiguredDynamicToolTimeoutMs(
 function readTimeoutSecondsAsMs(value: unknown): number | undefined {
   const seconds = readPositiveFiniteTimeoutMs(value);
   return seconds === undefined ? undefined : seconds * 1000;
+}
+
+function readDynamicToolTimeoutSecondsAsMs(value: unknown): number | undefined {
+  // Model-facing timeoutSeconds schemas use integers. Reject malformed
+  // fractions instead of silently shortening the caller's budget.
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    !Number.isInteger(value) ||
+    value <= 0
+  ) {
+    return undefined;
+  }
+  return value * 1000;
 }
 
 function readPositiveFiniteTimeoutMs(value: unknown): number | undefined {
