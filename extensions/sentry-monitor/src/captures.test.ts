@@ -132,6 +132,14 @@ describe("buildModelCallEndedCapture", () => {
     expect(capture?.tags).not.toHaveProperty("error_class");
     expect(capture?.extra).toMatchObject({ http_status: undefined });
   });
+
+  // session_id was already flowing into contexts.run (untouched below), but
+  // contexts are not indexed by Sentry — only tags are searchable, so
+  // grouping errors by session requires the tag.
+  it("tags session_id so a session's errors are findable across model calls", () => {
+    const capture = buildModelCallEndedCapture(modelCall({ sessionId: "sess-42" }), HOST);
+    expect(capture?.tags).toMatchObject({ session_id: "sess-42" });
+  });
 });
 
 describe("buildAgentEndCapture", () => {
@@ -428,6 +436,25 @@ describe("buildAfterToolCallCapture", () => {
     );
     expect(first?.fingerprint).toEqual(second?.fingerprint);
   });
+
+  // The event carries no session field at all; PluginHookToolContext (the
+  // hook's second handler arg) does, the same way agent_end's ctx does.
+  it("tags session_id from the hook context when the caller passes it", () => {
+    const capture = buildAfterToolCallCapture(
+      { toolName: "exec", params: {}, error: "boom" },
+      HOST,
+      { sessionId: "sess-7" },
+    );
+    expect(capture?.tags.session_id).toBe("sess-7");
+  });
+
+  it("omits session_id when no ctx is passed", () => {
+    const capture = buildAfterToolCallCapture(
+      { toolName: "exec", params: {}, error: "boom" },
+      HOST,
+    );
+    expect(capture?.tags).not.toHaveProperty("session_id");
+  });
 });
 
 describe("buildMessageSentCapture", () => {
@@ -444,6 +471,16 @@ describe("buildMessageSentCapture", () => {
     expect(capture?.message).toBe("socket closed");
     expect(capture?.extra?.message_id).toBe("m1");
     expect(capture?.fingerprint).toEqual(["message_sent", "socket closed"]);
+  });
+
+  // This hook has no separate sessionId — sessionKey is already the value
+  // contexts.run reports under its session_id slot, so the tag mirrors that.
+  it("tags session_id from sessionKey, this hook's only session identity", () => {
+    const capture = buildMessageSentCapture(
+      { to: "c", content: "hi", success: false, error: "boom", sessionKey: "sk-1" },
+      HOST,
+    );
+    expect(capture?.tags).toMatchObject({ session_id: "sk-1" });
   });
 });
 
@@ -531,6 +568,14 @@ describe("buildCronChangedCapture", () => {
     expect(capture?.extra).not.toHaveProperty("summary");
     expect(JSON.stringify(capture)).not.toContain("customer X");
   });
+
+  it("tags session_id when the job targets a session", () => {
+    const capture = buildCronChangedCapture(
+      { ...base, status: "error", error: "boom", sessionId: "sess-99" },
+      HOST,
+    );
+    expect(capture?.tags).toMatchObject({ session_id: "sess-99" });
+  });
 });
 
 describe("buildSessionEndCapture", () => {
@@ -559,6 +604,11 @@ describe("buildSessionEndCapture", () => {
       expect(capture?.extra?.message_count).toBe(3);
       expect(capture?.fingerprint).toEqual(["session_end", "unknown"]);
     }
+  });
+
+  it("tags session_id — sessionId is required on this event", () => {
+    const capture = buildSessionEndCapture(base, HOST);
+    expect(capture?.tags).toMatchObject({ session_id: "s1" });
   });
 });
 
@@ -600,6 +650,7 @@ describe("buildBeforeToolCallHookFailedCapture", () => {
     );
     expect(capture.contexts?.run?.session_id).toBe("sess-123");
     expect(capture.extra?.session_key).toBe("agent:main:slack:channel:c1:thread:t1");
+    expect(capture.tags).toMatchObject({ session_id: "sess-123" });
   });
 
   it("omits session_id from the run context when no sessionId is present", () => {
@@ -609,5 +660,6 @@ describe("buildBeforeToolCallHookFailedCapture", () => {
     );
     // runContext returns undefined when it has no ids at all.
     expect(capture.contexts?.run?.session_id).toBeUndefined();
+    expect(capture.tags).not.toHaveProperty("session_id");
   });
 });

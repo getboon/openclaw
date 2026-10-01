@@ -101,7 +101,11 @@ overrides:
   "@aws-sdk/xml-builder": 3.972.25
   hono: 4.12.25
   "@hono/node-server": 1.19.14
-  axios: 1.18.1
+  # GHSA-c29m-xwm3-cm6r / GHSA-mghh-pgcx-3jjj / GHSA-x97p-jq2g-jp4f /
+  # GHSA-3pq3-5fj3-cg6v / GHSA-542g-h47m-68v8: axios <1.20.0 — ReDoS in the
+  # data: URL parser and proxy-bypass host normalization, prototype pollution
+  # via toFormData, and two HTTP/2-adapter DoS/bypass issues.
+  axios: 1.20.0
   fast-uri: 3.1.7
   follow-redirects: 1.16.0
   defu: 6.1.5
