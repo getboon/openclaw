@@ -1,4 +1,6 @@
 // Msteams type declarations define plugin contracts.
+import type { InboundMediaFailure } from "../../runtime-api.js";
+
 export type MSTeamsAttachmentLike = {
   contentType?: string | null;
   contentUrl?: string | null;
@@ -17,6 +19,13 @@ export type MSTeamsInboundMedia = {
   placeholder: string;
 };
 
+/**
+ * One inbound attachment download attempted and failed. A direct alias of
+ * core's `InboundMediaFailure` (same shape, not a reimplementation) —
+ * matches the Slack pattern (extensions/slack/src/monitor/media-types.ts).
+ */
+export type MSTeamsAttachmentFailure = InboundMediaFailure;
+
 export type MSTeamsHtmlAttachmentSummary = {
   htmlAttachments: number;
   imgTags: number;
@@ -29,6 +38,8 @@ export type MSTeamsHtmlAttachmentSummary = {
 
 export type MSTeamsGraphMediaResult = {
   media: MSTeamsInboundMedia[];
+  /** Downloads attempted and failed; see `MSTeamsAttachmentFailure`. */
+  failures: MSTeamsAttachmentFailure[];
   hostedCount?: number;
   attachmentCount?: number;
   hostedStatus?: number;

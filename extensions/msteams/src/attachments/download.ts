@@ -24,6 +24,7 @@ import {
 } from "./shared.js";
 import type {
   MSTeamsAccessTokenProvider,
+  MSTeamsAttachmentFailure,
   MSTeamsAttachmentLike,
   MSTeamsInboundMedia,
 } from "./types.js";
@@ -212,6 +213,12 @@ export async function downloadMSTeamsAttachments(params: {
    * INFO level and block diagnosis of issues like #63396.
    */
   logger?: MSTeamsAttachmentDownloadLogger;
+  /**
+   * Invoked once per attachment download attempted and failed (e.g. a
+   * SharePoint/OneDrive Graph shares fetch 401/403), so callers can surface
+   * MediaFailures without changing this function's array return shape.
+   */
+  onFailure?: (failure: MSTeamsAttachmentFailure) => void;
 }): Promise<MSTeamsInboundMedia[]> {
   const list = Array.isArray(params.attachments) ? params.attachments : [];
   if (list.length === 0) {
@@ -230,21 +237,35 @@ export async function downloadMSTeamsAttachments(params: {
     .map(resolveDownloadCandidate)
     .filter(Boolean) as DownloadCandidate[];
 
-  const inlineCandidates = extractInlineImageCandidates(list, {
-    maxInlineBytes: params.maxBytes,
-    maxInlineTotalBytes: params.maxBytes,
-  });
+  const { candidates: inlineCandidates, failures: inlineExtractionFailures } =
+    extractInlineImageCandidates(list, {
+      maxInlineBytes: params.maxBytes,
+      maxInlineTotalBytes: params.maxBytes,
+    });
+  for (const failure of inlineExtractionFailures) {
+    params.onFailure?.(failure);
+  }
 
   const seenUrls = new Set<string>();
   for (const inline of inlineCandidates) {
     if (inline.kind === "url") {
-      if (!isUrlAllowed(inline.url, allowHosts)) {
-        continue;
-      }
+      // Dedup before the allowlist check so the SAME blocked URL repeated in
+      // one message (e.g. a quoted/resent message) is reported once, not
+      // once per occurrence (code-review finding).
       if (seenUrls.has(inline.url)) {
         continue;
       }
       seenUrls.add(inline.url);
+      if (!isUrlAllowed(inline.url, allowHosts)) {
+        // Never attempted (operator policy, not a real fetch), but the file
+        // still never reaches the agent — report it rather than go silent.
+        params.onFailure?.({
+          name: inline.fileHint,
+          contentType: inline.contentType,
+          reason: "fetch_failed",
+        });
+        continue;
+      }
       candidates.push({
         url: inline.url,
         fileHint: inline.fileHint,
@@ -263,6 +284,9 @@ export async function downloadMSTeamsAttachments(params: {
       continue;
     }
     if (inline.data.byteLength > params.maxBytes) {
+      // Defensive only: `extractInlineImageCandidates` enforces this same
+      // limit before a candidate ever reaches this loop — not reachable
+      // through the public entry point, so left without an onFailure call.
       continue;
     }
     try {
@@ -286,10 +310,24 @@ export async function downloadMSTeamsAttachments(params: {
       params.logger?.warn?.("msteams inline attachment decode failed", {
         error: err instanceof Error ? err.message : String(err),
       });
+      // Distinct from the non-image-sniff `continue` above (a correct,
+      // deliberate skip) — this branch means a decode genuinely threw, so
+      // it belongs in MediaFailures same as a remote fetch failure.
+      params.onFailure?.({
+        name: undefined,
+        contentType: inline.contentType,
+        reason: "fetch_failed",
+      });
     }
   }
   for (const candidate of candidates) {
     if (!isUrlAllowed(candidate.url, allowHosts)) {
+      // See the matching comment in the inline-candidate loop above.
+      params.onFailure?.({
+        name: candidate.fileHint,
+        contentType: candidate.contentTypeHint,
+        reason: "fetch_failed",
+      });
       continue;
     }
     try {
@@ -321,6 +359,11 @@ export async function downloadMSTeamsAttachments(params: {
       params.logger?.warn?.(
         `msteams attachment download failed host=${safeHostForLog(candidate.url)} error=${msg}`,
       );
+      params.onFailure?.({
+        name: candidate.fileHint,
+        contentType: candidate.contentTypeHint,
+        reason: "fetch_failed",
+      });
     }
   }
   return out;

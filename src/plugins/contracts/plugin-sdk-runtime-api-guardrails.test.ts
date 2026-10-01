@@ -122,6 +122,7 @@ const RUNTIME_API_EXPORT_GUARDS: Record<string, readonly string[]> = {
     'export { keepHttpServerTaskAlive } from "openclaw/plugin-sdk/channel-outbound";',
     'export { detectMime, extensionForMime, extractOriginalFilename, getFileExtension, resolveChannelMediaMaxBytes } from "openclaw/plugin-sdk/media-runtime";',
     'export { dispatchReplyFromConfigWithSettledDispatcher } from "openclaw/plugin-sdk/channel-inbound";',
+    'export type { InboundMediaFailure, InboundMediaFailureReason } from "openclaw/plugin-sdk/channel-inbound";',
     'export { loadOutboundMediaFromUrl } from "openclaw/plugin-sdk/outbound-media";',
     'export { buildMediaPayload } from "openclaw/plugin-sdk/reply-payload";',
     'export type { ReplyPayload } from "openclaw/plugin-sdk/reply-payload";',

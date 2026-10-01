@@ -7,6 +7,7 @@ import {
   extractMSTeamsHtmlAttachmentIds,
   isBotFrameworkPersonalChatId,
   type MSTeamsAccessTokenProvider,
+  type MSTeamsAttachmentFailure,
   type MSTeamsAttachmentLike,
   type MSTeamsHtmlAttachmentSummary,
   type MSTeamsInboundMedia,
@@ -45,7 +46,7 @@ export async function resolveMSTeamsInboundMedia(params: {
    * `graph-fallback-default.ts`).
    */
   alwaysFetchGraphMessage?: boolean;
-}): Promise<MSTeamsInboundMedia[]> {
+}): Promise<{ media: MSTeamsInboundMedia[]; failures: MSTeamsAttachmentFailure[] }> {
   const {
     attachments,
     htmlSummary,
@@ -62,6 +63,10 @@ export async function resolveMSTeamsInboundMedia(params: {
     alwaysFetchGraphMessage,
   } = params;
 
+  // Failures ACCUMULATE across every path (unlike `mediaList`): direct
+  // download and a BF/Graph fallback cover disjoint attachments, so an
+  // earlier failure must survive a later path recovering a different file.
+  const failures: MSTeamsAttachmentFailure[] = [];
   let mediaList = await downloadMSTeamsAttachments({
     attachments,
     maxBytes,
@@ -70,6 +75,7 @@ export async function resolveMSTeamsInboundMedia(params: {
     authAllowHosts: params.authAllowHosts,
     preserveFilenames,
     logger: log,
+    onFailure: (failure) => failures.push(failure),
   });
 
   if (mediaList.length === 0) {
@@ -109,6 +115,7 @@ export async function resolveMSTeamsInboundMedia(params: {
             attachmentCount: bfMedia.attachmentCount ?? attachmentIds.length,
           });
         }
+        failures.push(...bfMedia.failures);
       }
     }
 
@@ -148,6 +155,10 @@ export async function resolveMSTeamsInboundMedia(params: {
           attachmentCount?: number;
           tokenError?: boolean;
         }> = [];
+        // `messageUrls` are different ID guesses for the SAME message, so a
+        // batch seen before (any earlier URL, not just the immediately
+        // preceding one) is a retry, not distinct attachments — skip it.
+        const seenGraphBatchKeys = new Set<string>();
         for (const messageUrl of messageUrls) {
           const graphMedia = await downloadMSTeamsGraphMedia({
             messageUrl,
@@ -167,6 +178,14 @@ export async function resolveMSTeamsInboundMedia(params: {
             attachmentCount: graphMedia.attachmentCount,
             tokenError: graphMedia.tokenError,
           });
+          const batch = graphMedia.failures;
+          if (batch.length > 0) {
+            const batchKey = stableFailureBatchKey(batch);
+            if (!seenGraphBatchKeys.has(batchKey)) {
+              failures.push(...batch);
+              seenGraphBatchKeys.add(batchKey);
+            }
+          }
           if (graphMedia.media.length > 0) {
             mediaList = graphMedia.media;
             break;
@@ -196,5 +215,12 @@ export async function resolveMSTeamsInboundMedia(params: {
     });
   }
 
-  return mediaList;
+  return { media: mediaList, failures };
+}
+
+// Explicit field order (not JSON.stringify's insertion order, which a future
+// push-site edit could silently change) so equal batches always compare
+// equal, keeping the Graph messageUrl-retry dedup above reliable.
+function stableFailureBatchKey(batch: MSTeamsAttachmentFailure[]): string {
+  return batch.map((f) => `${f.name ?? ""}\u0000${f.contentType ?? ""}\u0000${f.reason}`).join("|");
 }

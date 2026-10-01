@@ -628,8 +628,22 @@ describe("msteams inline image limits", () => {
         content: `<img src="${smallPngDataUrl}" />`,
       },
     ];
-    const out = extractInlineImageCandidates(attachments, { maxInlineBytes: 4 });
-    expect(out).toStrictEqual([]);
+    const { candidates } = extractInlineImageCandidates(attachments, { maxInlineBytes: 4 });
+    expect(candidates).toStrictEqual([]);
+  });
+
+  it("reports too_large when an inline data image exceeds the per-image limit (code-review finding)", () => {
+    const attachments = [
+      {
+        contentType: "text/html",
+        content: `<img src="${smallPngDataUrl}" />`,
+      },
+    ];
+    const { candidates, failures } = extractInlineImageCandidates(attachments, {
+      maxInlineBytes: 4,
+    });
+    expect(candidates).toStrictEqual([]);
+    expect(failures).toEqual([{ name: undefined, contentType: "image/png", reason: "too_large" }]);
   });
 
   it("accepts inline data images within limit", () => {
@@ -639,13 +653,16 @@ describe("msteams inline image limits", () => {
         content: `<img src="${smallPngDataUrl}" />`,
       },
     ];
-    const out = extractInlineImageCandidates(attachments, { maxInlineBytes: 10 });
-    expect(out.length).toBe(1);
-    expect(out[0]?.kind).toBe("data");
-    if (out[0]?.kind === "data") {
-      expect(out[0].data.byteLength).toBeGreaterThan(0);
-      expect(out[0].contentType).toBe("image/png");
+    const { candidates, failures } = extractInlineImageCandidates(attachments, {
+      maxInlineBytes: 10,
+    });
+    expect(candidates.length).toBe(1);
+    expect(candidates[0]?.kind).toBe("data");
+    if (candidates[0]?.kind === "data") {
+      expect(candidates[0].data.byteLength).toBeGreaterThan(0);
+      expect(candidates[0].contentType).toBe("image/png");
     }
+    expect(failures).toStrictEqual([]);
   });
 
   it("rejects inline data images with malformed base64 padding", () => {
@@ -655,8 +672,14 @@ describe("msteams inline image limits", () => {
         content: `<img src="data:image/png;base64,aGV=sbG8=" />`,
       },
     ];
-    const out = extractInlineImageCandidates(attachments, { maxInlineBytes: 10 });
-    expect(out).toStrictEqual([]);
+    const { candidates, failures } = extractInlineImageCandidates(attachments, {
+      maxInlineBytes: 10,
+    });
+    expect(candidates).toStrictEqual([]);
+    // Malformed/garbage base64 was never a real image to begin with — a
+    // deliberate, correct skip, not a failure (unlike the too_large case
+    // above where a genuine image was dropped for being too big).
+    expect(failures).toStrictEqual([]);
   });
 
   it("enforces cumulative inline size limit across attachments", () => {
@@ -670,11 +693,50 @@ describe("msteams inline image limits", () => {
         content: `<img src="${smallPngDataUrl}" />`,
       },
     ];
-    const out = extractInlineImageCandidates(attachments, {
+    const { candidates } = extractInlineImageCandidates(attachments, {
       maxInlineBytes: 10,
       maxInlineTotalBytes: 6,
     });
-    expect(out.length).toBe(1);
-    expect(out[0]?.kind).toBe("data");
+    expect(candidates.length).toBe(1);
+    expect(candidates[0]?.kind).toBe("data");
+  });
+
+  it("reports too_large when the cumulative inline budget is exceeded (code-review finding)", () => {
+    const attachments = [
+      {
+        contentType: "text/html",
+        content: `<img src="${smallPngDataUrl}" />`,
+      },
+      {
+        contentType: "text/html",
+        content: `<img src="${smallPngDataUrl}" />`,
+      },
+    ];
+    const { candidates, failures } = extractInlineImageCandidates(attachments, {
+      maxInlineBytes: 10,
+      maxInlineTotalBytes: 6,
+    });
+    expect(candidates.length).toBe(1);
+    expect(failures).toEqual([{ name: undefined, contentType: "image/png", reason: "too_large" }]);
+  });
+
+  it("reports a failure for every image still unexamined after the budget trips (code-review finding)", () => {
+    // Before this fix, exceeding the cumulative budget on image 2 of 3 broke
+    // out of scanning entirely — image 3 was never looked at again, so it
+    // vanished from both candidates AND failures with zero accounting.
+    const attachments = [
+      { contentType: "text/html", content: `<img src="${smallPngDataUrl}" />` },
+      { contentType: "text/html", content: `<img src="${smallPngDataUrl}" />` },
+      { contentType: "text/html", content: `<img src="${smallPngDataUrl}" />` },
+    ];
+    const { candidates, failures } = extractInlineImageCandidates(attachments, {
+      maxInlineBytes: 10,
+      maxInlineTotalBytes: 6,
+    });
+    expect(candidates.length).toBe(1);
+    expect(failures).toEqual([
+      { name: undefined, contentType: "image/png", reason: "too_large" },
+      { name: undefined, contentType: "image/png", reason: "too_large" },
+    ]);
   });
 });

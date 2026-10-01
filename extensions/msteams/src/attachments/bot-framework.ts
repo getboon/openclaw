@@ -14,6 +14,7 @@ import {
 } from "./shared.js";
 import type {
   MSTeamsAccessTokenProvider,
+  MSTeamsAttachmentFailure,
   MSTeamsGraphMediaResult,
   MSTeamsInboundMedia,
 } from "./types.js";
@@ -347,10 +348,11 @@ export async function downloadMSTeamsBotFrameworkAttachments(params: {
     unique.push(trimmed);
   }
   if (unique.length === 0 || !params.serviceUrl || !params.tokenProvider) {
-    return { media: [], attachmentCount: unique.length };
+    return { media: [], failures: [], attachmentCount: unique.length };
   }
 
   const media: MSTeamsInboundMedia[] = [];
+  const failures: MSTeamsAttachmentFailure[] = [];
   for (const attachmentId of unique) {
     try {
       const item = await downloadMSTeamsBotFrameworkAttachment({
@@ -370,17 +372,23 @@ export async function downloadMSTeamsBotFrameworkAttachments(params: {
       });
       if (item) {
         media.push(item);
+      } else {
+        // The singular helper already logged the specific cause — record a
+        // generic failure so the agent still learns it was dropped.
+        failures.push({ reason: "fetch_failed" });
       }
     } catch (err) {
       params.logger?.warn?.("msteams botFramework attachment download failed", {
         error: err instanceof Error ? err.message : String(err),
         attachmentId,
       });
+      failures.push({ reason: "fetch_failed" });
     }
   }
 
   return {
     media,
+    failures,
     attachmentCount: unique.length,
   };
 }

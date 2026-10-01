@@ -13,6 +13,7 @@ export {
 export { buildMSTeamsMediaPayload } from "./attachments/payload.js";
 export type {
   MSTeamsAccessTokenProvider,
+  MSTeamsAttachmentFailure,
   MSTeamsAttachmentLike,
   MSTeamsHtmlAttachmentSummary,
   MSTeamsInboundMedia,

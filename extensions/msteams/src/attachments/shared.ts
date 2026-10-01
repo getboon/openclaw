@@ -15,7 +15,7 @@ import {
   normalizeOptionalString,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { responseWithRelease } from "../response-with-release.js";
-import type { MSTeamsAttachmentLike } from "./types.js";
+import type { MSTeamsAttachmentFailure, MSTeamsAttachmentLike } from "./types.js";
 
 type InlineImageCandidate =
   | {
@@ -347,7 +347,15 @@ function canonicalizeInlineBase64Payload(value: string): string | undefined {
 function decodeDataImageWithLimits(
   src: string,
   opts: { maxInlineBytes?: number },
-): { candidate: InlineImageCandidate | null; estimatedBytes: number } {
+): {
+  candidate: InlineImageCandidate | null;
+  estimatedBytes: number;
+  contentType?: string;
+  // Set only when a genuine image payload was rejected (too big, or decode
+  // threw) — never for malformed/non-base64/empty garbage, which was never
+  // a real image to begin with and is a correct silent skip, not a failure.
+  rejectionReason?: "too_large" | "decode_failed";
+} {
   const match = /^data:(image\/[a-z0-9.+-]+)?(;base64)?,(.*)$/i.exec(src);
   if (!match) {
     return { candidate: null, estimatedBytes: 0 };
@@ -368,7 +376,7 @@ function decodeDataImageWithLimits(
     return { candidate: null, estimatedBytes: 0 };
   }
   if (typeof opts.maxInlineBytes === "number" && estimatedBytes > opts.maxInlineBytes) {
-    return { candidate: null, estimatedBytes };
+    return { candidate: null, estimatedBytes, contentType, rejectionReason: "too_large" };
   }
 
   try {
@@ -376,9 +384,10 @@ function decodeDataImageWithLimits(
     return {
       candidate: { kind: "data", data, contentType, placeholder: "<media:image>" },
       estimatedBytes,
+      contentType,
     };
   } catch {
-    return { candidate: null, estimatedBytes: 0 };
+    return { candidate: null, estimatedBytes: 0, contentType, rejectionReason: "decode_failed" };
   }
 }
 
@@ -395,10 +404,15 @@ function fileHintFromUrl(src: string): string | undefined {
 export function extractInlineImageCandidates(
   attachments: MSTeamsAttachmentLike[],
   limits?: InlineImageLimitOptions,
-): InlineImageCandidate[] {
+): { candidates: InlineImageCandidate[]; failures: MSTeamsAttachmentFailure[] } {
   const out: InlineImageCandidate[] = [];
+  const failures: MSTeamsAttachmentFailure[] = [];
   let totalEstimatedInlineBytes = 0;
-  outerLoop: for (const att of attachments) {
+  // Once the cumulative budget is blown, every further real (non-malformed)
+  // image is rejected too — but scanning keeps going so each one still gets
+  // its own failure reported, instead of silently vanishing unexamined.
+  let budgetExhausted = false;
+  for (const att of attachments) {
     const html = extractHtmlFromAttachment(att);
     if (!html) {
       continue;
@@ -409,19 +423,37 @@ export function extractInlineImageCandidates(
       const src = match[1]?.trim();
       if (src && !src.startsWith("cid:")) {
         if (src.startsWith("data:")) {
-          const { candidate: decoded, estimatedBytes } = decodeDataImageWithLimits(src, {
+          const {
+            candidate: decoded,
+            estimatedBytes,
+            contentType,
+            rejectionReason,
+          } = decodeDataImageWithLimits(src, {
             maxInlineBytes: limits?.maxInlineBytes,
           });
+          if (rejectionReason) {
+            failures.push({
+              name: undefined,
+              contentType,
+              reason: rejectionReason === "too_large" ? "too_large" : "fetch_failed",
+            });
+          }
           if (decoded) {
             const nextTotal = totalEstimatedInlineBytes + estimatedBytes;
             if (
-              typeof limits?.maxInlineTotalBytes === "number" &&
-              nextTotal > limits.maxInlineTotalBytes
+              budgetExhausted ||
+              (typeof limits?.maxInlineTotalBytes === "number" &&
+                nextTotal > limits.maxInlineTotalBytes)
             ) {
-              break outerLoop;
+              // The cumulative budget (not this image alone) is what
+              // rejected it — same user-facing reason as a per-image
+              // rejection.
+              failures.push({ name: undefined, contentType, reason: "too_large" });
+              budgetExhausted = true;
+            } else {
+              totalEstimatedInlineBytes = nextTotal;
+              out.push(decoded);
             }
-            totalEstimatedInlineBytes = nextTotal;
-            out.push(decoded);
           }
         } else {
           out.push({
@@ -435,7 +467,7 @@ export function extractInlineImageCandidates(
       match = IMG_SRC_RE.exec(html);
     }
   }
-  return out;
+  return { candidates: out, failures };
 }
 
 export function safeHostForUrl(url: string): string {
