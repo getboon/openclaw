@@ -2,6 +2,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -243,6 +244,39 @@ describe("chrome MCP page parsing", () => {
       { pid: 124, signal: "SIGKILL" },
       { pid: 123, signal: "SIGKILL" },
     ]);
+  });
+
+  it("gives the real MCP handshake an explicit timeout instead of the SDK's 60s default", async () => {
+    // Deliberately does NOT call setChromeMcpSessionFactoryForTest -- every other test in
+    // this file injects a fake session and never reaches createRealSession's actual
+    // client.connect()/listTools() calls. This one lets sessionFactory stay null so
+    // createRealSession runs for real, with only Client's prototype methods stubbed (not
+    // the whole SDK module, which the two "redacts ... from attach failures" tests below
+    // need to stay real to spawn their own fake-mcp.mjs server). Catches a regression to
+    // the SDK's bare 60s default request timeout, which is shorter than the measured
+    // 69-73s npx cold-start (ENG-20866) and which the outer 120s handshake race alone
+    // cannot override.
+    // Real StdioClientTransport never spawns (connect() is stubbed below, so start() is
+    // never reached), so transport.pid stays null and the process-cleanup path on close
+    // is a no-op -- no listProcesses/killProcess fakes needed here.
+    const connectSpy = vi.spyOn(Client.prototype, "connect").mockResolvedValue(undefined);
+    const listToolsSpy = vi
+      .spyOn(Client.prototype, "listTools")
+      .mockResolvedValue({ tools: [{ name: "list_pages", inputSchema: { type: "object" } }] });
+
+    try {
+      await ensureChromeMcpAvailable("chrome-live", undefined, { ephemeral: true });
+
+      expect(connectSpy).toHaveBeenCalledTimes(1);
+      expect(listToolsSpy).toHaveBeenCalledTimes(1);
+      const [, connectOptions] = connectSpy.mock.calls[0] as [unknown, { timeout?: number }];
+      const [, listToolsOptions] = listToolsSpy.mock.calls[0] as [unknown, { timeout?: number }];
+      expect(connectOptions?.timeout).toBeGreaterThanOrEqual(120_000);
+      expect(listToolsOptions?.timeout).toBeGreaterThanOrEqual(120_000);
+    } finally {
+      connectSpy.mockRestore();
+      listToolsSpy.mockRestore();
+    }
   });
 
   it("uses Windows taskkill tree cleanup without waiting for SDK stdio close timeout", async () => {

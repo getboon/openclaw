@@ -765,8 +765,13 @@ async function createRealSession(
     try {
       await withChromeMcpHandshakeTimeout(
         (async () => {
-          await client.connect(transport);
-          const tools = await client.listTools();
+          // The MCP SDK's own per-request timeout (RequestOptions.timeout) defaults to
+          // DEFAULT_REQUEST_TIMEOUT_MSEC = 60_000ms and applies independently of the outer
+          // handshake race above -- a bare call here would reject at 60s, before the real
+          // 69-73s npx cold-start the outer 120s budget exists to tolerate ever completes.
+          const requestOptions = { timeout: CHROME_MCP_HANDSHAKE_TIMEOUT_MS };
+          await client.connect(transport, requestOptions);
+          const tools = await client.listTools(undefined, requestOptions);
           if (!tools.tools.some((tool) => tool.name === "list_pages")) {
             throw new Error("Chrome MCP server did not expose the expected navigation tools.");
           }
