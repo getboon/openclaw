@@ -215,7 +215,28 @@ export async function resolveMSTeamsInboundMedia(params: {
     });
   }
 
-  return { media: mediaList, failures };
+  return { media: mediaList, failures: dedupeNamedFailures(failures) };
+}
+
+// The direct path and the Graph fallback can both independently fail the
+// SAME attachment (e.g. a dragged SharePoint reference). Only named
+// failures are deduped — unnamed ones have no identity to collide on.
+function dedupeNamedFailures(failures: MSTeamsAttachmentFailure[]): MSTeamsAttachmentFailure[] {
+  const seenNamed = new Set<string>();
+  const out: MSTeamsAttachmentFailure[] = [];
+  for (const failure of failures) {
+    if (failure.name === undefined) {
+      out.push(failure);
+      continue;
+    }
+    const key = `${failure.name}\u0000${failure.contentType ?? ""}\u0000${failure.reason}`;
+    if (seenNamed.has(key)) {
+      continue;
+    }
+    seenNamed.add(key);
+    out.push(failure);
+  }
+  return out;
 }
 
 // Explicit field order (not JSON.stringify's insertion order, which a future
