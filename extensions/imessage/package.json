@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/imessage",
-  "version": "2026.6.11-boon.48",
+  "version": "2026.6.11-boon.49",
   "private": true,
   "description": "OpenClaw iMessage channel plugin using imsg on a signed-in Mac",
   "type": "module",
@@ -43,10 +43,10 @@
       ]
     },
     "compat": {
-      "pluginApi": ">=2026.6.11-boon.48"
+      "pluginApi": ">=2026.6.11-boon.49"
     },
     "build": {
-      "openclawVersion": "2026.6.11-boon.48"
+      "openclawVersion": "2026.6.11-boon.49"
     }
   },
   "pluginInspector": {
