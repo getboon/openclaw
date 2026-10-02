@@ -71,8 +71,13 @@ export async function resolveMSTeamsInboundMedia(params: {
   // sourceUrl identity each path reports alongside the failure — never by
   // name/contentType, which two distinct files can share (code-review
   // finding). Multiplicity is preserved whenever no identity is available.
-  const failures: MSTeamsAttachmentFailure[] = [];
+  // A later path can also RESOLVE an attachment the earlier path already
+  // failed on (e.g. a transient 403 followed by a successful Graph retry);
+  // `resolvedSourceUrls` + the final filter below drop that stale failure
+  // instead of reporting a success and a failure for the same file.
+  const trackedFailures: Array<{ failure: MSTeamsAttachmentFailure; sourceUrl?: string }> = [];
   const seenFailureUrls = new Set<string>();
+  const resolvedSourceUrls = new Set<string>();
   const addFailure = (failure: MSTeamsAttachmentFailure, sourceUrl?: string) => {
     if (sourceUrl !== undefined) {
       if (seenFailureUrls.has(sourceUrl)) {
@@ -80,8 +85,9 @@ export async function resolveMSTeamsInboundMedia(params: {
       }
       seenFailureUrls.add(sourceUrl);
     }
-    failures.push(failure);
+    trackedFailures.push({ failure, sourceUrl });
   };
+  const markResolved = (sourceUrl: string) => resolvedSourceUrls.add(sourceUrl);
   let mediaList = await downloadMSTeamsAttachments({
     attachments,
     maxBytes,
@@ -91,6 +97,7 @@ export async function resolveMSTeamsInboundMedia(params: {
     preserveFilenames,
     logger: log,
     onFailure: addFailure,
+    onSuccess: markResolved,
   });
 
   if (mediaList.length === 0) {
@@ -130,7 +137,9 @@ export async function resolveMSTeamsInboundMedia(params: {
             attachmentCount: bfMedia.attachmentCount ?? attachmentIds.length,
           });
         }
-        failures.push(...bfMedia.failures);
+        for (const failure of bfMedia.failures) {
+          trackedFailures.push({ failure, sourceUrl: undefined });
+        }
       }
     }
 
@@ -195,6 +204,7 @@ export async function resolveMSTeamsInboundMedia(params: {
               reportedViaOnFailure.add(failure);
               addFailure(failure, sourceUrl);
             },
+            onSuccess: markResolved,
           });
           attempts.push({
             url: messageUrl,
@@ -208,7 +218,9 @@ export async function resolveMSTeamsInboundMedia(params: {
           if (batch.length > 0) {
             const batchKey = stableFailureBatchKey(batch);
             if (!seenGraphBatchKeys.has(batchKey)) {
-              failures.push(...batch);
+              for (const failure of batch) {
+                trackedFailures.push({ failure, sourceUrl: undefined });
+              }
               seenGraphBatchKeys.add(batchKey);
             }
           }
@@ -243,7 +255,13 @@ export async function resolveMSTeamsInboundMedia(params: {
 
   // Deduped above by sourceUrl identity (via `addFailure`) wherever the
   // direct path and Graph fallback can report the SAME attachment; every
-  // other failure (no identity available) keeps full multiplicity.
+  // other failure (no identity available) keeps full multiplicity. Drop any
+  // failure whose sourceUrl a later path went on to resolve successfully —
+  // otherwise a retried-and-recovered attachment reports as both a success
+  // and a failure.
+  const failures = trackedFailures
+    .filter(({ sourceUrl }) => sourceUrl === undefined || !resolvedSourceUrls.has(sourceUrl))
+    .map(({ failure }) => failure);
   return { media: mediaList, failures };
 }
 

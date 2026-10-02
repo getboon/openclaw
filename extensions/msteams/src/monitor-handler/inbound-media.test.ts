@@ -643,6 +643,100 @@ describe("resolveMSTeamsInboundMedia failure reporting", () => {
       { name: undefined, contentType: "image/png", reason: "too_large" },
     ]);
   });
+
+  it("clears a stale direct-path failure once the Graph fallback resolves the SAME attachment (PR review finding)", async () => {
+    // The direct path can fail a SharePoint reference (e.g. a transient 403)
+    // while the Graph fallback, running only because mediaList is still
+    // empty, independently retries and succeeds on that exact attachment.
+    // Without clearing the stale entry, the agent would report BOTH a
+    // successful download AND a failure for the same file.
+    const sourceUrl = "https://graph.microsoft.com/v1.0/shares/shareid/driveItem/content";
+    vi.mocked(downloadMSTeamsAttachments).mockImplementationOnce(async (params) => {
+      params.onFailure?.(
+        { name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" },
+        sourceUrl,
+      );
+      return [];
+    });
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
+    const resolvedMedia = {
+      path: "/tmp/dragged.pdf",
+      contentType: "application/pdf",
+      placeholder: "[file]",
+    };
+    vi.mocked(downloadMSTeamsGraphMedia).mockImplementationOnce(async (params) => {
+      params.onSuccess?.(sourceUrl);
+      return { media: [resolvedMedia], failures: [] };
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "reference",
+          contentUrl: "https://tenant.sharepoint.com/dragged.pdf",
+          name: "dragged.pdf",
+        },
+        {
+          contentType: "text/html",
+          content: '<div><attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.media).toEqual([resolvedMedia]);
+    expect(result.failures).toEqual([]);
+  });
+
+  it("keeps an unrelated failure when the Graph fallback resolves a DIFFERENT attachment", async () => {
+    // Guards the fix above against over-clearing: a failure must only be
+    // dropped when its own sourceUrl was later resolved, not whenever ANY
+    // success occurs during the same call.
+    const failedSourceUrl =
+      "https://graph.microsoft.com/v1.0/shares/share-failed/driveItem/content";
+    const resolvedSourceUrl = "https://graph.microsoft.com/v1.0/shares/share-ok/driveItem/content";
+    vi.mocked(downloadMSTeamsAttachments).mockImplementationOnce(async (params) => {
+      params.onFailure?.(
+        { name: "broken.pdf", contentType: undefined, reason: "fetch_failed" },
+        failedSourceUrl,
+      );
+      return [];
+    });
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
+    const resolvedMedia = {
+      path: "/tmp/ok.pdf",
+      contentType: "application/pdf",
+      placeholder: "[file]",
+    };
+    vi.mocked(downloadMSTeamsGraphMedia).mockImplementationOnce(async (params) => {
+      params.onSuccess?.(resolvedSourceUrl);
+      return { media: [resolvedMedia], failures: [] };
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "reference",
+          contentUrl: "https://tenant.sharepoint.com/broken.pdf",
+          name: "broken.pdf",
+        },
+        {
+          contentType: "text/html",
+          content: '<div><attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.media).toEqual([resolvedMedia]);
+    expect(result.failures).toEqual([
+      { name: "broken.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
+  });
 });
 
 describe("resolveMSTeamsInboundMedia bot framework DM routing", () => {

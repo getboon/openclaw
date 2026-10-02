@@ -222,6 +222,13 @@ export async function downloadMSTeamsAttachments(params: {
    * path without guessing identity from name/contentType alone.
    */
   onFailure?: (failure: MSTeamsAttachmentFailure, sourceUrl?: string) => void;
+  /**
+   * Invoked once per attachment download attempted and succeeded, carrying
+   * the same `sourceUrl` identity as `onFailure` — lets a caller clear an
+   * earlier failure for this exact attachment reported by a different
+   * download path instead of leaving a stale failure next to a success.
+   */
+  onSuccess?: (sourceUrl: string) => void;
 }): Promise<MSTeamsInboundMedia[]> {
   const list = Array.isArray(params.attachments) ? params.attachments : [];
   if (list.length === 0) {
@@ -360,6 +367,7 @@ export async function downloadMSTeamsAttachments(params: {
           }),
       });
       out.push(media);
+      params.onSuccess?.(candidate.url);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       params.logger?.warn?.(

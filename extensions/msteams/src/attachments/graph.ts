@@ -335,6 +335,12 @@ export async function downloadMSTeamsGraphMedia(params: {
    * an internal URL identity rather than guessing from name/contentType.
    */
   onFailure?: (failure: MSTeamsAttachmentFailure, sourceUrl?: string) => void;
+  /**
+   * Invoked once per download attempted and succeeded, carrying the same
+   * URL identity as `onFailure` — lets a caller clear an earlier failure
+   * for this exact attachment reported by a different download path.
+   */
+  onSuccess?: (sourceUrl: string) => void;
 }): Promise<MSTeamsGraphMediaResult> {
   if (!params.messageUrl || !params.tokenProvider) {
     return { media: [], failures: [] };
@@ -474,6 +480,7 @@ export async function downloadMSTeamsGraphMedia(params: {
               },
             });
             sharePointMedia.push(media);
+            params.onSuccess?.(sharesUrl);
           } catch (err) {
             params.logger?.warn?.("msteams SharePoint reference download failed", {
               error: err instanceof Error ? err.message : String(err),
@@ -552,6 +559,7 @@ export async function downloadMSTeamsGraphMedia(params: {
         failures.push(failure);
         params.onFailure?.(failure, sourceUrl);
       },
+      onSuccess: (sourceUrl) => params.onSuccess?.(sourceUrl),
     });
   } catch (err) {
     params.logger?.warn?.("msteams graph attachment download failed", {
