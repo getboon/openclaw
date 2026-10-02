@@ -7,6 +7,7 @@ import {
   extractMSTeamsHtmlAttachmentIds,
   isBotFrameworkPersonalChatId,
   type MSTeamsAccessTokenProvider,
+  type MSTeamsAttachmentFailure,
   type MSTeamsAttachmentLike,
   type MSTeamsHtmlAttachmentSummary,
   type MSTeamsInboundMedia,
@@ -45,7 +46,7 @@ export async function resolveMSTeamsInboundMedia(params: {
    * `graph-fallback-default.ts`).
    */
   alwaysFetchGraphMessage?: boolean;
-}): Promise<MSTeamsInboundMedia[]> {
+}): Promise<{ media: MSTeamsInboundMedia[]; failures: MSTeamsAttachmentFailure[] }> {
   const {
     attachments,
     htmlSummary,
@@ -62,6 +63,31 @@ export async function resolveMSTeamsInboundMedia(params: {
     alwaysFetchGraphMessage,
   } = params;
 
+  // Failures ACCUMULATE across every path (unlike `mediaList`): direct
+  // download and a BF/Graph fallback cover disjoint attachments, so an
+  // earlier failure must survive a later path recovering a different file.
+  // The direct path and the Graph fallback CAN both fail the SAME attachment
+  // (e.g. a dragged SharePoint reference); dedupe those by the internal
+  // sourceUrl identity each path reports alongside the failure — never by
+  // name/contentType, which two distinct files can share (code-review
+  // finding). Multiplicity is preserved whenever no identity is available.
+  // A later path can also RESOLVE an attachment the earlier path already
+  // failed on (e.g. a transient 403 followed by a successful Graph retry);
+  // `resolvedSourceUrls` + the final filter below drop that stale failure
+  // instead of reporting a success and a failure for the same file.
+  const trackedFailures: Array<{ failure: MSTeamsAttachmentFailure; sourceUrl?: string }> = [];
+  const seenFailureUrls = new Set<string>();
+  const resolvedSourceUrls = new Set<string>();
+  const addFailure = (failure: MSTeamsAttachmentFailure, sourceUrl?: string) => {
+    if (sourceUrl !== undefined) {
+      if (seenFailureUrls.has(sourceUrl)) {
+        return;
+      }
+      seenFailureUrls.add(sourceUrl);
+    }
+    trackedFailures.push({ failure, sourceUrl });
+  };
+  const markResolved = (sourceUrl: string) => resolvedSourceUrls.add(sourceUrl);
   let mediaList = await downloadMSTeamsAttachments({
     attachments,
     maxBytes,
@@ -70,6 +96,8 @@ export async function resolveMSTeamsInboundMedia(params: {
     authAllowHosts: params.authAllowHosts,
     preserveFilenames,
     logger: log,
+    onFailure: addFailure,
+    onSuccess: markResolved,
   });
 
   if (mediaList.length === 0) {
@@ -108,6 +136,9 @@ export async function resolveMSTeamsInboundMedia(params: {
             conversationType,
             attachmentCount: bfMedia.attachmentCount ?? attachmentIds.length,
           });
+        }
+        for (const failure of bfMedia.failures) {
+          trackedFailures.push({ failure, sourceUrl: undefined });
         }
       }
     }
@@ -148,6 +179,17 @@ export async function resolveMSTeamsInboundMedia(params: {
           attachmentCount?: number;
           tokenError?: boolean;
         }> = [];
+        // `messageUrls` are different ID guesses for the SAME message, so a
+        // batch seen before (any earlier URL, not just the immediately
+        // preceding one) is a retry, not distinct attachments — skip it.
+        // This only ever holds hosted-content failures: anything reported
+        // via `onFailure` below (reference/sub-attachment, which carries a
+        // real sourceUrl identity) is excluded by object identity so it is
+        // never double-added here on top of `addFailure`. Relies on graph.ts
+        // pushing the exact same failure object to both its local list and
+        // `onFailure` — it does today for every identity-bearing failure.
+        const seenGraphBatchKeys = new Set<string>();
+        const reportedViaOnFailure = new Set<MSTeamsAttachmentFailure>();
         for (const messageUrl of messageUrls) {
           const graphMedia = await downloadMSTeamsGraphMedia({
             messageUrl,
@@ -158,6 +200,11 @@ export async function resolveMSTeamsInboundMedia(params: {
             preserveFilenames,
             log,
             logger: log,
+            onFailure: (failure, sourceUrl) => {
+              reportedViaOnFailure.add(failure);
+              addFailure(failure, sourceUrl);
+            },
+            onSuccess: markResolved,
           });
           attempts.push({
             url: messageUrl,
@@ -167,6 +214,16 @@ export async function resolveMSTeamsInboundMedia(params: {
             attachmentCount: graphMedia.attachmentCount,
             tokenError: graphMedia.tokenError,
           });
+          const batch = graphMedia.failures.filter((failure) => !reportedViaOnFailure.has(failure));
+          if (batch.length > 0) {
+            const batchKey = stableFailureBatchKey(batch);
+            if (!seenGraphBatchKeys.has(batchKey)) {
+              for (const failure of batch) {
+                trackedFailures.push({ failure, sourceUrl: undefined });
+              }
+              seenGraphBatchKeys.add(batchKey);
+            }
+          }
           if (graphMedia.media.length > 0) {
             mediaList = graphMedia.media;
             break;
@@ -196,5 +253,21 @@ export async function resolveMSTeamsInboundMedia(params: {
     });
   }
 
-  return mediaList;
+  // Deduped above by sourceUrl identity (via `addFailure`) wherever the
+  // direct path and Graph fallback can report the SAME attachment; every
+  // other failure (no identity available) keeps full multiplicity. Drop any
+  // failure whose sourceUrl a later path went on to resolve successfully —
+  // otherwise a retried-and-recovered attachment reports as both a success
+  // and a failure.
+  const failures = trackedFailures
+    .filter(({ sourceUrl }) => sourceUrl === undefined || !resolvedSourceUrls.has(sourceUrl))
+    .map(({ failure }) => failure);
+  return { media: mediaList, failures };
+}
+
+// Explicit field order (not JSON.stringify's insertion order, which a future
+// push-site edit could silently change) so equal batches always compare
+// equal, keeping the Graph messageUrl-retry dedup above reliable.
+function stableFailureBatchKey(batch: MSTeamsAttachmentFailure[]): string {
+  return batch.map((f) => `${f.name ?? ""}\u0000${f.contentType ?? ""}\u0000${f.reason}`).join("|");
 }

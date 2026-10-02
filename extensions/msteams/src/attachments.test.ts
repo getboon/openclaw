@@ -448,6 +448,51 @@ describe("msteams attachments", () => {
       expect(saveMediaBufferMock).not.toHaveBeenCalled();
     });
 
+    it("reports onFailure when an inline data:image payload throws while decoding", async () => {
+      // Distinct from the non-image sniff case above (a deliberate, correct
+      // skip, not a failure): here the mime sniff itself throws, a genuine
+      // decode error that the onFailure contract promises to surface.
+      detectMimeMock.mockRejectedValueOnce(new Error("sniff boom"));
+      const onFailure = vi.fn();
+
+      const media = await downloadMSTeamsAttachments(
+        buildDownloadParams(
+          [...createHtmlImageAttachments([`data:image/png;base64,${PNG_BASE64}`])],
+          { onFailure },
+        ),
+      );
+
+      expectAttachmentMediaLength(media, 0);
+      expect(onFailure).toHaveBeenCalledWith({
+        name: undefined,
+        contentType: CONTENT_TYPE_IMAGE_PNG,
+        reason: "fetch_failed",
+      });
+    });
+
+    it("reports too_large when an inline data:image payload exceeds maxBytes (code-review finding)", async () => {
+      // The actual enforcement point is extractInlineImageCandidates
+      // (shared.ts), one layer above this function's own loop — this proves
+      // the full pipeline forwards that failure through onFailure too, not
+      // just the unit-level shared.test.ts coverage.
+      const onFailure = vi.fn();
+
+      const media = await downloadMSTeamsAttachments({
+        attachments: createHtmlImageAttachments([`data:image/png;base64,${PNG_BASE64}`]),
+        maxBytes: 1,
+        allowHosts: DEFAULT_ALLOW_HOSTS,
+        resolveFn: publicResolve,
+        onFailure,
+      });
+
+      expectAttachmentMediaLength(media, 0);
+      expect(onFailure).toHaveBeenCalledWith({
+        name: undefined,
+        contentType: CONTENT_TYPE_IMAGE_PNG,
+        reason: "too_large",
+      });
+    });
+
     it.each<AttachmentAuthRetryCase>(ATTACHMENT_AUTH_RETRY_CASES)(
       "$label",
       runAttachmentAuthRetryCase,
@@ -567,6 +612,66 @@ describe("msteams attachments", () => {
       );
 
       expectAttachmentMediaLength(media, 0);
+    });
+
+    it("reports a failure when a candidate is blocked by the host allowlist", async () => {
+      const onFailure = vi.fn();
+      const media = await downloadMSTeamsAttachments(
+        buildDownloadParams(createImageAttachments(TEST_URL_OUTSIDE_ALLOWLIST), {
+          allowHosts: [GRAPH_HOST],
+          fetchFn: asFetchFn(vi.fn()),
+          onFailure,
+        }),
+      );
+
+      expectAttachmentMediaLength(media, 0);
+      // The file never reached the agent either way — report it rather than
+      // leave the agent with no signal at all, even though the proximate
+      // cause here is operator allowlist policy rather than a true fetch
+      // attempt (closest fit among the reasons this layer can distinguish).
+      expect(onFailure).toHaveBeenCalledWith(
+        {
+          name: undefined,
+          contentType: CONTENT_TYPE_IMAGE_PNG,
+          reason: "fetch_failed",
+        },
+        TEST_URL_OUTSIDE_ALLOWLIST,
+      );
+    });
+
+    it("reports a failure when an inline image URL is blocked by the host allowlist", async () => {
+      const onFailure = vi.fn();
+      const media = await downloadMSTeamsAttachments(
+        buildDownloadParams(createHtmlImageAttachments([TEST_URL_OUTSIDE_ALLOWLIST]), {
+          allowHosts: [GRAPH_HOST],
+          fetchFn: asFetchFn(vi.fn()),
+          onFailure,
+        }),
+      );
+
+      expectAttachmentMediaLength(media, 0);
+      expect(onFailure).toHaveBeenCalledWith({
+        name: "img",
+        contentType: undefined,
+        reason: "fetch_failed",
+      });
+    });
+
+    it("reports a blocked inline image URL only once even if it appears twice in one message (code-review finding)", async () => {
+      const onFailure = vi.fn();
+      const media = await downloadMSTeamsAttachments(
+        buildDownloadParams(
+          createHtmlImageAttachments([TEST_URL_OUTSIDE_ALLOWLIST, TEST_URL_OUTSIDE_ALLOWLIST]),
+          {
+            allowHosts: [GRAPH_HOST],
+            fetchFn: asFetchFn(vi.fn()),
+            onFailure,
+          },
+        ),
+      );
+
+      expectAttachmentMediaLength(media, 0);
+      expect(onFailure).toHaveBeenCalledTimes(1);
     });
 
     it("blocks redirects to non-https URLs", async () => {

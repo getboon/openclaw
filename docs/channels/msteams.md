@@ -654,6 +654,14 @@ If you need images/files in **channels** or want to fetch **message history**, y
 
 **Additional permission for user mentions:** User @mentions work out of the box for users in the conversation. However, if you want to dynamically search and mention users who are **not in the current conversation**, add `User.Read.All` (Application) permission and grant admin consent.
 
+### Resolving a SharePoint or OneDrive file link shared in a message
+
+When a user drags an existing file (or shares a file already posted in Teams) into a message, Teams/Graph deliver a reference to the file rather than its bytes. OpenClaw already resolves that reference through `GET /shares/{shareId}/driveItem/content` using the bot's own Graph token, so no extra integration is required — but it needs its own consent:
+
+- **`Files.Read.All` and/or `Sites.Read.All`** (Application), admin-consented, **on the Teams bot's own Azure AD app registration** — the same app registered for `channels.msteams.appId`/`tenantId` above.
+- This is a **separate consent from any customer-configured SharePoint connector or skill** (for example a certificate-based `Sites.Selected` app used by a SharePoint file-access skill). That grant lets a _skill_ call Microsoft Graph on the customer's behalf; it does **not** grant the Teams **bot's own app** permission to resolve files referenced inside inbound Teams messages. Both consents are commonly needed and are easy to conflate — "SharePoint is already connected" usually refers to the former, not the latter.
+- If this permission is missing, the download fails (401/403) and the agent reports it couldn't read the file instead of silently ignoring it.
+
 ## Known limitations
 
 ### Webhook timeouts
@@ -856,6 +864,8 @@ Bots can send files in DMs using the FileConsentCard flow (built-in). However, *
 ### Why group chats need SharePoint
 
 Bots don't have a personal OneDrive drive (the `/me/drive` Graph API endpoint doesn't work for application identities). To send files in group chats/channels, the bot uploads to a **SharePoint site** and creates a sharing link.
+
+This is the _outbound_ (bot → user) direction. For the _inbound_ direction — the agent resolving a SharePoint/OneDrive file a user drags or shares into a message — see [Resolving a SharePoint or OneDrive file link shared in a message](#resolving-a-sharepoint-or-onedrive-file-link-shared-in-a-message) above; it needs its own Graph consent on this same app registration.
 
 ### Setup
 
