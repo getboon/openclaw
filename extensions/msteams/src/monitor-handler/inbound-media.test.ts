@@ -510,22 +510,35 @@ describe("resolveMSTeamsInboundMedia failure reporting", () => {
     ]);
   });
 
-  it("dedupes the same named failure reported by both the direct path and the Graph fallback (PR review finding)", async () => {
+  it("dedupes the direct path and Graph fallback failing the SAME attachment (identity-based fix)", async () => {
     // The flagship ENG-20968 scenario: a dragged SharePoint reference
     // attachment has a contentUrl, so isDownloadableAttachment (no
     // contentType check) lets the DIRECT path attempt and fail it first;
     // since mediaList is still empty, the Graph fallback then independently
-    // rediscovers and re-fails the SAME attachment. Both are real, separate
-    // attempts (not a retry-of-the-same-call artifact), so neither path's
-    // own dedup catches it — this must be deduped where the two merge.
+    // rediscovers and re-fails the SAME attachment, producing two entries
+    // for what is usually one real file. A prior fix deduped these by
+    // name+contentType+reason, but that tuple is not a unique file identity
+    // (see the next test). Both download paths derive the SAME Graph shares
+    // URL from the attachment's contentUrl, so threading that URL through as
+    // an internal-only `sourceUrl` (never part of the public MediaFailures
+    // contract) lets the two reports collapse into the one real failure.
+    const sourceUrl = "https://graph.microsoft.com/v1.0/shares/shareid/driveItem/content";
     vi.mocked(downloadMSTeamsAttachments).mockImplementationOnce(async (params) => {
-      params.onFailure?.({ name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" });
+      params.onFailure?.(
+        { name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" },
+        sourceUrl,
+      );
       return [];
     });
     vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
-    vi.mocked(downloadMSTeamsGraphMedia).mockResolvedValue({
-      media: [],
-      failures: [{ name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" }],
+    vi.mocked(downloadMSTeamsGraphMedia).mockImplementationOnce(async (params) => {
+      const failure = {
+        name: "dragged.pdf",
+        contentType: undefined,
+        reason: "fetch_failed",
+      } as const;
+      params.onFailure?.(failure, sourceUrl);
+      return { media: [], failures: [failure] };
     });
 
     const result = await resolveMSTeamsInboundMedia({
@@ -551,10 +564,58 @@ describe("resolveMSTeamsInboundMedia failure reporting", () => {
     ]);
   });
 
+  it("never collapses two genuinely distinct same-named failures from different paths (PR review finding)", async () => {
+    // Two DIFFERENT SharePoint attachments can share a filename, content
+    // type, and failure reason (e.g. two separate "report.pdf" documents) —
+    // and so, in this case, two DIFFERENT sourceUrls. A name+contentType+
+    // reason dedup key would wrongly collapse these into one, telling the
+    // user fewer files failed than actually did — strictly worse than
+    // occasional over-counting. Both must survive untouched.
+    vi.mocked(downloadMSTeamsAttachments).mockImplementationOnce(async (params) => {
+      params.onFailure?.(
+        { name: "report.pdf", contentType: undefined, reason: "fetch_failed" },
+        "https://graph.microsoft.com/v1.0/shares/share-a/driveItem/content",
+      );
+      return [];
+    });
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
+    vi.mocked(downloadMSTeamsGraphMedia).mockImplementationOnce(async (params) => {
+      const failure = {
+        name: "report.pdf",
+        contentType: undefined,
+        reason: "fetch_failed",
+      } as const;
+      params.onFailure?.(
+        failure,
+        "https://graph.microsoft.com/v1.0/shares/share-b/driveItem/content",
+      );
+      return { media: [], failures: [failure] };
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "reference",
+          contentUrl: "https://tenant.sharepoint.com/site-a/report.pdf",
+          name: "report.pdf",
+        },
+        {
+          contentType: "text/html",
+          content: '<div><attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.failures).toEqual([
+      { name: "report.pdf", contentType: undefined, reason: "fetch_failed" },
+      { name: "report.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
+  });
+
   it("keeps two distinct unnamed failures from different paths (no name to collide on)", async () => {
-    // The dedup above is scoped to named failures only — two genuinely
-    // different unnamed failures (e.g. an oversized pasted image from each
-    // path) must not be collapsed just because they share a shape.
     vi.mocked(downloadMSTeamsAttachments).mockImplementationOnce(async (params) => {
       params.onFailure?.({ name: undefined, contentType: "image/png", reason: "too_large" });
       return [];

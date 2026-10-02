@@ -629,11 +629,14 @@ describe("msteams attachments", () => {
       // leave the agent with no signal at all, even though the proximate
       // cause here is operator allowlist policy rather than a true fetch
       // attempt (closest fit among the reasons this layer can distinguish).
-      expect(onFailure).toHaveBeenCalledWith({
-        name: undefined,
-        contentType: CONTENT_TYPE_IMAGE_PNG,
-        reason: "fetch_failed",
-      });
+      expect(onFailure).toHaveBeenCalledWith(
+        {
+          name: undefined,
+          contentType: CONTENT_TYPE_IMAGE_PNG,
+          reason: "fetch_failed",
+        },
+        TEST_URL_OUTSIDE_ALLOWLIST,
+      );
     });
 
     it("reports a failure when an inline image URL is blocked by the host allowlist", async () => {

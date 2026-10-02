@@ -217,8 +217,11 @@ export async function downloadMSTeamsAttachments(params: {
    * Invoked once per attachment download attempted and failed (e.g. a
    * SharePoint/OneDrive Graph shares fetch 401/403), so callers can surface
    * MediaFailures without changing this function's array return shape.
+   * `sourceUrl` (internal-only, never part of the public failure shape) lets
+   * a caller dedupe the SAME attachment reported by more than one download
+   * path without guessing identity from name/contentType alone.
    */
-  onFailure?: (failure: MSTeamsAttachmentFailure) => void;
+  onFailure?: (failure: MSTeamsAttachmentFailure, sourceUrl?: string) => void;
 }): Promise<MSTeamsInboundMedia[]> {
   const list = Array.isArray(params.attachments) ? params.attachments : [];
   if (list.length === 0) {
@@ -323,11 +326,14 @@ export async function downloadMSTeamsAttachments(params: {
   for (const candidate of candidates) {
     if (!isUrlAllowed(candidate.url, allowHosts)) {
       // See the matching comment in the inline-candidate loop above.
-      params.onFailure?.({
-        name: candidate.fileHint,
-        contentType: candidate.contentTypeHint,
-        reason: "fetch_failed",
-      });
+      params.onFailure?.(
+        {
+          name: candidate.fileHint,
+          contentType: candidate.contentTypeHint,
+          reason: "fetch_failed",
+        },
+        candidate.url,
+      );
       continue;
     }
     try {
@@ -359,11 +365,14 @@ export async function downloadMSTeamsAttachments(params: {
       params.logger?.warn?.(
         `msteams attachment download failed host=${safeHostForLog(candidate.url)} error=${msg}`,
       );
-      params.onFailure?.({
-        name: candidate.fileHint,
-        contentType: candidate.contentTypeHint,
-        reason: "fetch_failed",
-      });
+      params.onFailure?.(
+        {
+          name: candidate.fileHint,
+          contentType: candidate.contentTypeHint,
+          reason: "fetch_failed",
+        },
+        candidate.url,
+      );
     }
   }
   return out;

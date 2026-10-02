@@ -328,6 +328,13 @@ export async function downloadMSTeamsGraphMedia(params: {
   logger?: MSTeamsAttachmentDownloadLogger;
   /** Back-compat diagnostic logger used by older tests/callers. */
   log?: MSTeamsGraphMediaLogger;
+  /**
+   * Invoked once per download attempted and failed, alongside (not instead
+   * of) the `failures` field of the returned result — lets a caller dedupe
+   * the SAME attachment reported by more than one download path, keyed on
+   * an internal URL identity rather than guessing from name/contentType.
+   */
+  onFailure?: (failure: MSTeamsAttachmentFailure, sourceUrl?: string) => void;
 }): Promise<MSTeamsGraphMediaResult> {
   if (!params.messageUrl || !params.tokenProvider) {
     return { media: [], failures: [] };
@@ -418,15 +425,21 @@ export async function downloadMSTeamsGraphMedia(params: {
             continue;
           }
           attemptedReferenceUrls.add(shareUrl);
+          const sharesUrl = `${GRAPH_ROOT}/shares/${encodeGraphShareId(shareUrl)}/driveItem/content`;
 
           try {
-            const sharesUrl = `${GRAPH_ROOT}/shares/${encodeGraphShareId(shareUrl)}/driveItem/content`;
             if (!isUrlAllowed(sharesUrl, policy.allowHosts)) {
               debugLog?.debug?.("graph media sharepoint url not in allowHosts", {
                 messageUrl,
                 sharesUrl,
               });
-              failures.push({ name, contentType: undefined, reason: "fetch_failed" });
+              const failure: MSTeamsAttachmentFailure = {
+                name,
+                contentType: undefined,
+                reason: "fetch_failed",
+              };
+              failures.push(failure);
+              params.onFailure?.(failure, sharesUrl);
               continue;
             }
 
@@ -466,7 +479,13 @@ export async function downloadMSTeamsGraphMedia(params: {
               error: err instanceof Error ? err.message : String(err),
               name,
             });
-            failures.push({ name, contentType: undefined, reason: "fetch_failed" });
+            const failure: MSTeamsAttachmentFailure = {
+              name,
+              contentType: undefined,
+              reason: "fetch_failed",
+            };
+            failures.push(failure);
+            params.onFailure?.(failure, sharesUrl);
           }
         }
       } else {
@@ -529,7 +548,10 @@ export async function downloadMSTeamsGraphMedia(params: {
       resolveFn: params.resolveFn,
       preserveFilenames: params.preserveFilenames,
       logger: params.logger,
-      onFailure: (failure) => failures.push(failure),
+      onFailure: (failure, sourceUrl) => {
+        failures.push(failure);
+        params.onFailure?.(failure, sourceUrl);
+      },
     });
   } catch (err) {
     params.logger?.warn?.("msteams graph attachment download failed", {
