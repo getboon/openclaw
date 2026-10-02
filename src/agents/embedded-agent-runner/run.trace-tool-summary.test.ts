@@ -3,7 +3,11 @@
 // boon's monolithic run.ts (buildTraceToolSummary lives here) and boon's
 // per-call `errored` flag (vs upstream `isError`) + `hadFailure` param name.
 import { describe, expect, it } from "vitest";
-import { buildTraceToolSummary } from "./run.js";
+import {
+  buildTraceToolSummary,
+  collectDelegatedToolInvocationsFromInternalEvents,
+  mergeDelegatedToolEvidenceIntoSummary,
+} from "./run.js";
 
 describe("buildTraceToolSummary", () => {
   it("keeps visible tools and per-invocation outcomes without arguments or results", () => {
@@ -194,5 +198,189 @@ describe("buildTraceToolSummary", () => {
         hadFailure: true,
       }),
     ).not.toHaveProperty("unrecoveredFailures");
+  });
+});
+
+describe("collectDelegatedToolInvocationsFromInternalEvents", () => {
+  it("returns empty when internalEvents is undefined", () => {
+    expect(collectDelegatedToolInvocationsFromInternalEvents(undefined)).toEqual({
+      invocations: [],
+      visibleTools: [],
+    });
+  });
+
+  it("returns empty when no event is a task_completion with childToolEvidence", () => {
+    expect(
+      collectDelegatedToolInvocationsFromInternalEvents([
+        {
+          type: "task_completion",
+          source: "subagent",
+          childSessionKey: "c1",
+          announceType: "subagent task",
+          taskLabel: "t",
+          status: "ok",
+          statusLabel: "completed",
+          result: "done",
+          replyInstruction: "review",
+        },
+      ]),
+    ).toEqual({ invocations: [], visibleTools: [] });
+  });
+
+  it("flattens childToolEvidence across events and tags each invocation viaSubagent", () => {
+    const result = collectDelegatedToolInvocationsFromInternalEvents([
+      {
+        type: "task_completion",
+        source: "subagent",
+        childSessionKey: "c1",
+        announceType: "subagent task",
+        taskLabel: "t",
+        status: "ok",
+        statusLabel: "completed",
+        result: "done",
+        replyInstruction: "review",
+        childToolEvidence: [
+          {
+            childSessionKey: "c1",
+            toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+            visibleTools: ["takeoff_dispatch"],
+          },
+          {
+            childSessionKey: "c2",
+            toolInvocations: [{ name: "takeoff_status_poll", status: "ok" }],
+            visibleTools: ["takeoff_status_poll"],
+          },
+        ],
+      },
+    ]);
+    expect(result.invocations).toEqual([
+      { name: "takeoff_dispatch", status: "ok", viaSubagent: true },
+      { name: "takeoff_status_poll", status: "ok", viaSubagent: true },
+    ]);
+    expect(result.visibleTools.toSorted()).toEqual(["takeoff_dispatch", "takeoff_status_poll"]);
+  });
+});
+
+describe("buildTraceToolSummary + delegated merge (integration shape)", () => {
+  it("merging delegated invocations into an existing summary preserves direct invocations untagged", () => {
+    const direct = buildTraceToolSummary({
+      visibleToolNames: ["message"],
+      toolMetas: [{ toolName: "message", errored: false }],
+      hadFailure: false,
+    });
+    const delegated = collectDelegatedToolInvocationsFromInternalEvents([
+      {
+        type: "task_completion",
+        source: "subagent",
+        childSessionKey: "c1",
+        announceType: "subagent task",
+        taskLabel: "t",
+        status: "ok",
+        statusLabel: "completed",
+        result: "done",
+        replyInstruction: "review",
+        childToolEvidence: [
+          {
+            childSessionKey: "c1",
+            toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+            visibleTools: ["takeoff_dispatch"],
+          },
+        ],
+      },
+    ]);
+    const merged = mergeDelegatedToolEvidenceIntoSummary(direct, delegated);
+    expect(merged?.invocations).toEqual([
+      { name: "message", status: "ok" },
+      { name: "takeoff_dispatch", status: "ok", viaSubagent: true },
+    ]);
+  });
+
+  it("keeps calls and tools consistent with the merged invocations array", () => {
+    const direct = buildTraceToolSummary({
+      visibleToolNames: ["message"],
+      toolMetas: [{ toolName: "message", errored: false }],
+      hadFailure: false,
+    });
+    const delegated = collectDelegatedToolInvocationsFromInternalEvents([
+      {
+        type: "task_completion",
+        source: "subagent",
+        childSessionKey: "c1",
+        announceType: "subagent task",
+        taskLabel: "t",
+        status: "ok",
+        statusLabel: "completed",
+        result: "done",
+        replyInstruction: "review",
+        childToolEvidence: [
+          {
+            childSessionKey: "c1",
+            toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+            visibleTools: ["takeoff_dispatch"],
+          },
+        ],
+      },
+    ]);
+    const merged = mergeDelegatedToolEvidenceIntoSummary(direct, delegated);
+    expect(merged?.calls).toBe(2);
+    expect(merged?.tools).toEqual(["message", "takeoff_dispatch"]);
+    expect(merged?.calls).toBe(merged?.invocations?.length);
+  });
+
+  it("is a true no-op (identical reference) when there is nothing delegated to merge", () => {
+    const direct = buildTraceToolSummary({
+      visibleToolNames: ["message"],
+      toolMetas: [{ toolName: "message", errored: false }],
+      hadFailure: false,
+    });
+    const merged = mergeDelegatedToolEvidenceIntoSummary(direct, {
+      invocations: [],
+      visibleTools: [],
+    });
+    expect(merged).toBe(direct);
+  });
+
+  it("produces a valid, fully-delegated summary when the resumed parent's own attempt made no tool calls at all", () => {
+    // The headline ENG-19951 case: a resumed parent attempt whose own
+    // buildTraceToolSummary returns undefined (no visible tools, no direct
+    // invocations -- exactly the reported "message-only trace" failure
+    // mode) must still produce a non-empty, viaSubagent-tagged summary once
+    // delegated evidence exists.
+    const direct = buildTraceToolSummary({
+      visibleToolNames: [],
+      toolMetas: [],
+      hadFailure: false,
+    });
+    expect(direct).toBeUndefined();
+
+    const delegated = collectDelegatedToolInvocationsFromInternalEvents([
+      {
+        type: "task_completion",
+        source: "subagent",
+        childSessionKey: "c1",
+        announceType: "subagent task",
+        taskLabel: "t",
+        status: "ok",
+        statusLabel: "completed",
+        result: "done",
+        replyInstruction: "review",
+        childToolEvidence: [
+          {
+            childSessionKey: "c1",
+            toolInvocations: [{ name: "takeoff_dispatch", status: "ok" }],
+            visibleTools: ["takeoff_dispatch"],
+          },
+        ],
+      },
+    ]);
+    const merged = mergeDelegatedToolEvidenceIntoSummary(direct, delegated);
+
+    expect(merged).not.toBeUndefined();
+    expect(merged?.calls).toBe(1);
+    expect(merged?.tools).toEqual(["takeoff_dispatch"]);
+    expect(merged?.visibleTools).toEqual(["takeoff_dispatch"]);
+    expect(merged?.invocations).toEqual([
+      { name: "takeoff_dispatch", status: "ok", viaSubagent: true },
+    ]);
   });
 });

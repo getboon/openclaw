@@ -3,6 +3,7 @@
  *
  * Owns registration, lifecycle, delivery retry, steering, orphan recovery, persistence, and cleanup for child runs.
  */
+import type { AgentDecisionTrace } from "../auto-reply/reply-payload.js";
 import type { cleanupBrowserSessionsForLifecycleEnd } from "../browser-lifecycle-cleanup.js";
 import { getRuntimeConfig } from "../config/config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -1310,6 +1311,41 @@ export const testing = {
 
 export function addSubagentRunForTests(entry: SubagentRunRecord) {
   subagentRuns.set(entry.runId, entry);
+}
+
+/**
+ * Records a subagent's own already-computed audit trace onto its registry
+ * row. Called from agent-runner.ts at the exact point that
+ * trace is computed for the child's own reply — independent of, and
+ * earlier than, the later text-only completion freeze. Looks up the live
+ * map directly, not via getSubagentRunsSnapshotForRead (which may return a
+ * structuredClone'd snapshot outside test mode, so writing through it
+ * would silently not persist). No-ops if no row matches — an orphaned or
+ * already-cleaned-up child simply has nothing left to record onto.
+ */
+export function recordSubagentReplyAuditTrace(
+  childSessionKey: string,
+  runId: string,
+  auditTrace: AgentDecisionTrace,
+): void {
+  const key = childSessionKey.trim();
+  if (!key) {
+    return;
+  }
+  // Match on BOTH childSessionKey and runId -- a persistent session can have
+  // a newer run already registered under the same key before an older run's
+  // reply finishes computing its trace. Resolving by "latest createdAt for
+  // this key" alone would write the older run's trace onto the newer run's
+  // row (misattribution), which then gets silently clobbered the moment the
+  // newer run completes and records its own trace. Every read site already
+  // guards on runId (see subagent-announce.ts's ownRegistryRun check); the
+  // write must use the same identity, not a weaker one.
+  const entry = subagentRuns.get(runId);
+  if (!entry || entry.childSessionKey !== key) {
+    return;
+  }
+  ensureCompletionState(entry).resultAuditTrace = auditTrace;
+  persistSubagentRuns();
 }
 
 export function releaseSubagentRun(runId: string) {
