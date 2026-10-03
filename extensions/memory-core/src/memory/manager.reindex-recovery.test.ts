@@ -213,6 +213,84 @@ describe("memory manager reindex recovery", () => {
     }
   });
 
+  it("refuses a full reindex while an unreclaimed shadow database exists", async () => {
+    // One-shadow circuit breaker. Starting a rebuild on top of an existing shadow
+    // stacks a second full-size scratch DB -- on a host with a multi-GB agent DB
+    // that is ~10 GB each, and two of them exhausted a production volume.
+    const memoryManager = await openManager(createCfg({ provider: "none", sources: ["memory"] }));
+    const harness = memoryManager as unknown as ReindexHarness;
+    const databasePath = resolveOpenClawAgentSqlitePath({ agentId: "main" });
+
+    // A shadow too young for the GC floor, so it survives cleanup and must trip
+    // the breaker rather than being silently stacked on.
+    const shadow = `${databasePath}.memory-reindex-77777777-8888-9999-aaaa-bbbbccccdddd`;
+    await fs.writeFile(shadow, "unreclaimed");
+
+    let syncCalled = false;
+    harness.syncMemoryFiles = async () => {
+      syncCalled = true;
+      return { indexItems: [], finalize: () => undefined };
+    };
+
+    // Declines rather than throwing: a degraded index beats a full disk.
+    await expect(
+      harness.runInPlaceReindex({ reason: "test", force: true }),
+    ).resolves.toBeUndefined();
+
+    expect(syncCalled).toBe(false);
+    // `dirty` alone would let the next sync do an INCREMENTAL memory pass, so the
+    // full rebuild this guard deferred would never happen. Assert the full-retry
+    // flag, which is the state that actually forces the rebuild to be re-attempted.
+    expect(harness.dirty).toBe(true);
+    expect(harness.memoryFullRetryDirty).toBe(true);
+    // the pre-existing shadow is left alone for the GC, not deleted mid-decision
+    await expect(fs.access(shadow)).resolves.toBeUndefined();
+  });
+
+  it("refuses a full reindex when free space is below the budget", async () => {
+    const memoryManager = await openManager(createCfg({ provider: "none", sources: ["memory"] }));
+    const harness = memoryManager as unknown as ReindexHarness;
+
+    let syncCalled = false;
+    harness.syncMemoryFiles = async () => {
+      syncCalled = true;
+      return { indexItems: [], finalize: () => undefined };
+    };
+
+    // An absurd reserve makes any real volume fail the preflight.
+    vi.stubEnv("OPENCLAW_MEMORY_REINDEX_SPACE_RESERVE_BYTES", String(2 ** 53));
+    await expect(
+      harness.runInPlaceReindex({ reason: "test", force: true }),
+    ).resolves.toBeUndefined();
+
+    expect(syncCalled).toBe(false);
+    expect(harness.dirty).toBe(true);
+    expect(harness.memoryFullRetryDirty).toBe(true);
+  });
+
+  it("a declining guard requests a FULL session retry, not just a dirty flag", async () => {
+    // Both guards decline via markFailedFullReindexRetry, matching the failure path.
+    // Without the sessions half, a declined reindex on a sessions-sourced agent
+    // would skip session indexing entirely on the next pass rather than rebuilding.
+    const memoryManager = await openManager(
+      createCfg({ provider: "none", sources: ["memory", "sessions"] }),
+    );
+    const harness = memoryManager as unknown as ReindexHarness & {
+      markFailedFullReindexRetry: (p: { memory: boolean; sessions: boolean }) => void;
+    };
+    harness.dirty = false;
+    harness.memoryFullRetryDirty = false;
+    harness.sessionsDirty = false;
+    harness.sessionsFullRetryDirty = false;
+
+    harness.markFailedFullReindexRetry({ memory: true, sessions: true });
+
+    expect(harness.dirty).toBe(true);
+    expect(harness.memoryFullRetryDirty).toBe(true);
+    expect(harness.sessionsDirty).toBe(true);
+    expect(harness.sessionsFullRetryDirty).toBe(true);
+  });
+
   it("forces source-wide session sync when retrying a failed full reindex", async () => {
     const memoryManager = await openManager(
       createCfg({
