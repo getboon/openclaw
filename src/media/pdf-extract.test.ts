@@ -63,6 +63,22 @@ describe("extractPdfContent", () => {
     });
   });
 
+  it("passes the OCR page image opt-in through to document extractors", async () => {
+    extractDocumentContentMock.mockResolvedValue({ text: "pdf", images: [], extractor: "pdf" });
+
+    await extractPdfContent({
+      buffer: Buffer.from("%PDF-1.4"),
+      maxPages: 2,
+      maxPixels: 100,
+      minTextChars: 10,
+      ocrPageImages: true,
+    });
+
+    expect(extractDocumentContentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ ocrPageImages: true }),
+    );
+  });
+
   it("passes PDF passwords through to document extractors", async () => {
     extractDocumentContentMock.mockResolvedValue({
       text: "encrypted pdf",

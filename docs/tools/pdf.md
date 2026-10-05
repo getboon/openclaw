@@ -73,7 +73,10 @@ Input notes:
 
 - `pdf` and `pdfs` are merged and deduplicated before loading.
 - If no PDF input is provided, the tool errors.
-- `pages` is parsed as 1-based page numbers, deduped, sorted, and clamped to the configured max pages.
+- `pages` is parsed as 1-based page numbers, deduped, and sorted. Any page number can be requested.
+  One call reads at most `agents.defaults.pdfMaxPages` pages; the result names the pages left
+  unread and the `pages` value for the next call. Requested pages past the document end are
+  reported, and the tool errors when no requested page exists.
 - `password` applies to every PDF in the request and is only used by extraction fallback mode.
 - `maxBytesMb` defaults to `agents.defaults.pdfMaxBytesMb` or `10`.
 
@@ -118,7 +121,7 @@ Fallback mode is used for non-native providers.
 
 Flow:
 
-1. Select pages up to `agents.defaults.pdfMaxPages` (default `20`).
+1. Select the requested pages, or the first pages, up to `agents.defaults.pdfMaxPages` pages (default `20`).
 2. Extract them in bounded 10-page batches, preserving the document page count,
    processed page numbers, text limits, and truncation reasons.
 3. If extracted text length is below `200` chars, render the batch to PNG images and include them.
@@ -132,6 +135,11 @@ Fallback details:
   a partial-read warning, `details.status` is `partial`, and the model is
   instructed not to make document-wide absence claims.
 - Page image extraction uses a pixel budget of `4,000,000`.
+- Scanned pages are detected by their invisible OCR text layer and labelled as such,
+  because their text may contain OCR errors. Their page images are attached within the
+  same pixel budget per batch, and the model is told to prefer the page image. Renders
+  smaller than 1000 px on the longest side are dropped. When an OCR page gets no image,
+  the model is told not to make absence claims for it.
 - Encrypted PDFs can be opened with the top-level `password` parameter.
 - If the target model does not support image input and there is no extractable text, the tool errors.
 - If text extraction succeeds but image extraction would require vision on a
@@ -171,7 +179,8 @@ Common `details` fields:
 - `attempts`: fallback attempts that failed before success
 - `status`: `ok` or `partial` when extraction coverage is available
 - `coverage[]`: per-document page count, requested/processed pages, text
-  character and byte counts, completion flag, and truncation reasons
+  character and byte counts, completion flag, and truncation reasons, plus
+  `skippedByLimit`, `pagesBeyondDocument`, `ocrPages`, and `ocrImagePages` when present
 
 Path fields:
 

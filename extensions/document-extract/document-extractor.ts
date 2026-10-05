@@ -8,9 +8,13 @@ import type {
   DocumentExtractionTruncationReason,
   DocumentExtractorPlugin,
 } from "openclaw/plugin-sdk/document-extractor";
+import { classifyOcrPages } from "./ocr-pages.js";
 
 const MAX_EXTRACTED_TEXT_CHARS = 200_000;
 const MAX_RENDER_DIMENSION = 10_000;
+// clawpdf spends the leftover pixel budget on later pages, so they can come back as
+// unreadable thumbnails; those must not count as attached page images.
+const MIN_OCR_IMAGE_LONGEST_SIDE = 1000;
 
 let pdfEnginePromise: Promise<PdfEngine> | null = null;
 
@@ -34,6 +38,40 @@ function toDocumentImage(image: PdfImage): DocumentExtractedImage {
     data: Buffer.from(image.bytes).toString("base64"),
     mimeType: image.mimeType,
   };
+}
+
+function renderImageOptions(maxPixels: number) {
+  return { maxDimension: MAX_RENDER_DIMENSION, maxPixels, forms: true };
+}
+
+async function extractOcrPageImages(params: {
+  pdf: PdfDocument;
+  engine: PdfEngine;
+  pages: number[];
+  maxPixels: number;
+}): Promise<
+  Pick<DocumentExtractionCoverage, "ocrPages" | "ocrImagePages"> & { images: PdfImage[] }
+> {
+  const ocrPages = classifyOcrPages(params.pdf, params.engine, params.pages);
+  if (!ocrPages?.length) {
+    return { images: [] };
+  }
+  // OCR page images are a best-effort extra on top of complete text; a render failure
+  // or budget cut leaves the pages labelled as OCR without marking coverage partial.
+  try {
+    const rendered = await params.pdf.extract({
+      mode: "images",
+      pages: ocrPages,
+      image: renderImageOptions(params.maxPixels),
+    });
+    const images = rendered.images.filter(
+      (image) => Math.max(image.width, image.height) >= MIN_OCR_IMAGE_LONGEST_SIDE,
+    );
+    const ocrImagePages = images.map((image) => image.page);
+    return { ocrPages, images, ...(ocrImagePages.length > 0 ? { ocrImagePages } : {}) };
+  } catch {
+    return { ocrPages, images: [] };
+  }
 }
 
 function isPdfPasswordError(err: unknown): boolean {
@@ -128,6 +166,18 @@ async function extractPdfContent(
           .slice(0, request.maxPages)
       : undefined;
     const requestedPages = pages ?? pageRange(Math.min(pdf.pageCount, request.maxPages));
+    if (pages?.length === 0) {
+      return {
+        text: "",
+        images: [],
+        coverage: buildCoverage({
+          documentPageCount: pdf.pageCount,
+          requestedPages: [],
+          pagesProcessed: [],
+          text: "",
+        }),
+      };
+    }
     const pageSelection = pages ? { pages } : { maxPages: request.maxPages };
 
     const textResult = await pdf.extract({
@@ -139,16 +189,27 @@ async function extractPdfContent(
     const textPages = normalizedProcessedPages(textResult, requestedPages);
 
     if (text.trim().length >= request.minTextChars) {
+      const { images, ...ocrCoverage } = request.ocrPageImages
+        ? await extractOcrPageImages({
+            pdf,
+            engine,
+            pages: requestedPages,
+            maxPixels: request.maxPixels,
+          })
+        : { images: [] };
       return {
         text,
-        images: [],
-        coverage: buildCoverage({
-          documentPageCount: pdf.pageCount,
-          requestedPages,
-          pagesProcessed: textPages,
-          text,
-          textTruncated: textResult.truncated?.text,
-        }),
+        images: images.map(toDocumentImage),
+        coverage: {
+          ...buildCoverage({
+            documentPageCount: pdf.pageCount,
+            requestedPages,
+            pagesProcessed: textPages,
+            text,
+            textTruncated: textResult.truncated?.text,
+          }),
+          ...ocrCoverage,
+        },
       };
     }
 
@@ -156,11 +217,7 @@ async function extractPdfContent(
       const imageResult = await pdf.extract({
         mode: "images",
         ...pageSelection,
-        image: {
-          maxDimension: MAX_RENDER_DIMENSION,
-          maxPixels: request.maxPixels,
-          forms: true,
-        },
+        image: renderImageOptions(request.maxPixels),
       });
       const imagePages = normalizedProcessedPages(imageResult, requestedPages);
       return {

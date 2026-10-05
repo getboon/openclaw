@@ -158,6 +158,54 @@ async function stubPdfToolInfra(
   return { loadSpy };
 }
 
+function pageList(start: number, end: number): number[] {
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+}
+
+// Mirrors the document-extract plugin: out-of-range pages are filtered, and a
+// selection with no in-range page returns empty coverage instead of throwing.
+function mockPagedExtraction(documentPageCountFor: (buffer: Buffer) => number) {
+  return vi
+    .spyOn(pdfExtractModule, "extractPdfContent")
+    .mockImplementation(async ({ buffer, pageNumbers, maxPages }) => {
+      const documentPageCount = documentPageCountFor(buffer);
+      const requestedPages = (pageNumbers ?? pageList(1, maxPages))
+        .filter((page) => page <= documentPageCount)
+        .slice(0, maxPages);
+      return {
+        text: requestedPages.length
+          ? `Sheets ${requestedPages.at(0)}-${requestedPages.at(-1)}`
+          : "",
+        images: [],
+        coverage: {
+          documentPageCount,
+          requestedPages,
+          pagesProcessed: requestedPages,
+          complete: requestedPages.length === documentPageCount,
+          textChars: 20,
+          textBytes: 20,
+          maxTextChars: 200_000,
+          truncationReasons: requestedPages.length === documentPageCount ? [] : ["page_limit"],
+        },
+      };
+    });
+}
+
+function pagedPdfConfig(pdfMaxPages: number): OpenClawConfig {
+  return {
+    agents: {
+      defaults: {
+        pdfModel: { primary: OPENAI_PDF_MODEL, fallbacks: ["openai/gpt-5.5"] },
+        pdfMaxPages,
+      },
+    },
+  } as OpenClawConfig;
+}
+
+function resultText(result: { content: Array<{ type: string; text?: string }> }): string {
+  return result.content.map((entry) => entry.text ?? "").join("\n");
+}
+
 async function withManagedInboundPdf(
   run: (params: { stateDir: string; mediaId: string; mediaPath: string }) => Promise<void>,
 ) {
@@ -644,6 +692,7 @@ describe("createPdfTool", () => {
   it("rejects pages parameter for native PDF providers", async () => {
     await withTempPdfAgentDir(async (agentDir) => {
       await stubPdfToolInfra(agentDir, { provider: "anthropic", input: ["text", "document"] });
+      mockPagedExtraction(() => 2);
       const cfg = withPdfModel(ANTHROPIC_PDF_MODEL);
       const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
 
@@ -1304,6 +1353,320 @@ describe("createPdfTool", () => {
       });
       expect(completeMock).toHaveBeenCalledTimes(1);
       expect(firstCompletionContext()?.systemPrompt).toContain("Analyze the provided PDF content");
+    });
+  });
+
+  describe("page selection", () => {
+    async function setupPagedTool(
+      agentDir: string,
+      documentPageCountFor: (buffer: Buffer) => number,
+    ) {
+      await stubPdfToolInfra(agentDir, {
+        provider: "openai",
+        api: "openai-responses",
+        input: ["text"],
+      });
+      const extractSpy = mockPagedExtraction(documentPageCountFor);
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "Sheets reviewed." }],
+      } as never);
+      const tool = requirePdfTool(
+        (await loadCreatePdfTool())({ config: pagedPdfConfig(120), agentDir }),
+      );
+      return { extractSpy, tool };
+    }
+
+    it("reads page numbers above pdfMaxPages", async () => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        const { extractSpy, tool } = await setupPagedTool(agentDir, () => 300);
+
+        const result = await tool.execute("t1", {
+          prompt: "List sheets.",
+          pdf: "/tmp/doc.pdf",
+          pages: "200-210",
+        });
+
+        expect(extractSpy.mock.calls.map(([args]) => args.pageNumbers)).toEqual([
+          pageList(200, 209),
+          [210],
+        ]);
+        expect(completeMock).toHaveBeenCalledTimes(3);
+        expect(JSON.stringify(completeMock.mock.calls[0]?.[1])).toContain("Sheets 200-209");
+        const text = resultText(result);
+        expect(text).toContain("processed pages 200-210 of 300.");
+        expect(text).not.toContain("Per-call page limit");
+        expect(text).not.toContain("do not exist");
+      });
+    });
+
+    it("reads at most pdfMaxPages pages and names the skipped range", async () => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        const { extractSpy, tool } = await setupPagedTool(agentDir, () => 922);
+
+        const result = await tool.execute("t1", {
+          prompt: "List sheets.",
+          pdf: "/tmp/doc.pdf",
+          pages: "121-280",
+        });
+
+        expect(extractSpy.mock.calls.map(([args]) => args.pageNumbers)).toEqual(
+          Array.from({ length: 12 }, (_, index) => pageList(121 + index * 10, 130 + index * 10)),
+        );
+        const text = resultText(result);
+        expect(text).toContain(
+          'Per-call page limit is 120; requested pages 241-280 of doc.pdf were not read. Call pdf again with pages="241-280" to read them.',
+        );
+        expect(JSON.stringify(completeMock.mock.calls.at(-1)?.[1])).toContain(
+          "Per-call page limit is 120",
+        );
+        expectFields(result.details, {
+          status: "partial",
+          coverage: [
+            expect.objectContaining({
+              requestedPages: pageList(121, 240),
+              pagesProcessed: pageList(121, 240),
+              skippedByLimit: pageList(241, 280),
+            }),
+          ],
+        });
+      });
+    });
+
+    it("clips requested pages past the document end", async () => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        const { extractSpy, tool } = await setupPagedTool(agentDir, () => 922);
+
+        const result = await tool.execute("t1", {
+          prompt: "List sheets.",
+          pdf: "/tmp/doc.pdf",
+          pages: "915-930",
+        });
+
+        expect(extractSpy.mock.calls.map(([args]) => args.pageNumbers)).toEqual([
+          pageList(915, 924),
+        ]);
+        expect(completeMock).toHaveBeenCalledTimes(1);
+        expect(JSON.stringify(completeMock.mock.calls[0]?.[1])).toContain("Sheets 915-922");
+        const text = resultText(result);
+        expect(text).toContain("processed pages 915-922 of 922.");
+        expect(text).toContain("Requested pages 923-930 do not exist in doc.pdf (922 pages).");
+        expectFields(result.details, {
+          coverage: [
+            expect.objectContaining({
+              requestedPages: pageList(915, 922),
+              pagesProcessed: pageList(915, 922),
+              pagesBeyondDocument: pageList(923, 930),
+            }),
+          ],
+        });
+      });
+    });
+
+    it("fails once without a model call when no requested page exists", async () => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        const { extractSpy, tool } = await setupPagedTool(agentDir, () => 922);
+
+        await expect(
+          tool.execute("t1", { prompt: "List sheets.", pdf: "/tmp/doc.pdf", pages: "950-960" }),
+        ).rejects.toThrow(
+          "No requested PDF pages exist: doc.pdf has 922 pages (requested 950-960).",
+        );
+        expect(extractSpy).toHaveBeenCalledTimes(1);
+        expect(completeMock).not.toHaveBeenCalled();
+      });
+    });
+
+    it("keeps the extraction failure cause in the tool error", async () => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        const { extractSpy, tool } = await setupPagedTool(agentDir, () => 10);
+        extractSpy.mockRejectedValue(
+          new Error("Document extraction failed for application/pdf", {
+            cause: new Error("PDF requires a password or password is incorrect."),
+          }),
+        );
+
+        await expect(
+          tool.execute("t1", { prompt: "List sheets.", pdf: "/tmp/doc.pdf", pages: "1-5" }),
+        ).rejects.toThrow("PDF requires a password or password is incorrect.");
+        expect(completeMock).not.toHaveBeenCalled();
+      });
+    });
+
+    it("notes a short PDF without failing the other PDFs", async () => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        const shortPdf = Buffer.from("%PDF-1.4 short");
+        const longPdf = Buffer.from("%PDF-1.4 long");
+        const { extractSpy, tool } = await setupPagedTool(agentDir, (buffer) =>
+          buffer === shortPdf ? 50 : 200,
+        );
+        vi.mocked(webMedia.loadWebMediaRaw).mockImplementation(async (mediaPath) => ({
+          ...FAKE_PDF_MEDIA,
+          buffer: mediaPath.includes("short") ? shortPdf : longPdf,
+          fileName: mediaPath.includes("short") ? "short.pdf" : "long.pdf",
+        }));
+
+        const result = await tool.execute("t1", {
+          prompt: "List sheets.",
+          pdfs: ["/tmp/short.pdf", "/tmp/long.pdf"],
+          pages: "100-150",
+        });
+
+        expect(extractSpy.mock.calls.map(([args]) => args.pageNumbers)).toEqual([
+          pageList(100, 109),
+          ...Array.from({ length: 5 }, (_, index) => pageList(100 + index * 10, 109 + index * 10)),
+          [150],
+        ]);
+        expect(completeMock).toHaveBeenCalledTimes(7);
+        const text = resultText(result);
+        expect(text).toContain("Requested pages 100-150 do not exist in short.pdf (50 pages).");
+        expect(text).toContain("processed pages 100-150 of 200.");
+        expect(text).not.toContain("pages none of");
+        const synthesis = JSON.stringify(completeMock.mock.calls.at(-1)?.[1]);
+        expect(synthesis).toContain(
+          "Requested pages 100-150 do not exist in short.pdf (50 pages).",
+        );
+        expect(synthesis).not.toContain("pages none of");
+      });
+    });
+
+    it("keeps reading the first pdfMaxPages pages when pages is omitted", async () => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        const { extractSpy, tool } = await setupPagedTool(agentDir, () => 300);
+
+        const result = await tool.execute("t1", { prompt: "List sheets.", pdf: "/tmp/doc.pdf" });
+
+        expect(extractSpy.mock.calls.map(([args]) => args.pageNumbers)).toEqual(
+          Array.from({ length: 12 }, (_, index) => pageList(1 + index * 10, 10 + index * 10)),
+        );
+        const text = resultText(result);
+        expect(text).toContain(
+          "Partial PDF read: processed pages 1-120 of 300. Do not infer that omitted sheets or terms are absent.",
+        );
+        expect(text).not.toContain("Per-call page limit");
+      });
+    });
+  });
+
+  describe("OCR-layer pages", () => {
+    async function runOcrRead(
+      agentDir: string,
+      ocrCoverage: { ocrPages?: number[]; ocrImagePages?: number[] },
+      documentPageCount = 3,
+    ) {
+      await stubPdfToolInfra(agentDir, {
+        provider: "openai",
+        api: "openai-responses",
+        input: ["text", "image"],
+      });
+      const extractSpy = vi
+        .spyOn(pdfExtractModule, "extractPdfContent")
+        .mockImplementation(async ({ pageNumbers }) => {
+          const requestedPages = (pageNumbers ?? []).filter((page) => page <= documentPageCount);
+          return {
+            text: "3. 3. 3. M1OÏ2ÂD3 noisy layer text",
+            images: (ocrCoverage.ocrImagePages ?? []).map(() => ({
+              type: "image" as const,
+              data: "cG5n",
+              mimeType: "image/png",
+            })),
+            coverage: {
+              documentPageCount,
+              requestedPages,
+              pagesProcessed: requestedPages,
+              complete: requestedPages.length === documentPageCount,
+              textChars: 30,
+              textBytes: 30,
+              maxTextChars: 200_000,
+              truncationReasons: requestedPages.length === documentPageCount ? [] : ["page_limit"],
+              ...ocrCoverage,
+            },
+          };
+        });
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "Sheets reviewed." }],
+      } as never);
+      const tool = requirePdfTool(
+        (await loadCreatePdfTool())({ config: pagedPdfConfig(120), agentDir }),
+      );
+      const result = await tool.execute("t1", { prompt: "List sheets.", pdf: "/tmp/doc.pdf" });
+      return { extractSpy, result, context: JSON.stringify(completeMock.mock.calls[0]?.[1]) };
+    }
+
+    it("asks the extractor for OCR page images", async () => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        const { extractSpy } = await runOcrRead(agentDir, {});
+        expect(extractSpy).toHaveBeenCalledWith(expect.objectContaining({ ocrPageImages: true }));
+      });
+    });
+
+    it("labels OCR pages in the chunk and the coverage lines", async () => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        const { result, context } = await runOcrRead(agentDir, {
+          ocrPages: [2],
+          ocrImagePages: [2],
+        });
+
+        expect(context).toContain(
+          "[Page 2 is a scanned image with an OCR text layer. Its text may contain OCR errors; prefer the page image when one is attached. Page images are attached for pages 2.]",
+        );
+        expect(context).toContain(
+          "Page 2 of doc.pdf is scanned with an OCR text layer; its text may contain OCR errors.",
+        );
+        expect(context).not.toContain("must not claim");
+        const text = resultText(result);
+        expect(text).toContain("PDF coverage: processed pages 1-3 of 3.");
+        expect(text).toContain(
+          "Page 2 of doc.pdf is scanned with an OCR text layer; its text may contain OCR errors.",
+        );
+        expectFields(result.details, {
+          status: "ok",
+          coverage: [expect.objectContaining({ ocrPages: [2], ocrImagePages: [2] })],
+        });
+      });
+    });
+
+    it("forbids absence claims when an OCR page has no image", async () => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        const { result, context } = await runOcrRead(agentDir, { ocrPages: [2, 3] });
+
+        expect(context).toContain(
+          "[Pages 2-3 are scanned images with an OCR text layer. Their text may contain OCR errors; prefer the page image when one is attached. No page images fit for these pages; say their content could not be read reliably.]",
+        );
+        expect(context).toContain(
+          "Pages 2-3 of doc.pdf are scanned with an OCR text layer; their text may contain OCR errors.",
+        );
+        expect(context).toContain("Coverage is complete across the requested documents.");
+        expect(context).toContain(
+          "You must not claim that a sheet, discipline, term, or item is absent from the document; state that pages 2-3 of doc.pdf were not reliably read.",
+        );
+        expect(resultText(result)).toContain(
+          "You must not claim that a sheet, discipline, term, or item is absent from the document; state that pages 2-3 of doc.pdf were not reliably read.",
+        );
+      });
+    });
+
+    it("adds no OCR lines without OCR pages", async () => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        const { result, context } = await runOcrRead(agentDir, { ocrPages: [] });
+
+        expect(context).not.toContain("OCR");
+        expect(resultText(result)).not.toContain("OCR");
+      });
+    });
+
+    it("does not repeat the OCR chunk note on chunk summaries", async () => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        await runOcrRead(agentDir, { ocrPages: [2], ocrImagePages: [2] }, 20);
+
+        expect(completeMock).toHaveBeenCalledTimes(3);
+        const synthesis = JSON.stringify(completeMock.mock.calls[2]?.[1]);
+        expect(synthesis).not.toContain("is a scanned image with an OCR text layer");
+        expect(synthesis).toContain("Page 2 of doc.pdf is scanned with an OCR text layer");
+      });
     });
   });
 

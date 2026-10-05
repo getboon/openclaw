@@ -54,6 +54,31 @@ describe("extractDocumentContent", () => {
     });
   });
 
+  it("passes the OCR page image opt-in to plugins", async () => {
+    const extract = vi.fn().mockResolvedValue({ text: "pdf text", images: [] });
+    resolvePluginDocumentExtractorsMock.mockReturnValue([
+      {
+        id: "pdf",
+        pluginId: "document-extract",
+        label: "PDF",
+        mimeTypes: ["application/pdf"],
+        extract,
+      },
+    ]);
+
+    await extractDocumentContent({
+      buffer: Buffer.from("pdf"),
+      mimeType: "application/pdf",
+      maxPages: 1,
+      maxPixels: 100,
+      minTextChars: 10,
+      ocrPageImages: true,
+      config: {},
+    });
+
+    expect(extract).toHaveBeenCalledWith(expect.objectContaining({ ocrPageImages: true }));
+  });
+
   it("surfaces matching extractor failures instead of reporting disablement", async () => {
     const cause = new Error("password required");
     resolvePluginDocumentExtractorsMock.mockReturnValue([

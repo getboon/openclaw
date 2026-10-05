@@ -45,25 +45,58 @@ import {
 
 const ANTHROPIC_PDF_MODEL = "anthropic/claude-opus-4-7";
 
+function pages(start: number, end: number): number[] {
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+}
+
 describe("parsePageRange", () => {
   it("parses a single page number", () => {
-    expect(parsePageRange("3", 20)).toEqual([3]);
+    expect(parsePageRange("3", 20)).toEqual({ pages: [3], skipped: [] });
   });
 
   it("parses a page range", () => {
-    expect(parsePageRange("1-5", 20)).toEqual([1, 2, 3, 4, 5]);
+    expect(parsePageRange("1-5", 20)).toEqual({ pages: [1, 2, 3, 4, 5], skipped: [] });
   });
 
   it("parses comma-separated pages and ranges", () => {
-    expect(parsePageRange("1,3,5-7", 20)).toEqual([1, 3, 5, 6, 7]);
+    expect(parsePageRange("1,3,5-7", 20)).toEqual({ pages: [1, 3, 5, 6, 7], skipped: [] });
   });
 
-  it("clamps to maxPages", () => {
-    expect(parsePageRange("1-100", 5)).toEqual([1, 2, 3, 4, 5]);
+  it("accepts page numbers above maxPages", () => {
+    expect(parsePageRange("200-300", 120)).toEqual({ pages: pages(200, 300), skipped: [] });
+    expect(parsePageRange("200", 120)).toEqual({ pages: [200], skipped: [] });
+  });
+
+  it("caps the page count at maxPages and reports the rest as skipped", () => {
+    expect(parsePageRange("1-500", 120)).toEqual({ pages: pages(1, 120), skipped: [[121, 500]] });
+    expect(parsePageRange("121-280", 120)).toEqual({
+      pages: pages(121, 240),
+      skipped: [[241, 280]],
+    });
+  });
+
+  it("caps huge ranges without materializing them", () => {
+    const started = performance.now();
+    expect(parsePageRange("1-1000000000", 120)).toEqual({
+      pages: pages(1, 120),
+      skipped: [[121, 1_000_000_000]],
+    });
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  it("merges overlapping segments before applying the cap", () => {
+    expect(parsePageRange("1-5,3-8,20", 4)).toEqual({
+      pages: [1, 2, 3, 4],
+      skipped: [
+        [5, 8],
+        [20, 20],
+      ],
+    });
   });
 
   it("deduplicates and sorts", () => {
-    expect(parsePageRange("5,3,1,3,5", 20)).toEqual([1, 3, 5]);
+    expect(parsePageRange("5,3,1,3,5", 20)).toEqual({ pages: [1, 3, 5], skipped: [] });
+    expect(parsePageRange("5,3,3,1-2", 120)).toEqual({ pages: [1, 2, 3, 5], skipped: [] });
   });
 
   it("throws on invalid page number", () => {
@@ -83,7 +116,13 @@ describe("parsePageRange", () => {
   });
 
   it("handles empty parts gracefully", () => {
-    expect(parsePageRange("1,,3", 20)).toEqual([1, 3]);
+    expect(parsePageRange("1,,3", 20)).toEqual({ pages: [1, 3], skipped: [] });
+  });
+
+  it("throws when no pages match", () => {
+    expect(() => parsePageRange("", 20)).toThrow('No PDF pages matched requested range ""');
+    expect(() => parsePageRange(",", 20)).toThrow('No PDF pages matched requested range ","');
+    expect(() => parsePageRange("1-5", 0)).toThrow('No PDF pages matched requested range "1-5"');
   });
 });
 

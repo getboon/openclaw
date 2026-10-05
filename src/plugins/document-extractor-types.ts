@@ -21,6 +21,8 @@ export type DocumentExtractionCoverage = {
   textBytes: number;
   maxTextChars: number;
   truncationReasons: DocumentExtractionTruncationReason[];
+  ocrPages?: number[];
+  ocrImagePages?: number[];
 };
 
 /** Request passed to plugin document extractors. */
@@ -32,6 +34,7 @@ export type DocumentExtractionRequest = {
   minTextChars: number;
   password?: string;
   pageNumbers?: number[];
+  ocrPageImages?: boolean;
   onImageExtractionError?: (error: unknown) => void;
 };
 

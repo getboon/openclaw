@@ -9,6 +9,7 @@ import {
 } from "@openclaw/normalization-core/string-coerce";
 import { Type } from "typebox";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { formatErrorMessage } from "../../infra/errors.js";
 import { complete } from "../../llm/stream.js";
 import type { Context } from "../../llm/types.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
@@ -81,6 +82,8 @@ type PdfExtractionChunk = PdfExtractedContent & {
 
 type PdfCoverageSummary = DocumentExtractionCoverage & {
   filename: string;
+  skippedByLimit?: number[];
+  pagesBeyondDocument?: number[];
 };
 
 /**
@@ -145,7 +148,8 @@ export const PdfToolSchema = Type.Object({
   ),
   pages: Type.Optional(
     Type.String({
-      description: 'Pages, e.g. "1-5", "1,3,5-7"; default all.',
+      description:
+        'Pages, e.g. "1-5", "1,3,5-7", "200-260"; default first pages up to the per-call limit. Any page number can be requested; one call reads at most the configured page limit.',
     }),
   ),
   password: Type.Optional(Type.String({ description: "Password for encrypted PDFs." })),
@@ -187,7 +191,10 @@ function buildPdfExtractionContext(
         extractions.length > 1 || filenameLabel || pageLabel
           ? `[PDF${filenameLabel}${pageLabel} text]\n`
           : "[PDF text]\n";
-      content.push({ type: "text", text: label + extraction.text });
+      content.push({
+        type: "text",
+        text: formatOcrChunkNote(extraction.coverage) + label + extraction.text,
+      });
     }
     for (const img of extraction.images) {
       content.push({ type: "image", data: img.data, mimeType: img.mimeType });
@@ -204,6 +211,35 @@ function buildPdfExtractionContext(
     ...(systemPrompt ? { systemPrompt } : {}),
     messages: [{ role: "user", content, timestamp: Date.now() }],
   };
+}
+
+function formatOcrChunkNote(coverage: DocumentExtractionCoverage | undefined): string {
+  if (!coverage?.ocrPages?.length) {
+    return "";
+  }
+  const images = coverage.ocrImagePages?.length
+    ? ` Page images are attached for pages ${formatPageRanges(coverage.ocrImagePages)}.]`
+    : " No page images fit for these pages; say their content could not be read reliably.]";
+  const pages = formatPageRanges(coverage.ocrPages);
+  const label =
+    coverage.ocrPages.length === 1
+      ? `[Page ${pages} is a scanned image with an OCR text layer. Its text`
+      : `[Pages ${pages} are scanned images with an OCR text layer. Their text`;
+  return `${label} may contain OCR errors; prefer the page image when one is attached.${images}\n`;
+}
+
+function withoutOcrLabels(
+  coverage: DocumentExtractionCoverage | undefined,
+): DocumentExtractionCoverage | undefined {
+  if (!coverage) {
+    return undefined;
+  }
+  const { ocrPages: _ocrPages, ocrImagePages: _ocrImagePages, ...rest } = coverage;
+  return rest;
+}
+
+function sortedUnion(lists: ReadonlyArray<readonly number[] | undefined>): number[] {
+  return [...new Set(lists.flatMap((list) => list ?? []))].toSorted((a, b) => a - b);
 }
 
 function pageRange(start: number, end: number): number[] {
@@ -255,15 +291,14 @@ function safeEmitUpdate(
 function aggregatePdfCoverage(params: {
   filename: string;
   chunks: PdfExtractionChunk[];
+  documentPageCount: number;
   maxPages: number;
   requestedPages?: number[];
-}): PdfCoverageSummary | undefined {
+  skippedByLimit: number[];
+  pagesBeyondDocument: number[];
+}): PdfCoverageSummary {
   const coverages = params.chunks.flatMap((chunk) => (chunk.coverage ? [chunk.coverage] : []));
-  const first = coverages[0];
-  if (!first) {
-    return undefined;
-  }
-  const documentPageCount = first.documentPageCount;
+  const documentPageCount = params.documentPageCount;
   const requestedPages =
     params.requestedPages ??
     pageRange(1, Math.min(documentPageCount, Math.max(0, params.maxPages)));
@@ -271,6 +306,8 @@ function aggregatePdfCoverage(params: {
     ...new Set(coverages.flatMap((coverage) => coverage.pagesProcessed)),
   ].toSorted((a, b) => a - b);
   const processedSet = new Set(pagesProcessed);
+  const ocrPages = sortedUnion(coverages.map((coverage) => coverage.ocrPages));
+  const ocrImagePages = sortedUnion(coverages.map((coverage) => coverage.ocrImagePages));
   const truncationReasons = [
     ...new Set(
       coverages
@@ -295,21 +332,80 @@ function aggregatePdfCoverage(params: {
     textBytes: coverages.reduce((total, coverage) => total + coverage.textBytes, 0),
     maxTextChars: coverages.reduce((total, coverage) => total + coverage.maxTextChars, 0),
     truncationReasons,
+    ...(params.skippedByLimit.length > 0 ? { skippedByLimit: params.skippedByLimit } : {}),
+    ...(params.pagesBeyondDocument.length > 0
+      ? { pagesBeyondDocument: params.pagesBeyondDocument }
+      : {}),
+    ...(ocrPages.length > 0 ? { ocrPages } : {}),
+    ...(ocrImagePages.length > 0 ? { ocrImagePages } : {}),
   };
 }
 
-function buildCoverageInstruction(coverage: readonly PdfCoverageSummary[]): string {
+function firstContiguousPages(pages: readonly number[], maxPages: number): number[] {
+  const run: number[] = [];
+  for (const page of pages) {
+    if (run.length >= maxPages || (run.length > 0 && page !== run[run.length - 1] + 1)) {
+      break;
+    }
+    run.push(page);
+  }
+  return run;
+}
+
+function coverageNotes(entry: PdfCoverageSummary, maxPages: number): string[] {
+  const notes: string[] = [];
+  if (entry.skippedByLimit?.length) {
+    const nextPages = formatPageRanges(firstContiguousPages(entry.skippedByLimit, maxPages));
+    notes.push(
+      `Per-call page limit is ${maxPages}; requested pages ${formatPageRanges(entry.skippedByLimit)} of ${entry.filename} were not read. Call pdf again with pages="${nextPages}" to read them.`,
+    );
+  }
+  if (entry.pagesBeyondDocument?.length) {
+    notes.push(
+      `Requested pages ${formatPageRanges(entry.pagesBeyondDocument)} do not exist in ${entry.filename} (${entry.documentPageCount} pages).`,
+    );
+  }
+  if (entry.ocrPages?.length) {
+    const pages = formatPageRanges(entry.ocrPages);
+    const label =
+      entry.ocrPages.length === 1
+        ? `Page ${pages} of ${entry.filename} is scanned with an OCR text layer; its text`
+        : `Pages ${pages} of ${entry.filename} are scanned with an OCR text layer; their text`;
+    notes.push(`${label} may contain OCR errors.`);
+    const imagePages = new Set(entry.ocrImagePages);
+    const unreadOcrPages = entry.ocrPages.filter((page) => !imagePages.has(page));
+    if (unreadOcrPages.length > 0) {
+      notes.push(
+        `You must not claim that a sheet, discipline, term, or item is absent from the document; state that pages ${formatPageRanges(unreadOcrPages)} of ${entry.filename} were not reliably read.`,
+      );
+    }
+  }
+  return notes;
+}
+
+function buildCoverageInstruction(
+  coverage: readonly PdfCoverageSummary[],
+  maxPages: number,
+): string {
   if (coverage.length === 0) {
     return [
       "PDF coverage accounting is unavailable for these extraction results.",
       "You must not claim that a sheet, discipline, term, or item is absent from the document.",
     ].join("\n");
   }
-  const lines = coverage.map((entry) => {
+  const lines = coverage.flatMap((entry) => {
+    const notes = coverageNotes(entry, maxPages);
+    // A file with no requested page in range is fully described by its "do not exist" note.
+    if (entry.requestedPages.length === 0) {
+      return notes;
+    }
     const processed = formatPageRanges(entry.pagesProcessed);
-    return entry.complete
-      ? `${entry.filename}: all ${entry.documentPageCount} pages were processed (${processed}).`
-      : `${entry.filename}: only pages ${processed} of ${entry.documentPageCount} were processed.`;
+    return [
+      entry.complete
+        ? `${entry.filename}: all ${entry.documentPageCount} pages were processed (${processed}).`
+        : `${entry.filename}: only pages ${processed} of ${entry.documentPageCount} were processed.`,
+      ...notes,
+    ];
   });
   const incomplete = coverage.some((entry) => !entry.complete);
   return [
@@ -321,12 +417,23 @@ function buildCoverageInstruction(coverage: readonly PdfCoverageSummary[]): stri
   ].join("\n");
 }
 
-function formatCoverageResultText(text: string, coverage: readonly PdfCoverageSummary[]): string {
-  const lines = coverage.map((entry) => {
+function formatCoverageResultText(
+  text: string,
+  coverage: readonly PdfCoverageSummary[],
+  maxPages: number,
+): string {
+  const lines = coverage.flatMap((entry) => {
+    const notes = coverageNotes(entry, maxPages);
+    if (entry.requestedPages.length === 0) {
+      return notes;
+    }
     const processed = formatPageRanges(entry.pagesProcessed);
-    return entry.complete
-      ? `PDF coverage: processed pages ${processed} of ${entry.documentPageCount}.`
-      : `⚠️ Partial PDF read: processed pages ${processed} of ${entry.documentPageCount}. Do not infer that omitted sheets or terms are absent.`;
+    return [
+      entry.complete
+        ? `PDF coverage: processed pages ${processed} of ${entry.documentPageCount}.`
+        : `⚠️ Partial PDF read: processed pages ${processed} of ${entry.documentPageCount}. Do not infer that omitted sheets or terms are absent.`,
+      ...notes,
+    ];
   });
   return `${lines.join("\n")}\n\n${text}`;
 }
@@ -350,6 +457,7 @@ async function runPdfPrompt(params: {
   pdfs: Array<{ buffer: Buffer; filename: string }>;
   password?: string;
   pageNumbers?: number[];
+  maxPages: number;
   onUpdate?: AgentToolUpdateCallback;
   getExtractions: () => Promise<{
     chunks: PdfExtractionChunk[];
@@ -383,6 +491,19 @@ async function runPdfPrompt(params: {
     }
     return extractionCache;
   };
+  // Page-selection errors must surface as one plain tool error, not as a failed
+  // attempt per fallback model; the cache lets every attempt reuse this result.
+  if (params.pageNumbers) {
+    try {
+      await getExtractions();
+    } catch (err) {
+      if (err instanceof ToolInputError) {
+        throw err;
+      }
+      // The tool error reports only the message, so keep the cause chain in it.
+      throw new Error(formatErrorMessage(err), { cause: err });
+    }
+  }
 
   const result = await runWithImageModelFallback({
     cfg: effectiveCfg,
@@ -472,7 +593,10 @@ async function runPdfPrompt(params: {
       if (extractions.length <= 1) {
         const text = await analyzeExtractions(
           extractions,
-          [params.prompt, buildCoverageInstruction(extractionResult.coverage)].join("\n\n"),
+          [
+            params.prompt,
+            buildCoverageInstruction(extractionResult.coverage, params.maxPages),
+          ].join("\n\n"),
         );
         return {
           text,
@@ -494,10 +618,12 @@ async function runPdfPrompt(params: {
           "Return grounded findings and page references from this chunk only. Do not make document-wide absence claims.",
         ].join("\n\n");
         const chunkText = await analyzeExtractions([extraction], chunkPrompt);
+        // A summary is model output without page images, so the OCR chunk note no longer applies.
         chunkSummaries.push({
           ...extraction,
           text: chunkText,
           images: [],
+          coverage: withoutOcrLabels(extraction.coverage),
         });
         safeEmitUpdate(params.onUpdate, {
           content: [
@@ -516,7 +642,7 @@ async function runPdfPrompt(params: {
       }
       const synthesisPrompt = [
         params.prompt,
-        buildCoverageInstruction(extractionResult.coverage),
+        buildCoverageInstruction(extractionResult.coverage, params.maxPages),
       ].join("\n\n");
       const text = await analyzeExtractions(chunkSummaries, synthesisPrompt);
       return {
@@ -757,7 +883,8 @@ export function createPdfTool(options?: {
         });
       }
 
-      const pageNumbers = pagesRaw ? parsePageRange(pagesRaw, configuredMaxPages) : undefined;
+      const pageSelection = pagesRaw ? parsePageRange(pagesRaw, configuredMaxPages) : undefined;
+      const pageNumbers = pageSelection?.pages;
 
       const getExtractions = async (): Promise<{
         chunks: PdfExtractionChunk[];
@@ -765,12 +892,15 @@ export function createPdfTool(options?: {
       }> => {
         const chunks: PdfExtractionChunk[] = [];
         const coverage: PdfCoverageSummary[] = [];
+        const filesWithoutRequestedPages: string[] = [];
         for (const [pdfIndex, pdf] of loadedPdfs.entries()) {
           const firstRequestedPages = pageNumbers
             ? pageNumbers.slice(0, PDF_EXTRACTION_BATCH_PAGES)
             : pageRange(1, Math.min(PDF_EXTRACTION_BATCH_PAGES, configuredMaxPages));
           let documentPageCount: number | undefined;
           let nextChunkIndex = 0;
+          const pagesInDocument = (pages: number[]): number[] =>
+            pages.filter((page) => documentPageCount === undefined || page <= documentPageCount);
           const extractBatch = async (requestedPages: number[]): Promise<PdfExtractionChunk[]> => {
             const extracted = await extractPdfContent({
               buffer: pdf.buffer,
@@ -779,6 +909,7 @@ export function createPdfTool(options?: {
               minTextChars: PDF_MIN_TEXT_CHARS,
               ...(password ? { password } : {}),
               pageNumbers: requestedPages,
+              ocrPageImages: true,
               config: options?.config,
             });
             documentPageCount ??= extracted.coverage?.documentPageCount;
@@ -797,14 +928,22 @@ export function createPdfTool(options?: {
                 documentPageCount: knownDocumentPageCount,
               },
             });
+            const extractablePages = pagesInDocument(requestedPages);
             if (
-              requestedPages.length > 1 &&
+              extractablePages.length > 1 &&
               extracted.coverage?.truncationReasons.includes("text_limit")
             ) {
-              const midpoint = Math.ceil(requestedPages.length / 2);
-              const left = await extractBatch(requestedPages.slice(0, midpoint));
-              const right = await extractBatch(requestedPages.slice(midpoint));
+              const midpoint = Math.ceil(extractablePages.length / 2);
+              const left = await extractBatch(extractablePages.slice(0, midpoint));
+              const right = await extractBatch(extractablePages.slice(midpoint));
               return [...left, ...right];
+            }
+            const emptyExtraction =
+              !extracted.text.trim() &&
+              extracted.images.length === 0 &&
+              !extracted.coverage?.pagesProcessed.length;
+            if (emptyExtraction) {
+              return [];
             }
             return [
               {
@@ -818,32 +957,49 @@ export function createPdfTool(options?: {
           if (firstRequestedPages.length > 0) {
             chunks.push(...(await extractBatch(firstRequestedPages)));
           }
-          if (documentPageCount !== undefined) {
-            const allRequestedPages =
-              pageNumbers ??
-              pageRange(1, Math.min(documentPageCount, Math.max(0, configuredMaxPages)));
-            for (
-              let offset = PDF_EXTRACTION_BATCH_PAGES;
-              offset < allRequestedPages.length;
-              offset += PDF_EXTRACTION_BATCH_PAGES
-            ) {
-              chunks.push(
-                ...(await extractBatch(
-                  allRequestedPages.slice(offset, offset + PDF_EXTRACTION_BATCH_PAGES),
-                )),
-              );
-            }
+          const pageCount = documentPageCount;
+          if (pageCount === undefined) {
+            continue;
           }
-          const pdfChunks = chunks.filter((chunk) => chunk.pdfIndex === pdfIndex);
-          const summary = aggregatePdfCoverage({
-            filename: pdf.filename,
-            chunks: pdfChunks,
-            maxPages: configuredMaxPages,
-            ...(pageNumbers ? { requestedPages: pageNumbers } : {}),
-          });
-          if (summary) {
-            coverage.push(summary);
+          // Pages past the document end sort last, so clipping keeps later batch offsets aligned.
+          const allRequestedPages = pageNumbers
+            ? pagesInDocument(pageNumbers)
+            : pageRange(1, Math.min(pageCount, Math.max(0, configuredMaxPages)));
+          for (
+            let offset = PDF_EXTRACTION_BATCH_PAGES;
+            offset < allRequestedPages.length;
+            offset += PDF_EXTRACTION_BATCH_PAGES
+          ) {
+            chunks.push(
+              ...(await extractBatch(
+                allRequestedPages.slice(offset, offset + PDF_EXTRACTION_BATCH_PAGES),
+              )),
+            );
           }
+          const requestedPages = pageNumbers ? pagesInDocument(pageNumbers) : undefined;
+          if (requestedPages?.length === 0) {
+            filesWithoutRequestedPages.push(
+              `${pdf.filename} has ${pageCount} pages (requested ${formatPageRanges(pageNumbers ?? [])})`,
+            );
+          }
+          coverage.push(
+            aggregatePdfCoverage({
+              filename: pdf.filename,
+              chunks: chunks.filter((chunk) => chunk.pdfIndex === pdfIndex),
+              documentPageCount: pageCount,
+              maxPages: configuredMaxPages,
+              ...(requestedPages ? { requestedPages } : {}),
+              skippedByLimit: (pageSelection?.skipped ?? []).flatMap(([start, end]) =>
+                pageRange(start, Math.min(end, pageCount)),
+              ),
+              pagesBeyondDocument: (pageNumbers ?? []).filter((page) => page > pageCount),
+            }),
+          );
+        }
+        if (pageNumbers && filesWithoutRequestedPages.length === loadedPdfs.length) {
+          throw new ToolInputError(
+            `No requested PDF pages exist: ${filesWithoutRequestedPages.join("; ")}.`,
+          );
         }
         return { chunks, coverage };
       };
@@ -858,6 +1014,7 @@ export function createPdfTool(options?: {
         pdfs: loadedPdfs.map((p) => ({ buffer: p.buffer, filename: p.filename })),
         ...(password ? { password } : {}),
         pageNumbers,
+        maxPages: configuredMaxPages,
         onUpdate,
         getExtractions,
       });
@@ -891,6 +1048,8 @@ export function createPdfTool(options?: {
             pagesProcessed: entry.pagesProcessed,
             lastPageProcessed: entry.pagesProcessed.at(-1),
             truncationReasons: entry.truncationReasons,
+            skippedByLimit: entry.skippedByLimit,
+            pagesBeyondDocument: entry.pagesBeyondDocument,
             textChars: entry.textChars,
             textBytes: entry.textBytes,
             maxTextChars: entry.maxTextChars,
@@ -898,7 +1057,10 @@ export function createPdfTool(options?: {
         }
       }
       return buildTextToolResult(
-        { ...result, text: formatCoverageResultText(result.text, result.coverage) },
+        {
+          ...result,
+          text: formatCoverageResultText(result.text, result.coverage, configuredMaxPages),
+        },
         {
           native: result.native,
           ...pdfDetails,

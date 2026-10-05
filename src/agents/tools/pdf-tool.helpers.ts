@@ -46,11 +46,12 @@ export function providerSupportsNativePdf(provider: string): boolean {
   return providerSupportsNativePdfDocument({ providerId: provider });
 }
 
-/** Parses a page range string into sorted, unique, 1-based page numbers within `maxPages`. */
-export function parsePageRange(range: string, maxPages: number): number[] {
-  const pages = new Set<number>();
-  const parts = range.split(",").map((p) => p.trim());
-  for (const part of parts) {
+/** Inclusive `[start, end]` page segment. */
+export type PageSegment = [number, number];
+
+function parsePageSegments(range: string): PageSegment[] {
+  const segments: PageSegment[] = [];
+  for (const part of range.split(",").map((p) => p.trim())) {
     if (!part) {
       continue;
     }
@@ -61,20 +62,50 @@ export function parsePageRange(range: string, maxPages: number): number[] {
       if (!Number.isFinite(start) || !Number.isFinite(end) || start < 1 || end < start) {
         throw new Error(`Invalid page range: "${part}"`);
       }
-      for (let i = start; i <= Math.min(end, maxPages); i++) {
-        pages.add(i);
-      }
+      segments.push([start, end]);
     } else {
       const num = Number(part);
       if (!Number.isFinite(num) || num < 1) {
         throw new Error(`Invalid page number: "${part}"`);
       }
-      if (num <= maxPages) {
-        pages.add(num);
-      }
+      segments.push([num, num]);
     }
   }
-  return Array.from(pages).toSorted((a, b) => a - b);
+  const merged: PageSegment[] = [];
+  for (const [start, end] of segments.toSorted((a, b) => a[0] - b[0])) {
+    const last = merged.at(-1);
+    if (last && start <= last[1] + 1) {
+      last[1] = Math.max(last[1], end);
+    } else {
+      merged.push([start, end]);
+    }
+  }
+  return merged;
+}
+
+/**
+ * Parses a page range string into sorted, unique, 1-based page numbers.
+ * At most `maxPages` pages are returned; the remaining segments are returned as `skipped`.
+ */
+export function parsePageRange(
+  range: string,
+  maxPages: number,
+): { pages: number[]; skipped: PageSegment[] } {
+  const pages: number[] = [];
+  const skipped: PageSegment[] = [];
+  for (const [start, end] of parsePageSegments(range)) {
+    const take = Math.max(0, Math.min(end - start + 1, maxPages - pages.length));
+    for (let page = start; page < start + take; page++) {
+      pages.push(page);
+    }
+    if (start + take <= end) {
+      skipped.push([start + take, end]);
+    }
+  }
+  if (pages.length === 0) {
+    throw new Error(`No PDF pages matched requested range "${range}"`);
+  }
+  return { pages, skipped };
 }
 
 /** Converts a provider assistant message into PDF text or throws a model-labelled failure. */
