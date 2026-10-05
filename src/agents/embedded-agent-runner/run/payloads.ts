@@ -265,6 +265,10 @@ function resolveToolErrorWarningPolicy(params: {
   if (suppressToolErrorWarnings || params.suppressToolErrors || params.yieldHandoff) {
     return { showWarning: false, includeDetails };
   }
+  // Per-failure classification (sessions_send, sessions_spawn, middlewareError,
+  // mutating, exec-like) lives once in the shared `shouldSurfaceToolFailure`
+  // (tool-error-summary.ts), not duplicated here — it is also the tool-failure
+  // digest's source of truth, so the two can never disagree (ENG-18812).
   return {
     showWarning: shouldSurfaceToolFailure(params.lastToolError, {
       hasUserFacingReply: params.hasUserFacingReply,

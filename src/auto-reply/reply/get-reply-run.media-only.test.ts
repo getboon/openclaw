@@ -2176,7 +2176,10 @@ describe("runPreparedReply media-only handling", () => {
 
     await runPreparedReply(
       baseParams({
-        opts: { abortSignal: abortController.signal },
+        opts: {
+          abortSignal: abortController.signal,
+          queuedFollowupLifecycle: { onComplete: vi.fn(), onEnqueued: vi.fn() },
+        },
         ctx: {
           Body: "@bot keep this",
           RawBody: "@bot keep this",

@@ -10,6 +10,7 @@ import { withMockedWindowsPlatform } from "../test-utils/vitest-spies.js";
 import { pathExists } from "../utils.js";
 import { writePackageDistInventory } from "./package-dist-inventory.js";
 import { resolveStableNodePath } from "./stable-node-path.js";
+import type { UpdateChannel } from "./update-channels.js";
 import { runGatewayUpdate } from "./update-runner.js";
 
 const execFileSyncMock = vi.hoisted(() => vi.fn(() => "/tmp/openclaw-test-global-npmrc\n"));
@@ -241,7 +242,7 @@ describe("runGatewayUpdate", () => {
       options?: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs?: number },
     ) => Promise<CommandResult>,
     options?: {
-      channel?: "stable" | "beta" | "dev";
+      channel?: UpdateChannel;
       tag?: string;
       cwd?: string;
       devTargetRef?: string;
@@ -266,7 +267,7 @@ describe("runGatewayUpdate", () => {
   async function runWithRunner(
     runner: (argv: string[]) => Promise<CommandResult>,
     options?: {
-      channel?: "stable" | "beta" | "dev";
+      channel?: UpdateChannel;
       tag?: string;
       cwd?: string;
       devTargetRef?: string;
@@ -836,6 +837,25 @@ describe("runGatewayUpdate", () => {
     );
   });
 
+  it("rejects extended-stable Git updates before checkout mutation", async () => {
+    await setupGitCheckout({ packageManager: "pnpm@8.0.0" });
+    const { runner, calls } = createRunner({
+      [`git -C ${tempDir} rev-parse --show-toplevel`]: { stdout: tempDir },
+    });
+
+    const result = await runWithRunner(runner, { channel: "extended-stable" });
+
+    expect(result).toMatchObject({
+      status: "error",
+      mode: "git",
+      root: tempDir,
+      reason: "unsupported_git_channel",
+      steps: [],
+    });
+    expect(calls).not.toContain(`git -C ${tempDir} fetch --all --prune --tags`);
+    expect(calls.some((call) => call.includes("checkout"))).toBe(false);
+  });
+
   it("uses pnpm highest resolution mode for update installs", async () => {
     await setupGitCheckout({ packageManager: "pnpm@8.0.0" });
     await setupUiIndex();
@@ -895,6 +915,7 @@ describe("runGatewayUpdate", () => {
 
     expect(result.status).toBe("ok");
     expect(doctorEnv?.OPENCLAW_UPDATE_IN_PROGRESS).toBe("1");
+    expect(doctorEnv?.OPENCLAW_DOCTOR_DISABLE_CROSS_STATE_DIR_IMPORTS).toBe("1");
     expect(doctorEnv?.OPENCLAW_UPDATE_DEFER_CONFIGURED_PLUGIN_INSTALL_REPAIR).toBe("1");
     expect(doctorEnv?.OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE).toBe("1");
   });
@@ -2583,6 +2604,7 @@ describe("runGatewayUpdate", () => {
     expect(calls).toContain(doctorCommand);
     expect(result.steps.map((step) => step.name)).toContain("openclaw doctor");
     expect(doctorEnv?.OPENCLAW_UPDATE_IN_PROGRESS).toBe("1");
+    expect(doctorEnv?.OPENCLAW_DOCTOR_DISABLE_CROSS_STATE_DIR_IMPORTS).toBe("1");
     expect(doctorEnv?.OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE).toBe("1");
     expect(doctorEnv?.OPENCLAW_COMPATIBILITY_HOST_VERSION).toBe("2.0.0");
   });
@@ -2642,6 +2664,30 @@ describe("runGatewayUpdate", () => {
     expect(result.status).toBe("ok");
     expect(result.mode).toBe("npm");
     expect(calls).toContain(npmGlobalInstallCommand("openclaw@latest"));
+  });
+
+  it("rejects a tag override for the extended-stable global package channel", async () => {
+    const { nodeModules, pkgRoot } = await createGlobalPackageFixture(tempDir);
+    const { calls, runCommand } = createGlobalInstallHarness({
+      pkgRoot,
+      npmRootOutput: nodeModules,
+      installCommand: npmGlobalInstallCommand("openclaw@latest"),
+    });
+
+    const result = await runWithCommand(runCommand, {
+      cwd: pkgRoot,
+      channel: "extended-stable",
+      tag: "latest",
+    });
+
+    expect(result).toMatchObject({
+      status: "error",
+      mode: "npm",
+      root: pkgRoot,
+      reason: "extended-stable-tag-unsupported",
+      steps: [],
+    });
+    expect(calls).not.toContain(npmGlobalInstallCommand("openclaw@latest"));
   });
 
   it("cleans stale npm rename dirs before global update", async () => {

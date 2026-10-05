@@ -13,7 +13,7 @@ overrides:
   hono: 4.12.25
   '@hono/node-server': 1.19.14
   axios: 1.20.0
-  fast-uri: 3.1.7
+  fast-uri: 4.1.4
   follow-redirects: 1.16.0
   defu: 6.1.5
   fast-xml-parser: 5.7.0
@@ -31,7 +31,7 @@ overrides:
   tar: 7.5.21
   tough-cookie: 4.1.3
   yauzl: 3.2.1
-  protobufjs: 7.6.4
+  protobufjs: 7.6.5
   uuid: 14.0.0
   '@grpc/grpc-js': 1.14.4
   linkify-it: 5.0.2
@@ -567,8 +567,8 @@ importers:
   extensions/codex:
     dependencies:
       '@openai/codex':
-        specifier: 0.139.0
-        version: 0.139.0
+        specifier: 0.146.0
+        version: 0.146.0
       typebox:
         specifier: 1.1.39
         version: 1.1.39
@@ -3169,43 +3169,43 @@ packages:
     resolution: {integrity: sha512-gOBg5YHMfZy+TfHArfVogwgfBeQnKbbGo3pSUyK/gSI0AVu+pEiDVcKlQb0D8Mg1LNRZILZ6XG8I5dJ4KuAd9Q==}
     engines: {node: ^20.17.0 || >=22.9.0}
 
-  '@openai/codex@0.139.0':
-    resolution: {integrity: sha512-wr2fRE+fzW0CjEbfFsLh1ftarVEcw0CMLWS7QyA0nyOz5qacQPVq3cq2+/U7oEbwm1TOqoi0Fm1nxniB5FkpmA==}
+  '@openai/codex@0.146.0':
+    resolution: {integrity: sha512-yG3sPWNda/2YAIQIDq9MrrjoCTIQ7rxYM5IasrG3VBcuhCLTkgeg/JzqmJq1V98RE4MJ5jCxDXXQlOjrditFRw==}
     engines: {node: '>=16'}
     hasBin: true
 
-  '@openai/codex@0.139.0-darwin-arm64':
-    resolution: {integrity: sha512-o+0ZKWwgDFMMLO7rwinzO0PQsgK+Vme1pMN2GeAxsX29ZgGZcyPICfpJbeGSUO1mb2a36Skjx6nfdRnxMY0r7w==}
+  '@openai/codex@0.146.0-darwin-arm64':
+    resolution: {integrity: sha512-nb61yX4r5L6Z0dlC4o3u0GAK1YCd4TUvjaB382bajDoh84V+uv2hTBIVZ++fgXWV9yoeuNrNnNcn7GoTGOe2Tg==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [darwin]
 
-  '@openai/codex@0.139.0-darwin-x64':
-    resolution: {integrity: sha512-9gkBWzu6DB2rqU4DbpxD3DE5bofGpsK46Lp0h0I+bKWc2IIcxvSi8K2utKmBLoJCbKrn4JQu7dFNGRqEfENung==}
+  '@openai/codex@0.146.0-darwin-x64':
+    resolution: {integrity: sha512-hTQR5jy/ObfTf1MDnuJCZJAe+SljKE8DDwQWN6lDFgjsPhMQz852U2tILt8Ei+G5GkQSzemHYKl2AYPwW0Y5xw==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [darwin]
 
-  '@openai/codex@0.139.0-linux-arm64':
-    resolution: {integrity: sha512-tBQE5lZciRHeWZGuURgjP9S717MvTIpQMc593+DNxY2LQxozkngOkzFSQd1+/UmQKGrCqdFLu5irIwPXpSZyEw==}
+  '@openai/codex@0.146.0-linux-arm64':
+    resolution: {integrity: sha512-qiYDxkkEFnXG7joadJW6Q+XcgyDXCpGdpa9nk/c+i0gEomur1j7bHvx12NfWWCF/y8Tqri6ay+FLuC2MjdehtA==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [linux]
 
-  '@openai/codex@0.139.0-linux-x64':
-    resolution: {integrity: sha512-14UgzDS+X4crkvdt6S02A/ZZOrS8ZyWiuTRpguCtnhNamb7unSuDxy86BWgpAl3sqiTaN2CP8VLyp2ohQ8Nbzw==}
+  '@openai/codex@0.146.0-linux-x64':
+    resolution: {integrity: sha512-fswvyGprAPCMiOEue/7MKMk7pCjh9kZIJfJX5i9atmfnmGYbYCcUhZsEH9LEP0+0t5xyPqDbfNXY7NSxIVuXxA==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [linux]
 
-  '@openai/codex@0.139.0-win32-arm64':
-    resolution: {integrity: sha512-nlwRjsYotH1Rtqu/Q0VwQbIeO2UX1mkHK84Ov9qn/hl29QqqoBtno0tRyqIPbkXFIVQuWiAYXlV3ugLwH5fTrQ==}
+  '@openai/codex@0.146.0-win32-arm64':
+    resolution: {integrity: sha512-EW6zdjDe+SLX2Iw+xymJ5+Pz2+DGexdstfFHXh4Ub+TfJsQPiMjGfZfNaoWgdJ2FsqSIzVKu2+G0KCMGYz2W8g==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [win32]
 
-  '@openai/codex@0.139.0-win32-x64':
-    resolution: {integrity: sha512-lQrVLNz+90wdvWVNFDvCkHQRiAK9ZllmkTka3c8eqSDqdJk35Gpgppfv9Xtw5M2ZBtTq0sBdWBiCMyzGDBSpmQ==}
+  '@openai/codex@0.146.0-win32-x64':
+    resolution: {integrity: sha512-b3lxMYeR0+IhstNo4JjX1P9cPc1xwVcCVkPd1lD1wpWPJ0SBhpIkPczwbu3ZRkJcdyl342+rgyf4DUrbZLdrGA==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [win32]
@@ -5391,8 +5391,8 @@ packages:
   fast-string-width@3.0.2:
     resolution: {integrity: sha512-gX8LrtNEI5hq8DVUfRQMbr5lpaS4nMIWV+7XEbXk2b8kiQIizgnlr12B4dA3ZEx3308ze0O4Q1R+cHts8kyUJg==}
 
-  fast-uri@3.1.7:
-    resolution: {integrity: sha512-dOvZVzjdZdz7phd9v6jCbwxrBW3fK6n8Rc0CtdmM4bumzMnxywBYhuph6J819RRw/ku+rLbelwfMunktuzVVHg==}
+  fast-uri@4.1.4:
+    resolution: {integrity: sha512-dODXrIxlS9JSdgAnhIUKOosKV1oMtU2VtVw87QRaHzyl5jxO290Ii5tEZfCfzfWNHi3jKWwBSdQj0qIyshdZdQ==}
 
   fast-wrap-ansi@0.2.2:
     resolution: {integrity: sha512-7F2Fl+TjRSenLqlU3UjSH0iyqopqoZIu7eZVpEirP2g1GtWa2G/ecEmBdgz31+Mxr+ELclgg6sokpSFIQiZ02Q==}
@@ -6153,6 +6153,10 @@ packages:
     resolution: {integrity: sha512-4Ej49aYTDFIQ+uBkfX8GBvJGccoARxxPep+7aWTs55ozbjQJpW9M26Fe53vnGgvLeVzva/amzjQQaQu9w0vMhA==}
     hasBin: true
 
+  markdown-it@14.3.0:
+    resolution: {integrity: sha512-RCEsPjR+sr0x+AuYp601tKTkgFG4YEPLCzHST3cQ/fhlJkqAkz1L2/Qbp1j9qw5SBwQHFBoW8+hoN5xssOF0Tw==}
+    hasBin: true
+
   markdown-table@2.0.0:
     resolution: {integrity: sha512-Ezda85ToJUBhM6WGaG6veasyym+Tbs3cMAw/ZhOPqXiYsr0jgocBV3j3nx+4lk47plLlIqjwuTm/ywVI+zjJ/A==}
 
@@ -6770,8 +6774,8 @@ packages:
   property-information@7.2.0:
     resolution: {integrity: sha512-IAtzIB6sUiWaJYrX9smp3V46pBGbBeLFRGdh25kg1334VcBlD8HzhPeNIWQH9zhGmo2itIe25EHt9dQP7G5hmg==}
 
-  protobufjs@7.6.4:
-    resolution: {integrity: sha512-RJJPTTpvFfHcWLkIa2JFWK4XvtSzS0yEWDmunqHXli1h3JlkbcQZXDZdcWxv+JK3Xsl5/UFDPZ0iGm7DAengYw==}
+  protobufjs@7.6.5:
+    resolution: {integrity: sha512-/FPD0nUc9jH6rfFjji9IBqOz4pcSE3CsT1m7Ep6Mdb0LxSUMj8hgl6GomOvZzpNpAqqGaXA0P3VSrZLFzIhQrw==}
     engines: {node: '>=12.0.0'}
 
   proxy-addr@2.0.7:
@@ -8774,7 +8778,7 @@ snapshots:
     dependencies:
       google-auth-library: 10.6.2
       p-retry: 4.6.2
-      protobufjs: 7.6.4
+      protobufjs: 7.6.5
       ws: 8.21.0
     optionalDependencies:
       '@modelcontextprotocol/sdk': 1.29.0(zod@4.4.3)
@@ -8927,7 +8931,7 @@ snapshots:
       lodash.identity: 3.0.0
       lodash.merge: 4.6.2
       lodash.pickby: 4.6.0
-      protobufjs: 7.6.4
+      protobufjs: 7.6.5
       qs: 6.15.2
       ws: 8.21.0
     transitivePeerDependencies:
@@ -9190,31 +9194,31 @@ snapshots:
 
   '@npmcli/redact@4.0.0': {}
 
-  '@openai/codex@0.139.0':
+  '@openai/codex@0.146.0':
     optionalDependencies:
-      '@openai/codex-darwin-arm64': '@openai/codex@0.139.0-darwin-arm64'
-      '@openai/codex-darwin-x64': '@openai/codex@0.139.0-darwin-x64'
-      '@openai/codex-linux-arm64': '@openai/codex@0.139.0-linux-arm64'
-      '@openai/codex-linux-x64': '@openai/codex@0.139.0-linux-x64'
-      '@openai/codex-win32-arm64': '@openai/codex@0.139.0-win32-arm64'
-      '@openai/codex-win32-x64': '@openai/codex@0.139.0-win32-x64'
+      '@openai/codex-darwin-arm64': '@openai/codex@0.146.0-darwin-arm64'
+      '@openai/codex-darwin-x64': '@openai/codex@0.146.0-darwin-x64'
+      '@openai/codex-linux-arm64': '@openai/codex@0.146.0-linux-arm64'
+      '@openai/codex-linux-x64': '@openai/codex@0.146.0-linux-x64'
+      '@openai/codex-win32-arm64': '@openai/codex@0.146.0-win32-arm64'
+      '@openai/codex-win32-x64': '@openai/codex@0.146.0-win32-x64'
 
-  '@openai/codex@0.139.0-darwin-arm64':
+  '@openai/codex@0.146.0-darwin-arm64':
     optional: true
 
-  '@openai/codex@0.139.0-darwin-x64':
+  '@openai/codex@0.146.0-darwin-x64':
     optional: true
 
-  '@openai/codex@0.139.0-linux-arm64':
+  '@openai/codex@0.146.0-linux-arm64':
     optional: true
 
-  '@openai/codex@0.139.0-linux-x64':
+  '@openai/codex@0.146.0-linux-x64':
     optional: true
 
-  '@openai/codex@0.139.0-win32-arm64':
+  '@openai/codex@0.146.0-win32-arm64':
     optional: true
 
-  '@openai/codex@0.139.0-win32-x64':
+  '@openai/codex@0.146.0-win32-x64':
     optional: true
 
   '@openclaw/crabline@0.1.6':
@@ -10569,7 +10573,7 @@ snapshots:
   ajv@8.20.0:
     dependencies:
       fast-deep-equal: 3.1.3
-      fast-uri: 3.1.7
+      fast-uri: 4.1.4
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
 
@@ -10695,7 +10699,7 @@ snapshots:
       music-metadata: 11.12.3
       p-queue: 9.3.0
       pino: 9.14.0
-      protobufjs: 7.6.4
+      protobufjs: 7.6.5
       whatsapp-rust-bridge: 0.5.4
       ws: 8.21.0
     optionalDependencies:
@@ -11332,7 +11336,7 @@ snapshots:
     dependencies:
       fast-string-truncated-width: 3.0.3
 
-  fast-uri@3.1.7: {}
+  fast-uri@4.1.4: {}
 
   fast-wrap-ansi@0.2.2:
     dependencies:
@@ -12012,7 +12016,7 @@ snapshots:
   libsignal@6.0.0:
     dependencies:
       curve25519-js: 0.0.4
-      protobufjs: 7.6.4
+      protobufjs: 7.6.5
 
   lie@3.3.0:
     dependencies:
@@ -12205,6 +12209,15 @@ snapshots:
       entities: 4.5.0
       linkify-it: 5.0.2
       mdurl: 2.1.0
+      punycode.js: 2.3.1
+      uc.micro: 2.1.0
+
+  markdown-it@14.3.0:
+    dependencies:
+      argparse: 2.0.1
+      entities: 4.5.0
+      linkify-it: 5.0.2
+      mdurl: 2.0.0
       punycode.js: 2.3.1
       uc.micro: 2.1.0
 
@@ -13052,7 +13065,7 @@ snapshots:
 
   property-information@7.2.0: {}
 
-  protobufjs@7.6.4:
+  protobufjs@7.6.5:
     dependencies:
       '@protobufjs/aspromise': 1.1.2
       '@protobufjs/base64': 1.1.2

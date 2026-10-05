@@ -158,8 +158,8 @@ const defaultPublicDeprecatedExportsByEntrypointBudget = Object.freeze({
   "channel-mention-gating": 7,
   "channel-lifecycle": 23,
   "channel-ingress": 8,
-  "channel-message": 228,
-  "channel-message-runtime": 225,
+  "channel-message": 229,
+  "channel-message-runtime": 226,
   "channel-pairing-paths": 1,
   "channel-policy": 8,
   "channel-route": 5,
@@ -201,16 +201,19 @@ let budgets;
 let publicDeprecatedExportsByEntrypointBudget;
 try {
   budgets = {
+    // Budgets re-measured post-merge (upstream v2026.6.34): the merged surface
+    // exceeds both parents', so neither side's value alone is correct — set to
+    // the exact `pnpm plugin-sdk:surface` output measured on the merged tree.
     publicEntrypoints: readBudgetEnv("OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_ENTRYPOINTS", 324),
-    publicExports: readBudgetEnv("OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_EXPORTS", 10409),
-    publicFunctionExports: readBudgetEnv("OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_FUNCTION_EXPORTS", 5217),
+    publicExports: readBudgetEnv("OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_EXPORTS", 10413),
+    publicFunctionExports: readBudgetEnv("OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_FUNCTION_EXPORTS", 5218),
     publicDeprecatedExports: readBudgetEnv(
       "OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_DEPRECATED_EXPORTS",
-      3251,
+      3253,
     ),
     publicWildcardReexports: readBudgetEnv(
       "OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_WILDCARD_REEXPORTS",
-      215,
+      214,
     ),
   };
   publicDeprecatedExportsByEntrypointBudget = readEntrypointBudgetEnv(

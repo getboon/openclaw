@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { createTempDirTracker } from "../helpers/temp-dir.js";
 
 const SCRIPT_PATH = "scripts/test-install-sh-docker.sh";
@@ -382,9 +383,10 @@ describe("test-install-sh-docker", () => {
     const script = readFileSync(SCRIPT_PATH, "utf8");
     const dockerfile = readFileSync("Dockerfile", "utf8");
 
+    expect(script).toContain('ROOT_DIR="${OPENCLAW_INSTALL_SMOKE_SOURCE_DIR:-$HARNESS_ROOT}"');
     expect(script).toContain('UPDATE_DIST_IMAGE="${OPENCLAW_INSTALL_SMOKE_UPDATE_DIST_IMAGE:-}"');
     expect(script).toContain("restore_local_dist_from_image");
-    expect(script).toContain('source "$ROOT_DIR/scripts/lib/docker-e2e-container.sh"');
+    expect(script).toContain('source "$HARNESS_ROOT/scripts/lib/docker-e2e-container.sh"');
     expect(script).toContain(
       'DOCKER_COMMAND_TIMEOUT="${DOCKER_COMMAND_TIMEOUT:-${OPENCLAW_INSTALL_SMOKE_DOCKER_COMMAND_TIMEOUT:-600s}}"',
     );
@@ -397,10 +399,14 @@ describe("test-install-sh-docker", () => {
     expect(script).not.toContain('docker cp "${container_id}:/app/dist" "$ROOT_DIR/dist"');
     expect(script).toContain('echo "==> Reuse local dist/ from Docker image: $image"');
     expect(script).toContain("ensure_local_update_dist_import_closure");
-    expect(script).toContain('node scripts/check-package-dist-imports.mjs "$ROOT_DIR"');
+    expect(script).toContain(
+      'node "$HARNESS_ROOT/scripts/check-package-dist-imports.mjs" "$ROOT_DIR"',
+    );
     expect(script).toContain("WARN: reused Docker image dist failed import-closure check");
     expect(script).toContain("pnpm build");
     expect(script).not.toContain("pnpm ui:build");
+    expect(script).toContain('-f "$HARNESS_ROOT/scripts/docker/install-sh-smoke/Dockerfile"');
+    expect(script).toContain('-f "$HARNESS_ROOT/scripts/docker/install-sh-nonroot/Dockerfile"');
     expect(dockerfile).toContain("node scripts/check-package-dist-imports.mjs /app");
   });
 
@@ -643,9 +649,11 @@ describe("test-install-sh-docker", () => {
     const script = readFileSync(SCRIPT_PATH, "utf8");
 
     expect(script).toContain("node --import tsx scripts/write-package-dist-inventory.ts");
-    expect(script).toContain('node scripts/check-package-dist-imports.mjs "$ROOT_DIR"');
+    expect(script).toContain(
+      'node "$HARNESS_ROOT/scripts/check-package-dist-imports.mjs" "$ROOT_DIR"',
+    );
     expect(script).toContain("quiet_npm pack --ignore-scripts");
-    expect(script).toContain("node scripts/check-openclaw-package-tarball.mjs");
+    expect(script).toContain('node "$HARNESS_ROOT/scripts/check-openclaw-package-tarball.mjs"');
   });
 
   it("runs candidate tarballs through the installer script instead of direct npm", () => {
@@ -1162,6 +1170,48 @@ describe("bun global install smoke", () => {
     expect(releaseChecks).toContain("install_smoke_release_checks:");
     expect(releaseChecks).toContain("uses: ./.github/workflows/install-smoke.yml");
     expect(releaseChecks).toContain("run_bun_global_install_smoke: true");
+  });
+
+  it("runs installer packaging from the trusted workflow revision against a nested candidate", () => {
+    const workflow = parse(readFileSync(INSTALL_SMOKE_WORKFLOW_PATH, "utf8"));
+    const steps = workflow.jobs.installer_smoke.steps as Array<{
+      name?: string;
+      uses?: string;
+      with?: Record<string, unknown>;
+      env?: Record<string, unknown>;
+      run?: string;
+    }>;
+    const step = (name: string) => {
+      const found = steps.find((entry) => entry.name === name);
+      expect(found, name).toBeDefined();
+      return found!;
+    };
+
+    expect(step("Checkout trusted installer harness").with).toMatchObject({
+      repository: "${{ needs.preflight.outputs.workflow_repository }}",
+      ref: "${{ needs.preflight.outputs.workflow_sha }}",
+      "persist-credentials": false,
+    });
+    expect(step("Checkout candidate CLI").with).toMatchObject({
+      ref: "${{ needs.preflight.outputs.target_sha }}",
+      path: "candidate",
+      "persist-credentials": false,
+    });
+    expect(step("Setup Node environment for installer smoke").uses).toBe(
+      "./.github/actions/setup-node-env",
+    );
+    expect(step("Run installer docker tests").env).toMatchObject({
+      OPENCLAW_INSTALL_SMOKE_SOURCE_DIR: "${{ github.workspace }}/candidate",
+    });
+    expect(step("Run installer docker tests").run).toBe("bash scripts/test-install-sh-docker.sh");
+    expect(step("Build installer smoke image").run).toContain(
+      "./scripts/docker/install-sh-smoke/Dockerfile",
+    );
+    expect(step("Build installer smoke image").run).not.toContain("candidate/scripts/docker");
+    expect(step("Build installer non-root image").run).not.toContain("candidate/scripts/docker");
+    expect(step("Run Rocky Linux installer smoke").run).toContain(
+      "$PWD/candidate/scripts/install.sh",
+    );
   });
 
   it("kills Bun global install smoke commands that ignore TERM after timeout", () => {

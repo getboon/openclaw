@@ -1,12 +1,12 @@
 {
   "name": "openclaw",
-  "version": "2026.6.11-boon.49",
+  "version": "2026.6.34-boon.1",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "openclaw",
-      "version": "2026.6.11-boon.49",
+      "version": "2026.6.34-boon.1",
       "hasInstallScript": true,
       "license": "MIT",
       "dependencies": {
@@ -1839,9 +1839,9 @@
       }
     },
     "node_modules/fast-uri": {
-      "version": "3.1.7",
-      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.7.tgz",
-      "integrity": "sha512-dOvZVzjdZdz7phd9v6jCbwxrBW3fK6n8Rc0CtdmM4bumzMnxywBYhuph6J819RRw/ku+rLbelwfMunktuzVVHg==",
+      "version": "4.1.4",
+      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-4.1.4.tgz",
+      "integrity": "sha512-dODXrIxlS9JSdgAnhIUKOosKV1oMtU2VtVw87QRaHzyl5jxO290Ii5tEZfCfzfWNHi3jKWwBSdQj0qIyshdZdQ==",
       "funding": [
         {
           "type": "github",
@@ -3021,9 +3021,9 @@
       }
     },
     "node_modules/protobufjs": {
-      "version": "7.6.4",
-      "resolved": "https://registry.npmjs.org/protobufjs/-/protobufjs-7.6.4.tgz",
-      "integrity": "sha512-RJJPTTpvFfHcWLkIa2JFWK4XvtSzS0yEWDmunqHXli1h3JlkbcQZXDZdcWxv+JK3Xsl5/UFDPZ0iGm7DAengYw==",
+      "version": "7.6.5",
+      "resolved": "https://registry.npmjs.org/protobufjs/-/protobufjs-7.6.5.tgz",
+      "integrity": "sha512-/FPD0nUc9jH6rfFjji9IBqOz4pcSE3CsT1m7Ep6Mdb0LxSUMj8hgl6GomOvZzpNpAqqGaXA0P3VSrZLFzIhQrw==",
       "hasInstallScript": true,
       "license": "BSD-3-Clause",
       "dependencies": {
