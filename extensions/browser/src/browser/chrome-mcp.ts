@@ -138,8 +138,24 @@ const CHROME_MCP_CONNECTION_FLAGS = new Set([
 ]);
 const CHROME_MCP_USER_DATA_DIR_FLAGS = new Set(["--userDataDir", "--user-data-dir"]);
 const CHROME_MCP_NEW_PAGE_TIMEOUT_MS = 5_000;
-const CHROME_MCP_NAVIGATE_TIMEOUT_MS = 20_000;
-const CHROME_MCP_HANDSHAKE_TIMEOUT_MS = 30_000;
+// Doubles as the ceiling on establishing a not-yet-attached session
+// (navigateChromeMcpPage passes this straight through as callTool's own
+// options.timeoutMs, which leaseSession forwards into the shared
+// waitForChromeMcpReady attach-wait) -- see CHROME_MCP_HANDSHAKE_TIMEOUT_MS's
+// comment for why that floor is now 120s. Kept comfortably above it so a
+// first-touch "navigate" (rather than "open") doesn't cut the attach off
+// tighter than the handshake budget it's racing against. Trade-off accepted:
+// a genuinely hung real navigation on an already-attached session now also
+// takes longer to time out.
+const CHROME_MCP_NAVIGATE_TIMEOUT_MS = 130_000;
+// Live-measured (ENG-20866) on a fleet arm64 host: `npx -y
+// chrome-devtools-mcp@latest` alone -- before it ever attempts connecting to
+// a --wsEndpoint -- consistently took 69-73s of wall-clock (almost entirely
+// user CPU, not network I/O), reproducible across repeated invocations. The
+// old 30s budget guaranteed every remote-CDP attach (e.g. browser-handoff)
+// timed out on npx's own cold-invocation cost alone, never reaching the
+// actual browser connection. Set comfortably above the measured worst case.
+const CHROME_MCP_HANDSHAKE_TIMEOUT_MS = 120_000;
 const CHROME_MCP_STDERR_MAX_BYTES = 8 * 1024;
 const CHROME_MCP_PROCESS_EXIT_GRACE_MS = 250;
 const DEVTOOLS_ACTIVE_PORT_RE = /\bDevToolsActivePort\b/i;
@@ -744,8 +760,13 @@ async function createRealSession(
     try {
       await withChromeMcpHandshakeTimeout(
         (async () => {
-          await client.connect(transport);
-          const tools = await client.listTools();
+          // The MCP SDK's own per-request timeout (RequestOptions.timeout) defaults to
+          // DEFAULT_REQUEST_TIMEOUT_MSEC = 60_000ms and applies independently of the outer
+          // handshake race above -- a bare call here would reject at 60s, before the real
+          // 69-73s npx cold-start the outer 120s budget exists to tolerate ever completes.
+          const requestOptions = { timeout: CHROME_MCP_HANDSHAKE_TIMEOUT_MS };
+          await client.connect(transport, requestOptions);
+          const tools = await client.listTools(undefined, requestOptions);
           if (!tools.tools.some((tool) => tool.name === "list_pages")) {
             throw new Error("Chrome MCP server did not expose the expected navigation tools.");
           }

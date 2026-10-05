@@ -25,36 +25,39 @@ vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => ({
   fetchWithSsrFGuard: vi.fn(),
 }));
 
+// Hoisted so individual tests can reconfigure one call's behavior (e.g.
+// `.mockRejectedValueOnce`) — `getMSTeamsRuntime()` must keep returning these
+// SAME mock instances on every call, not a fresh object/fresh vi.fn() per
+// invocation, or a test's override would silently miss the real call site.
+const runtimeMediaMocks = vi.hoisted(() => ({
+  detectMime: vi.fn(async () => "image/png"),
+  saveResponseMedia: vi.fn(
+    async (response: Response, options?: { fallbackContentType?: string; maxBytes?: number }) => {
+      const length = Number(response.headers.get("content-length"));
+      if (Number.isFinite(length) && options?.maxBytes !== undefined && length > options.maxBytes) {
+        throw new Error("content length exceeds maxBytes");
+      }
+      return {
+        path: "/tmp/saved.png",
+        contentType: options?.fallbackContentType ?? "image/png",
+      };
+    },
+  ),
+  saveMediaBuffer: vi.fn(async (_buf: Buffer, ct: string) => ({
+    path: "/tmp/saved.png",
+    contentType: ct ?? "image/png",
+  })),
+}));
+
 vi.mock("../runtime.js", () => ({
   getMSTeamsRuntime: vi.fn(() => ({
     media: {
-      detectMime: vi.fn(async () => "image/png"),
+      detectMime: runtimeMediaMocks.detectMime,
     },
     channel: {
       media: {
-        saveResponseMedia: vi.fn(
-          async (
-            response: Response,
-            options?: { fallbackContentType?: string; maxBytes?: number },
-          ) => {
-            const length = Number(response.headers.get("content-length"));
-            if (
-              Number.isFinite(length) &&
-              options?.maxBytes !== undefined &&
-              length > options.maxBytes
-            ) {
-              throw new Error("content length exceeds maxBytes");
-            }
-            return {
-              path: "/tmp/saved.png",
-              contentType: options?.fallbackContentType ?? "image/png",
-            };
-          },
-        ),
-        saveMediaBuffer: vi.fn(async (_buf: Buffer, ct: string) => ({
-          path: "/tmp/saved.png",
-          contentType: ct ?? "image/png",
-        })),
+        saveResponseMedia: runtimeMediaMocks.saveResponseMedia,
+        saveMediaBuffer: runtimeMediaMocks.saveMediaBuffer,
       },
     },
   })),
@@ -69,9 +72,10 @@ vi.mock("./remote-media.js", () => ({
 }));
 
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
-import { downloadMSTeamsGraphMedia } from "./graph.js";
+import { downloadMSTeamsAttachments } from "./download.js";
+import { buildMSTeamsGraphMessageUrls, downloadMSTeamsGraphMedia } from "./graph.js";
 import { downloadAndStoreMSTeamsRemoteMedia } from "./remote-media.js";
-import { safeFetchWithPolicy } from "./shared.js";
+import { isUrlAllowed, safeFetchWithPolicy } from "./shared.js";
 
 function mockFetchResponse(body: unknown, status = 200) {
   const bodyStr = typeof body === "string" ? body : JSON.stringify(body);
@@ -178,6 +182,11 @@ describe("downloadMSTeamsGraphMedia hosted content $value fallback", () => {
 
     // No media because there's no id to fetch $value from and no contentBytes
     expect(result.media).toHaveLength(0);
+    // A malformed hostedContents entry still never reaches the agent — must
+    // still be reported, not silently vanish (code-review finding).
+    expect(result.failures).toEqual([
+      { name: undefined, contentType: "image/png", reason: "fetch_failed" },
+    ]);
   });
 
   it("skips $value content when Content-Length exceeds maxBytes", async () => {
@@ -209,6 +218,72 @@ describe("downloadMSTeamsGraphMedia hosted content $value fallback", () => {
       "https://graph.microsoft.com/v1.0/chats/c/messages/msg-cl/hostedContents/hosted-big/$value",
     );
     expect(result.media).toHaveLength(0);
+    // `saveResponseMedia`'s own maxBytes guard throws, which the
+    // $value branch's catch previously only warn-logged — must now surface.
+    expect(result.failures).toEqual([
+      { name: undefined, contentType: "image/png", reason: "fetch_failed" },
+    ]);
+  });
+
+  it("reports too_large when inline contentBytes exceeds maxBytes", async () => {
+    const bigBase64 = Buffer.alloc(2048, 1).toString("base64");
+
+    mockGraphMediaFetch({
+      messageId: "msg-cb-big",
+      hostedContents: [{ id: "hosted-cb", contentType: "image/png", contentBytes: bigBase64 }],
+    });
+
+    const result = await downloadMSTeamsGraphMedia({
+      messageUrl: "https://graph.microsoft.com/v1.0/chats/c/messages/msg-cb-big",
+      tokenProvider: { getAccessToken: vi.fn(async () => "test-token") },
+      maxBytes: 1024,
+    });
+
+    expect(result.media).toHaveLength(0);
+    expect(result.failures).toEqual([
+      { name: undefined, contentType: "image/png", reason: "too_large" },
+    ]);
+  });
+
+  it("reports fetch_failed when the $value fetch returns non-ok", async () => {
+    mockGraphMediaFetch({
+      messageId: "msg-value-403",
+      hostedContents: [{ id: "hosted-403", contentType: "image/png", contentBytes: null }],
+      valueResponses: {
+        "/hostedContents/hosted-403/$value": new Response("forbidden", { status: 403 }),
+      },
+    });
+
+    const result = await downloadMSTeamsGraphMedia({
+      messageUrl: "https://graph.microsoft.com/v1.0/chats/c/messages/msg-value-403",
+      tokenProvider: { getAccessToken: vi.fn(async () => "test-token") },
+      maxBytes: 10 * 1024 * 1024,
+    });
+
+    expect(result.media).toHaveLength(0);
+    expect(result.failures).toEqual([
+      { name: undefined, contentType: "image/png", reason: "fetch_failed" },
+    ]);
+  });
+
+  it("reports fetch_failed when saveMediaBuffer throws for inline contentBytes", async () => {
+    const base64Png = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
+    mockGraphMediaFetch({
+      messageId: "msg-save-throws",
+      hostedContents: [{ id: "hosted-save", contentType: "image/png", contentBytes: base64Png }],
+    });
+    runtimeMediaMocks.saveMediaBuffer.mockRejectedValueOnce(new Error("disk full"));
+
+    const result = await downloadMSTeamsGraphMedia({
+      messageUrl: "https://graph.microsoft.com/v1.0/chats/c/messages/msg-save-throws",
+      tokenProvider: { getAccessToken: vi.fn(async () => "test-token") },
+      maxBytes: 10 * 1024 * 1024,
+    });
+
+    expect(result.media).toHaveLength(0);
+    expect(result.failures).toEqual([
+      { name: undefined, contentType: "image/png", reason: "fetch_failed" },
+    ]);
   });
 
   it("uses inline contentBytes when available instead of $value", async () => {
@@ -364,6 +439,212 @@ describe("downloadMSTeamsGraphMedia attachment sourcing and error logging", () =
     // Regression guard: attachmentCount now reflects real inline attachments,
     // not the imaginary `/attachments` sub-resource count.
     expect(result.attachmentCount).toBe(1);
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it("reports a MediaFailures entry when the SharePoint reference download fails", async () => {
+    // Before this fix, a failed Graph `/shares/.../driveItem/content` fetch
+    // (e.g. 403 because the bot's own Azure AD app lacks Files.Read.All /
+    // Sites.Read.All consent) was only logged at warn level and the
+    // attachment silently vanished — the agent never learned the download
+    // was attempted, let alone that it failed.
+    mockGraphMediaFetch({
+      messageId: "msg-sp-403",
+      messageResponse: {
+        body: {},
+        attachments: [
+          {
+            contentType: "reference",
+            contentUrl: "https://tenant.sharepoint.com/dragged.pdf",
+            name: "dragged.pdf",
+          },
+        ],
+      },
+    });
+    vi.mocked(safeFetchWithPolicy).mockResolvedValue(new Response(null, { status: 403 }));
+    vi.mocked(downloadAndStoreMSTeamsRemoteMedia).mockRejectedValue(new Error("HTTP 403"));
+
+    const result = await downloadMSTeamsGraphMedia({
+      messageUrl: "https://graph.microsoft.com/v1.0/chats/c/messages/msg-sp-403",
+      tokenProvider: { getAccessToken: vi.fn(async () => "test-token") },
+      maxBytes: 10 * 1024 * 1024,
+    });
+
+    expect(result.media).toHaveLength(0);
+    expect(result.failures).toEqual([
+      { name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
+  });
+
+  it("does not report a failed SharePoint reference attachment twice (code-review finding)", async () => {
+    // A failed reference attachment was never added to `downloadedReferenceUrls`
+    // (only successes were), so `filteredAttachments` still included it and
+    // handed it to `downloadMSTeamsAttachments` for a second attempt, which
+    // failed the same way and reported the same failure again.
+    mockGraphMediaFetch({
+      messageId: "msg-sp-dup",
+      messageResponse: {
+        body: {},
+        attachments: [
+          {
+            contentType: "reference",
+            contentUrl: "https://tenant.sharepoint.com/dragged.pdf",
+            name: "dragged.pdf",
+          },
+        ],
+      },
+    });
+    vi.mocked(safeFetchWithPolicy).mockResolvedValue(new Response(null, { status: 403 }));
+    vi.mocked(downloadAndStoreMSTeamsRemoteMedia).mockRejectedValue(new Error("HTTP 403"));
+    // Simulate the retry path's own fetch failing the same way for the same
+    // attachment, exactly as it would for real (not a no-op mock).
+    vi.mocked(downloadMSTeamsAttachments).mockImplementationOnce(async (params) => {
+      for (const att of params.attachments ?? []) {
+        if (att.contentUrl === "https://tenant.sharepoint.com/dragged.pdf") {
+          params.onFailure?.({
+            name: att.name ?? undefined,
+            contentType: undefined,
+            reason: "fetch_failed",
+          });
+        }
+      }
+      return [];
+    });
+
+    const result = await downloadMSTeamsGraphMedia({
+      messageUrl: "https://graph.microsoft.com/v1.0/chats/c/messages/msg-sp-dup",
+      tokenProvider: { getAccessToken: vi.fn(async () => "test-token") },
+      maxBytes: 10 * 1024 * 1024,
+    });
+
+    expect(result.media).toHaveLength(0);
+    expect(result.failures).toEqual([
+      { name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
+  });
+
+  it("reports a failure once when the SAME SharePoint reference appears twice in one message (code-review finding)", async () => {
+    // e.g. a quoted/forwarded message surfacing the same file as two
+    // attachment entries with an identical contentUrl.
+    mockGraphMediaFetch({
+      messageId: "msg-sp-same-url-twice",
+      messageResponse: {
+        body: {},
+        attachments: [
+          {
+            contentType: "reference",
+            contentUrl: "https://tenant.sharepoint.com/dragged.pdf",
+            name: "dragged.pdf",
+          },
+          {
+            contentType: "reference",
+            contentUrl: "https://tenant.sharepoint.com/dragged.pdf",
+            name: "dragged.pdf",
+          },
+        ],
+      },
+    });
+    vi.mocked(safeFetchWithPolicy).mockResolvedValue(new Response(null, { status: 403 }));
+    vi.mocked(downloadAndStoreMSTeamsRemoteMedia).mockRejectedValue(new Error("HTTP 403"));
+
+    const result = await downloadMSTeamsGraphMedia({
+      messageUrl: "https://graph.microsoft.com/v1.0/chats/c/messages/msg-sp-same-url-twice",
+      tokenProvider: { getAccessToken: vi.fn(async () => "test-token") },
+      maxBytes: 10 * 1024 * 1024,
+    });
+
+    expect(result.media).toHaveLength(0);
+    expect(result.failures).toEqual([
+      { name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
+    // Both attachment entries were real, attempted (the second deduped away
+    // from re-fetching) — the diagnostic count must not undercount to 1
+    // just because the URL Set collapsed them (code-review finding).
+    expect(result.attachmentCount).toBe(2);
+  });
+
+  it("reports a failure (and does not retry) a SharePoint reference blocked by the host allowlist", async () => {
+    mockGraphMediaFetch({
+      messageId: "msg-sp-blocked",
+      messageResponse: {
+        body: {},
+        attachments: [
+          {
+            contentType: "reference",
+            contentUrl: "https://tenant.sharepoint.com/blocked.pdf",
+            name: "blocked.pdf",
+          },
+        ],
+      },
+    });
+    vi.mocked(isUrlAllowed).mockReturnValueOnce(false);
+
+    const result = await downloadMSTeamsGraphMedia({
+      messageUrl: "https://graph.microsoft.com/v1.0/chats/c/messages/msg-sp-blocked",
+      tokenProvider: { getAccessToken: vi.fn(async () => "test-token") },
+      maxBytes: 10 * 1024 * 1024,
+    });
+
+    expect(result.media).toHaveLength(0);
+    expect(result.failures).toEqual([
+      { name: "blocked.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
+    // Must not also be retried through the generic downloadMSTeamsAttachments
+    // fallback (which runs unconditionally for other attachment types), or
+    // it would double-report the same blocked file.
+    const [call] = vi.mocked(downloadMSTeamsAttachments).mock.calls;
+    expect(call?.[0]?.attachments).toEqual([]);
+  });
+
+  it("reports a failed SharePoint reference dragged into a threaded reply (real reply URL, not mocked)", async () => {
+    // Closes a gap: every other test in this suite exercises a top-level
+    // message URL. This one builds the messageUrl via the REAL
+    // buildMSTeamsGraphMessageUrls (reply-addressed, not a fresh message) to
+    // prove the failure-reporting wiring also works for a dragged file in an
+    // existing thread, not just a new top-level post.
+    const [replyUrl] = buildMSTeamsGraphMessageUrls({
+      conversationType: "channel",
+      messageId: "reply-id",
+      replyToId: "root-id",
+      channelData: { team: { id: "team-id" }, channel: { id: "chan-id" } },
+    });
+    expect(replyUrl).toContain("/messages/root-id/replies/reply-id");
+
+    vi.mocked(fetchWithSsrFGuard).mockImplementation(async (params: GuardedFetchParams) => {
+      const url = params.url;
+      if (url === replyUrl) {
+        return guardedFetchResult(
+          params,
+          mockFetchResponse({
+            body: {},
+            attachments: [
+              {
+                contentType: "reference",
+                contentUrl: "https://tenant.sharepoint.com/dragged-in-reply.pdf",
+                name: "dragged-in-reply.pdf",
+              },
+            ],
+          }),
+        );
+      }
+      if (url.endsWith("/hostedContents")) {
+        return guardedFetchResult(params, mockFetchResponse({ value: [] }));
+      }
+      return guardedFetchResult(params, mockFetchResponse({}, 404));
+    });
+    vi.mocked(safeFetchWithPolicy).mockResolvedValue(new Response(null, { status: 403 }));
+    vi.mocked(downloadAndStoreMSTeamsRemoteMedia).mockRejectedValue(new Error("HTTP 403"));
+
+    const result = await downloadMSTeamsGraphMedia({
+      messageUrl: replyUrl,
+      tokenProvider: { getAccessToken: vi.fn(async () => "test-token") },
+      maxBytes: 10 * 1024 * 1024,
+    });
+
+    expect(result.media).toHaveLength(0);
+    expect(result.failures).toEqual([
+      { name: "dragged-in-reply.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
   });
 
   it("logs a debug event when the message fetch throws instead of swallowing it", async () => {

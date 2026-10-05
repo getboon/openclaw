@@ -442,7 +442,12 @@ function shouldPreferHostForProfile(profileName: string | undefined) {
   return capabilities.usesChromeMcp;
 }
 
-const DEFAULT_EXISTING_SESSION_MANAGE_TIMEOUT_MS = 45_000;
+// Must outlast chrome-mcp's own handshake budget (CHROME_MCP_HANDSHAKE_TIMEOUT_MS =
+// 120_000ms in chrome-mcp.ts, itself sized to the measured 69-73s `npx` cold-start
+// cost, see ENG-20866). The old 45s default aborted this HTTP request -- and with it
+// the first existing-session "open" a fresh host ever does -- before chrome-mcp's own
+// handshake could finish, regardless of that 120s internal budget.
+const DEFAULT_EXISTING_SESSION_MANAGE_TIMEOUT_MS = 130_000;
 const EXISTING_SESSION_MANAGE_ACTIONS = new Set([
   "status",
   "start",

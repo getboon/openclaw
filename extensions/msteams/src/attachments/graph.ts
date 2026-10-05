@@ -29,6 +29,7 @@ import {
 } from "./shared.js";
 import type {
   MSTeamsAccessTokenProvider,
+  MSTeamsAttachmentFailure,
   MSTeamsAttachmentLike,
   MSTeamsGraphMediaLogger,
   MSTeamsGraphMediaResult,
@@ -191,7 +192,12 @@ async function downloadGraphHostedContent(params: {
   preserveFilenames?: boolean;
   ssrfPolicy?: SsrFPolicy;
   logger?: MSTeamsAttachmentDownloadLogger;
-}): Promise<{ media: MSTeamsInboundMedia[]; status: number; count: number }> {
+}): Promise<{
+  media: MSTeamsInboundMedia[];
+  failures: MSTeamsAttachmentFailure[];
+  status: number;
+  count: number;
+}> {
   const hosted = (await fetchGraphCollection({
     url: `${params.messageUrl}/hostedContents`,
     accessToken: params.accessToken,
@@ -199,15 +205,18 @@ async function downloadGraphHostedContent(params: {
     ssrfPolicy: params.ssrfPolicy,
   })) as { status: number; items: GraphHostedContent[] };
   if (hosted.items.length === 0) {
-    return { media: [], status: hosted.status, count: 0 };
+    return { media: [], failures: [], status: hosted.status, count: 0 };
   }
 
   const out: MSTeamsInboundMedia[] = [];
+  const failures: MSTeamsAttachmentFailure[] = [];
   for (const item of hosted.items) {
+    const itemContentType = item.contentType ?? undefined;
     const contentBytes = typeof item.contentBytes === "string" ? item.contentBytes : "";
     let buffer: Buffer;
     if (contentBytes) {
       if (estimateBase64DecodedBytes(contentBytes) > params.maxBytes) {
+        failures.push({ name: undefined, contentType: itemContentType, reason: "too_large" });
         continue;
       }
       try {
@@ -216,6 +225,7 @@ async function downloadGraphHostedContent(params: {
         params.logger?.warn?.("msteams graph hostedContent base64 decode failed", {
           error: err instanceof Error ? err.message : String(err),
         });
+        failures.push({ name: undefined, contentType: itemContentType, reason: "fetch_failed" });
         continue;
       }
     } else if (item.id) {
@@ -233,12 +243,17 @@ async function downloadGraphHostedContent(params: {
         });
         try {
           if (!valRes.ok) {
+            failures.push({
+              name: undefined,
+              contentType: itemContentType,
+              reason: "fetch_failed",
+            });
             continue;
           }
           const saved = await getMSTeamsRuntime().channel.media.saveResponseMedia(valRes, {
             sourceUrl: valueUrl,
             maxBytes: params.maxBytes,
-            fallbackContentType: item.contentType ?? undefined,
+            fallbackContentType: itemContentType,
             subdir: "inbound",
           });
           out.push({
@@ -253,24 +268,32 @@ async function downloadGraphHostedContent(params: {
         params.logger?.warn?.("msteams graph hostedContent value fetch failed", {
           error: err instanceof Error ? err.message : String(err),
         });
+        // Cause is opaque here (could be the network, or saveResponseMedia's
+        // own maxBytes guard throwing) — `fetch_failed` is the honest bucket
+        // since we can't distinguish without a typed error from the SDK.
+        failures.push({ name: undefined, contentType: itemContentType, reason: "fetch_failed" });
         continue;
       }
       continue;
     } else {
+      // Neither inline bytes nor an id to fetch from — nothing retrievable,
+      // but still a real item the agent will never see.
+      failures.push({ name: undefined, contentType: itemContentType, reason: "fetch_failed" });
       continue;
     }
     if (buffer.byteLength > params.maxBytes) {
+      failures.push({ name: undefined, contentType: itemContentType, reason: "too_large" });
       continue;
     }
     const mime = await getMSTeamsRuntime().media.detectMime({
       buffer,
-      headerMime: item.contentType ?? undefined,
+      headerMime: itemContentType,
     });
     // Download any file type, not just images
     try {
       const saved = await getMSTeamsRuntime().channel.media.saveMediaBuffer(
         buffer,
-        mime ?? item.contentType ?? undefined,
+        mime ?? itemContentType,
         "inbound",
         params.maxBytes,
       );
@@ -283,10 +306,11 @@ async function downloadGraphHostedContent(params: {
       params.logger?.warn?.("msteams graph hostedContent save failed", {
         error: err instanceof Error ? err.message : String(err),
       });
+      failures.push({ name: undefined, contentType: itemContentType, reason: "fetch_failed" });
     }
   }
 
-  return { media: out, status: hosted.status, count: hosted.items.length };
+  return { media: out, failures, status: hosted.status, count: hosted.items.length };
 }
 
 export async function downloadMSTeamsGraphMedia(params: {
@@ -304,9 +328,22 @@ export async function downloadMSTeamsGraphMedia(params: {
   logger?: MSTeamsAttachmentDownloadLogger;
   /** Back-compat diagnostic logger used by older tests/callers. */
   log?: MSTeamsGraphMediaLogger;
+  /**
+   * Invoked once per download attempted and failed, alongside (not instead
+   * of) the `failures` field of the returned result — lets a caller dedupe
+   * the SAME attachment reported by more than one download path, keyed on
+   * an internal URL identity rather than guessing from name/contentType.
+   */
+  onFailure?: (failure: MSTeamsAttachmentFailure, sourceUrl?: string) => void;
+  /**
+   * Invoked once per download attempted and succeeded, carrying the same
+   * URL identity as `onFailure` — lets a caller clear an earlier failure
+   * for this exact attachment reported by a different download path.
+   */
+  onSuccess?: (sourceUrl: string) => void;
 }): Promise<MSTeamsGraphMediaResult> {
   if (!params.messageUrl || !params.tokenProvider) {
-    return { media: [] };
+    return { media: [], failures: [] };
   }
   const policy: MSTeamsAttachmentFetchPolicy = resolveAttachmentFetchPolicy({
     allowHosts: params.allowHosts,
@@ -327,12 +364,23 @@ export async function downloadMSTeamsGraphMedia(params: {
     params.logger?.warn?.("msteams graph token acquisition failed", {
       error: err instanceof Error ? err.message : String(err),
     });
-    return { media: [], messageUrl, tokenError: true };
+    return { media: [], failures: [], messageUrl, tokenError: true };
   }
 
   const fetchFn = params.fetchFn ?? fetch;
   const sharePointMedia: MSTeamsInboundMedia[] = [];
-  const downloadedReferenceUrls = new Set<string>();
+  // Collects downloads attempted and failed (most commonly a Graph shares
+  // 401/403 from missing Files.Read.All/Sites.Read.All) so the caller can
+  // surface them as MediaFailures instead of silently vanishing.
+  const failures: MSTeamsAttachmentFailure[] = [];
+  // Every reference URL that reached a terminal outcome here (success,
+  // failure, or allowlist-blocked) — excludes it below so the generic
+  // retry path never double-attempts and double-reports it.
+  const attemptedReferenceUrls = new Set<string>();
+  // Counts every attachment entry attempted, including a duplicate URL the
+  // Set above collapses — attachmentCount is a per-entry diagnostic, not a
+  // per-unique-URL one.
+  let referenceAttemptCount = 0;
   let messageAttachments: GraphAttachment[] = [];
   let messageStatus: number | undefined;
   try {
@@ -376,14 +424,28 @@ export async function downloadMSTeamsGraphMedia(params: {
           if (!shareUrl) {
             continue;
           }
+          referenceAttemptCount++;
+          // Two attachment entries can carry the identical contentUrl (e.g. a
+          // quoted/forwarded message) — only attempt it once.
+          if (attemptedReferenceUrls.has(shareUrl)) {
+            continue;
+          }
+          attemptedReferenceUrls.add(shareUrl);
+          const sharesUrl = `${GRAPH_ROOT}/shares/${encodeGraphShareId(shareUrl)}/driveItem/content`;
 
           try {
-            const sharesUrl = `${GRAPH_ROOT}/shares/${encodeGraphShareId(shareUrl)}/driveItem/content`;
             if (!isUrlAllowed(sharesUrl, policy.allowHosts)) {
               debugLog?.debug?.("graph media sharepoint url not in allowHosts", {
                 messageUrl,
                 sharesUrl,
               });
+              const failure: MSTeamsAttachmentFailure = {
+                name,
+                contentType: undefined,
+                reason: "fetch_failed",
+              };
+              failures.push(failure);
+              params.onFailure?.(failure, sharesUrl);
               continue;
             }
 
@@ -418,12 +480,19 @@ export async function downloadMSTeamsGraphMedia(params: {
               },
             });
             sharePointMedia.push(media);
-            downloadedReferenceUrls.add(shareUrl);
+            params.onSuccess?.(sharesUrl);
           } catch (err) {
             params.logger?.warn?.("msteams SharePoint reference download failed", {
               error: err instanceof Error ? err.message : String(err),
               name,
             });
+            const failure: MSTeamsAttachmentFailure = {
+              name,
+              contentType: undefined,
+              reason: "fetch_failed",
+            };
+            failures.push(failure);
+            params.onFailure?.(failure, sharesUrl);
           }
         }
       } else {
@@ -454,22 +523,25 @@ export async function downloadMSTeamsGraphMedia(params: {
     ssrfPolicy,
     logger: params.logger,
   });
+  failures.push(...hosted.failures);
 
   const normalizedAttachments = messageAttachments.map(normalizeGraphAttachment);
-  const filteredAttachments =
-    sharePointMedia.length > 0
-      ? normalizedAttachments.filter((att) => {
-          const contentType = normalizeOptionalLowercaseString(att.contentType);
-          if (contentType !== "reference") {
-            return true;
-          }
-          const url = typeof att.contentUrl === "string" ? att.contentUrl : "";
-          if (!url) {
-            return true;
-          }
-          return !downloadedReferenceUrls.has(url);
-        })
-      : normalizedAttachments;
+  // Vacuously keeps everything when `attemptedReferenceUrls` is empty, so no
+  // separate unconditional-pass-through branch is needed.
+  const filteredAttachments = normalizedAttachments.filter((att) => {
+    const contentType = normalizeOptionalLowercaseString(att.contentType);
+    if (contentType !== "reference") {
+      return true;
+    }
+    const url = typeof att.contentUrl === "string" ? att.contentUrl : "";
+    if (!url) {
+      return true;
+    }
+    // Already got its one terminal outcome above (success or failure) —
+    // exclude it here so it is never retried generically below and
+    // double-reported.
+    return !attemptedReferenceUrls.has(url);
+  });
   let attachmentMedia: MSTeamsInboundMedia[] = [];
   try {
     attachmentMedia = await downloadMSTeamsAttachments({
@@ -483,6 +555,11 @@ export async function downloadMSTeamsGraphMedia(params: {
       resolveFn: params.resolveFn,
       preserveFilenames: params.preserveFilenames,
       logger: params.logger,
+      onFailure: (failure, sourceUrl) => {
+        failures.push(failure);
+        params.onFailure?.(failure, sourceUrl);
+      },
+      onSuccess: (sourceUrl) => params.onSuccess?.(sourceUrl),
     });
   } catch (err) {
     params.logger?.warn?.("msteams graph attachment download failed", {
@@ -493,8 +570,11 @@ export async function downloadMSTeamsGraphMedia(params: {
 
   return {
     media: [...sharePointMedia, ...hosted.media, ...attachmentMedia],
+    failures,
     hostedCount: hosted.count,
-    attachmentCount: filteredAttachments.length + sharePointMedia.length,
+    // referenceAttemptCount (every entry, not attemptedReferenceUrls.size)
+    // so a duplicate-URL attachment entry still counts as attempted here.
+    attachmentCount: filteredAttachments.length + referenceAttemptCount,
     hostedStatus: hosted.status,
     attachmentStatus: messageStatus,
     messageUrl,

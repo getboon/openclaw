@@ -146,7 +146,6 @@ overrides:
   brace-expansion: 5.0.11
   # GHSA-r28c-9q8g-f849: postcss <=8.5.17 path traversal in source-map auto-load.
   postcss: 8.5.22
-  "@opentelemetry/propagator-jaeger": 2.9.0
   # Scope the undici security pin per major line. jsdom needs `undici@^7.25.0`
   # and imports lib/handler/wrap-handler.js, removed in 8.x, while the 6.11
   # extensions depend on undici 8.5.0 directly — a single flat override would

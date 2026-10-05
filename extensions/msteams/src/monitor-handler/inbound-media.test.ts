@@ -3,8 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../attachments.js", () => ({
   downloadMSTeamsAttachments: vi.fn(async () => []),
-  downloadMSTeamsGraphMedia: vi.fn(async () => ({ media: [] })),
-  downloadMSTeamsBotFrameworkAttachments: vi.fn(async () => ({ media: [], attachmentCount: 0 })),
+  downloadMSTeamsGraphMedia: vi.fn(async () => ({ media: [], failures: [] })),
+  downloadMSTeamsBotFrameworkAttachments: vi.fn(async () => ({
+    media: [],
+    failures: [],
+    attachmentCount: 0,
+  })),
   buildMSTeamsGraphMessageUrls: vi.fn(() => [
     "https://graph.microsoft.com/v1.0/chats/c/messages/m",
   ]),
@@ -57,6 +61,7 @@ describe("resolveMSTeamsInboundMedia graph fallback trigger", () => {
     vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
     vi.mocked(downloadMSTeamsGraphMedia).mockResolvedValue({
       media: [{ path: "/tmp/img.png", contentType: "image/png", placeholder: "[image]" }],
+      failures: [],
     });
 
     await resolveMSTeamsInboundMedia({
@@ -136,7 +141,7 @@ describe("resolveMSTeamsInboundMedia graph fallback trigger", () => {
     vi.mocked(downloadMSTeamsAttachments).mockResolvedValue([]);
     vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
     vi.mocked(downloadMSTeamsGraphMedia).mockClear();
-    vi.mocked(downloadMSTeamsGraphMedia).mockResolvedValue({ media: [] });
+    vi.mocked(downloadMSTeamsGraphMedia).mockResolvedValue({ media: [], failures: [] });
     const log = { debug: vi.fn() };
 
     await resolveMSTeamsInboundMedia({
@@ -179,6 +184,7 @@ describe("resolveMSTeamsInboundMedia graph fallback trigger", () => {
     vi.mocked(buildMSTeamsGraphMessageUrls).mockClear();
     vi.mocked(downloadMSTeamsGraphMedia).mockResolvedValue({
       media: [{ path: "/tmp/doc.pdf", contentType: "application/pdf", placeholder: "[file]" }],
+      failures: [],
     });
 
     const result = await resolveMSTeamsInboundMedia({
@@ -196,7 +202,7 @@ describe("resolveMSTeamsInboundMedia graph fallback trigger", () => {
 
     expect(buildMSTeamsGraphMessageUrls).toHaveBeenCalled();
     expect(downloadMSTeamsGraphMedia).toHaveBeenCalled();
-    expect(result).toEqual([
+    expect(result.media).toEqual([
       { path: "/tmp/doc.pdf", contentType: "application/pdf", placeholder: "[file]" },
     ]);
   });
@@ -257,6 +263,482 @@ describe("resolveMSTeamsInboundMedia graph fallback trigger", () => {
   });
 });
 
+describe("resolveMSTeamsInboundMedia failure reporting", () => {
+  it("returns direct-download failures when nothing recovers the attachment", async () => {
+    vi.mocked(downloadMSTeamsAttachments).mockResolvedValue([]);
+    // No HTML attachment stub at all, so neither fallback runs — the direct
+    // path's failures (reported via the onFailure callback) are all we have.
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce([]);
+    vi.mocked(downloadMSTeamsAttachments).mockImplementationOnce(async (params) => {
+      params.onFailure?.({ name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" });
+      return [];
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      attachments: [
+        { contentType: "reference", contentUrl: "https://tenant.sharepoint.com/dragged.pdf" },
+      ],
+    });
+
+    expect(result.media).toEqual([]);
+    expect(result.failures).toEqual([
+      { name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
+  });
+
+  it("keeps a disjoint earlier failure even once a later fallback succeeds (code-review finding)", async () => {
+    // The direct-download attempt and the Graph fallback typically cover
+    // DIFFERENT attachments (the fallback exists for files direct download
+    // couldn't see at all) — a real failure for one file must not be erased
+    // just because the fallback recovered an unrelated one.
+    vi.mocked(downloadMSTeamsAttachments).mockImplementationOnce(async (params) => {
+      params.onFailure?.({ name: "a.png", contentType: undefined, reason: "fetch_failed" });
+      return [];
+    });
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
+    vi.mocked(downloadMSTeamsGraphMedia).mockResolvedValue({
+      media: [{ path: "/tmp/doc.pdf", contentType: "application/pdf", placeholder: "[file]" }],
+      failures: [],
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "text/html",
+          content: '<div><attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.media).toHaveLength(1);
+    expect(result.failures).toEqual([
+      { name: "a.png", contentType: undefined, reason: "fetch_failed" },
+    ]);
+  });
+
+  it("preserves a sibling failure from a fallback batch that also partially succeeded", async () => {
+    // Two files dragged in one message: the Graph re-fetch recovers one but
+    // the other's /shares fetch 403s. The failure must not be discarded just
+    // because the batch also returned some media (code-review finding).
+    vi.mocked(downloadMSTeamsAttachments).mockResolvedValue([]);
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
+    vi.mocked(downloadMSTeamsGraphMedia).mockResolvedValue({
+      media: [{ path: "/tmp/a.pdf", contentType: "application/pdf", placeholder: "[file]" }],
+      failures: [{ name: "b.pdf", contentType: undefined, reason: "fetch_failed" }],
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "text/html",
+          content: '<div><attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.media).toHaveLength(1);
+    expect(result.failures).toEqual([
+      { name: "b.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
+  });
+
+  it("preserves a sibling failure from a Bot Framework DM batch that also partially succeeded", async () => {
+    vi.mocked(downloadMSTeamsAttachments).mockResolvedValue([]);
+    vi.mocked(downloadMSTeamsBotFrameworkAttachments).mockResolvedValue({
+      media: [{ path: "/tmp/a.pdf", contentType: "application/pdf", placeholder: "[file]" }],
+      failures: [{ name: "b.pdf", contentType: undefined, reason: "fetch_failed" }],
+      attachmentCount: 2,
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "personal",
+      conversationId: "a:1dRsHCobZ1AxURzY05Dc",
+      serviceUrl: "https://smba.trafficmanager.net/amer/",
+      attachments: [
+        {
+          contentType: "text/html",
+          content: '<div>A file <attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.media).toHaveLength(1);
+    expect(result.failures).toEqual([
+      { name: "b.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
+  });
+
+  it("dedupes an identical failure reported across multiple Graph messageUrl retries", async () => {
+    vi.mocked(downloadMSTeamsAttachments).mockResolvedValue([]);
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
+    vi.mocked(buildMSTeamsGraphMessageUrls).mockReturnValueOnce([
+      "https://graph.microsoft.com/v1.0/chats/c/messages/m1",
+      "https://graph.microsoft.com/v1.0/chats/c/messages/m1/replies/m2",
+    ]);
+    vi.mocked(downloadMSTeamsGraphMedia).mockResolvedValue({
+      media: [],
+      failures: [{ name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" }],
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "text/html",
+          content: '<div><attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.media).toEqual([]);
+    expect(result.failures).toEqual([
+      { name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
+  });
+
+  it("dedupes a repeated failure batch even when a different-shaped batch comes between (code-review finding)", async () => {
+    // buildMSTeamsGraphMessageUrls can emit more than two ID-guess variants
+    // for the same underlying message; a stale/wrong ID guess in between two
+    // correct ones must not reset the dedup so the correct guesses' shared
+    // failure gets reported twice.
+    vi.mocked(downloadMSTeamsAttachments).mockResolvedValue([]);
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
+    vi.mocked(buildMSTeamsGraphMessageUrls).mockReturnValueOnce([
+      "https://graph.microsoft.com/v1.0/teams/t/channels/c/messages/m1",
+      "https://graph.microsoft.com/v1.0/teams/t/channels/c/messages/m2",
+      "https://graph.microsoft.com/v1.0/teams/t/channels/c/messages/m1/replies/m1",
+    ]);
+    const sharedFailure = {
+      name: "dragged.pdf",
+      contentType: undefined,
+      reason: "fetch_failed" as const,
+    };
+    const unrelatedFailure = {
+      name: "other.pdf",
+      contentType: undefined,
+      reason: "fetch_failed" as const,
+    };
+    vi.mocked(downloadMSTeamsGraphMedia)
+      .mockResolvedValueOnce({ media: [], failures: [sharedFailure] })
+      .mockResolvedValueOnce({ media: [], failures: [unrelatedFailure] })
+      .mockResolvedValueOnce({ media: [], failures: [sharedFailure] });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "text/html",
+          content: '<div><attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.failures).toEqual([sharedFailure, unrelatedFailure]);
+  });
+
+  it("keeps two genuinely distinct same-shaped failures from a single Graph call (code-review finding)", async () => {
+    // Two oversized pasted images in one message both come back from
+    // downloadGraphHostedContent as {name: undefined, contentType:
+    // "image/png", reason: "too_large"} — identical in shape but two real,
+    // separate lost files. A content-keyed dedupe must not collapse these
+    // just because the messageUrl-retry dedupe above needs *some* key.
+    vi.mocked(downloadMSTeamsAttachments).mockResolvedValue([]);
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
+    vi.mocked(buildMSTeamsGraphMessageUrls).mockReturnValueOnce([
+      "https://graph.microsoft.com/v1.0/chats/c/messages/m1",
+    ]);
+    const duplicateShapedFailure = {
+      name: undefined,
+      contentType: "image/png",
+      reason: "too_large" as const,
+    };
+    vi.mocked(downloadMSTeamsGraphMedia).mockResolvedValue({
+      media: [],
+      failures: [duplicateShapedFailure, duplicateShapedFailure],
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "text/html",
+          content: '<div><attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.failures).toEqual([duplicateShapedFailure, duplicateShapedFailure]);
+  });
+
+  it("surfaces Graph re-fetch failures when the fallback also comes up empty", async () => {
+    vi.mocked(downloadMSTeamsAttachments).mockResolvedValue([]);
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
+    vi.mocked(downloadMSTeamsGraphMedia).mockResolvedValue({
+      media: [],
+      failures: [{ name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" }],
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "text/html",
+          content: '<div><attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.media).toEqual([]);
+    expect(result.failures).toEqual([
+      { name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
+  });
+
+  it("dedupes the direct path and Graph fallback failing the SAME attachment (identity-based fix)", async () => {
+    // The flagship ENG-20968 scenario: a dragged SharePoint reference
+    // attachment has a contentUrl, so isDownloadableAttachment (no
+    // contentType check) lets the DIRECT path attempt and fail it first;
+    // since mediaList is still empty, the Graph fallback then independently
+    // rediscovers and re-fails the SAME attachment, producing two entries
+    // for what is usually one real file. A prior fix deduped these by
+    // name+contentType+reason, but that tuple is not a unique file identity
+    // (see the next test). Both download paths derive the SAME Graph shares
+    // URL from the attachment's contentUrl, so threading that URL through as
+    // an internal-only `sourceUrl` (never part of the public MediaFailures
+    // contract) lets the two reports collapse into the one real failure.
+    const sourceUrl = "https://graph.microsoft.com/v1.0/shares/shareid/driveItem/content";
+    vi.mocked(downloadMSTeamsAttachments).mockImplementationOnce(async (params) => {
+      params.onFailure?.(
+        { name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" },
+        sourceUrl,
+      );
+      return [];
+    });
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
+    vi.mocked(downloadMSTeamsGraphMedia).mockImplementationOnce(async (params) => {
+      const failure = {
+        name: "dragged.pdf",
+        contentType: undefined,
+        reason: "fetch_failed",
+      } as const;
+      params.onFailure?.(failure, sourceUrl);
+      return { media: [], failures: [failure] };
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "reference",
+          contentUrl: "https://tenant.sharepoint.com/dragged.pdf",
+          name: "dragged.pdf",
+        },
+        {
+          contentType: "text/html",
+          content: '<div><attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.media).toEqual([]);
+    expect(result.failures).toEqual([
+      { name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
+  });
+
+  it("never collapses two genuinely distinct same-named failures from different paths (PR review finding)", async () => {
+    // Two DIFFERENT SharePoint attachments can share a filename, content
+    // type, and failure reason (e.g. two separate "report.pdf" documents) —
+    // and so, in this case, two DIFFERENT sourceUrls. A name+contentType+
+    // reason dedup key would wrongly collapse these into one, telling the
+    // user fewer files failed than actually did — strictly worse than
+    // occasional over-counting. Both must survive untouched.
+    vi.mocked(downloadMSTeamsAttachments).mockImplementationOnce(async (params) => {
+      params.onFailure?.(
+        { name: "report.pdf", contentType: undefined, reason: "fetch_failed" },
+        "https://graph.microsoft.com/v1.0/shares/share-a/driveItem/content",
+      );
+      return [];
+    });
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
+    vi.mocked(downloadMSTeamsGraphMedia).mockImplementationOnce(async (params) => {
+      const failure = {
+        name: "report.pdf",
+        contentType: undefined,
+        reason: "fetch_failed",
+      } as const;
+      params.onFailure?.(
+        failure,
+        "https://graph.microsoft.com/v1.0/shares/share-b/driveItem/content",
+      );
+      return { media: [], failures: [failure] };
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "reference",
+          contentUrl: "https://tenant.sharepoint.com/site-a/report.pdf",
+          name: "report.pdf",
+        },
+        {
+          contentType: "text/html",
+          content: '<div><attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.failures).toEqual([
+      { name: "report.pdf", contentType: undefined, reason: "fetch_failed" },
+      { name: "report.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
+  });
+
+  it("keeps two distinct unnamed failures from different paths (no name to collide on)", async () => {
+    vi.mocked(downloadMSTeamsAttachments).mockImplementationOnce(async (params) => {
+      params.onFailure?.({ name: undefined, contentType: "image/png", reason: "too_large" });
+      return [];
+    });
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
+    vi.mocked(downloadMSTeamsGraphMedia).mockResolvedValue({
+      media: [],
+      failures: [{ name: undefined, contentType: "image/png", reason: "too_large" }],
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "text/html",
+          content: '<div><attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.failures).toEqual([
+      { name: undefined, contentType: "image/png", reason: "too_large" },
+      { name: undefined, contentType: "image/png", reason: "too_large" },
+    ]);
+  });
+
+  it("clears a stale direct-path failure once the Graph fallback resolves the SAME attachment (PR review finding)", async () => {
+    // The direct path can fail a SharePoint reference (e.g. a transient 403)
+    // while the Graph fallback, running only because mediaList is still
+    // empty, independently retries and succeeds on that exact attachment.
+    // Without clearing the stale entry, the agent would report BOTH a
+    // successful download AND a failure for the same file.
+    const sourceUrl = "https://graph.microsoft.com/v1.0/shares/shareid/driveItem/content";
+    vi.mocked(downloadMSTeamsAttachments).mockImplementationOnce(async (params) => {
+      params.onFailure?.(
+        { name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" },
+        sourceUrl,
+      );
+      return [];
+    });
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
+    const resolvedMedia = {
+      path: "/tmp/dragged.pdf",
+      contentType: "application/pdf",
+      placeholder: "[file]",
+    };
+    vi.mocked(downloadMSTeamsGraphMedia).mockImplementationOnce(async (params) => {
+      params.onSuccess?.(sourceUrl);
+      return { media: [resolvedMedia], failures: [] };
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "reference",
+          contentUrl: "https://tenant.sharepoint.com/dragged.pdf",
+          name: "dragged.pdf",
+        },
+        {
+          contentType: "text/html",
+          content: '<div><attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.media).toEqual([resolvedMedia]);
+    expect(result.failures).toEqual([]);
+  });
+
+  it("keeps an unrelated failure when the Graph fallback resolves a DIFFERENT attachment", async () => {
+    // Guards the fix above against over-clearing: a failure must only be
+    // dropped when its own sourceUrl was later resolved, not whenever ANY
+    // success occurs during the same call.
+    const failedSourceUrl =
+      "https://graph.microsoft.com/v1.0/shares/share-failed/driveItem/content";
+    const resolvedSourceUrl = "https://graph.microsoft.com/v1.0/shares/share-ok/driveItem/content";
+    vi.mocked(downloadMSTeamsAttachments).mockImplementationOnce(async (params) => {
+      params.onFailure?.(
+        { name: "broken.pdf", contentType: undefined, reason: "fetch_failed" },
+        failedSourceUrl,
+      );
+      return [];
+    });
+    vi.mocked(extractMSTeamsHtmlAttachmentIds).mockReturnValueOnce(["att-0"]);
+    const resolvedMedia = {
+      path: "/tmp/ok.pdf",
+      contentType: "application/pdf",
+      placeholder: "[file]",
+    };
+    vi.mocked(downloadMSTeamsGraphMedia).mockImplementationOnce(async (params) => {
+      params.onSuccess?.(resolvedSourceUrl);
+      return { media: [resolvedMedia], failures: [] };
+    });
+
+    const result = await resolveMSTeamsInboundMedia({
+      ...baseParams,
+      conversationType: "channel",
+      conversationId: "19:abc@thread.tacv2",
+      attachments: [
+        {
+          contentType: "reference",
+          contentUrl: "https://tenant.sharepoint.com/broken.pdf",
+          name: "broken.pdf",
+        },
+        {
+          contentType: "text/html",
+          content: '<div><attachment id="att-0"></attachment></div>',
+        },
+      ],
+    });
+
+    expect(result.media).toEqual([resolvedMedia]);
+    expect(result.failures).toEqual([
+      { name: "broken.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
+  });
+});
+
 describe("resolveMSTeamsInboundMedia bot framework DM routing", () => {
   const dmParams = {
     ...baseParams,
@@ -276,11 +758,12 @@ describe("resolveMSTeamsInboundMedia bot framework DM routing", () => {
           placeholder: "<media:document>",
         },
       ],
+      failures: [],
       attachmentCount: 1,
     });
     vi.mocked(downloadMSTeamsGraphMedia).mockClear();
 
-    const mediaList = await resolveMSTeamsInboundMedia({
+    const { media: mediaList } = await resolveMSTeamsInboundMedia({
       ...dmParams,
       attachments: [
         {
@@ -304,6 +787,7 @@ describe("resolveMSTeamsInboundMedia bot framework DM routing", () => {
     vi.mocked(downloadMSTeamsBotFrameworkAttachments).mockClear();
     vi.mocked(downloadMSTeamsBotFrameworkAttachments).mockResolvedValue({
       media: [],
+      failures: [],
       attachmentCount: 1,
     });
     vi.mocked(downloadMSTeamsGraphMedia).mockClear();
@@ -327,7 +811,7 @@ describe("resolveMSTeamsInboundMedia bot framework DM routing", () => {
   it("does NOT call the Bot Framework endpoint for Graph-compatible '19:' IDs", async () => {
     vi.mocked(downloadMSTeamsAttachments).mockResolvedValue([]);
     vi.mocked(downloadMSTeamsBotFrameworkAttachments).mockClear();
-    vi.mocked(downloadMSTeamsGraphMedia).mockResolvedValue({ media: [] });
+    vi.mocked(downloadMSTeamsGraphMedia).mockResolvedValue({ media: [], failures: [] });
 
     await resolveMSTeamsInboundMedia({
       ...baseParams,
