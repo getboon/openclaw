@@ -1466,7 +1466,7 @@ export const FIELD_HELP: Record<string, string> = {
   "agents.defaults.pdfMaxBytesMb":
     "Maximum PDF file size in megabytes for the PDF tool (default: 10). Clamped to 768: PDFium runs in a 2GiB WASM heap and copies the whole file into it, so a larger value cannot be honored.",
   "agents.defaults.pdfMaxPages":
-    "Maximum number of PDF pages one PDF tool call processes (default: 20). Any page number can be requested; pages beyond this count are reported for a follow-up call.",
+    "Maximum number of pages the PDF tool reads from each PDF in one call (default: 20). Any page number can be requested; pages beyond this count are reported with a pages= value for a follow-up call.",
   "agents.defaults.imageMaxDimensionPx":
     "Max image side length in pixels when sanitizing transcript/tool-result image payloads (default: 1200).",
   "agents.defaults.imageQuality":

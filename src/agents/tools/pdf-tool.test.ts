@@ -1416,7 +1416,7 @@ describe("createPdfTool", () => {
         );
         const text = resultText(result);
         expect(text).toContain(
-          'Per-call page limit is 120; requested pages 241-280 of doc.pdf were not read. Call pdf again with pages="241-280" to read them.',
+          'Per-call page limit is 120; pages 241-280 of doc.pdf were not read. Call pdf again with pages="241-280" to read them.',
         );
         expect(JSON.stringify(completeMock.mock.calls.at(-1)?.[1])).toContain(
           "Per-call page limit is 120",
@@ -1544,7 +1544,20 @@ describe("createPdfTool", () => {
         expect(text).toContain(
           "Partial PDF read: processed pages 1-120 of 300. Do not infer that omitted sheets or terms are absent.",
         );
-        expect(text).not.toContain("Per-call page limit");
+        expect(text).toContain(
+          'Per-call page limit is 120; pages 121-300 of doc.pdf were not read. Call pdf again with pages="121-240" to read them.',
+        );
+        expect(JSON.stringify(completeMock.mock.calls.at(-1)?.[1])).toContain(
+          "Per-call page limit is 120; pages 121-300 of doc.pdf were not read.",
+        );
+        expectFields(result.details, {
+          coverage: [
+            expect.objectContaining({
+              requestedPages: pageList(1, 120),
+              skippedByLimit: pageList(121, 300),
+            }),
+          ],
+        });
       });
     });
   });
@@ -1554,11 +1567,12 @@ describe("createPdfTool", () => {
       agentDir: string,
       ocrCoverage: { ocrPages?: number[]; ocrImagePages?: number[] },
       documentPageCount = 3,
+      input = ["text", "image"],
     ) {
       await stubPdfToolInfra(agentDir, {
         provider: "openai",
         api: "openai-responses",
-        input: ["text", "image"],
+        input,
       });
       const extractSpy = vi
         .spyOn(pdfExtractModule, "extractPdfContent")
@@ -1613,6 +1627,7 @@ describe("createPdfTool", () => {
         expect(context).toContain(
           "[Page 2 is a scanned image with an OCR text layer. Its text may contain OCR errors; prefer the page image when one is attached. Page images are attached for pages 2.]",
         );
+        expect(context).toContain('{"type":"image","data":"cG5n","mimeType":"image/png"}');
         expect(context).toContain(
           "Page 2 of doc.pdf is scanned with an OCR text layer; its text may contain OCR errors.",
         );
@@ -1646,6 +1661,30 @@ describe("createPdfTool", () => {
         expect(resultText(result)).toContain(
           "You must not claim that a sheet, discipline, term, or item is absent from the document; state that pages 2-3 of doc.pdf were not reliably read.",
         );
+      });
+    });
+
+    it("treats OCR pages as unread when the model accepts only text", async () => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        const { result, context } = await runOcrRead(
+          agentDir,
+          { ocrPages: [2], ocrImagePages: [2] },
+          3,
+          ["text"],
+        );
+
+        const absence =
+          "You must not claim that a sheet, discipline, term, or item is absent from the document; state that pages 2 of doc.pdf were not reliably read.";
+        expect(context).toContain(
+          "No page images fit for these pages; say their content could not be read reliably.]",
+        );
+        expect(context).not.toContain("Page images are attached");
+        expect(context).toContain(absence);
+        expect(context).not.toContain('"type":"image"');
+        expect(resultText(result)).toContain(absence);
+        expectFields(result.details, {
+          coverage: [expect.not.objectContaining({ ocrImagePages: expect.anything() })],
+        });
       });
     });
 

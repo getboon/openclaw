@@ -98,15 +98,15 @@ export function classifyOcrPages(
   engine: PdfEngine,
   pages: readonly number[],
 ): number[] | undefined {
-  try {
-    const api = resolveTextApi(document, engine);
-    if (!api) {
-      return undefined;
-    }
-    return pages.filter((pageNumber) =>
-      api.withLoadedPage(pageNumber, (page) => isOcrPage(api, page)),
-    );
-  } catch {
+  const api = resolveTextApi(document, engine);
+  if (!api) {
     return undefined;
   }
+  return pages.filter((pageNumber) => {
+    try {
+      return api.withLoadedPage(pageNumber, (page) => isOcrPage(api, page));
+    } catch {
+      return false;
+    }
+  });
 }

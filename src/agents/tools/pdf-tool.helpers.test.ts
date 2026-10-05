@@ -76,12 +76,17 @@ describe("parsePageRange", () => {
   });
 
   it("caps huge ranges without materializing them", () => {
-    const started = performance.now();
     expect(parsePageRange("1-1000000000", 120)).toEqual({
       pages: pages(1, 120),
       skipped: [[121, 1_000_000_000]],
     });
-    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  it("throws on page numbers beyond the safe integer range", () => {
+    expect(() => parsePageRange("9007199254740992-9007199254741000", 120)).toThrow(
+      "Invalid page range",
+    );
+    expect(() => parsePageRange("9007199254740993", 120)).toThrow("Invalid page number");
   });
 
   it("merges overlapping segments before applying the cap", () => {

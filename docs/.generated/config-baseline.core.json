@@ -3774,7 +3774,7 @@
         "performance"
       ],
       "label": "PDF Max Pages",
-      "help": "Maximum number of PDF pages one PDF tool call processes (default: 20). Any page number can be requested; pages beyond this count are reported for a follow-up call.",
+      "help": "Maximum number of pages the PDF tool reads from each PDF in one call (default: 20). Any page number can be requested; pages beyond this count are reported with a pages= value for a follow-up call.",
       "hasChildren": false
     },
     {

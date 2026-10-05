@@ -59,13 +59,13 @@ function parsePageSegments(range: string): PageSegment[] {
     if (dashMatch) {
       const start = Number(dashMatch[1]);
       const end = Number(dashMatch[2]);
-      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 1 || end < start) {
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 1 || end < start) {
         throw new Error(`Invalid page range: "${part}"`);
       }
       segments.push([start, end]);
     } else {
       const num = Number(part);
-      if (!Number.isFinite(num) || num < 1) {
+      if (!Number.isSafeInteger(num) || num < 1) {
         throw new Error(`Invalid page number: "${part}"`);
       }
       segments.push([num, num]);

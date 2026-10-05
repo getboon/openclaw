@@ -139,10 +139,16 @@ describe("classifyOcrPages", () => {
     }
   });
 
-  it("returns undefined instead of throwing when a page cannot be loaded", async () => {
-    const pdf = await engine.open(buildPdf([{ content: FULL_PAGE_IMAGE }]));
+  it("treats a page that cannot be loaded as not OCR and classifies the rest", async () => {
+    const pdf = await engine.open(
+      buildPdf([
+        { content: `${FULL_PAGE_IMAGE} BT 3 Tr /F1 12 Tf 72 700 Td (${OCR_TEXT}) Tj ET` },
+        { content: FULL_PAGE_IMAGE },
+        { content: FULL_PAGE_IMAGE },
+      ]),
+    );
     try {
-      expect(classifyOcrPages(pdf, engine, [1, 5])).toBeUndefined();
+      expect(classifyOcrPages(pdf, engine, [1, 5])).toEqual([1]);
     } finally {
       pdf.destroy();
     }

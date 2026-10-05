@@ -74,8 +74,8 @@ Input notes:
 - `pdf` and `pdfs` are merged and deduplicated before loading.
 - If no PDF input is provided, the tool errors.
 - `pages` is parsed as 1-based page numbers, deduped, and sorted. Any page number can be requested.
-  One call reads at most `agents.defaults.pdfMaxPages` pages; the result names the pages left
-  unread and the `pages` value for the next call. Requested pages past the document end are
+  One call reads at most `agents.defaults.pdfMaxPages` pages from each PDF; the result names the
+  pages left unread and the `pages` value for the next call. Requested pages past the document end are
   reported, and the tool errors when no requested page exists.
 - `password` applies to every PDF in the request and is only used by extraction fallback mode.
 - `maxBytesMb` defaults to `agents.defaults.pdfMaxBytesMb` or `10`.
@@ -121,7 +121,7 @@ Fallback mode is used for non-native providers.
 
 Flow:
 
-1. Select the requested pages, or the first pages, up to `agents.defaults.pdfMaxPages` pages (default `20`).
+1. Select the requested pages, or the first pages, up to `agents.defaults.pdfMaxPages` pages per PDF (default `20`).
 2. Extract them in bounded 10-page batches, preserving the document page count,
    processed page numbers, text limits, and truncation reasons.
 3. If extracted text length is below `200` chars, render the batch to PNG images and include them.
