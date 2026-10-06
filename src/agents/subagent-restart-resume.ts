@@ -55,8 +55,7 @@ export function resolveRestoredSubagentRunResumeAction(params: {
   if (!isRestoredSubagentRunResumeCandidate(run) || !session) {
     return "none";
   }
-  const deadlineMs = resolveSubagentRunDeadlineMs(run);
-  if (deadlineMs !== undefined && params.now >= deadlineMs) {
+  if (isSubagentRunPastDeadline(run, params.now)) {
     return session.abortedLastRun === true ? "clear-mark" : "none";
   }
   if (session.abortedLastRun === true) {
@@ -79,13 +78,25 @@ export function resolveSubagentRunResumeAgeMs(run: SubagentRunRecord, now: numbe
   return now - (run.sessionStartedAt ?? run.startedAt ?? run.createdAt);
 }
 
+export function isSubagentRunPastDeadline(
+  run: Pick<SubagentRunRecord, "createdAt" | "startedAt" | "runTimeoutSeconds">,
+  now: number,
+): boolean {
+  const deadlineMs = resolveSubagentRunDeadlineMs(run);
+  return deadlineMs !== undefined && now >= deadlineMs;
+}
+
 export function shouldKeepSubagentRunUnendedOnGatewayClose(params: {
   childSessionKey: string | undefined;
   outcomeStatus: SubagentRunOutcome["status"];
   explicitKill: boolean;
+  run?: Pick<SubagentRunRecord, "createdAt" | "startedAt" | "runTimeoutSeconds">;
   getConfig?: () => OpenClawConfig;
 }): boolean {
   if (params.outcomeStatus === "ok" || params.explicitKill || !isGatewayClosing()) {
+    return false;
+  }
+  if (params.run && isSubagentRunPastDeadline(params.run, Date.now())) {
     return false;
   }
   if (!isSubagentSessionKey(params.childSessionKey)) {

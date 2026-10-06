@@ -84,6 +84,7 @@ import type { SubagentRunRecord } from "./subagent-registry.types.js";
 import {
   isRestoredSubagentRunResumeCandidate,
   isSubagentRestartResumeEnabled,
+  isSubagentRunPastDeadline,
   resolveRestoredSubagentRunResumeAction,
   resolveSubagentRunResumeAgeMs,
   shouldKeepSubagentRunUnendedOnGatewayClose,
@@ -391,6 +392,7 @@ function keepSubagentRunUnendedOnGatewayClose(params: {
       childSessionKey: entry.childSessionKey,
       outcomeStatus: params.outcome.status,
       explicitKill: params.cause === "explicit-kill",
+      run: entry,
       getConfig: () => subagentRegistryDeps.getRuntimeConfig(),
     })
   ) {
@@ -1101,7 +1103,11 @@ async function sweepSubagentRuns() {
             storeCache,
           });
           // A run held at close stays for orphan recovery even after an in-process restart clears the closing flag.
-          if (entry.execution?.status === "interrupted" && sessionEntry?.abortedLastRun === true) {
+          if (
+            entry.execution?.status === "interrupted" &&
+            sessionEntry?.abortedLastRun === true &&
+            !isSubagentRunPastDeadline(entry, now)
+          ) {
             scheduleSubagentOrphanRecovery({ delayMs: 1_000 });
             continue;
           }

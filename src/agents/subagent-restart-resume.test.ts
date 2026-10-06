@@ -1,5 +1,5 @@
 // Covers the shared closing-gateway guard used by the sub-agent run and task registries.
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   markGatewayClosing,
   resetAllLanes,
@@ -18,12 +18,14 @@ function keep(params: {
   childSessionKey?: string;
   outcomeStatus?: "ok" | "error" | "timeout";
   explicitKill?: boolean;
+  run?: Pick<SubagentRunRecord, "createdAt" | "startedAt" | "runTimeoutSeconds">;
   getConfig?: () => object;
 }) {
   return shouldKeepSubagentRunUnendedOnGatewayClose({
     childSessionKey: params.childSessionKey ?? "agent:main:subagent:child",
     outcomeStatus: params.outcomeStatus ?? "error",
     explicitKill: params.explicitKill ?? false,
+    run: params.run,
     getConfig: params.getConfig ?? enabled,
   });
 }
@@ -51,6 +53,24 @@ describe("shouldKeepSubagentRunUnendedOnGatewayClose", () => {
   it("follows the restartResume switch", () => {
     markGatewayClosing();
     expect(keep({ getConfig: disabled })).toBe(false);
+  });
+
+  it("does not keep a run past its run deadline", () => {
+    const now = Date.parse("2026-03-24T12:00:00Z");
+    vi.useFakeTimers({ now });
+    try {
+      markGatewayClosing();
+      const run = { createdAt: now - 120_000, startedAt: now - 120_000 };
+      expect(keep({ outcomeStatus: "timeout", run: { ...run, runTimeoutSeconds: 60 } })).toBe(
+        false,
+      );
+      expect(keep({ outcomeStatus: "timeout", run: { ...run, runTimeoutSeconds: 600 } })).toBe(
+        true,
+      );
+      expect(keep({ outcomeStatus: "timeout", run: { ...run, runTimeoutSeconds: 0 } })).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stops guarding after an in-process restart resets the lanes", () => {

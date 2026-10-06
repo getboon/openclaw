@@ -3012,6 +3012,76 @@ describe("subagent registry seam flow", () => {
         expect(mocks.scheduleOrphanRecovery).toHaveBeenCalledTimes(1);
       });
     });
+
+    const registerWithDeadline = (runId: string) =>
+      mod.registerSubagentRun({
+        runId,
+        childSessionKey,
+        requesterSessionKey: "agent:main:main",
+        requesterDisplayKey: "main",
+        task: "long task",
+        cleanup: "keep",
+        expectsCompletionMessage: true,
+        runTimeoutSeconds: 60,
+      });
+
+    it("finalizes a timeout past its run deadline while the gateway closes", async () => {
+      mocks.getGlobalHookRunner.mockReturnValue({
+        hasHooks: (hookName: string) => hookName === "subagent_ended",
+        runSubagentEnded: mocks.runSubagentEnded,
+      } as never);
+      let finishWait: (result: unknown) => void = () => {};
+      mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
+        request.method === "agent.wait"
+          ? await new Promise((resolve) => {
+              finishWait = resolve;
+            })
+          : {},
+      );
+      registerWithDeadline("run-past-deadline");
+      vi.setSystemTime(new Date(Date.now() + 61_000));
+      markGatewayClosing();
+
+      finishWait({ status: "timeout" });
+
+      await waitForFast(() => {
+        expect(findRun("run-past-deadline")?.endedAt).toBeTypeOf("number");
+      });
+      expect(findRun("run-past-deadline")?.outcome?.status).toBe("timeout");
+      expect(findRun("run-past-deadline")?.execution?.status).not.toBe("interrupted");
+      await waitForFast(() => {
+        expect(mocks.runSubagentEnded).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it("finalizes a held run once the sweeper finds it past its run deadline", async () => {
+      waitPending();
+      registerWithDeadline("run-held-past-deadline");
+      markGatewayClosing();
+      lifecycleHandler()({
+        runId: "run-held-past-deadline",
+        stream: "lifecycle",
+        data: { phase: "end", startedAt: 10, endedAt: 20, aborted: true, stopReason: "restart" },
+      });
+      await expectKeptUnended("run-held-past-deadline");
+      sessionStore[childSessionKey] = {
+        ...sessionStore[childSessionKey],
+        status: "killed",
+        endedAt: Date.now(),
+        abortedLastRun: true,
+      } as SessionEntry;
+      resetAllLanes();
+      mocks.scheduleOrphanRecovery.mockClear();
+
+      vi.setSystemTime(new Date(Date.now() + 120_000));
+      await mod.testing.sweepOnceForTests();
+
+      await waitForFast(() => {
+        expect(findRun("run-held-past-deadline")?.endedAt).toBeTypeOf("number");
+      });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(mocks.scheduleOrphanRecovery).not.toHaveBeenCalled();
+    });
   });
 
   describe("boot restore for restart resume", () => {
