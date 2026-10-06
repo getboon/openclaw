@@ -884,6 +884,31 @@ describe("command queue", () => {
     expect(isGatewayClosing()).toBe(false);
   });
 
+  it("reports not closing for a legacy queue state without the closing flag", () => {
+    const key = Symbol.for("openclaw.commandQueueState");
+    const globalStore = globalThis as Record<PropertyKey, unknown>;
+    const original = globalStore[key];
+
+    try {
+      globalStore[key] = {
+        gatewayDraining: false,
+        lanes: new Map(),
+        activeTaskWaiters: new Set(),
+        nextTaskId: 1,
+        nextQueueSequence: 1,
+      };
+
+      expect(isGatewayClosing()).toBe(false);
+    } finally {
+      if (original !== undefined) {
+        globalStore[key] = original;
+      } else {
+        delete globalStore[key];
+      }
+      resetCommandQueueStateForTest();
+    }
+  });
+
   it("migrates legacy queue state missing activeTaskWaiters without crashing", async () => {
     // Simulate a SIGUSR1 in-process restart where the globalThis singleton was
     // created by an older code version (e.g. v2026.4.2) that did not include

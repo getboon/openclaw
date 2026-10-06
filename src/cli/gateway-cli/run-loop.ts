@@ -387,8 +387,8 @@ export async function runGatewayLoop(params: {
     restartIntent,
   }: GatewayRunSignalRequest) => {
     const isRestart = action === "restart";
-    // Set before the restart drain or server close aborts any child run, so
-    // finalize paths can tell a closing-gateway interruption from a real failure.
+    // Set before the restart drain or server close, so a child run that ends
+    // while the gateway closes is kept for resume after boot.
     eagerLifecycleRuntime.markGatewayClosing();
     let forceExitTimer: ReturnType<typeof setTimeout> | null = null;
     const armForceExitTimer = (forceExitMs: number) => {

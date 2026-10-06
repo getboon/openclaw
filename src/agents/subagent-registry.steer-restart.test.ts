@@ -319,6 +319,7 @@ describe("subagent registry steer restarts", () => {
     lifecycleHandler = undefined;
     removeInternalSessionEffectsTranscriptMock.mockClear();
     mod.resetSubagentRegistryForTests({ persist: false });
+    resetTaskRegistryForTests({ persist: false });
   });
 
   it("suppresses announce for interrupted runs and only announces the replacement run", async () => {
@@ -549,7 +550,6 @@ describe("subagent registry steer restarts", () => {
   });
 
   it("moves the live sub-agent task to the replacement run", () => {
-    resetTaskRegistryForTests({ persist: false });
     registerRun({
       runId: "run-task-old",
       childSessionKey: "agent:main:subagent:task-rekey",
@@ -574,7 +574,6 @@ describe("subagent registry steer restarts", () => {
     ).toBe(true);
 
     expect(liveTaskRunIds()).toEqual(["run-task-new"]);
-    resetTaskRegistryForTests({ persist: false });
   });
 
   it("preserves cumulative session timing across steer replacement runs", () => {

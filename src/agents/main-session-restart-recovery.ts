@@ -554,6 +554,8 @@ const MAX_SUBAGENT_LABEL_CHARS = 80;
 
 // The parent lost its turn but its sub-agents resume on their own; without this
 // note it tends to spawn duplicates of work that is still running.
+// oxlint-disable-next-line eslint/no-warning-comments -- deferred gap, kept visible until fixed
+// TODO(okka): list only sub-agents that will resume; runs past their deadline or the 2 h crash bound are listed here but end with an error.
 function buildLiveSubagentNote(params: {
   cfg?: OpenClawConfig;
   parentSessionKey: string;

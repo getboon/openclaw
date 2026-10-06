@@ -119,7 +119,8 @@ const COMMAND_QUEUE_STATE_KEY = Symbol.for("openclaw.commandQueueState");
 function getQueueState() {
   const state = resolveGlobalSingleton(COMMAND_QUEUE_STATE_KEY, () => ({
     gatewayDraining: false,
-    gatewayClosing: false,
+    // A singleton from an older in-process restart generation lacks this field.
+    gatewayClosing: false as boolean | undefined,
     lanes: new Map<string, LaneState>(),
     activeTaskWaiters: new Set<ActiveTaskWaiter>(),
     nextTaskId: 1,
@@ -476,7 +477,7 @@ export function markGatewayClosing(): void {
 }
 
 export function isGatewayClosing(): boolean {
-  return getQueueState().gatewayClosing;
+  return getQueueState().gatewayClosing === true;
 }
 
 export function setCommandLaneConcurrency(lane: string, maxConcurrent: number) {

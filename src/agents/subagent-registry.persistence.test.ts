@@ -758,6 +758,8 @@ describe("subagent registry persistence", () => {
     restartRegistry();
     await waitForRegistryWork(() => vi.mocked(scheduleOrphanRecovery).mock.calls.length > 0);
 
+    const recoveryParams = vi.mocked(scheduleOrphanRecovery).mock.calls[0]?.[0];
+    expect([...(recoveryParams?.getActiveRuns().keys() ?? [])]).toContain(runId);
     expect(callGateway).not.toHaveBeenCalled();
     expect(
       listSubagentRunsForRequester("agent:main:main").some((entry) => entry.runId === runId),
