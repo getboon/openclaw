@@ -1,0 +1,32 @@
+src/config/zod-schema.agent-runtime.ts
+  s_7d982217096b7e::t_9a367f92098879 469
+src/config/schema.help.ts
+  s_7d982217096b7e::t_2ace5416fdfb36 951-952
+src/config/schema.labels.ts
+  s_7d982217096b7e::t_2ace5416fdfb36 345
+src/agents/tools/web-fetch.ssrf.test.ts
+  s_7d982217096b7e::t_6b7ce762615ea1 53-57,251-260
+  s_7d982217096b7e::t_0cb0fc23164cb2 261-271
+src/config/schema.test.ts
+  s_7d982217096b7e::t_6b7ce762615ea1 850,859
+src/agents/tools/web-fetch.ts
+  s_7d982217096b7e::t_9a367f92098879 334,480-482,485,489,493
+src/config/types.tools.ts
+  s_7d982217096b7e::t_9a367f92098879 683-684
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "af7d02c2e854e191ae195262c5470a92e3cb2729",
+  "prompts": {},
+  "sessions": {
+    "s_7d982217096b7e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d02e7994-1c43-4ce1-8a93-a21bf7203ced",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
