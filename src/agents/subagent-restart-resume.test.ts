@@ -8,6 +8,7 @@ import {
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 import {
   resolveRestoredSubagentRunResumeAction,
+  resolveSubagentRunResumeAgeMs,
   shouldKeepSubagentRunUnendedOnGatewayClose,
 } from "./subagent-restart-resume.js";
 
@@ -110,5 +111,19 @@ describe("resolveRestoredSubagentRunResumeAction", () => {
   it("measures the two-hour bound from the first session start across resumes", () => {
     expect(action({ startedAt: now - hours(1) })).toBe("mark-and-hold");
     expect(action({ startedAt: now - hours(1), sessionStartedAt: now - hours(3) })).toBe("too-old");
+  });
+
+  it("skips a non-finite session start when it measures the resume age", () => {
+    const record = run({ sessionStartedAt: Number.NaN, startedAt: now - hours(1) });
+    expect(resolveSubagentRunResumeAgeMs(record, now)).toBe(hours(1));
+    expect(action({ sessionStartedAt: Number.NaN, startedAt: now - hours(1) })).toBe(
+      "mark-and-hold",
+    );
+  });
+
+  it("treats a run with no finite start time as too old to resume", () => {
+    const record = run({ createdAt: Number.NaN });
+    expect(resolveSubagentRunResumeAgeMs(record, now)).toBe(Number.POSITIVE_INFINITY);
+    expect(action({ createdAt: Number.NaN })).toBe("too-old");
   });
 });

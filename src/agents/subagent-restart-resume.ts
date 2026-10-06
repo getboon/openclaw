@@ -14,6 +14,7 @@ import type { SubagentRunOutcome } from "./subagent-announce-output.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 import { STALE_UNENDED_SUBAGENT_RUN_MS } from "./subagent-run-liveness.js";
 import { resolveSubagentRunDeadlineMs } from "./subagent-run-timeout.js";
+import { getSubagentSessionStartedAt } from "./subagent-session-metrics.js";
 
 /**
  * Boot action for a restored run:
@@ -75,7 +76,8 @@ export function resolveRestoredSubagentRunResumeAction(params: {
 
 export function resolveSubagentRunResumeAgeMs(run: SubagentRunRecord, now: number): number {
   // Resume replaces the run with a fresh startedAt; sessionStartedAt carries over.
-  return now - (run.sessionStartedAt ?? run.startedAt ?? run.createdAt);
+  const sessionStartedAt = getSubagentSessionStartedAt(run);
+  return sessionStartedAt === undefined ? Number.POSITIVE_INFINITY : now - sessionStartedAt;
 }
 
 export function isSubagentRunPastDeadline(
