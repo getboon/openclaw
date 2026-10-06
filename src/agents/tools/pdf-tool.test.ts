@@ -1360,6 +1360,7 @@ describe("createPdfTool", () => {
     async function setupPagedTool(
       agentDir: string,
       documentPageCountFor: (buffer: Buffer) => number,
+      pdfMaxPages = 120,
     ) {
       await stubPdfToolInfra(agentDir, {
         provider: "openai",
@@ -1373,9 +1374,16 @@ describe("createPdfTool", () => {
         content: [{ type: "text", text: "Sheets reviewed." }],
       } as never);
       const tool = requirePdfTool(
-        (await loadCreatePdfTool())({ config: pagedPdfConfig(120), agentDir }),
+        (await loadCreatePdfTool())({ config: pagedPdfConfig(pdfMaxPages), agentDir }),
       );
       return { extractSpy, tool };
+    }
+
+    function expectNoContinuationHintInModelPrompts() {
+      expect(completeMock).toHaveBeenCalled();
+      for (const [, context] of completeMock.mock.calls) {
+        expect(JSON.stringify(context)).not.toContain("Call pdf again");
+      }
     }
 
     it("reads page numbers above pdfMaxPages", async () => {
@@ -1419,8 +1427,9 @@ describe("createPdfTool", () => {
           'Per-call page limit is 120; pages 241-280 of doc.pdf were not read. Call pdf again with pages="241-280" to read them.',
         );
         expect(JSON.stringify(completeMock.mock.calls.at(-1)?.[1])).toContain(
-          "Per-call page limit is 120",
+          "Per-call page limit is 120; pages 241-280 of doc.pdf were not provided to you. Do not describe, guess, or simulate their content.",
         );
+        expectNoContinuationHintInModelPrompts();
         expectFields(result.details, {
           status: "partial",
           coverage: [
@@ -1548,8 +1557,9 @@ describe("createPdfTool", () => {
           'Per-call page limit is 120; pages 121-300 of doc.pdf were not read. Call pdf again with pages="121-240" to read them.',
         );
         expect(JSON.stringify(completeMock.mock.calls.at(-1)?.[1])).toContain(
-          "Per-call page limit is 120; pages 121-300 of doc.pdf were not read.",
+          "Per-call page limit is 120; pages 121-300 of doc.pdf were not provided to you. Do not describe, guess, or simulate their content.",
         );
+        expectNoContinuationHintInModelPrompts();
         expectFields(result.details, {
           coverage: [
             expect.objectContaining({
@@ -1558,6 +1568,24 @@ describe("createPdfTool", () => {
             }),
           ],
         });
+      });
+    });
+
+    it("keeps the continuation hint out of a single-extraction prompt", async () => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        const { extractSpy, tool } = await setupPagedTool(agentDir, () => 30, 10);
+
+        const result = await tool.execute("t1", { prompt: "List sheets.", pdf: "/tmp/doc.pdf" });
+
+        expect(extractSpy.mock.calls.map(([args]) => args.pageNumbers)).toEqual([pageList(1, 10)]);
+        expect(completeMock).toHaveBeenCalledTimes(1);
+        expect(resultText(result)).toContain(
+          'Per-call page limit is 10; pages 11-30 of doc.pdf were not read. Call pdf again with pages="11-20" to read them.',
+        );
+        expect(JSON.stringify(completeMock.mock.calls[0]?.[1])).toContain(
+          "Per-call page limit is 10; pages 11-30 of doc.pdf were not provided to you. Do not describe, guess, or simulate their content.",
+        );
+        expectNoContinuationHintInModelPrompts();
       });
     });
   });

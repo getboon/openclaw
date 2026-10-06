@@ -362,13 +362,25 @@ function firstContiguousPages(pages: readonly number[], maxPages: number): numbe
   return run;
 }
 
-function coverageNotes(entry: PdfCoverageSummary, maxPages: number): string[] {
+function coverageNotes(
+  entry: PdfCoverageSummary,
+  maxPages: number,
+  audience: "agent" | "analysis",
+): string[] {
   const notes: string[] = [];
   if (entry.skippedByLimit?.length) {
-    const nextPages = formatPageRanges(firstContiguousPages(entry.skippedByLimit, maxPages));
-    notes.push(
-      `Per-call page limit is ${maxPages}; pages ${formatPageRanges(entry.skippedByLimit)} of ${entry.filename} were not read. Call pdf again with pages="${nextPages}" to read them.`,
-    );
+    const skipped = `Per-call page limit is ${maxPages}; pages ${formatPageRanges(entry.skippedByLimit)} of ${entry.filename}`;
+    // The analysis model has no tools; a continuation hint makes it simulate a pdf call.
+    if (audience === "analysis") {
+      notes.push(
+        `${skipped} were not provided to you. Do not describe, guess, or simulate their content.`,
+      );
+    } else {
+      const nextPages = formatPageRanges(firstContiguousPages(entry.skippedByLimit, maxPages));
+      notes.push(
+        `${skipped} were not read. Call pdf again with pages="${nextPages}" to read them.`,
+      );
+    }
   }
   if (entry.pagesBeyondDocument?.length) {
     notes.push(
@@ -404,7 +416,7 @@ function buildCoverageInstruction(
     ].join("\n");
   }
   const lines = coverage.flatMap((entry) => {
-    const notes = coverageNotes(entry, maxPages);
+    const notes = coverageNotes(entry, maxPages, "analysis");
     // A file with no requested page in range is fully described by its "do not exist" note.
     if (entry.requestedPages.length === 0) {
       return notes;
@@ -433,7 +445,7 @@ function formatCoverageResultText(
   maxPages: number,
 ): string {
   const lines = coverage.flatMap((entry) => {
-    const notes = coverageNotes(entry, maxPages);
+    const notes = coverageNotes(entry, maxPages, "agent");
     if (entry.requestedPages.length === 0) {
       return notes;
     }
