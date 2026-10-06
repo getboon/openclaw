@@ -1,0 +1,25 @@
+extensions/browser/browser-profile-mutations.test.ts
+  s_7d982217096b7e::t_7fa8fdf545d86f 67-76
+  s_7d982217096b7e::t_067c55fe3075e5 77-79
+extensions/browser/browser-profile-mutations.ts
+  s_7d982217096b7e::t_7102467bcba50c 45-49
+extensions/browser/src/browser/config-mutations.ts
+  s_7d982217096b7e::t_7102467bcba50c 80-81,143
+  s_7d982217096b7e::t_d57a5b00179657 144-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "89e7b3625558b848e6f5cb386582054814079c90",
+  "prompts": {},
+  "sessions": {
+    "s_7d982217096b7e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d02e7994-1c43-4ce1-8a93-a21bf7203ced",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
