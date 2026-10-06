@@ -42,7 +42,11 @@ export async function registerRemoteCdpBrowserProfile(params: {
       name: params.name,
       resolved: resolveBrowserConfig(undefined, undefined),
       parsedCdpUrl: params.cdpUrl,
-      driver: "existing-session",
+      // Playwright over the remote CDP socket: each command is one hop. The
+      // existing-session driver routes every call through a Chrome DevTools MCP
+      // process and re-polls the URL after each click, ~10s per action remotely.
+      driver: "openclaw",
+      attachOnly: true,
       replaceExisting: true,
     });
     if (!profile) {

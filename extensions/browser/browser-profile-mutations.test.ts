@@ -64,4 +64,17 @@ describe("unregisterRemoteCdpBrowserProfile", () => {
     await unregisterRemoteCdpBrowserProfile("handoff-example.com");
     expect(deleteBrowserProfileConfigMock).toHaveBeenCalledWith("handoff-example.com");
   });
+
+  it("drives the remote browser with Playwright over CDP, attach-only, not through the Chrome MCP existing-session bridge", async () => {
+    createBrowserProfileConfigMock.mockResolvedValue({ cdpUrl: "wss://proxy.example/cdp" });
+
+    await registerRemoteCdpBrowserProfile({
+      name: "handoff-example.com",
+      cdpUrl: "wss://proxy.example/cdp",
+    });
+
+    expect(createBrowserProfileConfigMock).toHaveBeenCalledWith(
+      expect.objectContaining({ driver: "openclaw", attachOnly: true }),
+    );
+  });
 });
