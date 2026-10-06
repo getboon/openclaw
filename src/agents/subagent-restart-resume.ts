@@ -21,8 +21,8 @@ import { getSubagentSessionStartedAt } from "./subagent-session-metrics.js";
  * - "hold": orphan recovery owns it, so no boot wait;
  * - "mark-and-hold": a crash left it running, so set abortedLastRun first;
  * - "clear-mark": past its deadline, so the boot wait ends it as a timeout;
- * - "too-old": a crash left it running past the resume age bound, so today's restore;
- * - "none": today's restore.
+ * - "too-old": a crash left it running longer than the resume age bound, so it is not marked and takes today's restore;
+ * - "none": not a resume candidate, not crashed, or past its deadline with no mark; today's restore.
  */
 export type RestoredSubagentRunResumeAction =
   | "hold"
@@ -69,7 +69,7 @@ export function resolveRestoredSubagentRunResumeAction(params: {
   if (!crashed) {
     return "none";
   }
-  return resolveSubagentRunResumeAgeMs(run, params.now) < STALE_UNENDED_SUBAGENT_RUN_MS
+  return resolveSubagentRunResumeAgeMs(run, params.now) <= STALE_UNENDED_SUBAGENT_RUN_MS
     ? "mark-and-hold"
     : "too-old";
 }
