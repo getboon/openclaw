@@ -3175,6 +3175,28 @@ describe("subagent registry seam flow", () => {
         expect(mocks.scheduleOrphanRecovery).toHaveBeenCalledTimes(1);
       });
     });
+    it.each([
+      ["only ended or non-native runs are restored", "agent:main:acp:4f2c", {}],
+      [
+        "restartResume is off",
+        childSessionKey,
+        { agents: { defaults: { subagents: { archiveAfterMinutes: 0, restartResume: false } } } },
+      ],
+    ])("arms boot waits synchronously when %s", (_label, key, cfgPatch) => {
+      if (Object.keys(cfgPatch).length > 0) {
+        mocks.getRuntimeConfig.mockReturnValue({
+          ...cfgPatch,
+          session: { mainKey: "main", scope: "per-sender" as const },
+        } as ReturnType<typeof mocks.getRuntimeConfig>);
+      }
+      restoreRun({ childSessionKey: key });
+      setChildSession({}, key);
+
+      mod.initSubagentRegistry();
+
+      expect(waitCalls()).toBe(1);
+    });
+
     it("keeps runs held before a marking failure and arms waits for the rest", async () => {
       const markedKey = "agent:main:subagent:marked";
       const crashedKey = "agent:main:subagent:crashed";

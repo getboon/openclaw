@@ -82,6 +82,7 @@ import {
 import { configureSubagentRegistrySteerRuntime } from "./subagent-registry-steer-runtime.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 import {
+  isRestoredSubagentRunResumeCandidate,
   isSubagentRestartResumeEnabled,
   resolveRestoredSubagentRunResumeAction,
   resolveSubagentRunResumeAgeMs,
@@ -829,7 +830,15 @@ function restoreSubagentRunsOnce() {
     ensureListener();
     // Always start sweeper — session-mode runs (no archiveAtMs) also need TTL cleanup.
     startSweeper();
-    void resumeRestoredSubagentRuns();
+    // Arm boot waits synchronously unless a restored run may need a resume mark first.
+    const hasResumeCandidate =
+      isSubagentRestartResumeEnabled(subagentRegistryDeps.getRuntimeConfig()) &&
+      [...subagentRuns.values()].some(isRestoredSubagentRunResumeCandidate);
+    if (hasResumeCandidate) {
+      void resumeRestoredSubagentRuns();
+    } else {
+      armRestoredSubagentRuns(new Set());
+    }
   } catch (err) {
     log.warn(
       `failed to restore subagent runs from disk: ${err instanceof Error ? err.message : String(err)}`,
@@ -846,6 +855,10 @@ async function resumeRestoredSubagentRuns() {
   } catch (err) {
     log.warn("failed to prepare restored subagent runs for restart resume", { error: err });
   }
+  armRestoredSubagentRuns(heldRunIds);
+}
+
+function armRestoredSubagentRuns(heldRunIds: Set<string>) {
   for (const runId of subagentRuns.keys()) {
     if (!heldRunIds.has(runId)) {
       resumeSubagentRun(runId);

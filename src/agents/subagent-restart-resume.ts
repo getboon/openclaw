@@ -37,6 +37,14 @@ export function isSubagentRestartResumeEnabled(cfg: OpenClawConfig): boolean {
   return cfg.agents?.defaults?.subagents?.restartResume !== false;
 }
 
+export function isRestoredSubagentRunResumeCandidate(run: SubagentRunRecord): boolean {
+  return (
+    typeof run.endedAt !== "number" &&
+    run.pauseReason !== "sessions_yield" &&
+    isSubagentSessionKey(run.childSessionKey)
+  );
+}
+
 export function resolveRestoredSubagentRunResumeAction(params: {
   run: SubagentRunRecord;
   session: SessionEntry | undefined;
@@ -44,12 +52,7 @@ export function resolveRestoredSubagentRunResumeAction(params: {
   processStartedAt: number;
 }): RestoredSubagentRunResumeAction {
   const { run, session } = params;
-  if (
-    typeof run.endedAt === "number" ||
-    run.pauseReason === "sessions_yield" ||
-    !isSubagentSessionKey(run.childSessionKey) ||
-    !session
-  ) {
+  if (!isRestoredSubagentRunResumeCandidate(run) || !session) {
     return "none";
   }
   const deadlineMs = resolveSubagentRunDeadlineMs(run);
