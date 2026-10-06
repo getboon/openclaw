@@ -7,6 +7,8 @@ import {
   buildAgentRunTerminalOutcome,
   type AgentRunTerminalOutcome,
 } from "../agents/agent-run-terminal-outcome.js";
+import { isExplicitAgentAbortStopReason } from "../agents/run-termination.js";
+import { shouldKeepSubagentRunUnendedOnGatewayClose } from "../agents/subagent-restart-resume.js";
 import { shouldRouteCompletionThroughRequesterSession } from "../auto-reply/reply/completion-delivery-policy.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { onAgentEvent } from "../infra/agent-events.js";
@@ -1605,6 +1607,42 @@ function updateTasksByRunId(params: {
   return updated;
 }
 
+// The sub-agent registry keeps these runs unended for resume after boot; a
+// cancelled patch here would announce "Background task cancelled" for a live run.
+function isSubagentTaskHeldForRestartResume(
+  task: TaskRecord,
+  status: TaskStatus,
+  data: Record<string, unknown> | undefined,
+): boolean {
+  if (task.runtime !== "subagent") {
+    return false;
+  }
+  return shouldKeepSubagentRunUnendedOnGatewayClose({
+    childSessionKey: task.childSessionKey,
+    outcomeStatus: status === "succeeded" ? "ok" : "error",
+    explicitKill: isExplicitAgentAbortStopReason(data?.stopReason),
+  });
+}
+
+/** Point a live sub-agent task at the run that replaced its old run, so the new run's end settles it. */
+export function rekeySubagentTaskRunId(params: {
+  childSessionKey: string;
+  fromRunId: string;
+  toRunId: string;
+}): void {
+  restoreTaskRegistryOnce();
+  const childSessionKey = normalizeOptionalString(params.childSessionKey);
+  for (const task of getTasksByRunId(params.fromRunId)) {
+    if (
+      task.runtime === "subagent" &&
+      !isTerminalTaskStatus(task.status) &&
+      normalizeOptionalString(task.childSessionKey) === childSessionKey
+    ) {
+      updateTask(task.taskId, { runId: params.toRunId });
+    }
+  }
+}
+
 function ensureListener() {
   if (listenerStarted) {
     return;
@@ -1645,6 +1683,9 @@ function ensureListener() {
             endedAt: endedAt ?? now,
           });
           patch.status = mapAgentRunTerminalOutcomeToTaskStatus(terminal);
+          if (isSubagentTaskHeldForRestartResume(current, patch.status, evt.data)) {
+            continue;
+          }
           patch.endedAt = terminal.endedAt ?? now;
           if (terminal.error) {
             patch.error = terminal.error;
@@ -1657,6 +1698,9 @@ function ensureListener() {
             endedAt: endedAt ?? now,
           });
           patch.status = mapAgentRunTerminalOutcomeToTaskStatus(terminal);
+          if (isSubagentTaskHeldForRestartResume(current, patch.status, evt.data)) {
+            continue;
+          }
           patch.endedAt = terminal.endedAt ?? now;
           patch.error = terminal.error ?? current.error;
         }

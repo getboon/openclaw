@@ -2,6 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpSessionStoreEntry } from "../acp/runtime/session-meta.js";
 import { startAcpSpawnParentStreamRelay } from "../agents/acp-spawn-parent-stream.js";
+import {
+  clearRuntimeConfigSnapshot,
+  setRuntimeConfigSnapshot,
+} from "../config/runtime-snapshot.js";
 import { resetCronActiveJobs } from "../cron/active-jobs.js";
 import {
   emitAgentEvent,
@@ -14,6 +18,7 @@ import {
 } from "../infra/heartbeat-wake.js";
 import type { SessionBindingRecord } from "../infra/outbound/session-binding-service.js";
 import { peekSystemEvents, resetSystemEventsForTest } from "../infra/system-events.js";
+import { markGatewayClosing, resetCommandQueueStateForTest } from "../process/command-queue.js";
 import type { ParsedAgentSessionKey } from "../routing/session-key.js";
 import { withTempDir } from "../test-helpers/temp-dir.js";
 import { withEnvAsync } from "../test-utils/env.js";
@@ -43,6 +48,7 @@ import {
   markTaskRunningByRunId,
   markTaskTerminalById,
   recordTaskProgressByRunId,
+  rekeySubagentTaskRunId,
   reloadTaskRegistryFromStore,
   resetTaskRegistryControlRuntimeForTests,
   resetTaskRegistryDeliveryRuntimeForTests,
@@ -54,6 +60,7 @@ import {
 } from "./task-registry.js";
 import {
   configureTaskRegistryMaintenance,
+  getInspectableActiveTaskRestartBlockers,
   getInspectableTaskAuditFindings,
   getInspectableTaskRegistrySummary,
   getInspectableTaskAuditSummary,
@@ -787,6 +794,173 @@ describe("task-registry", () => {
       expectRecordFields(requireTaskByRunId("run-provider-end-timeout-task"), {
         status: "timed_out",
         endedAt: 240,
+      });
+    });
+  });
+
+  describe("rekeySubagentTaskRunId", () => {
+    const createSubagentTask = (runId: string, status: TaskRecord["status"] = "running") =>
+      createTaskRecord({
+        runtime: "subagent",
+        ownerKey: "agent:main:main",
+        scopeKind: "session",
+        childSessionKey: "agent:main:subagent:child",
+        runId,
+        task: "Long sub-agent task",
+        status,
+        deliveryStatus: "pending",
+        startedAt: 100,
+      });
+
+    it("moves a running sub-agent task to the resumed run so its end settles the task", async () => {
+      await withTaskRegistryTempDir(async () => {
+        resetTaskRegistryMemoryForTest();
+        const task = createSubagentTask("run-before-resume");
+
+        rekeySubagentTaskRunId({
+          childSessionKey: "agent:main:subagent:child",
+          fromRunId: "run-before-resume",
+          toRunId: "run-after-resume",
+        });
+
+        expect(findTaskByRunId("run-before-resume")).toBeUndefined();
+        expect(findTaskByRunId("run-after-resume")?.taskId).toBe(task.taskId);
+        emitAgentEvent({
+          runId: "run-after-resume",
+          sessionKey: "agent:main:subagent:child",
+          stream: "lifecycle",
+          data: { phase: "end", endedAt: 300 },
+        });
+        expect(getTaskById(task.taskId)?.status).toBe("succeeded");
+        expect(getInspectableActiveTaskRestartBlockers()).toStrictEqual([]);
+      });
+    });
+
+    it("leaves terminal and non-sub-agent tasks on their run", async () => {
+      await withTaskRegistryTempDir(async () => {
+        resetTaskRegistryMemoryForTest();
+        createSubagentTask("run-cancelled-by-steer", "cancelled");
+        createTaskRecord({
+          runtime: "cli",
+          ownerKey: "agent:main:subagent:child",
+          scopeKind: "session",
+          childSessionKey: "agent:main:subagent:child",
+          runId: "run-cli",
+          task: "cli",
+          status: "running",
+          deliveryStatus: "not_applicable",
+          startedAt: 100,
+        });
+
+        rekeySubagentTaskRunId({
+          childSessionKey: "agent:main:subagent:child",
+          fromRunId: "run-cancelled-by-steer",
+          toRunId: "run-steered",
+        });
+        rekeySubagentTaskRunId({
+          childSessionKey: "agent:main:subagent:child",
+          fromRunId: "run-cli",
+          toRunId: "run-cli-next",
+        });
+
+        expect(findTaskByRunId("run-cancelled-by-steer")?.status).toBe("cancelled");
+        expect(findTaskByRunId("run-steered")).toBeUndefined();
+        expect(findTaskByRunId("run-cli")?.runtime).toBe("cli");
+        expect(findTaskByRunId("run-cli-next")).toBeUndefined();
+      });
+    });
+  });
+
+  describe("closing gateway sub-agent interruptions", () => {
+    const createSubagentAndCliTasks = (runId: string) => {
+      createTaskRecord({
+        runtime: "subagent",
+        ownerKey: "agent:main:main",
+        scopeKind: "session",
+        childSessionKey: "agent:main:subagent:child",
+        runId,
+        task: "Long sub-agent task",
+        status: "running",
+        deliveryStatus: "pending",
+        startedAt: 100,
+      });
+      createTaskRecord({
+        runtime: "cli",
+        ownerKey: "agent:main:subagent:child",
+        scopeKind: "session",
+        childSessionKey: "agent:main:subagent:child",
+        runId,
+        task: "Long sub-agent task",
+        status: "running",
+        deliveryStatus: "not_applicable",
+        startedAt: 100,
+      });
+    };
+    const taskStatus = (runId: string, runtime: TaskRecord["runtime"]) =>
+      listTaskRecords().find((task) => task.runId === runId && task.runtime === runtime)?.status;
+    const emitRestartEnd = (runId: string) =>
+      emitAgentEvent({
+        runId,
+        sessionKey: "agent:main:subagent:child",
+        stream: "lifecycle",
+        data: { phase: "end", aborted: true, stopReason: "restart", endedAt: 200 },
+      });
+
+    afterEach(() => {
+      resetCommandQueueStateForTest();
+      clearRuntimeConfigSnapshot();
+    });
+
+    it("keeps the sub-agent task running and cancels the cli task", async () => {
+      await withTaskRegistryTempDir(async () => {
+        resetTaskRegistryMemoryForTest();
+        setRuntimeConfigSnapshot({});
+        createSubagentAndCliTasks("run-close-restart");
+        markGatewayClosing();
+
+        emitRestartEnd("run-close-restart");
+        await flushAsyncWork();
+
+        expect(taskStatus("run-close-restart", "subagent")).toBe("running");
+        expect(taskStatus("run-close-restart", "cli")).toBe("cancelled");
+        expect(hoisted.sendMessageMock).not.toHaveBeenCalled();
+        expect(peekSystemEvents("agent:main:main")).toStrictEqual([]);
+      });
+    });
+
+    it("still cancels the sub-agent task on a user abort while closing", async () => {
+      await withTaskRegistryTempDir(async () => {
+        resetTaskRegistryMemoryForTest();
+        setRuntimeConfigSnapshot({});
+        createSubagentAndCliTasks("run-close-user-abort");
+        markGatewayClosing();
+
+        emitAgentEvent({
+          runId: "run-close-user-abort",
+          sessionKey: "agent:main:subagent:child",
+          stream: "lifecycle",
+          data: { phase: "end", stopReason: "aborted", endedAt: 200 },
+        });
+
+        expect(taskStatus("run-close-user-abort", "subagent")).toBe("cancelled");
+      });
+    });
+
+    it("keeps today's cancellation outside of close and with the switch off", async () => {
+      await withTaskRegistryTempDir(async () => {
+        resetTaskRegistryMemoryForTest();
+        setRuntimeConfigSnapshot({});
+        createSubagentAndCliTasks("run-open-restart");
+        emitRestartEnd("run-open-restart");
+        expect(taskStatus("run-open-restart", "subagent")).toBe("cancelled");
+
+        setRuntimeConfigSnapshot({
+          agents: { defaults: { subagents: { restartResume: false } } },
+        });
+        createSubagentAndCliTasks("run-close-switch-off");
+        markGatewayClosing();
+        emitRestartEnd("run-close-switch-off");
+        expect(taskStatus("run-close-switch-off", "subagent")).toBe("cancelled");
       });
     });
   });

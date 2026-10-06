@@ -10,6 +10,12 @@ import type {
   SessionEntryPatchContext,
   SessionEntryPatchOptions,
 } from "../config/sessions/session-accessor.js";
+import {
+  markGatewayClosing,
+  resetAllLanes,
+  resetCommandQueueStateForTest,
+} from "../process/command-queue.js";
+import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
 const noop = () => {};
 const waitForFast = <T>(callback: () => T | Promise<T>) =>
@@ -152,7 +158,21 @@ const mocks = vi.hoisted(() => ({
   runSubagentEnded: vi.fn(async () => {}),
   resolveAgentTimeoutMs: vi.fn(() => 1_000),
   scheduleOrphanRecovery: vi.fn(),
+  registryLogInfo: vi.fn(),
 }));
+
+vi.mock("../logging/subsystem.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../logging/subsystem.js")>();
+  return {
+    ...actual,
+    createSubsystemLogger: (subsystem: string) => {
+      const logger = actual.createSubsystemLogger(subsystem);
+      return subsystem === "agents/subagent-registry"
+        ? { ...logger, info: mocks.registryLogInfo }
+        : logger;
+    },
+  };
+});
 
 vi.mock("../gateway/call.js", () => ({
   callGateway: mocks.callGateway,
@@ -1869,6 +1889,7 @@ describe("subagent registry seam flow", () => {
     );
 
     mod.initSubagentRegistry();
+    await vi.advanceTimersByTimeAsync(0);
 
     await waitForFast(() => {
       expect(waitTimeouts).toEqual([1_000]);
@@ -2637,6 +2658,562 @@ describe("subagent registry seam flow", () => {
       .find((entry) => entry.runId === "run-stale-aborted");
     expect(run?.endedAt).toBeUndefined();
     expect(run?.outcome).toBeUndefined();
+  });
+
+  describe("closing gateway interruptions", () => {
+    const childSessionKey = "agent:main:subagent:child";
+    let sessionStore: Record<string, SessionEntry>;
+
+    const lifecycleHandler = () => {
+      const lastCall = mocks.onAgentEvent.mock.calls[
+        mocks.onAgentEvent.mock.calls.length - 1
+      ] as unknown as
+        | [(evt: { runId: string; stream: string; data: Record<string, unknown> }) => void]
+        | undefined;
+      const handler = lastCall?.[0];
+      if (!handler) {
+        throw new Error("expected lifecycle handler");
+      }
+      return handler;
+    };
+    const findRun = (runId: string) =>
+      mod.listSubagentRunsForRequester("agent:main:main").find((entry) => entry.runId === runId);
+    const register = (runId: string, key = childSessionKey) =>
+      mod.registerSubagentRun({
+        runId,
+        childSessionKey: key,
+        requesterSessionKey: "agent:main:main",
+        requesterDisplayKey: "main",
+        task: "long task",
+        cleanup: "keep",
+        expectsCompletionMessage: true,
+      });
+    const waitPending = () =>
+      mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
+        request.method === "agent.wait" ? { status: "pending" } : {},
+      );
+    const expectKeptLog = (runId: string, outcomeStatus: string, source: string) =>
+      expect(mocks.registryLogInfo).toHaveBeenCalledWith("kept subagent run for restart resume", {
+        runId,
+        childSessionKey,
+        outcomeStatus,
+        source,
+      });
+    const expectKeptUnended = async (runId: string) => {
+      await waitForFast(() => {
+        expect(findRun(runId)?.execution?.status).toBe("interrupted");
+      });
+      const run = findRun(runId);
+      expect(run?.endedAt).toBeUndefined();
+      expect(run?.outcome).toBeUndefined();
+      expect(run?.execution?.interruptionReason).toBe("gateway-restart");
+      expect(run?.execution?.interruptedAt).toBeTypeOf("number");
+      await waitForFast(() => {
+        expect(sessionStore[childSessionKey]?.abortedLastRun).toBe(true);
+      });
+      expect(sessionStore[childSessionKey]?.updatedAt).toBe(1);
+      expect(mocks.runSubagentAnnounceFlow).not.toHaveBeenCalled();
+    };
+
+    beforeEach(() => {
+      sessionStore = {
+        [childSessionKey]: { sessionId: "sess-child", updatedAt: 1 } as SessionEntry,
+      };
+      mocks.loadSessionStore.mockReturnValue(sessionStore);
+    });
+
+    afterEach(() => {
+      resetCommandQueueStateForTest();
+    });
+
+    it("keeps a restart lifecycle end unended while the gateway closes", async () => {
+      waitPending();
+      register("run-close-restart");
+      markGatewayClosing();
+      lifecycleHandler()({
+        runId: "run-close-restart",
+        stream: "lifecycle",
+        data: { phase: "end", startedAt: 10, endedAt: 20, aborted: true, stopReason: "restart" },
+      });
+
+      await expectKeptUnended("run-close-restart");
+      expectKeptLog("run-close-restart", "error", "listener");
+      expect(mocks.patchSessionEntry).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionKey: childSessionKey }),
+        expect.any(Function),
+        { preserveActivity: true },
+      );
+    });
+
+    it("still finalizes a user abort as killed while the gateway closes", async () => {
+      waitPending();
+      register("run-close-user-abort");
+      markGatewayClosing();
+      lifecycleHandler()({
+        runId: "run-close-user-abort",
+        stream: "lifecycle",
+        data: { phase: "end", startedAt: 10, endedAt: 20, aborted: true, stopReason: "aborted" },
+      });
+
+      await waitForFast(() => {
+        expect(findRun("run-close-user-abort")?.endedReason).toBe("subagent-killed");
+      });
+      expect(sessionStore[childSessionKey]?.abortedLastRun).toBeUndefined();
+    });
+
+    it("finalizes a successful completion while the gateway closes", async () => {
+      waitPending();
+      register("run-close-ok");
+      markGatewayClosing();
+      lifecycleHandler()({
+        runId: "run-close-ok",
+        stream: "lifecycle",
+        data: { phase: "end", startedAt: 10, endedAt: 20 },
+      });
+
+      await waitForFast(() => {
+        expect(findRun("run-close-ok")?.outcome?.status).toBe("ok");
+      });
+    });
+
+    it("keeps a service-restart wait error unended only while the gateway closes", async () => {
+      let resolveWait: (value: unknown) => void = () => {};
+      mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
+        request.method === "agent.wait"
+          ? await new Promise((resolve) => {
+              resolveWait = resolve;
+            })
+          : {},
+      );
+      register("run-close-1012");
+      markGatewayClosing();
+      resolveWait({ status: "error", error: "gateway closed (1012): service restart" });
+
+      await expectKeptUnended("run-close-1012");
+      expectKeptLog("run-close-1012", "error", "wait");
+    });
+
+    it("finalizes a service-restart wait error outside of close", async () => {
+      mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
+        request.method === "agent.wait"
+          ? { status: "error", error: "gateway closed (1012): service restart" }
+          : {},
+      );
+      register("run-open-1012");
+
+      await waitForFast(() => {
+        expect(findRun("run-open-1012")?.outcome?.status).toBe("error");
+      });
+    });
+
+    it("keeps a cancelled wait result unended while the gateway closes", async () => {
+      markGatewayClosing();
+      mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
+        request.method === "agent.wait"
+          ? { status: "timeout", stopReason: "restart", startedAt: 10, endedAt: 20 }
+          : {},
+      );
+      register("run-close-cancelled");
+
+      await expectKeptUnended("run-close-cancelled");
+    });
+
+    it("finalizes a cancelled wait result outside of close", async () => {
+      mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
+        request.method === "agent.wait"
+          ? { status: "timeout", stopReason: "restart", startedAt: 10, endedAt: 20 }
+          : {},
+      );
+      register("run-open-cancelled");
+
+      await waitForFast(() => {
+        expect(findRun("run-open-cancelled")?.endedAt).toBeTypeOf("number");
+      });
+    });
+
+    it("still finalizes an aborted wait result while the gateway closes", async () => {
+      markGatewayClosing();
+      mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
+        request.method === "agent.wait"
+          ? { status: "ok", startedAt: 10, endedAt: 20, stopReason: "aborted" }
+          : {},
+      );
+      register("run-close-aborted-wait");
+
+      await waitForFast(() => {
+        expect(findRun("run-close-aborted-wait")?.endedReason).toBe("subagent-killed");
+      });
+    });
+
+    it("still finalizes explicit kills and failed marks while the gateway closes", async () => {
+      waitPending();
+      register("run-close-kill");
+      markGatewayClosing();
+      expect(mod.markSubagentRunTerminated({ runId: "run-close-kill", reason: "killed" })).toBe(1);
+      lifecycleHandler()({
+        runId: "run-close-kill",
+        stream: "lifecycle",
+        data: { phase: "end", startedAt: 10, endedAt: 20, aborted: true, stopReason: "restart" },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(findRun("run-close-kill")?.endedReason).toBe("subagent-killed");
+      expect(findRun("run-close-kill")?.execution?.status).not.toBe("interrupted");
+
+      register("run-close-failed-mark", "agent:main:subagent:other");
+      await mod.finalizeInterruptedSubagentRun({
+        runId: "run-close-failed-mark",
+        error: "recovery failed",
+      });
+      expect(findRun("run-close-failed-mark")?.outcome?.status).toBe("error");
+    });
+
+    it("never guards ACP children", async () => {
+      waitPending();
+      register("run-close-acp", "agent:main:acp:4f2c");
+      markGatewayClosing();
+      lifecycleHandler()({
+        runId: "run-close-acp",
+        stream: "lifecycle",
+        data: { phase: "end", startedAt: 10, endedAt: 20, aborted: true, stopReason: "restart" },
+      });
+
+      await waitForFast(() => {
+        expect(findRun("run-close-acp")?.endedReason).toBe("subagent-killed");
+      });
+    });
+
+    it("keeps today's behavior when restartResume is off", async () => {
+      mocks.getRuntimeConfig.mockReturnValue({
+        agents: { defaults: { subagents: { archiveAfterMinutes: 0, restartResume: false } } },
+        session: { mainKey: "main", scope: "per-sender" as const },
+      } as ReturnType<typeof mocks.getRuntimeConfig>);
+      waitPending();
+      register("run-close-switch-off");
+      markGatewayClosing();
+      lifecycleHandler()({
+        runId: "run-close-switch-off",
+        stream: "lifecycle",
+        data: { phase: "end", startedAt: 10, endedAt: 20, aborted: true, stopReason: "restart" },
+      });
+
+      await waitForFast(() => {
+        expect(findRun("run-close-switch-off")?.endedReason).toBe("subagent-killed");
+      });
+      expect(sessionStore[childSessionKey]?.abortedLastRun).toBeUndefined();
+    });
+
+    const restartResumeOff = () =>
+      mocks.getRuntimeConfig.mockReturnValue({
+        agents: { defaults: { subagents: { archiveAfterMinutes: 0, restartResume: false } } },
+        session: { mainKey: "main", scope: "per-sender" as const },
+      } as ReturnType<typeof mocks.getRuntimeConfig>);
+    const terminalWaitTimeout = () =>
+      mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
+        request.method === "agent.wait" ? { status: "timeout", startedAt: 10, endedAt: 20 } : {},
+      );
+    const sweepLostContext = async (runId: string) => {
+      waitPending();
+      register(runId);
+      vi.setSystemTime(new Date("2026-03-24T12:02:00Z"));
+      await mod.testing.sweepOnceForTests();
+    };
+
+    describe.each([
+      { mode: "closing", closing: true, switchOn: true, kept: true },
+      { mode: "not closing", closing: false, switchOn: true, kept: false },
+      { mode: "switch off", closing: true, switchOn: false, kept: false },
+    ])("timeout and sweeper ends: $mode", ({ closing, switchOn, kept }) => {
+      beforeEach(() => {
+        if (!switchOn) {
+          restartResumeOff();
+        }
+        if (closing) {
+          markGatewayClosing();
+        }
+      });
+
+      it("holds or finalizes a terminal wait timeout", async () => {
+        terminalWaitTimeout();
+        register("run-wait-timeout");
+
+        if (kept) {
+          await expectKeptUnended("run-wait-timeout");
+          expectKeptLog("run-wait-timeout", "timeout", "timeout");
+          return;
+        }
+        await waitForFast(() => {
+          expect(findRun("run-wait-timeout")?.outcome?.status).toBe("timeout");
+        });
+        expect(sessionStore[childSessionKey]?.abortedLastRun).toBeUndefined();
+      });
+
+      it("holds or finalizes a sweeper lost-context end", async () => {
+        await sweepLostContext("run-sweep-lost");
+
+        if (kept) {
+          await expectKeptUnended("run-sweep-lost");
+          expectKeptLog("run-sweep-lost", "error", "sweeper");
+          return;
+        }
+        await waitForFast(() => {
+          expect(findRun("run-sweep-lost")?.outcome).toMatchObject({
+            status: "error",
+            error: "subagent run lost active execution context",
+          });
+        });
+        expect(sessionStore[childSessionKey]?.abortedLastRun).toBeUndefined();
+      });
+    });
+
+    it("finalizes non-ok runs again after an in-process restart resets the lanes", async () => {
+      waitPending();
+      register("run-after-reset");
+      markGatewayClosing();
+      resetAllLanes();
+      lifecycleHandler()({
+        runId: "run-after-reset",
+        stream: "lifecycle",
+        data: { phase: "end", startedAt: 10, endedAt: 20, aborted: true, stopReason: "restart" },
+      });
+
+      await waitForFast(() => {
+        expect(findRun("run-after-reset")?.endedReason).toBe("subagent-killed");
+      });
+    });
+  });
+
+  describe("boot restore for restart resume", () => {
+    const childSessionKey = "agent:main:subagent:child";
+    const now = () => Date.now();
+    let sessionStore: Record<string, SessionEntry>;
+
+    const restoreRun = (overrides: Partial<SubagentRunRecord> = {}) => {
+      mocks.restoreSubagentRunsFromDisk.mockImplementation(((params: {
+        runs: Map<string, unknown>;
+      }) => {
+        params.runs.set(overrides.runId ?? "run-restored", {
+          runId: "run-restored",
+          childSessionKey,
+          requesterSessionKey: "agent:main:main",
+          requesterDisplayKey: "main",
+          task: "long task",
+          cleanup: "keep",
+          expectsCompletionMessage: true,
+          createdAt: now() - 10 * 60_000,
+          startedAt: now() - 10 * 60_000,
+          ...overrides,
+        });
+        return 1;
+      }) as never);
+    };
+    const setChildSession = (entry: Partial<SessionEntry>, key = childSessionKey) => {
+      sessionStore[key] = {
+        sessionId: "sess-child",
+        status: "running",
+        updatedAt: now() - 10 * 60_000,
+        ...entry,
+      } as SessionEntry;
+    };
+    const waitCalls = () =>
+      mocks.callGateway.mock.calls.filter(
+        ([request]) => (request as { method?: string }).method === "agent.wait",
+      ).length;
+    const pendingWaits = () =>
+      mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
+        request.method === "agent.wait" ? { status: "pending" } : {},
+      );
+
+    beforeEach(() => {
+      sessionStore = {};
+      mocks.loadSessionStore.mockReturnValue(sessionStore);
+      pendingWaits();
+    });
+
+    it("marks a running session left by a crash and leaves the run to orphan recovery", async () => {
+      restoreRun();
+      setChildSession({});
+      const updatedAt = sessionStore[childSessionKey]?.updatedAt;
+
+      mod.initSubagentRegistry();
+
+      await waitForFast(() => {
+        expect(mocks.scheduleOrphanRecovery).toHaveBeenCalledTimes(1);
+      });
+      expect(sessionStore[childSessionKey]?.abortedLastRun).toBe(true);
+      expect(sessionStore[childSessionKey]?.updatedAt).toBe(updatedAt);
+      expect(mocks.registryLogInfo).toHaveBeenCalledWith(
+        "marked crashed subagent session for restart resume",
+        { runId: "run-restored", childSessionKey },
+      );
+      expect(mocks.patchSessionEntry).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionKey: childSessionKey }),
+        expect.any(Function),
+        { preserveActivity: true },
+      );
+      expect(waitCalls()).toBe(0);
+    });
+
+    it("does not arm the boot wait for a child already marked at close", async () => {
+      restoreRun({ runTimeoutSeconds: 3_600 });
+      setChildSession({ abortedLastRun: true, status: "killed" });
+
+      mod.initSubagentRegistry();
+
+      await waitForFast(() => {
+        expect(mocks.scheduleOrphanRecovery).toHaveBeenCalledTimes(1);
+      });
+      expect(waitCalls()).toBe(0);
+    });
+
+    it("does not mark a run older than two hours", async () => {
+      restoreRun({ startedAt: Date.parse("2026-03-24T09:00:00Z") });
+      setChildSession({});
+
+      mod.initSubagentRegistry();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mocks.patchSessionEntry).not.toHaveBeenCalled();
+      expect(sessionStore[childSessionKey]?.abortedLastRun).toBeUndefined();
+    });
+
+    it("logs and keeps today's restore for a crashed run older than two hours", async () => {
+      restoreRun({ startedAt: now() - 3 * 60 * 60_000, runTimeoutSeconds: 4 * 60 * 60 });
+      setChildSession({});
+
+      mod.initSubagentRegistry();
+
+      await waitForFast(() => {
+        expect(waitCalls()).toBe(1);
+      });
+      expect(mocks.patchSessionEntry).not.toHaveBeenCalled();
+      expect(mocks.registryLogInfo).toHaveBeenCalledWith("subagent run too old to resume", {
+        runId: "run-restored",
+        childSessionKey,
+        ageMs: 3 * 60 * 60_000,
+      });
+    });
+
+    it.each([
+      ["a live owner", { updatedAt: Date.parse("2026-03-24T12:00:00Z") + 1 }, {}],
+      ["a session that is not running", { status: "done" as const }, {}],
+    ])("does not mark a session with %s", async (_label, sessionPatch, runPatch) => {
+      restoreRun(runPatch);
+      setChildSession(sessionPatch);
+
+      mod.initSubagentRegistry();
+
+      await waitForFast(() => {
+        expect(waitCalls()).toBe(1);
+      });
+      expect(sessionStore[childSessionKey]?.abortedLastRun).toBeUndefined();
+    });
+
+    it("never marks ACP children", async () => {
+      const acpKey = "agent:main:acp:4f2c";
+      restoreRun({ childSessionKey: acpKey });
+      setChildSession({}, acpKey);
+
+      mod.initSubagentRegistry();
+
+      await waitForFast(() => {
+        expect(waitCalls()).toBe(1);
+      });
+      expect(sessionStore[acpKey]?.abortedLastRun).toBeUndefined();
+    });
+
+    it("ends a child past its deadline with one timeout and clears its resume mark", async () => {
+      restoreRun({ runTimeoutSeconds: 60 });
+      setChildSession({ abortedLastRun: true });
+      const updatedAt = sessionStore[childSessionKey]?.updatedAt;
+      mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
+        request.method === "agent.wait" ? { status: "timeout" } : {},
+      );
+
+      mod.initSubagentRegistry();
+
+      await waitForFast(() => {
+        const run = mod
+          .listSubagentRunsForRequester("agent:main:main")
+          .find((entry) => entry.runId === "run-restored");
+        expect(run?.outcome?.status).toBe("timeout");
+        expect(mocks.runSubagentAnnounceFlow).toHaveBeenCalledTimes(1);
+      });
+      expect(sessionStore[childSessionKey]?.abortedLastRun).toBe(false);
+      expect(sessionStore[childSessionKey]?.updatedAt).toBe(updatedAt);
+      expect(mocks.registryLogInfo).toHaveBeenCalledWith(
+        "subagent run past its deadline; not resuming",
+        { runId: "run-restored", childSessionKey },
+      );
+    });
+
+    it("keeps today's restore when restartResume is off", async () => {
+      mocks.getRuntimeConfig.mockReturnValue({
+        agents: { defaults: { subagents: { archiveAfterMinutes: 0, restartResume: false } } },
+        session: { mainKey: "main", scope: "per-sender" as const },
+      } as ReturnType<typeof mocks.getRuntimeConfig>);
+      restoreRun({ runTimeoutSeconds: 60 });
+      setChildSession({ abortedLastRun: true });
+
+      mod.initSubagentRegistry();
+
+      await waitForFast(() => {
+        expect(waitCalls()).toBe(1);
+      });
+      expect(sessionStore[childSessionKey]?.abortedLastRun).toBe(true);
+      expect(mocks.patchSessionEntry).not.toHaveBeenCalled();
+    });
+
+    it("still arms boot waits and the orphan scan when the marking pass fails", async () => {
+      restoreRun();
+      setChildSession({});
+      mocks.patchSessionEntry.mockRejectedValueOnce(new Error("session store locked"));
+
+      mod.initSubagentRegistry();
+
+      await waitForFast(() => {
+        expect(waitCalls()).toBe(1);
+        expect(mocks.scheduleOrphanRecovery).toHaveBeenCalledTimes(1);
+      });
+    });
+    it("keeps runs held before a marking failure and arms waits for the rest", async () => {
+      const markedKey = "agent:main:subagent:marked";
+      const crashedKey = "agent:main:subagent:crashed";
+      mocks.restoreSubagentRunsFromDisk.mockImplementation(((params: {
+        runs: Map<string, unknown>;
+      }) => {
+        for (const [runId, key] of [
+          ["run-marked", markedKey],
+          ["run-crashed", crashedKey],
+        ]) {
+          params.runs.set(runId, {
+            runId,
+            childSessionKey: key,
+            requesterSessionKey: "agent:main:main",
+            requesterDisplayKey: "main",
+            task: "long task",
+            cleanup: "keep",
+            expectsCompletionMessage: true,
+            createdAt: now() - 10 * 60_000,
+            startedAt: now() - 10 * 60_000,
+          });
+        }
+        return 2;
+      }) as never);
+      setChildSession({ abortedLastRun: true, status: "killed" }, markedKey);
+      setChildSession({}, crashedKey);
+      mocks.patchSessionEntry.mockRejectedValueOnce(new Error("session store locked"));
+
+      mod.initSubagentRegistry();
+
+      await waitForFast(() => {
+        expect(mocks.scheduleOrphanRecovery).toHaveBeenCalledTimes(1);
+      });
+      const waitedRunIds = mocks.callGateway.mock.calls
+        .map(([request]) => request as { method?: string; params?: { runId?: string } })
+        .filter((request) => request.method === "agent.wait")
+        .map((request) => request.params?.runId);
+      expect(waitedRunIds).toEqual(["run-crashed"]);
+    });
   });
 
   it("completes a registered run across timing persistence, lifecycle status, and announce cleanup", async () => {

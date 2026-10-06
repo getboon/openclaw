@@ -52,6 +52,7 @@ const getInspectableActiveTaskRestartBlockers = vi.fn(
     }>,
 );
 const markGatewayDraining = vi.fn();
+const markGatewayClosing = vi.fn();
 const waitForActiveTasks = vi.fn(async (_timeoutMs?: number) => ({ drained: true }));
 const resetAllLanes = vi.fn();
 const advanceCronActiveJobGeneration = vi.fn();
@@ -159,6 +160,7 @@ vi.mock("../../infra/restart-handoff.js", () => ({
 vi.mock("../../process/command-queue.js", () => ({
   getActiveTaskCount: () => getActiveTaskCount(),
   markGatewayDraining: () => markGatewayDraining(),
+  markGatewayClosing: () => markGatewayClosing(),
   waitForActiveTasks: (timeoutMs?: number) => waitForActiveTasks(timeoutMs),
   resetAllLanes: () => resetAllLanes(),
 }));
@@ -419,6 +421,10 @@ describe("runGatewayLoop", () => {
         reason: "gateway stopping",
         restartExpectedMs: null,
       });
+      expect(markGatewayClosing).toHaveBeenCalledOnce();
+      expect(markGatewayClosing.mock.invocationCallOrder[0]).toBeLessThan(
+        close.mock.invocationCallOrder[0] ?? 0,
+      );
       expect(runtime.exit).toHaveBeenCalledWith(0);
     });
   });
@@ -464,6 +470,10 @@ describe("runGatewayLoop", () => {
 
       expect(consumeGatewayRestartIntentPayloadSync).toHaveBeenCalledOnce();
       expect(markGatewayDraining).toHaveBeenCalledOnce();
+      expect(markGatewayClosing).toHaveBeenCalledOnce();
+      expect(markGatewayClosing.mock.invocationCallOrder[0]).toBeLessThan(
+        markGatewayDraining.mock.invocationCallOrder[0] ?? 0,
+      );
       expect(waitForActiveTasks).toHaveBeenCalledWith(90_000);
       expectRestartCloseCall(closeFirst, 90_000);
       await startedSecond;

@@ -49,6 +49,11 @@ export function resolveAgentRunAbortLifecycleFields(signal: AbortSignal | undefi
   };
 }
 
+/** Returns whether a stop reason is a user or controller abort, not a gateway restart. */
+export function isExplicitAgentAbortStopReason(value: unknown): boolean {
+  return value === AGENT_RUN_ABORTED_STOP_REASON;
+}
+
 /** Returns whether a stop reason is the stable aborted-run reason. */
 export function isAbortedAgentStopReason(
   value: unknown,

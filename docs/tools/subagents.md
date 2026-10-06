@@ -345,6 +345,9 @@ See [Configuration reference](/gateway/configuration-reference) and
 <ParamField path="agents.defaults.subagents.requireAgentId" type="boolean" default="false">
   Block `sessions_spawn` calls that omit `agentId` (forces explicit profile selection). Per-agent override: `agents.list[].subagents.requireAgentId`.
 </ParamField>
+<ParamField path="agents.defaults.subagents.restartResume" type="boolean" default="true">
+  Resume native sub-agent runs that a gateway restart, stop, or crash interrupted, in place after the next boot. The resumed child is told to check what already ran before it repeats a side effect. A run past its `runTimeoutSeconds` deadline ends as a timeout instead. Set `false` to end interrupted runs with an error instead. Defaults only.
+</ParamField>
 <ParamField path="agents.defaults.subagents.announceTimeoutMs" type="number" default="120000">
   Per-call timeout for gateway `agent` announce delivery attempts. Values are positive integer milliseconds and are clamped to the platform-safe timer maximum. Transient retries can make the total announce wait longer than one configured timeout.
 </ParamField>

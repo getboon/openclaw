@@ -32,6 +32,8 @@ let getActiveTaskCount: CommandQueueModule["getActiveTaskCount"];
 let getCommandLaneSnapshot: CommandQueueModule["getCommandLaneSnapshot"];
 let getCommandLaneSnapshots: CommandQueueModule["getCommandLaneSnapshots"];
 let getQueueSize: CommandQueueModule["getQueueSize"];
+let isGatewayClosing: CommandQueueModule["isGatewayClosing"];
+let markGatewayClosing: CommandQueueModule["markGatewayClosing"];
 let markGatewayDraining: CommandQueueModule["markGatewayDraining"];
 let resetAllLanes: CommandQueueModule["resetAllLanes"];
 let resetCommandLane: CommandQueueModule["resetCommandLane"];
@@ -104,6 +106,8 @@ describe("command queue", () => {
       getCommandLaneSnapshot,
       getCommandLaneSnapshots,
       getQueueSize,
+      isGatewayClosing,
+      markGatewayClosing,
       markGatewayDraining,
       resetAllLanes,
       resetCommandLane,
@@ -866,6 +870,18 @@ describe("command queue", () => {
     markGatewayDraining();
     resetAllLanes();
     await expect(enqueueCommandInLane(CommandLane.Main, async () => "ok")).resolves.toBe("ok");
+  });
+
+  it("tracks gateway closing separately from draining and clears it on lane reset", async () => {
+    expect(isGatewayClosing()).toBe(false);
+    markGatewayClosing();
+    expect(isGatewayClosing()).toBe(true);
+    await expect(enqueueCommandInLane(CommandLane.Main, async () => "ok")).resolves.toBe("ok");
+    resetAllLanes();
+    expect(isGatewayClosing()).toBe(false);
+    markGatewayClosing();
+    resetCommandQueueStateForTest();
+    expect(isGatewayClosing()).toBe(false);
   });
 
   it("migrates legacy queue state missing activeTaskWaiters without crashing", async () => {
