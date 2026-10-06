@@ -526,8 +526,6 @@ describe("subagent-orphan-recovery", () => {
         automaticAttempts: 2,
         lastAttemptAt: Date.now() - 20_000,
         lastRunId: "previous-run",
-        wedgedAt: Date.now() - 10_000,
-        wedgedReason: "subagent orphan recovery blocked after 2 rapid accepted resume attempts",
       },
     });
     const activeRuns = createActiveRuns(createTestRunRecord());
@@ -545,6 +543,7 @@ describe("subagent-orphan-recovery", () => {
     );
     expect(finalizeParams.error).toContain("interrupted by a gateway restart");
     expect(finalizeParams.error).toContain("2 rapid accepted resume attempts");
+    expect(sessions.updateSessionStore).toHaveBeenCalledOnce();
   });
 
   it("includes last human message in resume when available", async () => {

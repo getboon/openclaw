@@ -3120,6 +3120,7 @@ describe("subagent registry seam flow", () => {
       mocks.callGateway.mock.calls.filter(
         ([request]) => (request as { method?: string }).method === "agent.wait",
       ).length;
+    let uptimeSpy: { mockRestore: () => void } | undefined;
     const pendingWaits = () =>
       mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
         request.method === "agent.wait" ? { status: "pending" } : {},
@@ -3129,6 +3130,11 @@ describe("subagent registry seam flow", () => {
       sessionStore = {};
       mocks.loadSessionStore.mockReturnValue(sessionStore);
       pendingWaits();
+      uptimeSpy = vi.spyOn(process, "uptime").mockReturnValue(5);
+    });
+
+    afterEach(() => {
+      uptimeSpy?.mockRestore();
     });
 
     it("marks a running session left by a crash and leaves the run to orphan recovery", async () => {

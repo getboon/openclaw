@@ -2,8 +2,8 @@
  * Sub-agent restart-resume policy.
  *
  * Decides when a closing gateway keeps an interrupted child run unended so the
- * next boot resumes it in place. The run registry and the task registry share
- * this predicate so a run and its task never disagree.
+ * next boot resumes it in place. The task registry only skips its own terminal
+ * patch for a held run; the run registry's finalize settles the task.
  */
 import { getRuntimeConfig } from "../config/config.js";
 import type { SessionEntry } from "../config/sessions/types.js";
