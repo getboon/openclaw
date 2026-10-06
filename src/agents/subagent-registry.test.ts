@@ -161,17 +161,20 @@ const mocks = vi.hoisted(() => ({
   registryLogInfo: vi.fn(),
 }));
 
-vi.mock("../logging/subsystem.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../logging/subsystem.js")>();
-  return {
-    ...actual,
-    createSubsystemLogger: (subsystem: string) => {
-      const logger = actual.createSubsystemLogger(subsystem);
-      return subsystem === "agents/subagent-registry"
-        ? { ...logger, info: mocks.registryLogInfo }
-        : logger;
-    },
-  };
+vi.mock("../logging/subsystem.js", () => {
+  const createSubsystemLogger = (subsystem: string) => ({
+    subsystem,
+    isEnabled: () => false,
+    trace: vi.fn(),
+    debug: vi.fn(),
+    info: subsystem === "agents/subagent-registry" ? mocks.registryLogInfo : vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+    raw: vi.fn(),
+    child: (name: string) => createSubsystemLogger(`${subsystem}/${name}`),
+  });
+  return { createSubsystemLogger };
 });
 
 vi.mock("../gateway/call.js", () => ({
@@ -2978,6 +2981,35 @@ describe("subagent registry seam flow", () => {
 
       await waitForFast(() => {
         expect(findRun("run-after-reset")?.endedReason).toBe("subagent-killed");
+      });
+    });
+
+    it("leaves a run held at close to orphan recovery when the sweeper runs after a lane reset", async () => {
+      waitPending();
+      register("run-held-then-swept");
+      markGatewayClosing();
+      lifecycleHandler()({
+        runId: "run-held-then-swept",
+        stream: "lifecycle",
+        data: { phase: "end", startedAt: 10, endedAt: 20, aborted: true, stopReason: "restart" },
+      });
+      await expectKeptUnended("run-held-then-swept");
+      sessionStore[childSessionKey] = {
+        ...sessionStore[childSessionKey],
+        status: "killed",
+        endedAt: Date.now(),
+        abortedLastRun: true,
+      } as SessionEntry;
+      resetAllLanes();
+      mocks.scheduleOrphanRecovery.mockClear();
+
+      vi.setSystemTime(new Date(Date.now() + 120_000));
+      await mod.testing.sweepOnceForTests();
+
+      expect(findRun("run-held-then-swept")?.endedReason).toBeUndefined();
+      expect(findRun("run-held-then-swept")?.endedAt).toBeUndefined();
+      await waitForFast(() => {
+        expect(mocks.scheduleOrphanRecovery).toHaveBeenCalledTimes(1);
       });
     });
   });

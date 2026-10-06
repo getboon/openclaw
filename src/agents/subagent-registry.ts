@@ -1100,6 +1100,11 @@ async function sweepSubagentRuns() {
             childSessionKey: entry.childSessionKey,
             storeCache,
           });
+          // A run held at close stays for orphan recovery even after an in-process restart clears the closing flag.
+          if (entry.execution?.status === "interrupted" && sessionEntry?.abortedLastRun === true) {
+            scheduleSubagentOrphanRecovery({ delayMs: 1_000 });
+            continue;
+          }
           const completion = resolveCompletionFromSessionEntry(sessionEntry, now, {
             notBeforeMs: entry.startedAt ?? entry.createdAt,
           });
