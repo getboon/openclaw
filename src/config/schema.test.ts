@@ -847,6 +847,7 @@ describe("config schema", () => {
           ssrfPolicy: {
             allowRfc2544BenchmarkRange: true,
             allowIpv6UniqueLocalRange: true,
+            allowedHostnames: ["localhost"],
           },
         },
       },
@@ -855,6 +856,7 @@ describe("config schema", () => {
     expect(parsed?.web?.fetch?.ssrfPolicy).toEqual({
       allowRfc2544BenchmarkRange: true,
       allowIpv6UniqueLocalRange: true,
+      allowedHostnames: ["localhost"],
     });
   });
 

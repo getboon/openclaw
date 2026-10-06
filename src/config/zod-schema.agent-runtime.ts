@@ -466,6 +466,7 @@ const ToolsWebFetchSchema = z
       .object({
         allowRfc2544BenchmarkRange: z.boolean().optional(),
         allowIpv6UniqueLocalRange: z.boolean().optional(),
+        allowedHostnames: z.array(z.string()).optional(),
       })
       .strict()
       .optional(),

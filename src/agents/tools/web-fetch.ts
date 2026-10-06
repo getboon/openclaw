@@ -331,6 +331,7 @@ type WebFetchRuntimeParams = {
   ssrfPolicy?: {
     allowRfc2544BenchmarkRange?: boolean;
     allowIpv6UniqueLocalRange?: boolean;
+    allowedHostnames?: string[];
   };
   providerCacheKey?: string;
   lookupFn?: LookupFn;
@@ -476,16 +477,20 @@ async function maybeFetchProviderWebFetchPayload(
 async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string, unknown>> {
   const allowRfc2544BenchmarkRange = params.ssrfPolicy?.allowRfc2544BenchmarkRange === true;
   const allowIpv6UniqueLocalRange = params.ssrfPolicy?.allowIpv6UniqueLocalRange === true;
+  const allowedHostnames = params.ssrfPolicy?.allowedHostnames?.length
+    ? params.ssrfPolicy.allowedHostnames
+    : undefined;
   const useTrustedEnvProxy = params.useTrustedEnvProxy;
   const ssrfPolicy: SsrFPolicy | undefined =
-    allowRfc2544BenchmarkRange || allowIpv6UniqueLocalRange
+    allowRfc2544BenchmarkRange || allowIpv6UniqueLocalRange || allowedHostnames
       ? {
           ...(allowRfc2544BenchmarkRange ? { allowRfc2544BenchmarkRange } : {}),
           ...(allowIpv6UniqueLocalRange ? { allowIpv6UniqueLocalRange } : {}),
+          ...(allowedHostnames ? { allowedHostnames } : {}),
         }
       : undefined;
   const cacheKey = normalizeCacheKey(
-    `fetch:${params.url}:${params.extractMode}:${params.maxChars}${params.providerCacheKey ? `:provider:${params.providerCacheKey}` : ""}${allowRfc2544BenchmarkRange ? ":allow-rfc2544" : ""}${allowIpv6UniqueLocalRange ? ":allow-ipv6-ula" : ""}${useTrustedEnvProxy ? ":trusted-env-proxy" : ""}`,
+    `fetch:${params.url}:${params.extractMode}:${params.maxChars}${params.providerCacheKey ? `:provider:${params.providerCacheKey}` : ""}${allowRfc2544BenchmarkRange ? ":allow-rfc2544" : ""}${allowIpv6UniqueLocalRange ? ":allow-ipv6-ula" : ""}${allowedHostnames ? `:allow-hosts=${allowedHostnames.join(",")}` : ""}${useTrustedEnvProxy ? ":trusted-env-proxy" : ""}`,
   );
   const cached = readCache(FETCH_CACHE, cacheKey);
   if (cached) {

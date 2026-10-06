@@ -50,7 +50,11 @@ function firstFetchUrl(fetchSpy: ReturnType<typeof setMockFetch>): string {
 function createWebFetchToolForTest(params?: {
   firecrawlApiKey?: string;
   useTrustedEnvProxy?: boolean;
-  ssrfPolicy?: { allowRfc2544BenchmarkRange?: boolean; allowIpv6UniqueLocalRange?: boolean };
+  ssrfPolicy?: {
+    allowRfc2544BenchmarkRange?: boolean;
+    allowIpv6UniqueLocalRange?: boolean;
+    allowedHostnames?: string[];
+  };
   cacheTtlMinutes?: number;
 }) {
   return createWebFetchTool({
@@ -233,6 +237,27 @@ describe("web_fetch SSRF protection", () => {
     const fetchSpy = setMockFetch().mockResolvedValue(textResponse("ipv6 ula ok"));
     const allowedTool = createWebFetchToolForTest({
       ssrfPolicy: { allowIpv6UniqueLocalRange: true },
+      cacheTtlMinutes: 1,
+    });
+
+    const allowed = await allowedTool?.execute?.("call", { url });
+    expectRawFetchSuccessDetails(allowed?.details);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    const stricterTool = createWebFetchToolForTest({ cacheTtlMinutes: 1 });
+    await expectBlockedUrl(stricterTool, url, /private|internal|blocked/i);
+  });
+
+  it("allows listed hostnames only when web_fetch ssrfPolicy.allowedHostnames opts in", async () => {
+    const url = "http://localhost:3000/file";
+    lookupMock.mockResolvedValue([{ address: "127.0.0.1", family: 4 }]);
+
+    const deniedTool = createWebFetchToolForTest({ cacheTtlMinutes: 1 });
+    await expectBlockedUrl(deniedTool, url, /private|internal|blocked/i);
+
+    const fetchSpy = setMockFetch().mockResolvedValue(textResponse("localhost ok"));
+    const allowedTool = createWebFetchToolForTest({
+      ssrfPolicy: { allowedHostnames: ["localhost"] },
       cacheTtlMinutes: 1,
     });
 
