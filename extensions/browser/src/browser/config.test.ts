@@ -1041,6 +1041,38 @@ describe("browser config", () => {
     expect(getBrowserProfileCapabilities(work).usesChromeMcp).toBe(false);
   });
 
+  it("drives an attach-only loopback CDP relay (ws URL with a path) over Playwright, not /json endpoints", () => {
+    const resolved = resolveBrowserConfig({
+      profiles: {
+        relay: {
+          cdpUrl: "ws://localhost:3000/api/v1/agent/browser_sessions/5/cdp?ref=abc",
+          driver: "openclaw",
+          attachOnly: true,
+          color: "#0066CC",
+        },
+        local: { cdpPort: 18800, color: "#FF4500" },
+        chromeSocket: {
+          cdpUrl: "ws://127.0.0.1:9222/devtools/browser/abc",
+          attachOnly: true,
+          color: "#00AA00",
+        },
+      },
+    });
+
+    const chromeSocket = getBrowserProfileCapabilities(resolveProfile(resolved, "chromeSocket")!);
+    expect(chromeSocket).toMatchObject({ mode: "local-managed", supportsJsonTabEndpoints: true });
+
+    const relay = getBrowserProfileCapabilities(resolveProfile(resolved, "relay")!);
+    expect(relay).toMatchObject({
+      mode: "remote-cdp",
+      usesPersistentPlaywright: true,
+      supportsJsonTabEndpoints: false,
+    });
+
+    const local = getBrowserProfileCapabilities(resolveProfile(resolved, "local")!);
+    expect(local).toMatchObject({ mode: "local-managed", supportsJsonTabEndpoints: true });
+  });
+
   describe("default profile preference", () => {
     it("defaults to openclaw profile when defaultProfile is not configured", () => {
       const resolved = resolveBrowserConfig({
