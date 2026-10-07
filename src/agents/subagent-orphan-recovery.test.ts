@@ -972,6 +972,61 @@ describe("subagent-orphan-recovery", () => {
     );
   });
 
+  it("records the attempt of a tracked late-accepted resume so a new interruption gets a new key", async () => {
+    const store = mockSharedAbortedSessionStore();
+    const childKey = "agent:main:subagent:test-session-1";
+    vi.mocked(subagentRegistrySteerRuntime.replaceSubagentRunAfterSteer).mockReturnValue(true);
+    vi.mocked(gateway.callGateway)
+      .mockImplementationOnce(async () => {
+        store[childKey].abortedLastRun = false;
+        throw new Error("gateway timeout after 10000ms");
+      })
+      .mockResolvedValue({ runId: "resumed-run" } as never);
+    const activeRuns = createActiveRuns(createTestRunRecord());
+    const scan = () =>
+      recoverOrphanedSubagentSessions({
+        getActiveRuns: () => activeRuns,
+        resumedSessionKeys: new Set<string>(),
+      });
+
+    await scan();
+    const adopted = await scan();
+    expect(adopted.recovered).toBe(1);
+    expect(store[childKey].subagentRecovery).toMatchObject({
+      automaticAttempts: 1,
+      lastRunId: "run-1",
+    });
+    store[childKey].abortedLastRun = true;
+    const next = await scan();
+
+    expect(next.recovered).toBe(1);
+    const [timedOutKey, nextKey] = resumeIdempotencyKeys();
+    expect(nextKey).toMatch(UUID_PATTERN);
+    expect(nextKey).not.toBe(timedOutKey);
+  });
+
+  it("forgets a timed-out resume once its run is finalized as failed", async () => {
+    const store = mockSharedAbortedSessionStore();
+    vi.mocked(subagentRegistrySteerRuntime.replaceSubagentRunAfterSteer).mockReturnValue(true);
+    vi.mocked(gateway.callGateway).mockRejectedValueOnce(
+      new Error("gateway timeout after 10000ms"),
+    );
+    const activeRuns = createActiveRuns(createTestRunRecord());
+
+    scheduleOrphanRecovery({ getActiveRuns: () => activeRuns, delayMs: 1, maxRetries: 0 });
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.resolve();
+    expect(subagentRegistrySteerRuntime.finalizeInterruptedSubagentRun).toHaveBeenCalledOnce();
+    store["agent:main:subagent:test-session-1"].abortedLastRun = false;
+    const later = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+
+    expect(later.recovered).toBe(0);
+    expect(subagentRegistrySteerRuntime.replaceSubagentRunAfterSteer).not.toHaveBeenCalled();
+  });
+
   it("does not take over a steer run that replaced the run of a timed-out resume", async () => {
     const store = mockSharedAbortedSessionStore();
     vi.mocked(subagentRegistrySteerRuntime.replaceSubagentRunAfterSteer).mockReturnValue(true);

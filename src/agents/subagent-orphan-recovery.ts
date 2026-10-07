@@ -45,7 +45,10 @@ const DEFAULT_RECOVERY_DELAY_MS = 5_000;
 const resumeInFlightSessionKeys = new Set<string>();
 // Resumes whose call failed, by child. The gateway may still have accepted the run, whose id is the
 // key. Bound to the run it replaces, so a later steer run on the child is never taken over.
-const unconfirmedResumes = new Map<string, { idempotencyKey: string; originalRunId: string }>();
+const unconfirmedResumes = new Map<
+  string,
+  { idempotencyKey: string; originalRunId: string; attempt: number }
+>();
 
 function isLegacyRestartInterruptedTimeout(
   runRecord: SubagentRunRecord,
@@ -170,10 +173,6 @@ async function resumeOrphanedSession(params: {
     resumeMessage += params.configChangeHint;
   }
 
-  unconfirmedResumes.set(params.sessionKey, {
-    idempotencyKey: params.idempotencyKey,
-    originalRunId: params.originalRunId,
-  });
   try {
     const result = await callGateway<{ runId: string }>({
       method: "agent",
@@ -196,7 +195,6 @@ async function resumeOrphanedSession(params: {
       },
       timeoutMs: 10_000,
     });
-    unconfirmedResumes.delete(params.sessionKey);
     const remapped = remapToResumedRun({
       originalRunId: params.originalRunId,
       originalRun: params.originalRun,
@@ -330,10 +328,32 @@ export async function recoverOrphanedSubagentSessions(params: {
               runId: sent.idempotencyKey,
             })
           ) {
+            resumeInFlightSessionKeys.add(childSessionKey);
+            claimedResume = true;
             resumedSessionKeys.add(childSessionKey);
             log.info(
               `adopted late-accepted resume of ${childSessionKey}: run=${sent.idempotencyKey}`,
             );
+            // Record the attempt like a confirmed resume, so a later interruption gets a new key.
+            try {
+              await updateSessionStore(storePath, (currentStore) => {
+                const current = currentStore[childSessionKey];
+                if (current) {
+                  markSubagentRecoveryAttempt({
+                    entry: current,
+                    now: Date.now(),
+                    runId,
+                    attempt: sent.attempt,
+                  });
+                  current.updatedAt = Date.now();
+                  currentStore[childSessionKey] = current;
+                }
+              });
+            } catch (err) {
+              log.warn(
+                `adopted resume of ${childSessionKey} but failed to record the attempt: ${String(err)}`,
+              );
+            }
             result.recovered++;
             continue;
           }
@@ -413,9 +433,15 @@ export async function recoverOrphanedSubagentSessions(params: {
         // We intentionally do NOT clear abortedLastRun before attempting
         // the resume — if callGateway fails (e.g. gateway still booting),
         // the flag stays true so the next restart can retry.
+        const idempotencyKey = resolveResumeIdempotencyKey(childSessionKey, currentEntry);
+        unconfirmedResumes.set(childSessionKey, {
+          idempotencyKey,
+          originalRunId: runId,
+          attempt: recoveryGate.nextAttempt,
+        });
         const resumeResult = await resumeOrphanedSession({
           sessionKey: childSessionKey,
-          idempotencyKey: resolveResumeIdempotencyKey(childSessionKey, currentEntry),
+          idempotencyKey,
           task: runRecord.task,
           lastHumanMessage: extractMessageText(lastHumanMessage),
           configChangeHint: configChangeDetected
@@ -426,6 +452,7 @@ export async function recoverOrphanedSubagentSessions(params: {
         });
 
         if (resumeResult.resumed) {
+          unconfirmedResumes.delete(childSessionKey);
           resumedSessionKeys.add(childSessionKey);
           // Only clear the aborted flag after confirmed successful resume.
           try {
@@ -550,6 +577,11 @@ export function scheduleOrphanRecovery(params: {
             return;
           }
           const attempts = attempt + 1;
+          for (const run of result.failedRuns) {
+            if (unconfirmedResumes.get(run.childSessionKey)?.originalRunId === run.runId) {
+              unconfirmedResumes.delete(run.childSessionKey);
+            }
+          }
           void Promise.allSettled(
             result.failedRuns.map((run) =>
               finalizeInterruptedSubagentRun({
