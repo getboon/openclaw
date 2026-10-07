@@ -1,0 +1,22 @@
+extensions/browser/src/browser/pw-session.ts
+  s_7d982217096b7e::t_af0983b129dd54 938-946,956-957,982-983
+  s_7d982217096b7e::t_2ddef748a4bde1 984-985
+extensions/browser/src/browser/client-fetch.ts
+  s_7d982217096b7e::t_585cff2807b05b 370-376
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f0e7db2e94fffdc7fc902f8e35fc5e3f019baf92",
+  "prompts": {},
+  "sessions": {
+    "s_7d982217096b7e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d02e7994-1c43-4ce1-8a93-a21bf7203ced",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
