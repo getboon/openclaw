@@ -3370,6 +3370,45 @@ describe("subagent registry seam flow", () => {
       expect(waitedRunIds).toEqual(["run-resumed-next"]);
     });
 
+    it("holds the new run of a child resumed while its own crashed mark is being written", async () => {
+      const childKey = "agent:main:subagent:own-write";
+      mocks.restoreSubagentRunsFromDisk.mockImplementation(((params: {
+        runs: Map<string, unknown>;
+      }) => {
+        params.runs.set("run-own", {
+          runId: "run-own",
+          childSessionKey: childKey,
+          requesterSessionKey: "agent:main:main",
+          requesterDisplayKey: "main",
+          task: "long task",
+          cleanup: "keep",
+          expectsCompletionMessage: true,
+          createdAt: now() - 10 * 60_000,
+          startedAt: now() - 10 * 60_000,
+        });
+        return 1;
+      }) as never);
+      setChildSession({}, childKey);
+      const realPatch = mocks.patchSessionEntry.getMockImplementation();
+      mocks.patchSessionEntry.mockImplementation((async (...args: unknown[]) => {
+        const result = await (realPatch as (...a: unknown[]) => Promise<unknown>)(...args);
+        // Orphan recovery resumes the child after its mark lands, before the marking loop continues.
+        mod.replaceSubagentRunAfterSteer({ previousRunId: "run-own", nextRunId: "run-own-next" });
+        return result;
+      }) as never);
+
+      mod.initSubagentRegistry();
+
+      await waitForFast(() => {
+        expect(mocks.scheduleOrphanRecovery).toHaveBeenCalledTimes(1);
+      });
+      const waitedRunIds = mocks.callGateway.mock.calls
+        .map(([request]) => request as { method?: string; params?: { runId?: string } })
+        .filter((request) => request.method === "agent.wait")
+        .map((request) => request.params?.runId);
+      expect(waitedRunIds).toEqual(["run-own-next"]);
+    });
+
     it("keeps runs held before a marking failure and arms waits for the rest", async () => {
       const markedKey = "agent:main:subagent:marked";
       const crashedKey = "agent:main:subagent:crashed";
