@@ -24,12 +24,39 @@ describe("resolveRunFailoverDecision", () => {
     });
   });
 
+  it("keeps retry-limit as a local error for model_not_found even when fallback is configured", () => {
+    // model_not_found is excluded the same way timeout/format/session_expired
+    // are: the ladder already tried every configured model, so rotating to a
+    // fallback at retry-limit exhaustion would just repeat the same failure.
+    expect(
+      resolveRunFailoverDecision({
+        stage: "retry_limit",
+        fallbackConfigured: true,
+        failoverReason: "model_not_found",
+      }),
+    ).toEqual({
+      action: "return_error_payload",
+    });
+  });
+
   it("keeps retry-limit as a local error for non-escalating reasons", () => {
     expect(
       resolveRunFailoverDecision({
         stage: "retry_limit",
         fallbackConfigured: true,
         failoverReason: "timeout",
+      }),
+    ).toEqual({
+      action: "return_error_payload",
+    });
+  });
+
+  it("returns error payload for model_not_found when no fallback is configured", () => {
+    expect(
+      resolveRunFailoverDecision({
+        stage: "retry_limit",
+        fallbackConfigured: false,
+        failoverReason: "model_not_found",
       }),
     ).toEqual({
       action: "return_error_payload",
@@ -634,6 +661,44 @@ describe("resolveRunFailoverDecision", () => {
         failoverFailure: true,
         failoverReason: "timeout",
         harnessOwnsTransport: true,
+        profileRotated: true,
+      }),
+    ).toEqual({
+      action: "surface_error",
+      reason: "timeout",
+    });
+  });
+
+  it("falls back on fallback-safe harness-owned prompt timeouts", () => {
+    expect(
+      resolveRunFailoverDecision({
+        stage: "prompt",
+        aborted: false,
+        externalAbort: false,
+        fallbackConfigured: true,
+        failoverFailure: true,
+        failoverReason: "timeout",
+        harnessOwnsTransport: true,
+        promptTimeoutFallbackSafe: true,
+        profileRotated: true,
+      }),
+    ).toEqual({
+      action: "fallback_model",
+      reason: "timeout",
+    });
+  });
+
+  it("surfaces fallback-safe harness-owned prompt timeouts when no fallback is configured", () => {
+    expect(
+      resolveRunFailoverDecision({
+        stage: "prompt",
+        aborted: false,
+        externalAbort: false,
+        fallbackConfigured: false,
+        failoverFailure: true,
+        failoverReason: "timeout",
+        harnessOwnsTransport: true,
+        promptTimeoutFallbackSafe: true,
         profileRotated: true,
       }),
     ).toEqual({

@@ -574,11 +574,11 @@ describe("browser tool snapshot maxChars", () => {
     await tool.execute?.("call-1", { action: "status", profile: "user", target: "node" });
 
     const { options, request } = lastNodeInvokeCall();
-    expect(options.timeoutMs).toBe(50_000);
+    expect(options.timeoutMs).toBe(135_000);
     expect(request.params?.method).toBe("GET");
     expect(request.params?.path).toBe("/");
     expect(request.params?.profile).toBe("user");
-    expect(request.params?.timeoutMs).toBe(45_000);
+    expect(request.params?.timeoutMs).toBe(130_000);
   });
 
   it("passes top-level timeoutMs through to existing-session open", async () => {
@@ -618,6 +618,29 @@ describe("browser tool snapshot maxChars", () => {
       2,
     );
     expect(opts.timeoutMs).toBe(60_000);
+  });
+
+  it("uses a cold-start-aware default timeout for existing-session open with no caller timeoutMs", async () => {
+    // A first "open" against a fresh chrome-mcp host is the path ENG-20866 measured at
+    // 69-73s of npx cold-start alone. With no explicit timeoutMs, this must not fall back
+    // to a default shorter than chrome-mcp's own 120s handshake budget (see
+    // DEFAULT_EXISTING_SESSION_MANAGE_TIMEOUT_MS).
+    setResolvedBrowserProfiles({
+      user: { driver: "existing-session", attachOnly: true, color: "#00AA00" },
+    });
+    const tool = createBrowserTool();
+    await tool.execute?.("call-1", {
+      action: "open",
+      profile: "user",
+      url: "https://example.com",
+    });
+
+    const opts = lastMockCallArg<{ profile?: string; timeoutMs?: number }>(
+      browserClientMocks.browserOpenTab,
+      2,
+    );
+    expect(opts.profile).toBe("user");
+    expect(opts.timeoutMs).toBe(130_000);
   });
 
   it("rejects fractional top-level timeoutMs values", async () => {
@@ -860,6 +883,21 @@ describe("browser tool snapshot maxChars", () => {
     expect(request.nodeId).toBe("node-1");
     expect(request.command).toBe("browser.proxy");
     expect(request.params?.timeoutMs).toBe(20_000);
+    expect(browserClientMocks.browserStatus).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["target=node", { target: "node" }],
+    ["an explicit node pin", { node: "node-1" }],
+    ["automatic node routing", {}],
+  ])("blocks %s when host control is disabled", async (_label, route) => {
+    mockSingleBrowserProxyNode();
+    const tool = createBrowserTool({ allowHostControl: false });
+
+    await expect(tool.execute?.("call-1", { action: "status", ...route })).rejects.toThrow(
+      /browser control is disabled by sandbox policy/i,
+    );
+    expect(gatewayMocks.callGatewayTool).not.toHaveBeenCalled();
     expect(browserClientMocks.browserStatus).not.toHaveBeenCalled();
   });
 
@@ -1192,13 +1230,13 @@ describe("browser tool snapshot maxChars", () => {
     await tool.execute?.("call-1", { action: "status", profile: "user" });
 
     const { options, request } = lastNodeInvokeCall();
-    expect(options.timeoutMs).toBe(50_000);
+    expect(options.timeoutMs).toBe(135_000);
     expect(request.nodeId).toBe("node-1");
     expect(request.command).toBe("browser.proxy");
     expect(request.params?.profile).toBe("user");
     expect(request.params?.path).toBe("/");
     expect(request.params?.method).toBe("GET");
-    expect(request.params?.timeoutMs).toBe(45_000);
+    expect(request.params?.timeoutMs).toBe(130_000);
     expect(browserClientMocks.browserStatus).not.toHaveBeenCalled();
   });
 
@@ -1239,17 +1277,17 @@ describe("browser tool snapshot maxChars", () => {
     setResolvedBrowserProfiles({
       user: { driver: "existing-session", attachOnly: true, color: "#00AA00" },
     });
-    const tool = createBrowserTool();
+    const tool = createBrowserTool({ allowHostControl: true });
     await tool.execute?.("call-1", { action: "status", profile: "user", target: "node" });
 
     const { options, request } = lastNodeInvokeCall();
-    expect(options.timeoutMs).toBe(50_000);
+    expect(options.timeoutMs).toBe(135_000);
     expect(request.nodeId).toBe("node-1");
     expect(request.command).toBe("browser.proxy");
     expect(request.params?.profile).toBe("user");
     expect(request.params?.path).toBe("/");
     expect(request.params?.method).toBe("GET");
-    expect(request.params?.timeoutMs).toBe(45_000);
+    expect(request.params?.timeoutMs).toBe(130_000);
     expect(browserClientMocks.browserStatus).not.toHaveBeenCalled();
   });
 
@@ -1262,13 +1300,13 @@ describe("browser tool snapshot maxChars", () => {
     await tool.execute?.("call-1", { action: "status", profile: "user", node: "node-1" });
 
     const { options, request } = lastNodeInvokeCall();
-    expect(options.timeoutMs).toBe(50_000);
+    expect(options.timeoutMs).toBe(135_000);
     expect(request.nodeId).toBe("node-1");
     expect(request.command).toBe("browser.proxy");
     expect(request.params?.profile).toBe("user");
     expect(request.params?.path).toBe("/");
     expect(request.params?.method).toBe("GET");
-    expect(request.params?.timeoutMs).toBe(45_000);
+    expect(request.params?.timeoutMs).toBe(130_000);
     expect(browserClientMocks.browserStatus).not.toHaveBeenCalled();
   });
 
@@ -1297,6 +1335,24 @@ describe("browser tool url alias support", () => {
     const opts = lastMockCallArg<{ profile?: string }>(browserClientMocks.browserOpenTab, 2);
     expect(url).toBe("https://example.com");
     expect(opts.profile).toBeUndefined();
+  });
+
+  it("rejects credentialed open URLs before host or node dispatch", async () => {
+    mockSingleBrowserProxyNode();
+    const tool = createBrowserTool();
+    for (const target of ["host", "node"] as const) {
+      for (const url of ["https://user:secret@example.com/path", "https://user:secret@"]) {
+        const error = await tool.execute?.("call-1", { action: "open", target, url }).then(
+          () => new Error("credentialed URL was accepted"),
+          (cause: unknown) => cause,
+        );
+        expect(error).toBeInstanceOf(Error);
+        expect(String(error)).not.toContain("secret");
+      }
+    }
+
+    expect(browserClientMocks.browserOpenTab).not.toHaveBeenCalled();
+    expect(gatewayMocks.callGatewayTool).not.toHaveBeenCalled();
   });
 
   it("tracks opened tabs when session context is available", async () => {
@@ -1353,6 +1409,26 @@ describe("browser tool url alias support", () => {
     expect(request.url).toBe("https://example.com");
     expect(request.targetId).toBe("tab-1");
     expect(request.profile).toBeUndefined();
+  });
+
+  it("rejects credentialed navigate URLs before host or node dispatch", async () => {
+    mockSingleBrowserProxyNode();
+    const tool = createBrowserTool();
+    for (const target of ["host", "node"] as const) {
+      for (const url of ["https://user:secret@example.com/path", "https://user:secret@"]) {
+        const error = await tool
+          .execute?.("call-1", { action: "navigate", target, url, targetId: "tab-1" })
+          .then(
+            () => new Error("credentialed URL was accepted"),
+            (cause: unknown) => cause,
+          );
+        expect(error).toBeInstanceOf(Error);
+        expect(String(error)).not.toContain("secret");
+      }
+    }
+
+    expect(browserActionsMocks.browserNavigate).not.toHaveBeenCalled();
+    expect(gatewayMocks.callGatewayTool).not.toHaveBeenCalled();
   });
 
   it("keeps targetUrl required error label when both params are missing", async () => {

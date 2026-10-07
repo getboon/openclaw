@@ -48,6 +48,18 @@ describe("agent concurrency defaults", () => {
     expect(parsed.agents?.defaults?.subagents?.maxChildrenPerAgent).toBe(7);
   });
 
+  it("accepts the sub-agent restart resume switch and rejects unknown siblings", () => {
+    const parsed = OpenClawSchema.parse({
+      agents: { defaults: { subagents: { restartResume: false } } },
+    });
+    expect(parsed.agents?.defaults?.subagents?.restartResume).toBe(false);
+
+    const rejected = OpenClawSchema.safeParse({
+      agents: { defaults: { subagents: { restartResumeTypo: false } } },
+    });
+    expect(rejected.success).toBe(false);
+  });
+
   it("injects missing agent defaults", () => {
     const cfg = applyAgentDefaults({});
 

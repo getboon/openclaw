@@ -41,6 +41,7 @@ export {
 } from "../../tasks/cron-task-cancel.js";
 export {
   getActiveTaskCount,
+  markGatewayClosing,
   markGatewayDraining,
   resetAllLanes,
   waitForActiveTasks,

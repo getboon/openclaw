@@ -34,6 +34,8 @@ import {
   resolveAgentIdFromSessionKey,
 } from "../routing/session-key.js";
 import { resolveSendPolicy } from "../sessions/send-policy.js";
+import { truncateLine } from "../shared/subagents-format.js";
+import { listTasksForOwnerKey } from "../tasks/runtime-internal.js";
 import {
   deliveryContextFromSession,
   normalizeDeliveryContext,
@@ -46,6 +48,8 @@ import {
 } from "./embedded-agent-runner/run-state.js";
 import { resolveAgentSessionDirs } from "./session-dirs.js";
 import type { SessionLockInspection } from "./session-write-lock.js";
+import { isSubagentRestartResumeEnabled } from "./subagent-restart-resume.js";
+import { buildTurnResumeInstruction } from "./turn-resume-instruction.js";
 
 const log = createSubsystemLogger("main-session-restart-recovery");
 
@@ -421,21 +425,6 @@ function resolveMainSessionResumeBlockReason(messages: unknown[]): string | null
   return null;
 }
 
-function buildResumeMessage(pendingFinalDeliveryText?: string | null): string {
-  const base =
-    "[System] Your previous turn was interrupted by a gateway restart while " +
-    "OpenClaw was waiting on tool/model work. Continue from the existing " +
-    "transcript and finish the interrupted response.";
-  const sanitizedPendingText =
-    typeof pendingFinalDeliveryText === "string"
-      ? sanitizePendingFinalDeliveryText(pendingFinalDeliveryText)
-      : "";
-  if (sanitizedPendingText) {
-    return `${base}\n\nNote: The interrupted final reply was captured: "${sanitizedPendingText}"`;
-  }
-  return base;
-}
-
 async function markSessionFailed(params: {
   storePath: string;
   sessionKey: string;
@@ -560,6 +549,37 @@ function resolveRestartRecoveryDeliveryContext(params: {
   };
 }
 
+const MAX_LISTED_SUBAGENT_LABELS = 5;
+const MAX_SUBAGENT_LABEL_CHARS = 80;
+
+// The parent lost its turn but its sub-agents resume on their own; without this
+// note it tends to spawn duplicates of work that is still running.
+// oxlint-disable-next-line eslint/no-warning-comments -- deferred gap, kept visible until fixed
+// TODO(okka): list only sub-agents that will resume; runs past their deadline or the 2 h crash bound are listed here but end with an error.
+function buildLiveSubagentNote(params: {
+  cfg?: OpenClawConfig;
+  parentSessionKey: string;
+}): string | undefined {
+  if (params.cfg && !isSubagentRestartResumeEnabled(params.cfg)) {
+    return undefined;
+  }
+  const labels = listTasksForOwnerKey(params.parentSessionKey)
+    .filter(
+      (task) =>
+        task.runtime === "subagent" && (task.status === "running" || task.status === "queued"),
+    )
+    .map((task) =>
+      truncateLine((task.label ?? task.task).replace(/\s+/g, " ").trim(), MAX_SUBAGENT_LABEL_CHARS),
+    );
+  if (labels.length === 0) {
+    return undefined;
+  }
+  const listed = labels.slice(0, MAX_LISTED_SUBAGENT_LABELS).join(", ");
+  const more = labels.length - MAX_LISTED_SUBAGENT_LABELS;
+  const names = more > 0 ? `${listed} and ${more} more` : listed;
+  return `Background sub-agents ${names} are still running or resuming. Their results arrive here. Do not start them again.`;
+}
+
 async function resumeMainSession(params: {
   cfg?: OpenClawConfig;
   entry: SessionEntry;
@@ -577,8 +597,13 @@ async function resumeMainSession(params: {
     sessionKey: params.sessionKey,
   });
   try {
+    const subagentNote = buildLiveSubagentNote({
+      cfg: params.cfg,
+      parentSessionKey: params.sessionKey,
+    });
+    const instruction = buildTurnResumeInstruction("gateway_restart", sanitizedPendingText);
     const agentParams: Record<string, unknown> = {
-      message: buildResumeMessage(sanitizedPendingText),
+      message: subagentNote ? `${instruction}\n\n${subagentNote}` : instruction,
       sessionKey: params.sessionKey,
       idempotencyKey: crypto.randomUUID(),
       deliver: Boolean(deliveryContext),

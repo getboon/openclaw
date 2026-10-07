@@ -1,7 +1,3 @@
-import {
-  buildExecAutoReviewInputForShellCommand,
-  reviewExecRequestWithConfiguredModel,
-} from "openclaw/plugin-sdk/agent-harness-exec-review-runtime";
 /**
  * Bridges Codex app-server approval requests into OpenClaw policy hooks and
  * plugin approval UX.
@@ -18,16 +14,12 @@ import {
   type NativeHookRelayRegistrationHandle,
   runBeforeToolCallHook,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
-import { normalizeAgentId } from "openclaw/plugin-sdk/routing";
 import { normalizeTrimmedStringList } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { formatCodexDisplayText } from "../command-formatters.js";
 import {
-  isTrustedCodexModelBackedOpenAIProvider,
-  type OpenClawExecPolicyForCodexAppServer,
-} from "./config.js";
-import {
   approvalRequestExplicitlyUnavailable,
   mapExecDecisionToOutcome,
+  readFinalApprovalDecision,
   requestPluginApproval,
   type AppServerApprovalOutcome,
   waitForPluginApprovalDecision,
@@ -81,9 +73,6 @@ export async function handleCodexAppServerApprovalRequest(params: {
     NativeHookRelayRegistrationHandle,
     "allowedEvents" | "generation" | "relayId"
   >;
-  execPolicy?: Pick<OpenClawExecPolicyForCodexAppServer, "mode">;
-  execReviewerAgentId?: string;
-  internalExecAutoReview?: boolean;
   autoApprove?: boolean;
   signal?: AbortSignal;
 }): Promise<JsonValue | undefined> {
@@ -149,36 +138,40 @@ export async function handleCodexAppServerApprovalRequest(params: {
       });
       return buildApprovalResponse(params.method, context.requestParams, "approved-session");
     }
-    const autoReviewOutcome = await runInternalExecAutoReviewForApprovalRequest({
-      enabled: params.internalExecAutoReview === true && params.execPolicy?.mode === "auto",
-      method: params.method,
-      requestParams,
-      paramsForRun: params.paramsForRun,
-      context,
-      agentId: params.execReviewerAgentId,
-      signal: params.signal,
-    });
-    if (autoReviewOutcome?.outcome === "approved-once") {
+    // Codex app-server approval requests do not expose an enforceable resolved
+    // executable, so unresolved requests must stay on the human approval route.
+    let emittedApprovalRequestId: string | undefined;
+    const emitRequestedApproval = (approvalId: string): void => {
+      if (emittedApprovalRequestId === approvalId) {
+        return;
+      }
+      emittedApprovalRequestId = approvalId;
       emitApprovalEvent(params.paramsForRun, {
-        phase: "resolved",
+        phase: "requested",
         kind: context.kind,
-        status: "approved",
+        status: "pending",
         title: context.title,
+        approvalId,
+        approvalSlug: approvalId,
         ...context.eventDetails,
-        ...approvalEventScope(params.method, autoReviewOutcome.outcome),
-        message: autoReviewOutcome.reason,
+        message: "Codex app-server approval requested.",
       });
-      return buildApprovalResponse(params.method, context.requestParams, autoReviewOutcome.outcome);
-    }
-    // Native hook/model policy did not decide; fall back to the OpenClaw
-    // approval route so user-facing runs still get an approval prompt.
+    };
     const requestResult = await requestPluginApproval({
       paramsForRun: params.paramsForRun,
       title: context.title,
       description: context.description,
       severity: context.severity,
       toolName: context.toolName,
-      toolCallId: context.itemId,
+      toolCallId: context.approvalId,
+      finalResponse: {
+        signal: params.signal,
+        onAccepted: (accepted) => {
+          if (accepted.id) {
+            emitRequestedApproval(accepted.id);
+          }
+        },
+      },
     });
 
     const approvalId = requestResult?.id;
@@ -195,20 +188,13 @@ export async function handleCodexAppServerApprovalRequest(params: {
       return buildApprovalResponse(params.method, context.requestParams, "denied");
     }
 
-    emitApprovalEvent(params.paramsForRun, {
-      phase: "requested",
-      kind: context.kind,
-      status: "pending",
-      title: context.title,
-      approvalId,
-      approvalSlug: approvalId,
-      ...context.eventDetails,
-      message: "Codex app-server approval requested.",
-    });
+    emitRequestedApproval(approvalId);
 
+    const finalDecision = readFinalApprovalDecision(requestResult);
     const decision = approvalRequestExplicitlyUnavailable(requestResult)
       ? null
-      : await waitForPluginApprovalDecision({ approvalId, signal: params.signal });
+      : (finalDecision ??
+        (await waitForPluginApprovalDecision({ approvalId, signal: params.signal })));
     const outcome = mapExecDecisionToOutcome(decision);
 
     emitApprovalEvent(params.paramsForRun, {
@@ -300,6 +286,9 @@ function buildApprovalContext(params: {
     readString(params.requestParams, "itemId") ??
     readString(params.requestParams, "callId") ??
     readString(params.requestParams, "approvalId");
+  // Codex gives every execve callback its own approvalId while retaining the
+  // parent itemId. Policy and relay dedupe must use the callback identity.
+  const approvalId = readString(params.requestParams, "approvalId") ?? itemId;
   const commandDetailLines =
     params.method === "item/commandExecution/requestApproval"
       ? describeCommandApprovalDetails(params.requestParams)
@@ -360,6 +349,7 @@ function buildApprovalContext(params: {
           ? "codex_permission_approval"
           : "codex_file_approval",
     itemId,
+    approvalId,
     requestParams: params.requestParams,
     eventDetails: {
       ...(itemId ? { itemId } : {}),
@@ -376,244 +366,6 @@ type ApprovalPolicyOutcome =
   | { outcome: "denied"; reason: string }
   | { outcome: "approved-once" | "approved-session" }
   | { outcome: "no-decision" };
-
-async function runInternalExecAutoReviewForApprovalRequest(params: {
-  enabled: boolean;
-  method: string;
-  requestParams: JsonObject | undefined;
-  paramsForRun: EmbeddedRunAttemptParams;
-  context: ApprovalContext;
-  agentId?: string;
-  signal?: AbortSignal;
-}): Promise<{ outcome: "approved-once"; reason: string } | undefined> {
-  if (!params.enabled || params.method !== "item/commandExecution/requestApproval") {
-    return undefined;
-  }
-  if (hasCommandApprovalCapabilityAmendments(params.requestParams)) {
-    return undefined;
-  }
-  const input = await buildAppServerExecAutoReviewInput({
-    requestParams: params.requestParams,
-    paramsForRun: params.paramsForRun,
-  });
-  if (!input) {
-    return undefined;
-  }
-  const reviewerConfig = resolveExecReviewerConfig(params.paramsForRun, params.agentId);
-  if (
-    !canUseInternalExecAutoReviewReviewer(
-      reviewerConfig,
-      params.paramsForRun.config,
-      process.env,
-      params.paramsForRun.agentDir,
-    )
-  ) {
-    return undefined;
-  }
-  const decision = await waitForInternalExecAutoReviewDecision({
-    signal: params.signal,
-    promise: reviewExecRequestWithConfiguredModel({
-      cfg: params.paramsForRun.config,
-      agentId: params.agentId ?? params.paramsForRun.agentId,
-      reviewer: reviewerConfig,
-      input,
-    }),
-  });
-  if (decision.decision !== "allow-once") {
-    return undefined;
-  }
-  return {
-    outcome: "approved-once",
-    reason: `Codex app-server command approval granted by OpenClaw exec auto-reviewer: ${formatCodexDisplayText(
-      decision.rationale,
-    )}`,
-  };
-}
-
-async function waitForInternalExecAutoReviewDecision(params: {
-  signal?: AbortSignal;
-  promise: Promise<Awaited<ReturnType<typeof reviewExecRequestWithConfiguredModel>>>;
-}): Promise<Awaited<ReturnType<typeof reviewExecRequestWithConfiguredModel>>> {
-  if (!params.signal) {
-    return params.promise;
-  }
-  if (params.signal.aborted) {
-    throw toCodexAppServerApprovalCancellationError(params.signal.reason);
-  }
-  let onAbort: (() => void) | undefined;
-  const abortPromise = new Promise<never>((_, reject) => {
-    onAbort = () => reject(toCodexAppServerApprovalCancellationError(params.signal?.reason));
-    params.signal?.addEventListener("abort", onAbort, { once: true });
-  });
-  try {
-    return await Promise.race([params.promise, abortPromise]);
-  } finally {
-    if (onAbort) {
-      params.signal.removeEventListener("abort", onAbort);
-    }
-  }
-}
-
-function toCodexAppServerApprovalCancellationError(reason: unknown): Error {
-  if (reason instanceof Error) {
-    return reason;
-  }
-  return new Error(
-    typeof reason === "string" && reason.trim() ? reason : "Codex app-server approval cancelled.",
-  );
-}
-
-async function buildAppServerExecAutoReviewInput(params: {
-  requestParams: JsonObject | undefined;
-  paramsForRun: EmbeddedRunAttemptParams;
-}) {
-  const command = readString(params.requestParams, "command");
-  if (!command) {
-    return undefined;
-  }
-  return buildExecAutoReviewInputForShellCommand({
-    command,
-    cwd: readString(params.requestParams, "cwd") ?? params.paramsForRun.workspaceDir ?? null,
-    host: "codex-app-server",
-    agent: {
-      id: params.paramsForRun.agentId ?? null,
-      sessionKey: params.paramsForRun.sessionKey ?? null,
-    },
-  });
-}
-
-function hasCommandApprovalCapabilityAmendments(requestParams: JsonObject | undefined): boolean {
-  return (
-    hasNonEmptyJsonObject(requestParams?.additionalPermissions) ||
-    hasNonEmptyJsonObject(requestParams?.networkApprovalContext) ||
-    hasNonEmptyJsonObject(requestParams?.proposedExecpolicyAmendment) ||
-    hasNonEmptyArray(requestParams?.proposedExecpolicyAmendment) ||
-    hasNonEmptyArray(requestParams?.proposedNetworkPolicyAmendments) ||
-    findAvailableCommandAmendmentDecision(requestParams) !== undefined ||
-    commandAcceptDecisionUnavailable(requestParams)
-  );
-}
-
-function commandAcceptDecisionUnavailable(requestParams: JsonObject | undefined): boolean {
-  const available = requestParams?.availableDecisions;
-  return Array.isArray(available) && !available.includes("accept");
-}
-
-function hasNonEmptyJsonObject(value: unknown): boolean {
-  return isJsonObject(value) && Object.keys(value).length > 0;
-}
-
-function hasNonEmptyArray(value: unknown): boolean {
-  return Array.isArray(value) && value.length > 0;
-}
-
-function resolveExecReviewerConfig(
-  params: EmbeddedRunAttemptParams,
-  agentId?: string,
-): Record<string, unknown> | undefined {
-  const configRoot = readUnknownRecord(params.config);
-  const globalExec = readUnknownRecord(readUnknownRecord(configRoot?.tools)?.exec);
-  const agentExec = resolveAgentExecConfig(configRoot, agentId ?? params.agentId);
-  return readUnknownRecord(agentExec?.reviewer) ?? readUnknownRecord(globalExec?.reviewer);
-}
-
-function canUseInternalExecAutoReviewReviewer(
-  reviewerConfig: Record<string, unknown> | undefined,
-  config: EmbeddedRunAttemptParams["config"] | undefined,
-  env: NodeJS.ProcessEnv | undefined,
-  agentDir: string | undefined,
-): boolean {
-  const model = readExecReviewerModelRef(reviewerConfig);
-  const slashIndex = model?.indexOf("/") ?? -1;
-  if (!model || slashIndex <= 0) {
-    return false;
-  }
-  if (configuredAgentModelAliasMatches(config, model)) {
-    return false;
-  }
-  const provider = model.slice(0, slashIndex).trim().toLowerCase();
-  if (provider !== "openai") {
-    return false;
-  }
-  return isTrustedCodexModelBackedOpenAIProvider({
-    config,
-    env,
-    agentDir,
-    model: model.slice(slashIndex + 1).trim(),
-  });
-}
-
-function readExecReviewerModelRef(
-  reviewerConfig: Record<string, unknown> | undefined,
-): string | undefined {
-  const model = reviewerConfig?.model;
-  if (typeof model === "string") {
-    return model.trim() || undefined;
-  }
-  const primary = readUnknownRecord(model)?.primary;
-  return typeof primary === "string" && primary.trim() ? primary.trim() : undefined;
-}
-
-function configuredAgentModelAliasMatches(
-  config: EmbeddedRunAttemptParams["config"] | undefined,
-  modelRef: string,
-): boolean {
-  const normalizedModelRef = normalizeExecReviewerAliasRef(modelRef);
-  const agents = readUnknownRecord(readUnknownRecord(config)?.agents);
-  return agentModelAliasMatches(readUnknownRecord(agents?.defaults), normalizedModelRef);
-}
-
-function agentModelAliasMatches(
-  agentConfig: Record<string, unknown> | undefined,
-  normalizedModelRef: string,
-): boolean {
-  const models = readUnknownRecord(agentConfig?.models);
-  if (!models) {
-    return false;
-  }
-  for (const entry of Object.values(models)) {
-    const alias = readUnknownRecord(entry)?.alias;
-    if (typeof alias === "string" && normalizeExecReviewerAliasRef(alias) === normalizedModelRef) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function normalizeExecReviewerAliasRef(modelRef: string): string {
-  const trimmed = modelRef.trim().toLowerCase();
-  const slashIndex = trimmed.indexOf("/");
-  const authProfileIndex = trimmed.indexOf("@", slashIndex + 1);
-  return authProfileIndex > 0 ? trimmed.slice(0, authProfileIndex) : trimmed;
-}
-
-function resolveAgentExecConfig(
-  configRoot: Record<string, unknown> | undefined,
-  agentId: string | undefined,
-): Record<string, unknown> | undefined {
-  const normalizedAgentId = agentId ? normalizeAgentId(agentId) : undefined;
-  if (!normalizedAgentId) {
-    return undefined;
-  }
-  const agentList = readUnknownRecord(configRoot?.agents)?.list;
-  if (!Array.isArray(agentList)) {
-    return undefined;
-  }
-  for (const entry of agentList) {
-    const record = readUnknownRecord(entry);
-    if (typeof record?.id !== "string" || normalizeAgentId(record.id) !== normalizedAgentId) {
-      continue;
-    }
-    return readUnknownRecord(readUnknownRecord(record.tools)?.exec);
-  }
-  return undefined;
-}
-
-function readUnknownRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
 
 async function runOpenClawToolPolicyForApprovalRequest(params: {
   method: string;
@@ -662,7 +414,7 @@ async function runOpenClawToolPolicyForApprovalRequest(params: {
   const outcome = await runBeforeToolCallHook({
     toolName: policyRequest.toolName,
     params: policyRequest.params,
-    ...(params.context.itemId ? { toolCallId: params.context.itemId } : {}),
+    ...(params.context.approvalId ? { toolCallId: params.context.approvalId } : {}),
     approvalMode: "request",
     signal: params.signal,
     ctx: {
@@ -740,12 +492,12 @@ async function runNativeRelayToolPolicyForApprovalRequest(params: {
     hasNativeHookRelayInvocation({
       relayId: params.nativeHookRelay.relayId,
       event: "pre_tool_use",
-      toolUseId: params.context.itemId,
+      toolUseId: params.context.approvalId,
     })
   ) {
     const approvalOutcome = await resolveNativeHookRelayDeferredToolApproval({
       relayId: params.nativeHookRelay.relayId,
-      toolUseId: params.context.itemId,
+      toolUseId: params.context.approvalId,
       signal: params.signal,
     });
     if (approvalOutcome?.outcome === "denied") {
@@ -771,7 +523,7 @@ async function runNativeRelayToolPolicyForApprovalRequest(params: {
     }
     const approvalOutcome = await resolveNativeHookRelayDeferredToolApproval({
       relayId: params.nativeHookRelay.relayId,
-      toolUseId: params.context.itemId,
+      toolUseId: params.context.approvalId,
       signal: params.signal,
     });
     if (approvalOutcome?.outcome === "denied") {
@@ -807,7 +559,7 @@ function buildNativeRelayPreToolUsePayload(params: {
     hook_event_name: "PreToolUse",
     openclaw_approval_mode: "report",
     tool_name: "exec_command",
-    ...(params.context.itemId ? { tool_use_id: params.context.itemId } : {}),
+    ...(params.context.approvalId ? { tool_use_id: params.context.approvalId } : {}),
     ...(params.cwd ? { cwd: params.cwd } : {}),
     ...(turnId ? { turn_id: turnId } : {}),
     tool_input: {

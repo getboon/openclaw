@@ -119,6 +119,8 @@ const COMMAND_QUEUE_STATE_KEY = Symbol.for("openclaw.commandQueueState");
 function getQueueState() {
   const state = resolveGlobalSingleton(COMMAND_QUEUE_STATE_KEY, () => ({
     gatewayDraining: false,
+    // A singleton from an older in-process restart generation lacks this field.
+    gatewayClosing: false as boolean | undefined,
     lanes: new Map<string, LaneState>(),
     activeTaskWaiters: new Set<ActiveTaskWaiter>(),
     nextTaskId: 1,
@@ -469,6 +471,15 @@ export function isGatewayDraining(): boolean {
   return getQueueState().gatewayDraining;
 }
 
+/** Mark gateway as closing for stop or restart. Unlike draining, enqueues stay allowed. */
+export function markGatewayClosing(): void {
+  getQueueState().gatewayClosing = true;
+}
+
+export function isGatewayClosing(): boolean {
+  return getQueueState().gatewayClosing === true;
+}
+
 export function setCommandLaneConcurrency(lane: string, maxConcurrent: number) {
   const cleaned = normalizeLane(lane);
   const state = getLaneState(cleaned);
@@ -608,6 +619,7 @@ export function resetCommandLane(lane: string = CommandLane.Main): number {
 export function resetCommandQueueStateForTest(): void {
   const queueState = getQueueState();
   queueState.gatewayDraining = false;
+  queueState.gatewayClosing = false;
   queueState.lanes.clear();
   for (const waiter of Array.from(queueState.activeTaskWaiters)) {
     resolveActiveTaskWaiter(waiter, { drained: true });
@@ -633,6 +645,7 @@ export function resetCommandQueueStateForTest(): void {
 export function resetAllLanes(): void {
   const queueState = getQueueState();
   queueState.gatewayDraining = false;
+  queueState.gatewayClosing = false;
   const lanesToDrain: string[] = [];
   for (const state of queueState.lanes.values()) {
     state.generation += 1;

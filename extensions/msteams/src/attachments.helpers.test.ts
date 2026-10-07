@@ -291,6 +291,25 @@ describe("msteams attachment helpers", () => {
         types: [CONTENT_TYPE_IMAGE_PNG, CONTENT_TYPE_IMAGE_PNG],
       });
     });
+
+    it("omits MediaFailures when there are none", () => {
+      const payload = buildMSTeamsMediaPayload(createImageMediaEntries("/tmp/a.png"));
+      expect(payload.MediaFailures).toBeUndefined();
+    });
+
+    it("includes MediaFailures when a download was attempted and failed", () => {
+      const payload = buildMSTeamsMediaPayload(createImageMediaEntries("/tmp/a.png"), [
+        { name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" },
+      ]);
+      expectMSTeamsMediaPayload(payload, {
+        firstPath: "/tmp/a.png",
+        paths: ["/tmp/a.png"],
+        types: [CONTENT_TYPE_IMAGE_PNG],
+      });
+      expect(payload.MediaFailures).toEqual([
+        { name: "dragged.pdf", contentType: undefined, reason: "fetch_failed" },
+      ]);
+    });
   });
 
   it("retains the expected sharepoint host fixture", () => {

@@ -95,8 +95,22 @@ describe("ci workflow guards", () => {
       default: false,
       type: "boolean",
     });
+    expect(workflow.on.workflow_dispatch.inputs.dispatch_id).toEqual({
+      description: "Optional parent workflow dispatch identifier",
+      required: false,
+      default: "",
+      type: "string",
+    });
+    expect(workflow.on.workflow_dispatch.inputs.historical_target_tag).toMatchObject({
+      default: "",
+      type: "string",
+    });
+    expect(workflow.on.workflow_dispatch.inputs.release_candidate_ref).toMatchObject({
+      default: "",
+      type: "string",
+    });
     expect(readFileSync(".github/workflows/ci.yml", "utf8")).toContain(
-      "run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_gate && format('CI release gate {0}', inputs.target_ref) || 'CI' }}",
+      "run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.dispatch_id != '' && format('CI {0}', inputs.dispatch_id) || (github.event_name == 'workflow_dispatch' && inputs.release_gate && format('CI release gate {0}', inputs.target_ref) || 'CI') }}",
     );
     const preflightSteps = workflow.jobs.preflight.steps;
     const validationStep = preflightSteps.find(
@@ -109,6 +123,18 @@ describe("ci workflow guards", () => {
       "release_gate requires target_ref to be a full commit SHA",
     );
     expect(validationStep.run).toContain("release_gate must run from the branch at target_ref");
+    const historicalTargetStep = preflightSteps.find(
+      (step) => step.name === "Validate historical release target",
+    );
+    expect(historicalTargetStep.run).toContain(
+      "Historical release tag ${HISTORICAL_TARGET_TAG} does not resolve to ${EXPECTED_SHA}.",
+    );
+    const releaseCandidateStep = preflightSteps.find(
+      (step) => step.name === "Validate release candidate target",
+    );
+    expect(releaseCandidateStep.run).toContain(
+      "Release candidate branch ${RELEASE_CANDIDATE_REF} does not resolve to ${EXPECTED_SHA}.",
+    );
     expect(readFileSync(".github/workflows/ci.yml", "utf8")).toContain(
       "OPENCLAW_CI_RUN_ANDROID: ${{ github.event_name == 'workflow_dispatch' && (inputs.release_gate || inputs.include_android) && 'true' || steps.changed_scope.outputs.run_android || 'false' }}",
     );
@@ -416,6 +442,31 @@ describe("ci workflow guards", () => {
         'git -C "$GITHUB_WORKSPACE" fetch --no-tags --depth=1',
       );
     }
+  });
+
+  it("pins the v6.11 SwiftFormat contract for Apple CI", () => {
+    const workflow = readCiWorkflow();
+    const installSteps = [
+      workflow.jobs["macos-swift"].steps.find(
+        (step) => step.name === "Install XcodeGen / SwiftLint / SwiftFormat",
+      ),
+      workflow.jobs["ios-build"].steps.find((step) => step.name === "Install iOS Swift tooling"),
+    ];
+
+    for (const install of installSteps) {
+      expect(install.run).toContain('swiftformat_version="0.61.1"');
+      expect(install.run).toContain(
+        'swiftformat_checksum="b990400779aceb7d7020796eb9ba814d4480543f671d38fc0ff48cb72f04c584"',
+      );
+      expect(install.run).toContain(
+        "https://github.com/nicklockwood/SwiftFormat/releases/download/$swiftformat_version/swiftformat.zip",
+      );
+      expect(install.run).not.toContain("brew install xcodegen swiftlint swiftformat");
+    }
+    expect(installSteps[1].run).toContain('swiftformat_link="$(brew --prefix)/bin/swiftformat"');
+    expect(installSteps[1].run).toContain(
+      'ln -sfn "$swift_tools_dir/swiftformat" "$swiftformat_link"',
+    );
   });
 
   it("bounds the Windows Crabbox hydrate main fetch", () => {

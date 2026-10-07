@@ -598,7 +598,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       }
     }
 
-    const mediaList = await resolveMSTeamsInboundMedia({
+    const { media: mediaList, failures: mediaFailures } = await resolveMSTeamsInboundMedia({
       attachments,
       htmlSummary: htmlSummary ?? undefined,
       maxBytes: mediaMaxBytes,
@@ -622,7 +622,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         ?.preserveFilenames,
     });
 
-    const mediaPayload = buildMSTeamsMediaPayload(mediaList);
+    const mediaPayload = buildMSTeamsMediaPayload(mediaList, mediaFailures);
 
     // Fetch thread history when the message is a reply inside a Teams channel thread.
     // This is a best-effort enhancement; errors are logged and do not block the reply.

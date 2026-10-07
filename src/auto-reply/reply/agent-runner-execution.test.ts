@@ -18,7 +18,7 @@ import {
   createUserTurnTranscriptRecorder,
   type PersistedUserTurnMessage,
 } from "../../sessions/user-turn-transcript.js";
-import { getReplyPayloadMetadata } from "../reply-payload.js";
+import { getReplyPayloadGatewayFailure, getReplyPayloadMetadata } from "../reply-payload.js";
 import type { TemplateContext } from "../templating.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
@@ -34,6 +34,7 @@ import {
 } from "./agent-runner-execution.js";
 import { HEARTBEAT_EXTERNAL_RUN_FAILURE_TEXT } from "./agent-runner-failure-copy.js";
 import {
+  PROVIDER_AUTHENTICATION_ERROR_USER_MESSAGE,
   PROVIDER_CONVERSATION_STATE_ERROR_USER_MESSAGE,
   PROVIDER_INTERNAL_ERROR_USER_MESSAGE,
   PROVIDER_RATE_LIMIT_OR_QUOTA_ERROR_USER_MESSAGE,
@@ -448,6 +449,8 @@ function createMockReplyOperation(): {
       phase: "running",
       result: null,
       startedAt: 0,
+      lastActivityAtMs: Date.now(),
+      recordActivity: vi.fn(),
       setPhase: vi.fn(),
       updateSessionId: updateSessionIdMock,
       attachBackend: vi.fn(),
@@ -5821,6 +5824,30 @@ describe("runAgentTurnWithFallback", () => {
     }
   });
 
+  it("tells the channel why an all-models-failed turn stopped: billing", async () => {
+    state.runWithModelFallbackMock.mockRejectedValueOnce(
+      Object.assign(new Error("All models failed (1): openai/gpt-5.5: 402 (billing)"), {
+        name: "FallbackSummaryError",
+        attempts: [{ provider: "openai", model: "gpt-5.5", error: "402", reason: "billing" }],
+      }),
+    );
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback({
+      ...createMinimalRunAgentTurnParams({ followupRun: createFollowupRun() }),
+      sessionKey: "main",
+      getActiveSessionEntry: () => undefined,
+    });
+
+    expect(result.kind).toBe("final");
+    if (result.kind === "final") {
+      expect(getReplyPayloadGatewayFailure(result.payload)).toEqual({
+        code: "token_allocation_exhausted",
+        retryAffordance: "requires_billing_action",
+      });
+    }
+  });
+
   function makePureTransientSummaryError(): Error {
     return Object.assign(
       new Error(
@@ -5914,6 +5941,11 @@ describe("runAgentTurnWithFallback", () => {
         expect(text).not.toMatch(/blocked|cloudflare|render|gateway|waf/i);
         expect(text).not.toContain("All models");
         expect(text).not.toContain("boon-llm-gateway");
+        // Terminal: the "retrying automatically" class is downgraded, never claimed.
+        expect(getReplyPayloadGatewayFailure(result.payload)).toEqual({
+          code: "agent_failed_transient_after_retries",
+          retryAffordance: "user_can_retry",
+        });
       }
     } finally {
       vi.useRealTimers();
@@ -6756,6 +6788,38 @@ describe("runAgentTurnWithFallback", () => {
   );
 
   it.each(NON_DIRECT_FAILURE_SURFACE_CASES)(
+    "surfaces provider authentication failures in $label chats",
+    async (testCase) => {
+      const rawError =
+        "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses";
+      state.runEmbeddedAgentMock.mockRejectedValueOnce(
+        new FailoverError("LLM request unauthorized.", {
+          reason: "auth",
+          provider: "openai",
+          model: "gpt-5.5",
+          status: 401,
+          rawError,
+        }),
+      );
+
+      const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+      const result = await runAgentTurnWithFallback(
+        createMinimalRunAgentTurnParams({
+          sessionCtx: createNonDirectFailureSessionCtx(testCase),
+        }),
+      );
+
+      expect(result.kind).toBe("final");
+      if (result.kind === "final") {
+        expect(result.payload.isError).toBe(true);
+        expect(result.payload.text).toBe(PROVIDER_AUTHENTICATION_ERROR_USER_MESSAGE);
+        expect(result.payload.text).not.toBe(SILENT_REPLY_TOKEN);
+        expect(result.payload.text).not.toContain(rawError);
+      }
+    },
+  );
+
+  it.each(NON_DIRECT_FAILURE_SURFACE_CASES)(
     "surfaces transient-busy fallback copy in $label chats",
     async (testCase) => {
       state.runEmbeddedAgentMock.mockRejectedValueOnce(new Error("429 rate limit exceeded"));
@@ -7277,7 +7341,7 @@ describe("runAgentTurnWithFallback", () => {
     expect(result.kind).toBe("final");
     if (result.kind === "final") {
       expect(result.payload.text).toBe(
-        "⚠️ Missing API key for OpenAI on the gateway. Use `openai/gpt-5.5` with the OpenAI OAuth profile, or set `OPENAI_API_KEY` for direct OpenAI API-key runs.",
+        "⚠️ Missing API key for OpenAI on the gateway. Use `openai/gpt-5.6-sol` with the OpenAI OAuth profile, or set `OPENAI_API_KEY` for direct OpenAI API-key runs.",
       );
     }
   });

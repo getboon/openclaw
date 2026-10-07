@@ -18,6 +18,21 @@ on:
         required: false
         default: false
         type: boolean
+      dispatch_id:
+        description: Optional parent workflow dispatch identifier
+        required: false
+        default: ""
+        type: string
+      historical_target_tag:
+        description: Semver release tag authorizing validation for its exact commit
+        required: false
+        default: ""
+        type: string
+      release_candidate_ref:
+        description: Canonical release branch authorizing validation for its exact head
+        required: false
+        default: ""
+        type: string
   push:
     branches: [main]
     paths-ignore:
@@ -31,7 +46,7 @@ on:
 permissions:
   contents: read
 
-run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.release_gate && format('CI release gate {0}', inputs.target_ref) || 'CI' }}
+run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.dispatch_id != '' && format('CI {0}', inputs.dispatch_id) || (github.event_name == 'workflow_dispatch' && inputs.release_gate && format('CI release gate {0}', inputs.target_ref) || 'CI') }}
 
 concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-manual-v1-{1}', github.workflow, github.run_id) || (github.event_name == 'pull_request' && format('{0}-v7-{1}', github.workflow, github.event.pull_request.number) || (github.repository == 'openclaw/openclaw' && format('{0}-v7-{1}', github.workflow, github.ref) || format('{0}-v7-{1}-{2}', github.workflow, github.ref, github.sha))) }}
@@ -170,6 +185,46 @@ jobs:
       - name: Resolve checkout SHA
         id: checkout_ref
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Validate historical release target
+        if: inputs.historical_target_tag != ''
+        env:
+          EXPECTED_SHA: ${{ steps.checkout_ref.outputs.sha }}
+          HISTORICAL_TARGET_TAG: ${{ inputs.historical_target_tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$HISTORICAL_TARGET_TAG" =~ ^v[0-9]{4}\.[0-9]+\.[0-9]+(-(alpha|beta)\.[0-9]+)?$ ]]; then
+            echo "historical_target_tag must be a canonical OpenClaw release tag." >&2
+            exit 1
+          fi
+          tag_ref="refs/tags/${HISTORICAL_TARGET_TAG}"
+          remote="$(git remote get-url origin)"
+          tag_sha="$(git ls-remote --tags "$remote" "${tag_ref}^{}" | awk 'NR == 1 { print $1 }')"
+          if [[ -z "$tag_sha" ]]; then
+            tag_sha="$(git ls-remote --tags "$remote" "$tag_ref" | awk 'NR == 1 { print $1 }')"
+          fi
+          if [[ "$tag_sha" != "$EXPECTED_SHA" ]]; then
+            echo "Historical release tag ${HISTORICAL_TARGET_TAG} does not resolve to ${EXPECTED_SHA}." >&2
+            exit 1
+          fi
+
+      - name: Validate release candidate target
+        if: inputs.release_candidate_ref != ''
+        env:
+          EXPECTED_SHA: ${{ steps.checkout_ref.outputs.sha }}
+          RELEASE_CANDIDATE_REF: ${{ inputs.release_candidate_ref }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_CANDIDATE_REF" =~ ^(release/[0-9]{4}\.[0-9]+\.[0-9]+|extended-stable/[0-9]{4}\.[0-9]+\.33)$ ]]; then
+            echo "release_candidate_ref must be a canonical OpenClaw release branch." >&2
+            exit 1
+          fi
+          remote="$(git remote get-url origin)"
+          branch_sha="$(git ls-remote --heads "$remote" "refs/heads/${RELEASE_CANDIDATE_REF}" | awk 'NR == 1 { print $1 }')"
+          if [[ "$branch_sha" != "$EXPECTED_SHA" ]]; then
+            echo "Release candidate branch ${RELEASE_CANDIDATE_REF} does not resolve to ${EXPECTED_SHA}." >&2
+            exit 1
+          fi
 
       - name: Ensure preflight base commit
         if: github.event_name != 'workflow_dispatch'
@@ -2076,7 +2131,27 @@ jobs:
           git -C "$GITHUB_WORKSPACE" checkout --detach refs/remotes/origin/checkout
 
       - name: Install XcodeGen / SwiftLint / SwiftFormat
-        run: brew install xcodegen swiftlint swiftformat
+        run: |
+          set -euo pipefail
+          brew install xcodegen swiftlint
+          swiftformat_version="0.61.1"
+          swiftformat_checksum="b990400779aceb7d7020796eb9ba814d4480543f671d38fc0ff48cb72f04c584"
+          swiftformat_archive="$RUNNER_TEMP/swiftformat-$swiftformat_version.zip"
+          swift_tools_dir="$RUNNER_TEMP/openclaw-swift-tools"
+          curl --fail --location --silent --show-error \
+            --connect-timeout 10 --max-time 120 \
+            --retry 3 --retry-max-time 120 \
+            --output "$swiftformat_archive" \
+            "https://github.com/nicklockwood/SwiftFormat/releases/download/$swiftformat_version/swiftformat.zip"
+          if [[ "$(shasum -a 256 "$swiftformat_archive" | awk '{print $1}')" != "$swiftformat_checksum" ]]; then
+            echo "SwiftFormat $swiftformat_version archive checksum mismatch" >&2
+            exit 1
+          fi
+          mkdir -p "$swift_tools_dir"
+          unzip -q "$swiftformat_archive" -d "$swift_tools_dir"
+          chmod +x "$swift_tools_dir/swiftformat"
+          echo "$swift_tools_dir" >> "$GITHUB_PATH"
+          [[ "$("$swift_tools_dir/swiftformat" --version)" == "$swiftformat_version" ]]
 
       - name: Detect Swift toolchain cache key
         id: swift-toolchain
@@ -2236,7 +2311,32 @@ jobs:
           install-bun: "false"
 
       - name: Install iOS Swift tooling
-        run: brew install xcodegen swiftlint swiftformat
+        run: |
+          set -euo pipefail
+          brew install xcodegen swiftlint
+          swiftformat_version="0.61.1"
+          swiftformat_checksum="b990400779aceb7d7020796eb9ba814d4480543f671d38fc0ff48cb72f04c584"
+          swiftformat_archive="$RUNNER_TEMP/swiftformat-$swiftformat_version.zip"
+          swift_tools_dir="$RUNNER_TEMP/openclaw-swift-tools"
+          curl --fail --location --silent --show-error \
+            --connect-timeout 10 --max-time 120 \
+            --retry 3 --retry-max-time 120 \
+            --output "$swiftformat_archive" \
+            "https://github.com/nicklockwood/SwiftFormat/releases/download/$swiftformat_version/swiftformat.zip"
+          if [[ "$(shasum -a 256 "$swiftformat_archive" | awk '{print $1}')" != "$swiftformat_checksum" ]]; then
+            echo "SwiftFormat $swiftformat_version archive checksum mismatch" >&2
+            exit 1
+          fi
+          mkdir -p "$swift_tools_dir"
+          unzip -q "$swiftformat_archive" -d "$swift_tools_dir"
+          chmod +x "$swift_tools_dir/swiftformat"
+          echo "$swift_tools_dir" >> "$GITHUB_PATH"
+          [[ "$("$swift_tools_dir/swiftformat" --version)" == "$swiftformat_version" ]]
+          # The generated Xcode phase prepends Homebrew ahead of GITHUB_PATH.
+          # Point that lookup at the verified formatter or the build can bypass the pin.
+          swiftformat_link="$(brew --prefix)/bin/swiftformat"
+          ln -sfn "$swift_tools_dir/swiftformat" "$swiftformat_link"
+          [[ "$("$swiftformat_link" --version)" == "$swiftformat_version" ]]
 
       - name: Build iOS app
         run: pnpm ios:build

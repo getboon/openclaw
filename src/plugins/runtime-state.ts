@@ -4,6 +4,8 @@ import { getActivePluginRegistryWorkspaceDirFromState as getPinnedWorkspaceDirFr
 export const PLUGIN_REGISTRY_STATE = Symbol.for("openclaw.pluginRegistryState");
 
 type PluginRegistry = import("./registry-types.js").PluginRegistry;
+type PluginRegistryHostServices =
+  import("./registry-types.js").PluginRegistryParams["hostServices"];
 
 export type RuntimeTrackedPluginRegistry = PluginRegistry;
 
@@ -24,6 +26,13 @@ export type RegistryState = {
   workspaceDir: string | null;
   runtimeSubagentMode: "default" | "explicit" | "gateway-bindable";
   importedPluginIds: Set<string>;
+  /**
+   * The real gateway's live host services (cron, etc.), set only by a genuine
+   * activation (see setActivePluginRegistry). Ephemeral tool-resolution
+   * registries never carry their own hostServices (see PluginRuntimeLoadContext),
+   * so durable side-effect APIs fall back to this instead of failing outright.
+   */
+  hostServices?: PluginRegistryHostServices;
 };
 
 type GlobalRegistryState = typeof globalThis & {

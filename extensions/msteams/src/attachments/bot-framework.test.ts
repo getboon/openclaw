@@ -569,6 +569,7 @@ describe("downloadMSTeamsBotFrameworkAttachments", () => {
       fetchFn: vi.fn() as unknown as typeof fetch,
     });
     expect(result.media).toStrictEqual([]);
+    expect(result.failures).toStrictEqual([]);
   });
 
   it("continues past a per-attachment failure", async () => {
@@ -605,5 +606,9 @@ describe("downloadMSTeamsBotFrameworkAttachments", () => {
 
     expect(result.media).toHaveLength(1);
     expect(result.attachmentCount).toBe(2);
+    // a per-attachment failure must be reported via `failures` so
+    // the agent can tell the user a file was attached but couldn't be
+    // downloaded, instead of the attachment silently vanishing.
+    expect(result.failures).toEqual([{ reason: "fetch_failed" }]);
   });
 });

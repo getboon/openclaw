@@ -379,13 +379,18 @@ describe("msteams graph attachments", () => {
     expectAttachmentMediaLength(media.media, 0);
     const calledUrls = fetchMock.mock.calls.map((call) => call[0]);
     const expectedSharesUrl = `${GRAPH_SHARES_URL_PREFIX}${encodeGraphShareId(DEFAULT_SHARE_REFERENCE_URL)}/driveItem/content`;
+    // The failed reference attachment is excluded from the generic retry
+    // fallback below (it already got its one terminal attempt here), so the
+    // shares URL is fetched exactly once, not twice (code-review finding).
     expect(calledUrls).toEqual([
       DEFAULT_MESSAGE_URL,
       expectedSharesUrl,
       `${DEFAULT_MESSAGE_URL}/hostedContents`,
-      expectedSharesUrl,
     ]);
     expect(calledUrls).not.toContain(escapedUrl);
+    expect(media.failures).toEqual([
+      { name: "report.pdf", contentType: undefined, reason: "fetch_failed" },
+    ]);
   });
 
   it("skips inline hosted content when estimated decoded bytes exceed maxBytes", async () => {

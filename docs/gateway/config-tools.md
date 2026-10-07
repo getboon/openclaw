@@ -471,6 +471,7 @@ Experimental built-in tool flags. Default off unless a strict-agentic GPT-5 auto
 - `allowAgents`: default allowlist of configured target agent ids for `sessions_spawn` when the requester agent does not set its own `subagents.allowAgents` (`["*"]` = any configured target; default: same agent only). Stale entries whose agent config was deleted are rejected by `sessions_spawn` and omitted from `agents_list`; run `openclaw doctor --fix` to clean them up.
 - `runTimeoutSeconds`: default timeout (seconds) for `sessions_spawn`. An explicit `0` means no timeout. When unset, sub-agents inherit `agents.defaults.timeoutSeconds`.
 - `announceTimeoutMs`: per-call timeout (milliseconds) for gateway `agent` announce delivery attempts. Default: `120000`. Transient retries can make the total announce wait longer than one configured timeout.
+- `restartResume`: resume native sub-agent runs that a gateway restart, stop, or crash interrupted, in place after the next boot. Default: `true`. Set `false` to end those runs with an error instead. Defaults only; there is no per-agent override. A run past its `runTimeoutSeconds` deadline ends as a timeout. A run that a crash left running for more than 2 h is not resumed.
 - Per-subagent tool policy: `tools.subagents.tools.allow` / `tools.subagents.tools.deny`.
 
 ---

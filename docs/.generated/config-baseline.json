@@ -5327,6 +5327,16 @@
       "hasChildren": false
     },
     {
+      "path": "agents.defaults.subagents.restartResume",
+      "kind": "core",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
       "path": "agents.defaults.subagents.runTimeoutSeconds",
       "kind": "core",
       "type": "integer",
@@ -13327,7 +13337,7 @@
         "storage"
       ],
       "label": "Session Abort Threshold (ms)",
-      "help": "No-progress age threshold in milliseconds before eligible stalled active work may be abort-drained for recovery. Defaults to the safer extended embedded-run recovery window.",
+      "help": "No-progress age threshold in milliseconds before eligible stalled active work may be abort-drained for recovery. Defaults to the safer extended embedded-run recovery window; blocked tool calls always retain a 15-minute minimum.",
       "hasChildren": false
     },
     {
@@ -17051,8 +17061,10 @@
       ],
       "required": false,
       "deprecated": false,
-      "sensitive": false,
-      "tags": [],
+      "sensitive": true,
+      "tags": [
+        "security"
+      ],
       "hasChildren": false
     },
     {
@@ -25110,7 +25122,7 @@
         "tools"
       ],
       "label": "Exec Reviewer Model",
-      "help": "Optional provider/model override for the exec reviewer agent. Omit to reuse the current agent model.",
+      "help": "Optional provider/model override for the exec reviewer agent. Omit to reuse the configured primary model for the target agent.",
       "hasChildren": true
     },
     {
@@ -25155,7 +25167,7 @@
         "tools"
       ],
       "label": "Exec Reviewer Timeout (ms)",
-      "help": "Exec reviewer timeout in milliseconds before falling back to human approval (default: 30000).",
+      "help": "Per-stage exec reviewer timeout in milliseconds for model preparation and completion before falling back to human approval (default: 30000).",
       "hasChildren": false
     },
     {
@@ -34546,7 +34558,7 @@
         "advanced"
       ],
       "label": "Auto Update Enabled",
-      "help": "Enable background auto-update for package installs (default: false).",
+      "help": "Enable background auto-update for stable and beta package installs; extended-stable never auto-applies (default: false).",
       "hasChildren": false
     },
     {
@@ -34588,7 +34600,7 @@
         "advanced"
       ],
       "label": "Update Channel",
-      "help": "Update channel for git + npm installs (\"stable\", \"beta\", or \"dev\").",
+      "help": "Update channel for git + npm installs (\"stable\", \"extended-stable\", \"beta\", or \"dev\"). Extended-stable is package-only: installation is foreground-only, with optional read-only startup hints.",
       "hasChildren": false
     },
     {
@@ -34602,7 +34614,7 @@
         "automation"
       ],
       "label": "Update Check on Start",
-      "help": "Check for npm updates when the gateway starts (default: true).",
+      "help": "Check for npm updates when the gateway starts, including read-only extended-stable hints (default: true).",
       "hasChildren": false
     },
     {

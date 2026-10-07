@@ -53,6 +53,7 @@ import { clearRuntimeConfigSnapshot, getRuntimeConfig } from "../config/io.js";
 import type { ModelsConfig, ModelProviderConfig, OpenClawConfig } from "../config/types.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import type { ModelRegistry } from "../llm/model-registry.js";
+import { redactSecrets } from "../logging/redact.js";
 import { normalizeGoogleModelId } from "../plugin-sdk/google-model-id.js";
 import { resolveProviderThinkingProfile } from "../plugins/provider-runtime.js";
 import type { ProviderThinkingModelCompat } from "../plugins/provider-thinking.types.js";
@@ -896,6 +897,13 @@ describe("resolveGatewayLiveProviderTimeoutSeconds", () => {
   });
 });
 
+describe("isGatewayLiveProbeTimeout", () => {
+  it("keeps missing terminal replies out of provider timeout skips", () => {
+    expect(isGatewayLiveProbeTimeout("probe timeout after 90000ms (prompt)")).toBe(true);
+    expect(isGatewayLiveProbeTimeout("terminal timeout after 90000ms (tool-read)")).toBe(false);
+  });
+});
+
 describe("isGatewayLiveModelTimeout", () => {
   it("matches provider-attributed agent wait timeouts", () => {
     expect(
@@ -929,6 +937,23 @@ describe("formatGatewayLiveAgentWaitFailure", () => {
       }).message,
     ).toContain(
       "anthropic prompt: agent.wait timeout for runId=run-1 (timeoutPhase=provider, providerStarted=true, stopReason=rpc)",
+    );
+  });
+});
+
+describe("isGatewayAgentWaitCompletedWithoutReply", () => {
+  it("accepts the malformed completion envelope used by tool-only turns", () => {
+    expect(isGatewayAgentWaitCompletedWithoutReply({ status: "error", error: " completed " })).toBe(
+      true,
+    );
+  });
+
+  it("rejects genuine agent errors and non-error completion envelopes", () => {
+    expect(isGatewayAgentWaitCompletedWithoutReply({ status: "error", error: "aborted" })).toBe(
+      false,
+    );
+    expect(isGatewayAgentWaitCompletedWithoutReply({ status: "ok", error: "completed" })).toBe(
+      false,
     );
   });
 });
@@ -1611,10 +1636,17 @@ function isToolNonceProbeMiss(error: string): boolean {
 
 function isTransientToolReadProbeErrorForLiveModel(error: string): boolean {
   const msg = error.toLowerCase();
+  // Some tool-capable providers complete a tool turn without appending reply text.
+  // Retry here; the existing model policy decides whether exhausted misses may skip.
+  const isCompletedWithoutReply =
+    msg.includes("agent.wait error") && msg.includes("(error=completed)");
+  const isTransientProviderFailure =
+    msg.includes("unknown error occurred") ||
+    (msg.includes("ai service returned an internal error") &&
+      msg.includes("try again in a moment"));
   return (
     msg.includes("tool-read: agent-wait") &&
-    msg.includes("failovererror") &&
-    msg.includes("unknown error occurred")
+    (isCompletedWithoutReply || (msg.includes("failovererror") && isTransientProviderFailure))
   );
 }
 
@@ -1682,7 +1714,30 @@ describe("isTransientToolReadProbeErrorForLiveModel", () => {
     ).toBe(true);
     expect(
       isTransientToolReadProbeErrorForLiveModel(
+        "[all-models] 1/1 openai/gpt-5.5: tool-read: agent-wait: agent.wait error for runId=run-1 (error=FailoverError: The AI service returned an internal error. Please try again in a moment.)",
+      ),
+    ).toBe(true);
+    expect(
+      isTransientToolReadProbeErrorForLiveModel(
         "[all-models] 1/1 google/gemini-3.1-pro-preview: prompt: agent-wait: agent.wait error for runId=run-1 (error=FailoverError: An unknown error occurred)",
+      ),
+    ).toBe(false);
+    expect(
+      isTransientToolReadProbeErrorForLiveModel(
+        "[all-models] 1/1 openai/gpt-5.5: prompt: agent-wait: agent.wait error for runId=run-1 (error=FailoverError: The AI service returned an internal error. Please try again in a moment.)",
+      ),
+    ).toBe(false);
+  });
+
+  it("matches terminal tool-read runs that completed without a reply", () => {
+    expect(
+      isTransientToolReadProbeErrorForLiveModel(
+        "[all-models] 1/1 openrouter/ai21/jamba-large-1.7: tool-read: agent-wait: agent.wait error for runId=run-1 (error=completed)",
+      ),
+    ).toBe(true);
+    expect(
+      isTransientToolReadProbeErrorForLiveModel(
+        "[all-models] 1/1 openrouter/ai21/jamba-large-1.7: prompt: agent-wait: agent.wait error for runId=run-1 (error=completed)",
       ),
     ).toBe(false);
   });
@@ -1795,7 +1850,9 @@ async function runAnthropicRefusalProbe(params: {
     client: params.client,
     sessionKey: params.sessionKey,
     idempotencyKey: `idem-${randomUUID()}-refusal`,
-    message: `Reply with the single word ok. Test token: ${magic}`,
+    // Credential redaction masks values after "token:", including the
+    // nonce needed to correlate this probe with its persisted user turn.
+    message: `Reply with the single word ok. Test trigger: ${magic}`,
     thinkingLevel: params.thinkingLevel,
     context: `${params.label}: refusal-probe`,
     modelKey: params.modelKey,
@@ -2142,12 +2199,17 @@ function extractTranscriptMessageText(message: unknown): string {
   return textParts.join("\n").trim();
 }
 
-async function readSessionAssistantTexts(sessionKey: string, modelKey?: string): Promise<string[]> {
+type SessionAssistantEntry = {
+  stopReason?: string;
+  text: string;
+};
+
+async function readSessionMessagesForLiveProbe(sessionKey: string): Promise<unknown[]> {
   const { storePath, entry } = loadSessionEntry(sessionKey);
   if (!entry?.sessionId) {
     return [];
   }
-  const messages = await readSessionMessagesAsync(
+  return await readSessionMessagesAsync(
     {
       sessionEntry: entry,
       sessionId: entry.sessionId,
@@ -2159,7 +2221,45 @@ async function readSessionAssistantTexts(sessionKey: string, modelKey?: string):
       reason: "live model assistant text verification",
     },
   );
-  const assistantTexts: string[] = [];
+}
+
+function sessionMessagesAfterNextUserTurn(
+  messages: readonly unknown[],
+  baselineMessageCount: number,
+  expectedUserText?: string,
+): unknown[] {
+  const nextUserOffset = messages.slice(baselineMessageCount).findIndex((message) => {
+    const actualUserText = extractTranscriptMessageText(message);
+    return (
+      (message as { role?: unknown } | null | undefined)?.role === "user" &&
+      (expectedUserText === undefined || matchesLiveProbeUserText(actualUserText, expectedUserText))
+    );
+  });
+  if (nextUserOffset < 0) {
+    return [];
+  }
+  return messages.slice(baselineMessageCount + nextUserOffset + 1);
+}
+
+function matchesLiveProbeUserText(actual: string, expected: string): boolean {
+  if (actual === expected) {
+    return true;
+  }
+  const markerIndex = expected.indexOf(`${ANTHROPIC_MAGIC_STRING_TRIGGER_REFUSAL}_`);
+  if (markerIndex < 0) {
+    return false;
+  }
+  const nonceSuffix = expected.slice(markerIndex + ANTHROPIC_MAGIC_STRING_TRIGGER_REFUSAL.length);
+  // The embedded Anthropic runtime scrubs the refusal trigger before persisting it.
+  // Its random suffix survives and still uniquely owns this live probe turn.
+  return /^_[a-f0-9]{32}$/.test(nonceSuffix) && actual.endsWith(nonceSuffix);
+}
+
+function sessionAssistantEntriesForLiveProbe(
+  messages: readonly unknown[],
+  modelKey?: string,
+): SessionAssistantEntry[] {
+  const assistantEntries: SessionAssistantEntry[] = [];
   for (const message of messages) {
     if (!message || typeof message !== "object") {
       continue;
@@ -2168,19 +2268,196 @@ async function readSessionAssistantTexts(sessionKey: string, modelKey?: string):
     if (role !== "assistant") {
       continue;
     }
-    assistantTexts.push(
-      maybeStripAssistantScaffoldingForLiveModel(extractTranscriptMessageText(message), modelKey),
-    );
+    const stopReason = (message as { stopReason?: unknown }).stopReason;
+    assistantEntries.push({
+      text: maybeStripAssistantScaffoldingForLiveModel(
+        extractTranscriptMessageText(message),
+        modelKey,
+      ),
+      ...(typeof stopReason === "string" ? { stopReason } : {}),
+    });
   }
-  return assistantTexts;
+  return assistantEntries;
 }
+
+async function readSessionAssistantEntries(
+  sessionKey: string,
+  modelKey?: string,
+  baselineMessageCount?: number,
+  expectedUserText?: string,
+): Promise<SessionAssistantEntry[]> {
+  const messages = await readSessionMessagesForLiveProbe(sessionKey);
+  // Assistant-count cursors can admit a late write from the previous run.
+  // The next matching user entry is the durable boundary that owns this attempt's replies.
+  const scopedMessages =
+    baselineMessageCount === undefined
+      ? messages
+      : sessionMessagesAfterNextUserTurn(messages, baselineMessageCount, expectedUserText);
+  return sessionAssistantEntriesForLiveProbe(scopedMessages, modelKey);
+}
+
+async function readSessionAssistantTexts(
+  sessionKey: string,
+  modelKey?: string,
+  baselineMessageCount?: number,
+  expectedUserText?: string,
+): Promise<string[]> {
+  return (
+    await readSessionAssistantEntries(sessionKey, modelKey, baselineMessageCount, expectedUserText)
+  ).map((entry) => entry.text);
+}
+
+function latestAssistantTextAfterBaseline(
+  assistantTexts: string[],
+  baselineAssistantCount: number,
+): string | undefined {
+  return assistantTexts
+    .slice(baselineAssistantCount)
+    .map((text) => text.trim())
+    .findLast((text) => text.length > 0);
+}
+
+function latestTerminalAssistantTextAfterBaseline(
+  assistantEntries: SessionAssistantEntry[],
+  baselineAssistantCount: number,
+): string | undefined {
+  const latest = assistantEntries.slice(baselineAssistantCount).at(-1);
+  if (!latest || latest.stopReason === "toolUse") {
+    return undefined;
+  }
+  return latest.text.trim() || undefined;
+}
+
+describe("latestAssistantTextAfterBaseline", () => {
+  it("returns the final reply after an intermediate tool preamble", () => {
+    expect(
+      latestAssistantTextAfterBaseline(
+        ["previous reply", "I will read the file.", "nonce-a nonce-b"],
+        1,
+      ),
+    ).toBe("nonce-a nonce-b");
+  });
+
+  it("waits for a terminal reply after a tool preamble", () => {
+    expect(
+      latestTerminalAssistantTextAfterBaseline(
+        [
+          { stopReason: "stop", text: "previous reply" },
+          { stopReason: "toolUse", text: "I will read the file." },
+          { stopReason: "stop", text: "nonce-a nonce-b" },
+        ],
+        1,
+      ),
+    ).toBe("nonce-a nonce-b");
+    expect(
+      latestTerminalAssistantTextAfterBaseline(
+        [
+          { stopReason: "stop", text: "previous reply" },
+          { stopReason: "error", text: "partial reply" },
+          { stopReason: "toolUse", text: "I will read the file." },
+        ],
+        1,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("correlates retry replies after late prior transcript writes", () => {
+    const firstBaselineMessageCount = 1;
+    const firstAttemptMessages: unknown[] = [
+      { role: "user", content: "prior attempt" },
+      { role: "toolResult", content: "stale-a stale-b" },
+      { role: "assistant", stopReason: "stop", content: "stale-a stale-b" },
+      { role: "user", content: "stale retry" },
+      { role: "assistant", stopReason: "stop", content: "stale-a stale-b" },
+      { role: "user", content: "read first-a first-b" },
+      { role: "assistant", stopReason: "toolUse", content: "reading first probe" },
+      { role: "toolResult", content: "first-a first-b" },
+      { role: "assistant", stopReason: "stop", content: "first-a first-b" },
+    ];
+    expect(
+      sessionMessagesAfterNextUserTurn(
+        firstAttemptMessages.slice(0, 5),
+        firstBaselineMessageCount,
+        "read first-a first-b",
+      ),
+    ).toEqual([]);
+    const firstToolUseOnly = sessionAssistantEntriesForLiveProbe(
+      sessionMessagesAfterNextUserTurn(
+        firstAttemptMessages.slice(0, 8),
+        firstBaselineMessageCount,
+        "read first-a first-b",
+      ),
+    );
+    expect(latestTerminalAssistantTextAfterBaseline(firstToolUseOnly, 0)).toBeUndefined();
+    const firstEntries = sessionAssistantEntriesForLiveProbe(
+      sessionMessagesAfterNextUserTurn(
+        firstAttemptMessages,
+        firstBaselineMessageCount,
+        "read first-a first-b",
+      ),
+    );
+    expect(latestTerminalAssistantTextAfterBaseline(firstEntries, 0)).toBe("first-a first-b");
+
+    const secondBaselineMessageCount = firstAttemptMessages.length;
+    const secondAttemptMessages = [
+      ...firstAttemptMessages,
+      { role: "toolResult", content: "first-a first-b" },
+      { role: "assistant", stopReason: "stop", content: "first-a first-b" },
+      { role: "user", content: "stale first retry" },
+      { role: "assistant", stopReason: "stop", content: "first-a first-b" },
+      { role: "user", content: "read second-a second-b" },
+      { role: "assistant", stopReason: "toolUse", content: "reading second probe" },
+      { role: "toolResult", content: "second-a second-b" },
+      { role: "assistant", stopReason: "stop", content: "second-a second-b" },
+    ];
+    const secondEntries = sessionAssistantEntriesForLiveProbe(
+      sessionMessagesAfterNextUserTurn(
+        secondAttemptMessages,
+        secondBaselineMessageCount,
+        "read second-a second-b",
+      ),
+    );
+    expect(latestTerminalAssistantTextAfterBaseline(secondEntries, 0)).toBe("second-a second-b");
+  });
+
+  it("correlates Anthropic refusal probes after the runtime scrubs their trigger", () => {
+    const nonce = "0123456789abcdef0123456789abcdef";
+    const expected = `Reply with the single word ok. Test trigger: ${ANTHROPIC_MAGIC_STRING_TRIGGER_REFUSAL}_${nonce}`;
+    const scrubbed = `Reply with the single word ok. Test trigger: ANTHROPIC MAGIC STRING TRIGGER REFUSAL (redacted)_${nonce}`;
+    const redacted = redactSecrets(expected);
+
+    expect(matchesLiveProbeUserText(scrubbed, expected)).toBe(true);
+    expect(redacted).toContain(nonce);
+    expect(matchesLiveProbeUserText(redacted, expected)).toBe(true);
+    expect(
+      sessionMessagesAfterNextUserTurn(
+        [
+          { role: "user", content: "previous turn" },
+          { role: "assistant", content: "previous reply", stopReason: "stop" },
+          { role: "user", content: redacted },
+          { role: "assistant", content: "ok", stopReason: "stop" },
+        ],
+        2,
+        expected,
+      ),
+    ).toEqual([{ role: "assistant", content: "ok", stopReason: "stop" }]);
+    expect(
+      matchesLiveProbeUserText(
+        "Reply with the single word ok. Test trigger: ANTHROPIC MAGIC STRING TRIGGER REFUSAL (redacted)_ffffffffffffffffffffffffffffffff",
+        expected,
+      ),
+    ).toBe(false);
+  });
+});
 
 async function waitForSessionAssistantText(params: {
   sessionKey: string;
-  baselineAssistantCount: number;
+  baselineMessageCount: number;
+  expectedUserText: string;
   context: string;
   modelKey?: string;
-  timeoutLabel?: "probe" | "model";
+  terminalOnly?: boolean;
+  timeoutLabel?: "model" | "probe" | "terminal";
   timeoutMs?: number;
 }) {
   const startedAt = Date.now();
@@ -2189,15 +2466,20 @@ async function waitForSessionAssistantText(params: {
   const timeoutMs = params.timeoutMs ?? GATEWAY_LIVE_TRANSCRIPT_TIMEOUT_MS;
   const timeoutLabel = params.timeoutLabel ?? "model";
   while (Date.now() - startedAt < timeoutMs) {
-    const assistantTexts = await readSessionAssistantTexts(params.sessionKey, params.modelKey);
-    if (assistantTexts.length > params.baselineAssistantCount) {
-      const freshText = assistantTexts
-        .slice(params.baselineAssistantCount)
-        .map((text) => text.trim())
-        .findLast((text) => text.length > 0);
-      if (freshText) {
-        return freshText;
-      }
+    const assistantEntries = await readSessionAssistantEntries(
+      params.sessionKey,
+      params.modelKey,
+      params.baselineMessageCount,
+      params.expectedUserText,
+    );
+    const freshText = params.terminalOnly
+      ? latestTerminalAssistantTextAfterBaseline(assistantEntries, 0)
+      : latestAssistantTextAfterBaseline(
+          assistantEntries.map((entry) => entry.text),
+          0,
+        );
+    if (freshText) {
+      return freshText;
     }
     if (Date.now() - lastHeartbeatAt >= GATEWAY_LIVE_HEARTBEAT_MS) {
       lastHeartbeatAt = Date.now();
@@ -2244,11 +2526,21 @@ function formatGatewayLiveAgentWaitFailure(params: {
   );
 }
 
+function isGatewayAgentWaitCompletedWithoutReply(result: unknown): boolean {
+  const value = result as { status?: unknown; error?: unknown } | null | undefined;
+  return (
+    value?.status === "error" &&
+    typeof value.error === "string" &&
+    value.error.trim().toLowerCase() === "completed"
+  );
+}
+
 async function waitForGatewayAgentRun(params: {
   client: GatewayClient;
   runId: string;
   context: string;
   timeoutMs?: number;
+  allowCompletedWithoutReply?: boolean;
 }): Promise<void> {
   const timeoutMs = params.timeoutMs ?? GATEWAY_LIVE_TRANSCRIPT_TIMEOUT_MS;
   const result = await params.client.request(
@@ -2261,7 +2553,10 @@ async function waitForGatewayAgentRun(params: {
       timeoutMs: timeoutMs + 5_000,
     },
   );
-  if ((result as { status?: unknown } | undefined)?.status === "ok") {
+  if (
+    (result as { status?: unknown } | undefined)?.status === "ok" ||
+    (params.allowCompletedWithoutReply && isGatewayAgentWaitCompletedWithoutReply(result))
+  ) {
     return;
   }
   throw formatGatewayLiveAgentWaitFailure({
@@ -2279,15 +2574,14 @@ async function requestGatewayAgentText(params: {
   context: string;
   idempotencyKey: string;
   modelKey?: string;
+  assistantText?: "required" | "optional";
   attachments?: Array<{
     mimeType: string;
     fileName: string;
     content: string;
   }>;
 }) {
-  const baselineAssistantCount = (
-    await readSessionAssistantTexts(params.sessionKey, params.modelKey)
-  ).length;
+  const baselineMessageCount = (await readSessionMessagesForLiveProbe(params.sessionKey)).length;
   const runId = params.idempotencyKey;
   const accepted = await withGatewayLiveProbeTimeout(
     params.client.request("agent", {
@@ -2304,9 +2598,28 @@ async function requestGatewayAgentText(params: {
   if (accepted?.status !== "accepted") {
     throw new Error(`agent status=${String(accepted?.status)}`);
   }
+  if (params.assistantText === "optional") {
+    // Tool-only turns intentionally may not append assistant text. Their
+    // contract is terminal completion; the following turn proves tool state.
+    await waitForGatewayAgentRun({
+      client: params.client,
+      runId,
+      context: `${params.context}: agent-wait`,
+      timeoutMs: GATEWAY_LIVE_AGENT_WAIT_TIMEOUT_MS,
+      allowCompletedWithoutReply: true,
+    });
+    const assistantTexts = await readSessionAssistantTexts(
+      params.sessionKey,
+      params.modelKey,
+      baselineMessageCount,
+      params.message,
+    );
+    return assistantTexts.at(-1) ?? "";
+  }
   const transcriptPromise = waitForSessionAssistantText({
     sessionKey: params.sessionKey,
-    baselineAssistantCount,
+    baselineMessageCount,
+    expectedUserText: params.message,
     context: `${params.context}: transcript-final`,
     modelKey: params.modelKey,
     timeoutLabel: "model",
@@ -2333,7 +2646,16 @@ async function requestGatewayAgentText(params: {
         ? waitResult.error
         : new Error(String(waitResult.error));
     }
-    return first.text;
+    return await waitForSessionAssistantText({
+      sessionKey: params.sessionKey,
+      baselineMessageCount,
+      expectedUserText: params.message,
+      context: `${params.context}: transcript-terminal`,
+      modelKey: params.modelKey,
+      terminalOnly: true,
+      timeoutLabel: "terminal",
+      timeoutMs: GATEWAY_LIVE_PROBE_TIMEOUT_MS,
+    });
   }
   void transcriptPromise.catch(() => undefined);
   if (first.kind === "agent-error") {
@@ -2341,13 +2663,54 @@ async function requestGatewayAgentText(params: {
   }
   return await waitForSessionAssistantText({
     sessionKey: params.sessionKey,
-    baselineAssistantCount,
+    baselineMessageCount,
+    expectedUserText: params.message,
     context: `${params.context}: transcript-after-agent-wait`,
     modelKey: params.modelKey,
-    timeoutLabel: "probe",
+    terminalOnly: true,
+    timeoutLabel: "terminal",
     timeoutMs: GATEWAY_LIVE_PROBE_TIMEOUT_MS,
   });
 }
+
+function buildGatewayToolReadMessage(params: {
+  toolProbePath: string;
+  strictReply: boolean;
+}): string {
+  const readArgs = JSON.stringify({ path: params.toolProbePath });
+  const task =
+    "OpenClaw release validation created a synthetic local test note in your current workspace. " +
+    `Use the tool named \`read\` (or \`Read\`) with JSON arguments ${readArgs} ` +
+    "to inspect it, not a shell command.";
+  if (!params.strictReply) {
+    return `${task} Report the values recorded for LEFT and RIGHT.`;
+  }
+  return `${task} The note contains no user data or secrets. Reply with only the LEFT and RIGHT values, separated by one space.`;
+}
+
+describe("buildGatewayToolReadMessage", () => {
+  it("requires a workspace read before reporting the synthetic note", () => {
+    const message = buildGatewayToolReadMessage({
+      toolProbePath: "/tmp/operator/workspace/.openclaw-live-tool-probe-deadbeef.txt",
+      strictReply: true,
+    });
+
+    expect(message).toContain(
+      JSON.stringify({ path: "/tmp/operator/workspace/.openclaw-live-tool-probe-deadbeef.txt" }),
+    );
+    expect(message).toContain("synthetic local test note");
+    expect(message).toContain("tool named `read`");
+    expect(message).toContain("not a shell command");
+    expect(message).toContain("no user data or secrets");
+  });
+
+  it("serializes Windows and quoted paths as JSON tool arguments", () => {
+    const toolProbePath = 'C:\\Users\\operator\\workspace\\"probe".txt';
+    const message = buildGatewayToolReadMessage({ toolProbePath, strictReply: false });
+
+    expect(message).toContain(JSON.stringify({ path: toolProbePath }));
+  });
+});
 
 type GatewayModelSuiteParams = {
   label: string;
@@ -2912,8 +3275,12 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
   await fs.rm(path.join(workspaceDir, "BOOTSTRAP.md"), { force: true });
   const nonceA = randomUUID();
   const nonceB = randomUUID();
-  const toolProbePath = path.join(workspaceDir, `.openclaw-live-tool-probe.${nonceA}.txt`);
-  await fs.writeFile(toolProbePath, `nonceA=${nonceA}\nnonceB=${nonceB}\n`);
+  // Keep expected values out of the path without sharing a probe file across runs.
+  const toolProbePath = path.join(
+    workspaceDir,
+    `.openclaw-live-tool-probe-${randomBytes(4).toString("hex")}.txt`,
+  );
+  await fs.writeFile(toolProbePath, `LEFT=${nonceA}\nRIGHT=${nonceB}\n`);
 
   const agentDir = resolveDefaultAgentDir(params.cfg);
   const sanitizedCfg: OpenClawConfig = {
@@ -3131,10 +3498,14 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
                 throw new Error(`missing required keywords: ${text}`);
               }
 
-              // Real tool invocation: force the agent to Read a local file and echo a nonce.
+              // Real tool invocation: values exist only in a synthetic workspace note, so a
+              // matching reply still proves the agent inspected the file without an exfil-shaped prompt.
               logProgress(`${progressLabel}: tool-read`);
               const runIdTool = randomUUID();
               const maxToolReadAttempts = 3;
+              // Known-variable models already skip after exhausted nonce misses.
+              // Use the stricter follow-up prompts before conceding that coverage.
+              const retryKnownToolNonceMiss = shouldSkipToolNonceProbeMissForLiveModel(modelKey);
               let toolText = "";
               for (
                 let toolReadAttempt = 0;
@@ -3148,13 +3519,7 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
                     sessionKey,
                     idempotencyKey: `idem-${runIdTool}-tool-${toolReadAttempt + 1}`,
                     modelKey,
-                    message: strictReply
-                      ? "OpenClaw live tool probe (local, safe): " +
-                        `use the tool named \`read\` (or \`Read\`) with JSON arguments {"path":"${toolProbePath}"}. ` +
-                        `Then reply with exactly: ${nonceA} ${nonceB}. No extra text.`
-                      : "OpenClaw live tool probe (local, safe): " +
-                        `use the tool named \`read\` (or \`Read\`) with JSON arguments {"path":"${toolProbePath}"}. ` +
-                        "Then reply with the two nonce values you read (include both).",
+                    message: buildGatewayToolReadMessage({ toolProbePath, strictReply }),
                     thinkingLevel,
                     context: `${progressLabel}: tool-read`,
                   });
@@ -3205,10 +3570,11 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
                     provider: model.provider,
                     attempt: toolReadAttempt,
                     maxAttempts: maxToolReadAttempts,
+                    retryKnownNonceMismatch: retryKnownToolNonceMiss,
                   })
                 ) {
                   logProgress(
-                    `${progressLabel}: tool-read retry (${toolReadAttempt + 2}/${maxToolReadAttempts}) malformed tool output`,
+                    `${progressLabel}: tool-read retry (${toolReadAttempt + 2}/${maxToolReadAttempts}) tool output mismatch`,
                   );
                   continue;
                 }
@@ -3221,8 +3587,15 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
               if (params.extraToolProbes) {
                 logProgress(`${progressLabel}: tool-exec`);
                 const nonceC = randomUUID();
-                const toolWritePath = path.join(tempDir, `write-${runIdTool}.txt`);
+                // Timeout wrappers do not cancel late tool runs, so keep provider-key attempts
+                // isolated without putting a nonce-shaped UUID in the model-visible path.
+                const toolWritePath = path.join(
+                  tempDir,
+                  `write-model-${index + 1}-attempt-${attempt + 1}.txt`,
+                );
                 const maxExecReadAttempts = 3;
+                const retryKnownExecReadNonceMiss =
+                  shouldSkipExecReadNonceMissForLiveModel(modelKey) || retryKnownToolNonceMiss;
                 let execReadText = "";
                 for (
                   let execReadAttempt = 0;
@@ -3240,7 +3613,7 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
                         "use the tool named `exec` (or `Exec`) to run this command: " +
                         `mkdir -p "${tempDir}" && printf '%s' '${nonceC}' > "${toolWritePath}". ` +
                         `Then use the tool named \`read\` (or \`Read\`) with JSON arguments {"path":"${toolWritePath}"}. ` +
-                        `Then reply with exactly: ${nonceC}. No extra text.`
+                        "Then reply with exactly the nonce text from that file. No extra text."
                       : "OpenClaw live tool probe (local, safe): " +
                         "use the tool named `exec` (or `Exec`) to run this command: " +
                         `mkdir -p "${tempDir}" && printf '%s' '${nonceC}' > "${toolWritePath}". ` +
@@ -3275,10 +3648,11 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
                       provider: model.provider,
                       attempt: execReadAttempt,
                       maxAttempts: maxExecReadAttempts,
+                      retryKnownNonceMismatch: retryKnownExecReadNonceMiss,
                     })
                   ) {
                     logProgress(
-                      `${progressLabel}: tool-exec retry (${execReadAttempt + 2}/${maxExecReadAttempts}) malformed tool output`,
+                      `${progressLabel}: tool-exec retry (${execReadAttempt + 2}/${maxExecReadAttempts}) tool output mismatch`,
                     );
                     continue;
                   }
@@ -3355,39 +3729,59 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
               ) {
                 logProgress(`${progressLabel}: tool-only regression`);
                 const runId2 = randomUUID();
-                const firstText = await requestGatewayAgentText({
-                  client,
-                  sessionKey,
-                  idempotencyKey: `idem-${runId2}-1`,
-                  modelKey,
-                  message: `Call the tool named \`read\` (or \`Read\`) on "${toolProbePath}". Do not write any other text.`,
-                  thinkingLevel,
-                  context: `${progressLabel}: tool-only-regression-first`,
-                });
-                assertNoReasoningTags({
-                  text: firstText,
-                  model: modelKey,
-                  phase: "tool-only",
-                  label: params.label,
-                });
-
-                const reply = await requestGatewayAgentText({
-                  client,
-                  sessionKey,
-                  idempotencyKey: `idem-${runId2}-2`,
-                  modelKey,
-                  message: `Now answer: what are the values of nonceA and nonceB in "${toolProbePath}"? Reply with exactly: ${nonceA} ${nonceB}.`,
-                  thinkingLevel,
-                  context: `${progressLabel}: tool-only-regression-second`,
-                });
-                assertNoReasoningTags({
-                  text: reply,
-                  model: modelKey,
-                  phase: "tool-only-followup",
-                  label: params.label,
-                });
-                if (!reply.includes(nonceA) || !reply.includes(nonceB)) {
-                  throw new Error(`unexpected reply: ${reply}`);
+                // Keep these fresh and file-only without making harmless test values look like
+                // credentials that providers may partially mask in the follow-up response.
+                const historyLeft = randomBytes(4).toString("hex").toUpperCase();
+                const historyRight = randomBytes(4).toString("hex").toUpperCase();
+                const historyToolProbePath = path.join(
+                  workspaceDir,
+                  `.openclaw-live-tool-history-${randomBytes(4).toString("hex")}.txt`,
+                );
+                const historyToolProbeFilename = path.basename(historyToolProbePath);
+                // Fresh values prevent the follow-up from succeeding from the earlier read reply.
+                await fs.writeFile(
+                  historyToolProbePath,
+                  `LEFT=${historyLeft}\nRIGHT=${historyRight}\n`,
+                );
+                try {
+                  const firstText = await requestGatewayAgentText({
+                    client,
+                    sessionKey,
+                    idempotencyKey: `idem-${runId2}-1`,
+                    modelKey,
+                    message: `Call the tool named \`read\` (or \`Read\`) on the release-validation note "${historyToolProbeFilename}". Do not write any other text.`,
+                    thinkingLevel,
+                    context: `${progressLabel}: tool-only-regression-first`,
+                    assistantText: "optional",
+                  });
+                  assertNoReasoningTags({
+                    text: firstText,
+                    model: modelKey,
+                    phase: "tool-only",
+                    label: params.label,
+                  });
+                  const reply = await requestGatewayAgentText({
+                    client,
+                    sessionKey,
+                    idempotencyKey: `idem-${runId2}-2`,
+                    modelKey,
+                    message:
+                      `Continue the release-validation check: what LEFT and RIGHT values were read from ` +
+                      `"${historyToolProbeFilename}"? Reply with only those two values, separated by one space.`,
+                    thinkingLevel,
+                    context: `${progressLabel}: tool-only-regression-second`,
+                  });
+                  assertNoReasoningTags({
+                    text: reply,
+                    model: modelKey,
+                    phase: "tool-only-followup",
+                    label: params.label,
+                  });
+                  if (!reply.includes(historyLeft) || !reply.includes(historyRight)) {
+                    throw new Error(`unexpected reply: ${reply}`);
+                  }
+                } finally {
+                  await fs.rm(historyToolProbePath, { force: true });
                 }
               }
 
@@ -3576,7 +3970,8 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
           }
           if (shouldSkipToolNonceProbeMissForLiveModel(modelKey) && isToolNonceProbeMiss(message)) {
             skippedCount += 1;
-            logProgress(`${progressLabel}: skip (${modelKey} tool probe nonce miss)`);
+            const probe = isExecReadNonceProbeMiss(message) ? "exec/read" : "tool-read";
+            logProgress(`${progressLabel}: skip (${modelKey} ${probe} nonce miss)`);
             break;
           }
           if (isMissingProfileError(message)) {
@@ -3947,8 +4342,12 @@ describeLive("gateway live (dev agent, profile keys)", () => {
       await fs.mkdir(workspaceDir, { recursive: true });
       const nonceA = randomUUID();
       const nonceB = randomUUID();
-      toolProbePath = path.join(workspaceDir, `.openclaw-live-zai-fallback.${nonceA}.txt`);
-      await fs.writeFile(toolProbePath, `nonceA=${nonceA}\nnonceB=${nonceB}\n`);
+      // Avoid UUID-bearing probe paths without sharing a file across concurrent runs.
+      toolProbePath = path.join(
+        workspaceDir,
+        `.openclaw-live-zai-fallback-${randomBytes(4).toString("hex")}.txt`,
+      );
+      await fs.writeFile(toolProbePath, `LEFT=${nonceA}\nRIGHT=${nonceB}\n`);
 
       try {
         const port = await withGatewayLiveProbeTimeout(
@@ -4007,9 +4406,7 @@ describeLive("gateway live (dev agent, profile keys)", () => {
         sessionKey,
         idempotencyKey: `idem-${randomUUID()}-tool`,
         modelKey: "anthropic/claude-opus-4-6",
-        message:
-          `Call the tool named \`read\` (or \`Read\` if \`read\` is unavailable) with JSON arguments {"path":"${toolProbePath}"}. ` +
-          `Then reply with exactly: ${nonceA} ${nonceB}. No extra text.`,
+        message: buildGatewayToolReadMessage({ toolProbePath, strictReply: true }),
         thinkingLevel: THINKING_LEVEL,
         context: "zai-fallback: tool-probe",
       });
@@ -4037,8 +4434,8 @@ describeLive("gateway live (dev agent, profile keys)", () => {
         idempotencyKey: `idem-${randomUUID()}-followup`,
         modelKey: "zai/glm-5.1",
         message:
-          `What are the values of nonceA and nonceB in "${toolProbePath}"? ` +
-          `Reply with exactly: ${nonceA} ${nonceB}.`,
+          "Continue the release-validation check: what LEFT and RIGHT values did the previous " +
+          "model read from the synthetic local note? Reply with only those two values, separated by one space.",
         thinkingLevel: THINKING_LEVEL,
         context: "zai-fallback: followup",
       });

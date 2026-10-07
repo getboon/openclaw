@@ -1045,6 +1045,64 @@ describe("deliverOutboundPayloads", () => {
     expect(queueMocks.ackDelivery).not.toHaveBeenCalled();
   });
 
+  it("marks queued delivery as unknown-after-send (not failed) when a later payload fails after an earlier one succeeded", async () => {
+    // Regression: required-mode batch send where an earlier payload succeeded
+    // (results.length > 0, OutboundDeliveryError.sentBeforeError === true) but a
+    // later payload throws. Previously the wrapper catch called failDelivery,
+    // leaving the entry in `send_attempt_started` so reconnect drain later
+    // replayed it as "not yet sent" — producing duplicate messages when the
+    // adapter's unknown-send reconciliation misreported `not_sent`. The fix
+    // advances to `unknown_after_send` so drain routes the entry through
+    // reconcileUnknownQueuedDelivery instead of blind replay.
+    const sendMatrix = vi
+      .fn()
+      .mockResolvedValueOnce({ messageId: "m1" })
+      .mockRejectedValueOnce(new Error("second payload send failed"));
+
+    await expect(
+      deliverOutboundPayloads({
+        cfg: {},
+        channel: "matrix",
+        to: "!room:example",
+        payloads: [{ text: "first" }, { text: "second" }],
+        deps: { matrix: sendMatrix },
+        queuePolicy: "required",
+      }),
+    ).rejects.toThrow("second payload send failed");
+
+    expect(sendMatrix).toHaveBeenCalledTimes(2);
+    expect(queueMocks.markDeliveryPlatformOutcomeUnknown).toHaveBeenCalledWith("mock-queue-id");
+    // Must NOT failDelivery — that would leave send_attempt_started for drain to replay.
+    expect(queueMocks.failDelivery).not.toHaveBeenCalled();
+    // Must NOT ack — the batch did not fully succeed; reconcile must confirm the
+    // partial send rather than silently dropping the queue entry.
+    expect(queueMocks.ackDelivery).not.toHaveBeenCalled();
+  });
+
+  it("still calls failDelivery when a payload fails before any send succeeded", async () => {
+    // No send evidence (sentBeforeError === false): failDelivery is correct —
+    // nothing reached the channel, so leaving the entry for retry is safe.
+    const sendMatrix = vi.fn().mockRejectedValueOnce(new Error("first payload send failed"));
+
+    await expect(
+      deliverOutboundPayloads({
+        cfg: {},
+        channel: "matrix",
+        to: "!room:example",
+        payloads: [{ text: "first" }],
+        deps: { matrix: sendMatrix },
+        queuePolicy: "required",
+      }),
+    ).rejects.toThrow("first payload send failed");
+
+    expect(queueMocks.failDelivery).toHaveBeenCalledWith(
+      "mock-queue-id",
+      expect.stringContaining("first payload send failed"),
+    );
+    expect(queueMocks.markDeliveryPlatformOutcomeUnknown).not.toHaveBeenCalled();
+    expect(queueMocks.ackDelivery).not.toHaveBeenCalled();
+  });
+
   it("fails required delivery when the post-send unknown marker cannot be written", async () => {
     queueMocks.markDeliveryPlatformOutcomeUnknown.mockRejectedValueOnce(
       new Error("unknown marker offline"),
@@ -1823,6 +1881,43 @@ describe("deliverOutboundPayloads", () => {
     const sendParams = requireMockCallArg(sendPayload, "sendPayload");
     expect((sendParams.payload as { channelData?: unknown }).channelData).toEqual({
       normalized: true,
+    });
+  });
+
+  it("preserves adapter partial-delivery metadata without a message receipt", async () => {
+    const adapterError = Object.assign(new Error("later adapter chunk failed"), {
+      sentBeforeError: true,
+      visibleReplySent: true,
+    });
+    const sendPayload = vi.fn().mockRejectedValue(adapterError);
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "matrix",
+          source: "test",
+          plugin: createOutboundTestPlugin({
+            id: "matrix",
+            outbound: {
+              deliveryMode: "direct",
+              sendText: vi.fn(),
+              sendMedia: vi.fn(),
+              sendPayload,
+            },
+          }),
+        },
+      ]),
+    );
+
+    await expect(
+      deliverOutboundPayloads({
+        cfg: {},
+        channel: "matrix",
+        to: "!room",
+        payloads: [{ text: "long peer reply", channelData: { matrix: { mode: "notice" } } }],
+      }),
+    ).rejects.toMatchObject({
+      sentBeforeError: true,
+      payloadOutcomes: [expect.objectContaining({ status: "failed", sentBeforeError: true })],
     });
   });
 
@@ -3551,6 +3646,54 @@ describe("deliverOutboundPayloads", () => {
     expect(sendText).not.toHaveBeenCalled();
     expect(hookMocks.runner.runMessageSent).not.toHaveBeenCalled();
     expect(mocks.appendAssistantMessageToSessionTranscript).not.toHaveBeenCalled();
+  });
+
+  it("does not reuse a previous payload message id for a suppressed text send", async () => {
+    hookMocks.runner.hasHooks.mockReturnValue(true);
+    const sendText = vi
+      .fn()
+      .mockResolvedValueOnce({ channel: "matrix", messageId: "mx-1" })
+      .mockResolvedValueOnce({ channel: "matrix", messageId: "" });
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "matrix",
+          source: "test",
+          plugin: createOutboundTestPlugin({
+            id: "matrix",
+            outbound: { deliveryMode: "direct", sendText },
+          }),
+        },
+      ]),
+    );
+
+    const results = await deliverOutboundPayloads({
+      cfg: {},
+      channel: "matrix",
+      to: "!room:1",
+      payloads: [{ text: "first" }, { text: "second" }],
+    });
+
+    expect(results).toStrictEqual([{ channel: "matrix", messageId: "mx-1" }]);
+    expect(hookMocks.runner.runMessageSent).toHaveBeenCalledTimes(2);
+    expect(hookMocks.runner.runMessageSent).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        content: "first",
+        success: true,
+        messageId: "mx-1",
+      }),
+      expect.objectContaining({ channelId: "matrix" }),
+    );
+    expect(hookMocks.runner.runMessageSent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        content: "second",
+        success: false,
+      }),
+      expect.objectContaining({ channelId: "matrix" }),
+    );
+    expect(hookMocks.runner.runMessageSent.mock.calls[1]?.[0]).not.toHaveProperty("messageId");
   });
 
   it("emits message_sent success for sendPayload deliveries", async () => {

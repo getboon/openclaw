@@ -2,6 +2,62 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.34-boon.2
+
+Keeps background sub-agents alive across a gateway crash, stop or restart: an interrupted native sub-agent now resumes after the next boot and delivers its real result, instead of ending with a lost-context error and a "Background task cancelled" notice.
+
+- **#266 (ENG-20801):** while the gateway closes, a non-ok end of a native sub-agent run stays unended and is marked `abortedLastRun`, so the existing orphan recovery resumes it after boot. Explicit kills, steers, ACP and plugin runs, and runs past their `runTimeoutSeconds` deadline still finalize. On boot, a child session that a crash left running is marked too, unless it is older than two hours. The sub-agent task follows the new run id, so no cancelled notice goes out and later restarts do not wait on a stale task. The resume prompt tells the child that tool calls may have been cut off, and a resumed parent is told which sub-agents are still running.
+- New switch `agents.defaults.subagents.restartResume`, default `true`. With `false`, interrupted runs end with an error, as before.
+- This diverges from upstream, which stopped relaunching interrupted sub-agents. A later upstream sync must carry or drop it.
+- Base = `2026.6.34-boon.1`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.34-boon.2` in lockstep. No separately published plugin source changed between boon.1 and boon.2.
+
+## 2026.6.34-boon.1
+
+Advances the fork's upstream base from `2026.6.11` to `2026.6.34` — 23 upstream release trains, 304 commits, merged in one real (never squashed) merge commit, carrying fixes across browser/network sandboxing, agent and provider run resilience, channel recovery, and SQLite checkpoint robustness, while preserving every fork patch unchanged.
+
+- **(#250):** merges upstream `v2026.6.34` into `boon`, also repairing a latent ancestry defect from PR #31 (that merge was squash-merged, so `v2026.6.11` was never an ancestor of `boon`, and every upstream merge since diffed against a stale base). This merge primes ancestry first so the real conflict count is 29 files instead of ~1150. Of 231 total conflicts (202 mechanical manifest + 29 real), every one was resolved under one policy: boon's patches win unless boon has no competing behavior, or upstream is strictly higher on a security pin. Notable keeps: boon's `shouldSurfaceToolFailure` tool-failure-digest refactor over upstream's pre-refactor duplicated logic in `payloads.ts`; boon's `projectSessionEntryForPersistenceRevision` session-store projection; ENG-14349's dropped `buildTeamsFileInfoCard` Teams card (stays dropped). Three silent bugs were found and fixed outside the flagged conflicts: a positional-argument regression in `extensions/diagnostics-otel/src/service.ts` against `@opentelemetry/sdk-logs@0.219.0`, a `failover-policy` test asserting behavior boon deliberately doesn't have, and a duplicated test helper.
+- Upstream brings bounded reads/timeouts, credential redaction, SSRF blocking of loopback rebinding and URL-embedded credentials, outbound tool-trace sanitization, Discord reconnect draining, LINE group allowlist scoping, cron/task recovery, OAuth credential rotation, cross-state-dir import opt-in, exec-approval binding, macOS exec output limiting, WhatsApp LID-JID resolution, and bounded `before_agent_finalize` hooks. Also aboard: doctor/onboarding repair hardening, secret-input hardening, compaction preflight counting bash/summary turns, Codex run-time-derived watchdogs, Google Meet OAuth manual-paste fallback, Feishu implicit-default SecretRef fix, commitments extraction-batch restoration, and message-action requester provenance gating. Slack now fails closed on mention detection and warns on user-token auth.
+- Validation: `release-preflight` all 10 sub-checks OK, `tsgo:core`/`tsgo:extensions` 0 errors, 947+ targeted tests passing. Full `pnpm check`, the full Vitest suite, and cross-OS/Docker/package-acceptance proof deferred to CI/Crabbox per repo policy given the scale of the diff (1191 files, +65k/-7.5k).
+- **Rollout note:** this is a core-train jump of the same class that caused the 2026-07-06 arguijo Teams outage. A gateway-only roll is **not safe** — the merge touches `extensions/slack` and `extensions/msteams` source, so any rollout needs the full plugin-leg sequence (`gateway → reconcile → slack → msteams`), a real inbound-message round-trip per channel on an internal host, and a rehearsed rollback before any customer wave.
+- Base = `2026.6.11-boon.49` → upstream base reset to `2026.6.34`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.34-boon.1` in lockstep; the gateway, Slack, and Teams tarballs carry new source and need their fleet legs rolled, while `@openclaw/diagnostics-prometheus` is version-bumped only (no source change), so it needs no separate fleet pass.
+
+## 2026.6.11-boon.49
+
+Stops long tool-heavy sessions from reporting phantom tool failures and never compacting, tells Teams users explicitly when a dragged SharePoint/OneDrive file couldn't be read instead of silently dropping it, lets browser-handoff's live Chrome MCP attach actually survive a slow `npx` cold start, tags Sentry captures with `session_id` for the per-session reliability dashboard, and clears a batch of HIGH dependency advisories (Sentry's stale pinned OpenTelemetry/Prisma instrumentation chain, undici, brace-expansion, axios) from the latest Vanta/AWS Inspector sweep.
+
+- **#246:** the aggregate tool-result budget was a fixed `perResultCap * 4` (256k chars on a 500k-token window) with no reference to the context window. Once summed tool-result text crossed it, older results flattened to a bare `[... N more characters truncated; rerun with narrower args if needed]` notice with zero content bytes — indistinguishable from a tool failure to the model — and that same truncated array fed the compaction-pressure estimate, so real session growth never triggered compaction at all. The aggregate budget now scales with the window (`max(perResultCap * 4, window * 4 * 0.5)`, 1M chars on a 500k window), elision writes a notice stating the call succeeded, fresh trailing results are protected from aggregate elision, and the two persisted precheck routes no longer silently collapse to the per-result cap. Backport of upstream `d45b8be939a` / `168a4890bb4`. Prompt size on tool-heavy sessions can grow up to ~1M chars per turn instead of 256k, and compaction now fires on sessions that previously coasted past it — canary first and watch for summarizer timeouts.
+- **#253 (ENG-20866):** every browser-handoff live Chrome MCP attach failed with a handshake timeout, even against a fully valid, `ready` boon-core CDP session. Measured directly on the `arief-openclaw-test` canary: `npx -y chrome-devtools-mcp@latest --version` alone takes 69-73 seconds of cold-start CPU, before the subprocess ever attempts the actual `--wsEndpoint` connection — guaranteed to blow past the old 30s handshake timeout. `CHROME_MCP_HANDSHAKE_TIMEOUT_MS` raises 30s → 120s (with an explicit per-request timeout passed to the MCP SDK's own `connect()`/`listTools()`, which otherwise default to 60s), `CHROME_MCP_NAVIGATE_TIMEOUT_MS` raises 20s → 130s (it also caps the attach-wait for a navigate-first cold session), and `DEFAULT_EXISTING_SESSION_MANAGE_TIMEOUT_MS` raises 45s → 130s (otherwise aborts the first handoff "open" on a fresh host before the handshake finishes). Trade-off: a genuinely hung navigation on an already-attached session now takes up to ~135s to time out instead of ~25s.
+- **#256 (ENG-20876):** Reliability Metric #5 (Sentry error rate, target <5/customer/session/day) had per-customer/day tracking live, but `session_id` was never an indexed Sentry tag — only ever landing in `contexts.run`, which Sentry doesn't search on. `session_id` is now a real tag on `model_call_ended`, `before_tool_call_hook_failed`, `message_sent` (falls back to `sessionKey`), `cron_changed`, `session_end`, and `after_tool_call` (ctx threaded through `register.ts` the same way `agent_end` already does). `delivery_recovery_exhausted` and `subagent_ended` are deliberately left untouched — neither has a clean `session_id`-shaped value to promote.
+- **#260 (ENG-20968):** dragging a file from a Teams chat/channel into a message to the agent passed a link the agent couldn't access, even with SharePoint/Graph permissions correctly set up. The resolution mechanism already existed (Graph's `/shares/{shareId}/driveItem/content`, fetched with the bot's own Graph token) — every failure in that path was only `warn`-logged and never surfaced, so the agent was left with a bare SharePoint URL and no signal a download was even attempted. The full msteams attachment pipeline (direct downloads, inline `data:` images, SharePoint references, Graph `hostedContents`, Bot Framework DMs) now reports failures through core's `MediaFailures` contract: the agent tells the user explicitly when a file couldn't be read, oversized inline images get a `too_large` notice instead of vanishing, and a failure is cleared (not double-reported) when a later Graph retry succeeds on the same attachment. `docs/channels/msteams.md` now documents that a dragged SharePoint/OneDrive file needs its own Graph consent (`Files.Read.All`/`Sites.Read.All`, Application) on the Teams bot's own Azure AD app — separate from, and not satisfied by, the SharePoint skill's certificate-based `Sites.Selected` app. Success paths are unchanged.
+- **#261 (ENG-21009):** `@sentry/node@8.49.0` exact-pins 31 stale `@opentelemetry/*` packages plus a dead `@prisma/instrumentation`, none of which openclaw's own workspace otel overrides can reach — accounting for most of the ~12 medium-severity Vanta/AWS Inspector findings tied to this dependency on the fleet AMI. Bumped to `10.75.3`, which has 9 dependencies with no pinned otel majors and no transitive Prisma instrumentation; `extensions/sentry-monitor`'s entire Sentry surface has no breaking change v8→v10, verified against the installed package. No operator-visible behavior change.
+- **Security:** `undici` (both the 7.x and 8.x override lines) moves to 7.29.1 / 8.10.2 for GHSA-rfgv-xxqx-mfg5 (DoS via unrequested WebSocket subprotocol) and GHSA-w293-vg96-wgc3 (TLS certificate-validation bypass via dropped connect options in `BalancedPool`); `brace-expansion` moves to 5.0.11 for GHSA-qhr7-859c-m2p7 and GHSA-6j4f-fj2g-mc7p (DoS via uncontrolled recursion); `axios` moves to 1.20.0 (bundled with #256) for a ReDoS advisory pair. None of these change observable behavior.
+- Dev-only: `markdown-it` 14.2.0 → 14.3.1 (root, `ui`, `packages/markdown-core`), `dompurify` 3.4.13 → 3.4.16, `golang.org/x/net` bump in `scripts/docs-i18n` (#35, #255, #258, #259, #262).
+- Base = `2026.6.11-boon.48`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.49` in lockstep. `@openclaw/msteams` source changed (#260) — a `fleet-msteams.sh` pass is required on Teams hosts after the gateway roll. No separately published `@openclaw/slack` or `@openclaw/diagnostics-prometheus` source changed since boon.48, so those need no separate pass.
+
+## 2026.6.11-boon.48
+
+Lets a channel plugin tell a user why a turn stopped instead of staying silent: a sub-agent completion owner now learns when an attempt is its last, and an all-models-failed reply now carries its failure class through the plugin SDK.
+
+- **#251 (`finalAttempt`):** a channel plugin that owns a sub-agent completion had a retryable failure retried up to the announce retry limit, then given up, without ever knowing which attempt was the last — so a plugin that hit a turn budget on the final attempt stayed silent and the user saw nothing. `SubagentCompletionRequest` gains an optional `finalAttempt`, computed from the same cleanup decision the lifecycle applies after a failure (one shared `resolveDeferredCleanupDecision` call, so the two cannot disagree), so a plugin can post a visible halt on the attempt that will not be retried. Additive: owners that ignore it behave as before.
+- **#251 (`getReplyPayloadGatewayFailure`):** when every model candidate failed, the runner classified the failure into a `GatewayFailureCode` and then kept only the copy text, so a channel saw `isError: true` and could not tell a transient provider outage from billing or context overflow without matching the text. The resolved code (including the `will_auto_retry` -> `agent_failed_transient_after_retries` downgrade) now rides on the final failure payload's metadata on every terminal branch, and `openclaw/plugin-sdk/reply-payload` exposes `getReplyPayloadGatewayFailure(payload) -> { code, retryAffordance }` beside `getReplyPayloadToolFailureDigest`, plus the `GatewayFailureCode` and `RetryAffordance` types. Additive: no wire or text change.
+- **#251 (surface budget):** `scripts/plugin-sdk-surface-report.mjs` public-export budget raised 10406 -> 10409 and public-function-export budget 5216 -> 5217 for the new getter and its two types; plugin SDK API baseline hash regenerated.
+- **Security:** the pinned `fast-uri` dependency moves from 3.1.6 to 3.1.7, its first release patched against two high-severity URI-parsing vulnerabilities (authority injection through an unvalidated port, and host confusion through an unclosed bracket in the authority).
+- Base = `2026.6.11-boon.47`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.48` in lockstep. No separately published plugin source changed between boon.47 and boon.48 (#251 touches only `src/agents`, `src/auto-reply`, `src/plugin-sdk` and the SDK surface script; nothing under `extensions/`), so a gateway roll delivers the whole release — no `fleet-slack.sh` / `fleet-msteams.sh` / `fleet-diagnostics-prometheus.sh` pass is needed. A channel plugin that starts reading `finalAttempt` or `getReplyPayloadGatewayFailure` needs this gateway underneath it.
+
+## 2026.6.11-boon.47
+
+Finishes the browser-handoff automatic sign-in flow end to end — scheduling a resume turn from inside a plugin tool's own execution now actually authorizes and cron stays available across reloads, the recheck notices a completed sign-in sooner and messages the customer before a slow follow-up browser-attach step can block it, and `delivery.mode: "none"` cron jobs can now deliver that message at all — plus a diagnostic for hung Chrome MCP handshakes, a distinct eval-trajectory label for project schedules, a shared turn-resume-wording refactor for boon-core, and a Docker build fix for 8 GB CI runners.
+
+- **#236 / #239:** the browser-handoff recheck's `scheduleSessionTurn` call failed deterministically, on every live attempt, with `scheduleSessionTurn returned no job`. #236 found the first cause — a plugin tool's own `execute()` handler resolves a fresh, never-activated, single-plugin registry on every call, but the liveness gate required the caller's registry to be the one true active registry, which this kind of registry structurally never is; fixed with a fallback that checks the real active registry by plugin id instead. Redeploying and retesting live on `arief-openclaw-test` surfaced three more bugs in sequence: the fallback's own marker never applied to the actual multi-plugin discovery-scan registry backing the real call (switched the discriminator to the existing, always-set `toolDiscovery` field); the ephemeral tool-resolution path never threaded `hostServices` through at all, so cron was unavailable even once authorized (added a shared, process-wide `hostServices` reference, restored on real activation); and that shared reference was itself wiped ~12 seconds after every boot by a routine plugin pre-warm reload (stopped clearing it there — test-only cleanup already lives in `resetPluginRuntimeStateForTest`). Any plugin tool can now reliably schedule or unschedule a durable, cron-backed future session turn from inside its own execution, regardless of which internal registry resolved the call or how many reloads have happened since boot.
+- **#240:** the recheck's exponential backoff capped at 5 minutes, so a sign-in that finished while only boon-core's async profile snapshot was left pending could sit undetected for up to 5 minutes. Cap lowered to 2 minutes (30s/60s/120s/120s/...), roughly halving worst-case detection lag in the steady state without materially raising poll volume.
+- **#242:** live testing showed a customer who finished signing in never got a confirmation — the model detected `ready`, then got stuck retrying a failing `browser` attach and never reached the message send. The scheduled-recheck prompt and the `"ready"` tool-result text now both say the same thing, in the same order: message the customer first, before any other tool call, so a slow or failing follow-up step can't block the one thing the customer is actually waiting on.
+- **#241:** a cron job with `delivery.mode: "none"` and no explicit per-job channel/to (the pattern browser-handoff's recheck uses) had its resolved delivery target hard-wired empty, so even the agent's own explicit `message(action=send)` failed with "Action send requires a target." The empty-target short-circuit is removed; cron's own auto-announcement still stays suppressed for `"none"` (driven independently by the delivery plan), but the agent's explicit send now has a real target to fall back to.
+- **#243:** a hung or failing Chrome MCP handshake logged nothing useful — the subprocess's stderr was only drained after `connect()` resolved, which is exactly the branch that never runs when the handshake itself hangs. Stderr is now drained from the moment the transport is constructed, per the MCP SDK's own documented support for exactly this.
+- **#247:** the agent-chat trajectory label for `boon-projects schedule append`/`schedule list` fell through to the generic "working with project data," indistinguishable from any other project call; each now gets its own label, unblocking a deterministic regression assert in a companion `boon` PR.
+- **[ENG-20030]:** the turn-resume instruction shown on a gateway restart or budget/step/latency interruption moves out of `main-session-restart-recovery.ts` into a shared `src/agents/turn-resume-instruction.ts`, keyed by reason, so boon-core and anychat-boon-web send identical wording instead of three paraphrases.
+- **#248:** `pnpm build:docker` ran tsdown with declaration emit on, then deleted every `.d.ts` in the next stage anyway — pure wasted heap that pushed peak RSS to 9.5 GB and OOM-killed the build on GitHub's 8 GB arm64 runner. Declaration emit is now skipped for this build the same way `scripts/package-openclaw-for-docker.mjs` already does; peak RSS drops to 3.1 GB with identical output.
+- Base = `2026.6.11-boon.46`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.11-boon.47` in lockstep. No separately published plugin source changed between boon.46 and boon.47 (#236/#239 are in the core plugin registry, #240/#242 are in the bundled `browser-handoff`, #241 is in `cron`, #243 is in the bundled `browser` plugin, #247 is in `src/agents`'s tool-display, ENG-20030 is in `src/agents`, #248 is Docker build tooling), so a gateway roll delivers the whole release — no `fleet-slack.sh` / `fleet-msteams.sh` / `fleet-diagnostics-prometheus.sh` pass is needed.
+
 ## 2026.6.11-boon.46
 
 Makes OpenTelemetry tracing actually export on a gateway that also runs Sentry, keeps token and cost spans attached to their turn, stops a plugin's scheduled turn from being silently rolled back, and surfaces a browser-handoff scheduling failure that used to vanish.
@@ -395,6 +451,263 @@ Fork-only build atop upstream `v2026.5.18` (getboon/openclaw `boon` branch). Tar
 - Carries unmerged upstream PR #86584 (gate owned-write publish on a pre-append fingerprint; fixes #86572) plus the intermediate owned-session-transcript-write wiring it depends on.
 - Fork hardening on top of #86584 (from internal codex review): the benign session-fence advance now fails closed unless the fenced prefix is byte-identical to the trusted snapshot (prevents a prefix-rewrite + benign-append from masking a real takeover); and a reacquire takeover error no longer masks the original provider error.
 - Does NOT carry #87159 (embedded session file ownership race) — high backport risk; revisit if it lands upstream.
+
+## 2026.6.34
+
+### Highlights
+
+- **Safer browser and network boundaries:** sandboxed browser routes, trusted DNS targets, custom browser origins, and loopback provider endpoints now reject unsafe access paths. (#97958, #38290, #103075, #110693) Thanks @eleqtrizit, @brunowowk, @mosidevv, @pgondhi987, and @lsr911.
+- **More resilient agent and provider runs:** retained session writes, provider fallbacks, stream progress handling, and stdio failures now recover without silently ending active work. (#96100, #97128, #90908, #99803, #100521) Thanks @xialonglee, @sallyom, @richwilson-bloom, @LiuwqGit, @vincentkoc, @yetval, @shengting, and @cxbAsDev.
+- **Stronger channel recovery:** pending channel work resumes after recovery, acknowledgements are idempotent, and sustained Discord gateway bursts stay bounded. (#79811, #97041, #104919, #109108, #110954, #103793, #94016) Thanks @indulgeback, @cuiyuxin-gif, @Pick-cat, @Glucksberg, @evan-YM, @zhangguiping-xydt, @yetval, @sheyanmin, and @thomasthelen-kibeauftragter.
+- **Safer operator diagnostics:** command and status surfaces keep owner-only actions protected and prevent credentials from appearing in account URLs or summaries. (#98260, #107754, #105017) Thanks @eleqtrizit, @joshavant, @ooiuuii, @aniruddhaadak80, and @tzy-17.
+- **More robust local runtime state:** SQLite checkpoints, workspace reads, gateway process signalling, plugin HTTP responses, and dependency handling no longer turn transient host conditions into failed runs. (#99067, #100910, #102125, #109590, #112406) Thanks @ooiuuii, @masatohoshino, @vincentkoc, @mushuiyu886, and @krissding.
+
+### Changes
+
+- **Extended-stable hardening:** this maintenance release carries targeted security and reliability repairs without adding new release-line features.
+
+### Fixes
+
+- **OpenCode Go:** use the documented `hy3` model identifier instead of the failing `hy3-preview` alias.
+- **Codex native subagents:** retain the parent app-server subscription and recognize multi-agent V2 child activity until a yielded child completion reaches its requester.
+- **Dependency security:** updates production dependency resolutions for patched `brace-expansion`, PostCSS, `fast-uri`, `ip-address`, and Undici versions. (#113428, #118804)
+- **Execution and transport safety:** browser, sandbox, exec, MCP, and secret-resolution paths reject unsafe inputs and handle stream failures without crashing the host process.
+- **Delivery and channel stability:** outbound receipts, delivery evidence, channel lifecycle, health monitoring, and gateway queues recover cleanly under retries, restarts, and overload.
+- **Gateway and storage reliability:** plugin responses, process probes, workspace bootstrap reads, and SQLite writes tolerate expected transient failures while preserving correct state.
+
+### Upcoming deprecations
+
+- **Plugin SDK migration:** `before_agent_start`, root `openclaw/plugin-sdk` imports, `providerAuthEnvVars`, and `channelEnvVars` are scheduled for removal after July 24. Migrate to the modern hook stages, focused SDK subpath imports, and manifest setup descriptors. See [Plugin SDK migration](/plugins/sdk-migration) and [plugin manifests](/plugins/manifest).
+
+### Complete contribution record
+
+This audited record covers the complete v2026.6.33..496c84bf6159bd09ce2c2a261c354ea641757b19 history plus release-validation backports: 25 merged PRs. The generation manifest also supplies direct commits as editorial input; the grouped notes above prioritize user impact.
+
+#### Pull requests
+
+- **PR #96100** Related #95915. Thanks @xialonglee, @sallyom, and @richwilson-bloom.
+- **PR #79811** Related #79753. Thanks @indulgeback and @cuiyuxin-gif.
+- **PR #97041** Thanks @Pick-cat and @vincentkoc.
+- **PR #97128** Related #96518. Thanks @LiuwqGit, @vincentkoc, and @yetval.
+- **PR #90908** Thanks @shengting.
+- **PR #97958** Thanks @eleqtrizit.
+- **PR #98260** Thanks @eleqtrizit.
+- **PR #99803** Thanks @cxbAsDev and @vincentkoc.
+- **PR #99067** Related #99066. Thanks @ooiuuii.
+- **PR #100521** Thanks @cxbAsDev.
+- **PR #100910** Thanks @masatohoshino and @vincentkoc.
+- **PR #102125** Thanks @mushuiyu886.
+- **PR #38290** Related #46520. Thanks @brunowowk and @mosidevv.
+- **PR #103075** Thanks @pgondhi987.
+- **PR #104919** Related #104903. Thanks @Glucksberg and @evan-YM.
+- **PR #107754** Related #98633, #102932, #105427. Thanks @joshavant, @ooiuuii, and @aniruddhaadak80.
+- **PR #109108** Thanks @zhangguiping-xydt.
+- **PR #105017** Thanks @tzy-17.
+- **PR #109590** Thanks @krissding.
+- **PR #110693** Thanks @lsr911.
+- **PR #110954** Thanks @zhangguiping-xydt.
+- **PR #103793** Thanks @yetval.
+- **PR #94016** Related #94008. Thanks @sheyanmin and @thomasthelen-kibeauftragter.
+- **PR #112406** Thanks @vincentkoc.
+- **PR #107938**.
+
+## 2026.6.33
+
+### Highlights
+
+- **Safer network and secret boundaries:** provider streams, Discord REST responses, browser fetches, OAuth paths, and logs now cap hostile response sizes and keep Telegram credentials out of diagnostics. (#96989, #95412, #99428) Thanks @wangmiao0668000666, @Alix-007, @xialonglee, @liuhaiyang14, @Pick-cat, @mushuiyu886, @vincentkoc, @ZOOWH, @Pandah97, @solodmd, @zhangguiping-xydt, and @obviyus.
+- **More reliable long-running agents:** run release, liveness checks, and watchdog semantics now distinguish genuine stalls from active long model calls and wedged backends. (#102160) Thanks @obviyus, @kiagentkronos-cell, @alvelda, @alkor2000, and @vincentkoc.
+- **Stronger channel delivery:** Discord reconnects no longer silently drop queued messages or repeat ambiguous non-idempotent sends, while Telegram bot-to-bot and reply-fence handling preserve the intended thread and authorization result. (#100896, #103867, #106755) Thanks @tiffanychum, @Godecule, @yetval, @xialonglee, and @RomneyDa.
+- **Safer credential recovery:** service restarts preserve SecretRef-backed Telegram credentials, and OAuth repair no longer overwrites an already-valid destination profile. (#99124, #97541) Thanks @mushuiyu886, @1Wanker, @liuhao1024, @yetval, @Darren2030, @obviyus, and @RomneyDa.
+- **Extended-stable updates:** package installations can select, update from, and receive availability notices for the `extended-stable` channel without silently falling back to another release line. (#99811, #100438) Thanks @kevinslin.
+
+### Changes
+
+- **Approval and tool authority:** Codex app-server commands now require an actual human/plugin approval, exec auto-review stays bound to the exact resolved command, and narrow tool allowlists remain owned by the factory that constructs them. (#103430, #103457, #104213) Thanks @obviyus, @brokemac79, @Pandah97, @wangmiao0668000666, and @pgondhi987.
+- **Scoped external tooling:** external MCP loopback clients use short-lived session-bound attach grants instead of inheriting mutable child-process authority, and Gateway message actions retain trusted requester provenance and reject untrusted callers. (#102031) Thanks @pgondhi987, @Glucksberg, @wings1029, @Alix-007, @machine3at, and @anagnorisis2peripeteia.
+
+### Fixes
+
+- **Authorization and disclosure:** Gateway HTTP rejects disallowed browser origins before unauthenticated handling, permission repair stays confined to its intended include, MCP status output redacts secrets, and Gateway action bridges reject untrusted requesters. (#102881, #103267, #103396, #102031) Thanks @wangyan2026, @yetval, @NianJiuZst, @obviyus, @pgondhi987, and @brokemac79.
+- **Gateway and process stability:** agent-run caches are bounded, lock probes stop leaking file descriptors, close reasons preserve valid UTF-8, and heartbeat reads survive transient filesystem races. (#77973, #99291, #100047, #100389) Thanks @fede-kamel, @chenyangjun-xy, @zhangLei99586, @NarahariRaghava, @ogarciarevett, @markr9805, @849261680, @mushuiyu886, @vincentkoc, @wings1029, and @masatohoshino.
+- **Provider and browser reliability:** Anthropic-compatible partial streams stop hanging at their size bound, OpenAI Realtime uses the correct authentication and transcription secret flow, and remote CDP credentials stay out of responses. (#100686, #102518, #103139) Thanks @zhangguiping-xydt, @cxbAsDev, @sjf-oa, @sjf, @vincentkoc, and @obviyus.
+- **Ingress and webhook safety:** replayed Twilio requests are rejected under sustained traffic, corrupt queued channel rows are tombstoned without blocking later work, and Telegram tokens are redacted even when split across log chunks. (#101107, #105259, #103861) Thanks @zhangguiping-xydt, @vincentkoc, @mushuiyu886, @Pick-cat, and @xialonglee.
+
+### Complete contribution record
+
+This audited record covers the complete v2026.6.11..db7af38c0b228fbd57613f7517bce02b056aa9ab history: 169 merged PRs. The generation manifest also supplies direct commits as editorial input; the grouped notes above prioritize user impact.
+
+#### Pull requests
+
+- **PR #98835** Related #98672. Thanks @moguangyu5-design and @jalehman and @AaronFaby.
+- **PR #96989** Thanks @wangmiao0668000666 and @vincentkoc.
+- **PR #95412** Thanks @Alix-007.
+- **PR #95108** Thanks @vincentkoc.
+- **PR #97499** Thanks @wangmiao0668000666.
+- **PR #102953** Thanks @ZOOWH.
+- **PR #97551** Thanks @Alix-007 and @vincentkoc.
+- **PR #97540** Thanks @Alix-007 and @vincentkoc.
+- **PR #95416** Thanks @Alix-007 and @vincentkoc.
+- **PR #97614** Thanks @cxbAsDev.
+- **PR #97808** Thanks @Pick-cat.
+- **PR #96445** Thanks @lin-hongkuan.
+- **PR #97961** Thanks @eleqtrizit.
+- **PR #97838** Thanks @pgondhi987.
+- **PR #98455** Thanks @wings1029.
+- **PR #100889** Thanks @mushuiyu886.
+- **PR #77973** Related #77976. Thanks @fede-kamel and @vincentkoc.
+- **PR #99291** Related #98958. Thanks @chenyangjun-xy and @zhangLei99586.
+- **PR #99428** Related #96982. Thanks @xialonglee and @liuhaiyang14.
+- **PR #98130** Thanks @Pick-cat.
+- **PR #100047** Related #99976. Thanks @NarahariRaghava.
+- **PR #100389** Related #99994. Thanks @ogarciarevett and @markr9805.
+- **PR #98682** Thanks @wings1029.
+- **PR #99479** Thanks @Pandah97.
+- **PR #101079** Thanks @cxbAsDev.
+- **PR #101160** Thanks @cxbAsDev.
+- **PR #102105** Thanks @wangmiao0668000666.
+- **PR #102450** Thanks @qingminglong.
+- **PR #100483** Related #100423. Thanks @versatagent.
+- **PR #102050** Thanks @Alix-007.
+- **PR #102952** Related #55365. Thanks @lidge-jun and @Mdx2025.
+- **PR #102160** Related #85826, #96168. Thanks @obviyus and @kiagentkronos-cell and @alvelda.
+- **PR #96224** Related #77986. Thanks @eleqtrizit and @fede-kamel.
+- **PR #96599** Thanks @sjf-oa and @sjf.
+- **PR #96615** Related #96589. Thanks @liuhao1024 and @yetval.
+- **PR #89812** Related #89626. Thanks @Petru2224.
+- **PR #92274** Related #91527. Thanks @fsdwen and @zackchiutw.
+- **PR #96396** Related #95784. Thanks @849261680 and @velvet-shark and @BryceMurray.
+- **PR #96096** Related #85900. Thanks @849261680 and @velvet-shark and @fanispoulinakisai-boop.
+- **PR #96831** Related #94083. Thanks @velvet-shark and @ooiuuii.
+- **PR #96142** Related #95574. Thanks @brokemac79 and @riazrahaman.
+- **PR #97044** Related #96983. Thanks @zw-xysk and @vincentkoc and @liuhaiyang14.
+- **PR #94452** Related #94040. Thanks @mushuiyu886 and @xrow.
+- **PR #96772** Thanks @wangmiao0668000666 and @vincentkoc.
+- **PR #96042** Thanks @Alix-007 and @vincentkoc.
+- **PR #96038** Thanks @Alix-007 and @vincentkoc.
+- **PR #96031** Thanks @Alix-007.
+- **PR #95103** Thanks @vincentkoc.
+- **PR #97620** Thanks @Alix-007 and @vincentkoc.
+- **PR #97693** Thanks @Alix-007.
+- **PR #98496** Thanks @Pandah97.
+- **PR #97784** Thanks @Alix-007.
+- **PR #97140** Related #97091. Thanks @galiniliev.
+- **PR #95543** Related #95474. Thanks @mikasa0818 and @ElliotDrel.
+- **PR #97504** Thanks @hugenshen.
+- **PR #90908** Thanks @shengting.
+- **PR #97356** Thanks @miorbnli.
+- **PR #97541** Related #97522. Thanks @liuhao1024 and @yetval.
+- **PR #97520** Related #97313. Thanks @zhangguiping-xydt and @pmdvedar-ai.
+- **PR #96544** Thanks @yetval and @vincentkoc.
+- **PR #97579** Thanks @hugenshen.
+- **PR #96644** Thanks @solodmd.
+- **PR #97214** Thanks @masatohoshino and @vincentkoc.
+- **PR #97372** Thanks @masatohoshino.
+- **PR #95774** Thanks @mushuiyu886.
+- **PR #95084** Related #90684. Thanks @jailbirt and @studentzhou-svg.
+- **PR #97367** Thanks @masatohoshino.
+- **PR #98693** Thanks @ZengWen-DT and @cursoragent.
+- **PR #89817** Thanks @masatohoshino.
+- **PR #96965** Related #96929. Thanks @zw-xysk and @YouToco.
+- **PR #100107** Thanks @frank-beans.
+- **PR #97861** Thanks @yetval.
+- **PR #96444** Thanks @lin-hongkuan.
+- **PR #96492** Thanks @yetval.
+- **PR #97870** Thanks @eleqtrizit.
+- **PR #98142** Thanks @RomneyDa.
+- **PR #98226** Related #98225. Thanks @ooiuuii.
+- **PR #99460** Related #99459. Thanks @ooiuuii.
+- **PR #98354** Thanks @Pick-cat.
+- **PR #98508** Thanks @lzyyzznl.
+- **PR #93379** Related #77755. Thanks @xialonglee and @jiveshkalra.
+- **PR #99070** Thanks @LeonidasLux.
+- **PR #98720** Related #98463. Thanks @wangmiao0668000666 and @zhangLei99586.
+- **PR #99800** Thanks @cxbAsDev and @vincentkoc.
+- **PR #100744** Thanks @lsr911 and @vincentkoc.
+- **PR #98262** Related #98239. Thanks @brokemac79.
+- **PR #101366** Related #84600. Thanks @deepujain and @13884379776l.
+- **PR #100835** Thanks @machine3at.
+- **PR #102035** Thanks @pgondhi987.
+- **PR #101617** Thanks @zhangguiping-xydt.
+- **PR #101744** Thanks @hugenshen and @cursoragent.
+- **PR #101739** Thanks @Alix-007.
+- **PR #102089** Thanks @Alix-007.
+- **PR #102661** Related #98038. Thanks @mabaty.
+- **PR #102403** Thanks @yetval.
+- **PR #102398** Thanks @yetval.
+- **PR #102426** Thanks @pgondhi987.
+- **PR #102840** Thanks @yetval.
+- **PR #103441** Related #68691. Thanks @hobo-l-20230331 and @aaajiao.
+- **PR #103267** Thanks @NianJiuZst.
+- **PR #104015**
+- **PR #103619** Thanks @pgondhi987.
+- **PR #104337** Related #104330.
+- **PR #102881** Related #102834. Thanks @wangyan2026 and @yetval.
+- **PR #105769** Thanks @mushuiyu886.
+- **PR #102924** Thanks @hugenshen.
+- **PR #106056** Thanks @pgondhi987.
+- **PR #106806** Related #103056. Thanks @yetval.
+- **PR #96143** Related #77616. Thanks @brokemac79 and @RomneyDa and @slideshow-dingo.
+- **PR #97271** Thanks @hugenshen.
+- **PR #96762** Thanks @wangmiao0668000666 and @vincentkoc.
+- **PR #97235** Thanks @zhangguiping-xydt and @vincentkoc.
+- **PR #95542** Related #95519. Thanks @mikasa0818 and @altaywtf and @zjx111234.
+- **PR #97571** Related #97564. Thanks @liuhao1024 and @nicelysalted.
+- **PR #86088** Thanks @liaoandi and @altaywtf.
+- **PR #99960** Thanks @masatohoshino and @vincentkoc.
+- **PR #85296** Thanks @alkor2000 and @vincentkoc.
+- **PR #100484** Thanks @vincentkoc and @litang9.
+- **PR #100722** Related #98864. Thanks @cxbAsDev and @carterstebbins23-spec.
+- **PR #94149** Related #84698. Thanks @ZengWen-DT and @cursoragent and @zus-assistant.
+- **PR #96065** Thanks @Darren2030 and @obviyus.
+- **PR #99124** Related #98107. Thanks @mushuiyu886 and @1Wanker.
+- **PR #99931** Related #98357. Thanks @ooiuuii.
+- **PR #91584** Thanks @hiragram and @openclaw-agent.
+- **PR #100896** Related #56610. Thanks @tiffanychum and @Godecule.
+- **PR #103867** Thanks @yetval.
+- **PR #101378** Related #91489, #92054, #98573. Thanks @wendy-chsy and @Vilard7 and @arturomagdiel and @studiodevlabs.
+- **PR #101394** Thanks @cxbAsDev.
+- **PR #100686** Thanks @zhangguiping-xydt.
+- **PR #102518**
+- **PR #103139**
+- **PR #103353** Related #103317.
+- **PR #103247**
+- **PR #103430** Related #103427.
+- **PR #103457** Related #103427.
+- **PR #103617** Related #103610.
+- **PR #103396** Related #103053. Thanks @obviyus and @yetval.
+- **PR #103074** Thanks @pgondhi987.
+- **PR #103822**
+- **PR #101107** Thanks @zhangguiping-xydt.
+- **PR #103620** Thanks @pgondhi987.
+- **PR #103861** Thanks @vincentkoc.
+- **PR #105259** Thanks @Pick-cat.
+- **PR #104213** Related #104208. Thanks @obviyus.
+- **PR #104715** Thanks @Leon-SK668.
+- **PR #105082**
+- **PR #102031** Thanks @pgondhi987.
+- **PR #106755**
+- **PR #106854**
+- **PR #103994**
+- **PR #102996**
+- **PR #99811** Related #99808. Thanks @kevinslin.
+- **PR #100438** Thanks @kevinslin.
+- **PR #102759** Related #102757. Thanks @vincentkoc.
+- **PR #102858**
+- **PR #102896**
+- **PR #103737** Thanks @vincentkoc.
+- **PR #103759** Thanks @vincentkoc.
+- **PR #103906**
+- **PR #104162** Related #104161. Thanks @vincentkoc.
+- **PR #104697**
+- **PR #105746** Thanks @vincentkoc.
+- **PR #99266** Thanks @RomneyDa.
+- **PR #100448** Thanks @kevinslin.
+- **PR #107832** Thanks @RomneyDa.
+- **PR #99212**
+- **PR #107872** Thanks @RomneyDa.
+- **PR #102600**
+- **PR #103204** Related #103189.
 
 ## 2026.6.11
 

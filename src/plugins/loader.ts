@@ -436,6 +436,13 @@ export function clearActivatedPluginRuntimeState(): void {
   clearEmbeddingProviders();
   clearMemoryEmbeddingProviders();
   clearMemoryPluginState();
+  // Deliberately does NOT clear the shared hostServices reference here: this
+  // runs at the start of EVERY real reload (see loadOpenClawPlugins), including
+  // ones with no reason to know about hostServices at all (e.g. ensureRuntimePluginsLoaded's
+  // post-startup pre-warm reload) -- clearing unconditionally would wipe a
+  // valid reference the real gateway boot set moments earlier. setActivePluginRegistry's
+  // own "only update when explicitly given" rule already protects production;
+  // resetPluginRuntimeStateForTest (test-only) clears it explicitly instead.
 }
 
 export function clearPluginRegistryLoadCache(): void {
@@ -1810,11 +1817,12 @@ function activatePluginRegistry(
   cacheKey: string,
   runtimeSubagentMode: "default" | "explicit" | "gateway-bindable",
   workspaceDir?: string,
+  hostServices?: PluginLoadOptions["hostServices"],
 ): void {
   // Always re-initialize: the global runner resolves hooks from the live
   // registry set (active + pinned surfaces), so activation order and scope
   // cannot drop hooks the way the old preserve-one-runner gate did (#91918).
-  setActivePluginRegistry(registry, cacheKey, runtimeSubagentMode, workspaceDir);
+  setActivePluginRegistry(registry, cacheKey, runtimeSubagentMode, workspaceDir, hostServices);
   initializeGlobalHookRunner(registry);
 }
 
@@ -1830,6 +1838,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         `empty-plugin-scope::${resolveRuntimeSubagentMode(options.runtimeOptions)}::${options.workspaceDir ?? ""}`,
         resolveRuntimeSubagentMode(options.runtimeOptions),
         options.workspaceDir,
+        options.hostServices,
       );
     }
     return emptyRegistry;
@@ -1888,6 +1897,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
           cached.cacheKey,
           cached.runtimeSubagentMode,
           options.workspaceDir,
+          options.hostServices,
         );
       }
       return cached.state.registry;
@@ -2012,6 +2022,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         hostServices: options.hostServices,
       }),
       activateGlobalSideEffects: shouldActivate,
+      toolDiscovery: options.toolDiscovery === true,
     });
 
     const suppliedManifestRegistry = options.manifestRegistry;
@@ -2970,7 +2981,13 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
       );
     }
     if (shouldActivate) {
-      activatePluginRegistry(registry, cacheKey, runtimeSubagentMode, options.workspaceDir);
+      activatePluginRegistry(
+        registry,
+        cacheKey,
+        runtimeSubagentMode,
+        options.workspaceDir,
+        options.hostServices,
+      );
     }
     return registry;
   } finally {

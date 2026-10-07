@@ -3,7 +3,6 @@
 import type { AgentMessage } from "openclaw/plugin-sdk/agent-core";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import "../../test-helpers/agent-session-token-mock.js";
-import { estimateToolResultReductionPotential } from "../tool-result-truncation.js";
 
 let PREEMPTIVE_OVERFLOW_ERROR_TEXT: typeof import("./preemptive-compaction.js").PREEMPTIVE_OVERFLOW_ERROR_TEXT;
 let estimateLlmBoundaryTokenPressure: typeof import("./preemptive-compaction.js").estimateLlmBoundaryTokenPressure;
@@ -393,7 +392,7 @@ describe("preemptive-compaction", () => {
   });
 
   it("routes to compact then truncate when recent tool tails help but cannot fully cover the overflow", () => {
-    const medium = "alpha beta gamma delta epsilon ".repeat(220);
+    const medium = "alpha beta gamma delta epsilon ".repeat(600);
     const longHistory = "old discussion with substantial retained context and decisions ".repeat(
       5000,
     );
@@ -418,12 +417,17 @@ describe("preemptive-compaction", () => {
     expect(result.toolResultReducibleChars).toBeGreaterThan(0);
   });
 
-  it("treats mixed oversized-plus-aggregate tool tails as cumulative recovery potential", () => {
+  it("routes mixed oversized-plus-medium tool tails to truncation on per-result savings", () => {
+    // Routing estimates recovery at contextTokenBudget (~ the prompt estimate). Tool text
+    // counts as 2 chars/token there, so the aggregate budget (2 chars per window token)
+    // covers every medium result and only the oversized cut is reducible.
     const oversized = "x".repeat(45_000);
     const medium = "alpha beta gamma delta epsilon ".repeat(500);
     const messages: AgentMessage[] = [
       makeAssistantHistory("short history"),
       makeToolResultMessage(oversized),
+      makeToolResultMessage(medium),
+      makeToolResultMessage(medium),
       makeToolResultMessage(medium),
       makeToolResultMessage(medium),
     ];
@@ -432,10 +436,6 @@ describe("preemptive-compaction", () => {
       messages,
       systemPrompt: "sys",
       prompt: "hello",
-    });
-    const potential = estimateToolResultReductionPotential({
-      messages,
-      contextWindowTokens: 128_000,
     });
     const desiredOverflowTokens = 2_000;
     const result = shouldPreemptivelyCompactBeforePrompt({
@@ -446,10 +446,9 @@ describe("preemptive-compaction", () => {
       reserveTokens,
     });
 
-    expect(potential.oversizedReducibleChars).toBeGreaterThan(0);
-    expect(potential.aggregateReducibleChars).toBeGreaterThan(0);
-    expect(potential.oversizedReducibleChars).toBeLessThan(potential.maxReducibleChars);
-    expect(potential.maxReducibleChars).toBeGreaterThan(desiredOverflowTokens * 4);
+    expect(result.overflowTokens).toBe(desiredOverflowTokens);
+    // 45k oversized result cut to the 16k per-result cap; medium results stay whole.
+    expect(result.toolResultReducibleChars).toBe(45_000 - 16_000);
     expect(result.route).toBe("truncate_tool_results_only");
     expect(result.shouldCompact).toBe(false);
   });

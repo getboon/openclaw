@@ -535,6 +535,8 @@ export type AgentDefaultsConfig = {
     announceTimeoutMs?: number;
     /** Require explicit agentId in sessions_spawn (no default same-as-caller). Default: false. */
     requireAgentId?: boolean;
+    /** Resume sub-agent runs interrupted by a gateway restart or stop after the next boot. Default: true. */
+    restartResume?: boolean;
   };
   /** Optional sandbox settings for non-main sessions. */
   sandbox?: AgentSandboxConfig;

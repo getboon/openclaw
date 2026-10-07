@@ -267,6 +267,7 @@ export async function runSubagentAnnounceFlow(params: {
   bestEffortDeliver?: boolean;
   onDeliveryResult?: (delivery: SubagentAnnounceDeliveryResult) => void;
   claimedOwnerChannel?: string;
+  finalAttempt?: boolean;
 }): Promise<boolean> {
   let didAnnounce = false;
   const expectsCompletionMessage = params.expectsCompletionMessage === true;
@@ -602,6 +603,7 @@ export async function runSubagentAnnounceFlow(params: {
           endedAt: params.endedAt,
           label: params.label,
           signal: params.signal,
+          finalAttempt: params.finalAttempt,
         };
         let ownerResult;
         try {

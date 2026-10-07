@@ -1,12 +1,12 @@
 {
   "name": "@openclaw/lobster",
-  "version": "2026.6.11-boon.46",
+  "version": "2026.6.34-boon.2",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/lobster",
-      "version": "2026.6.11-boon.46",
+      "version": "2026.6.34-boon.2",
       "dependencies": {
         "@clawdbot/lobster": "2026.5.22",
         "typebox": "1.1.39"
@@ -53,9 +53,9 @@
       "license": "MIT"
     },
     "node_modules/fast-uri": {
-      "version": "3.1.6",
-      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.6.tgz",
-      "integrity": "sha512-7Ical1vFEMr0onbVzEDIreM22I4khW+fzyQPwvAFWBp1iwdshSZRsL4jjRvPG9JP1uiqMHRto+YU6R2/CzDz5Q==",
+      "version": "4.1.4",
+      "resolved": "https://registry.npmjs.org/fast-uri/-/fast-uri-4.1.4.tgz",
+      "integrity": "sha512-dODXrIxlS9JSdgAnhIUKOosKV1oMtU2VtVw87QRaHzyl5jxO290Ii5tEZfCfzfWNHi3jKWwBSdQj0qIyshdZdQ==",
       "funding": [
         {
           "type": "github",

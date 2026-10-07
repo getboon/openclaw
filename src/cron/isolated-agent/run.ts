@@ -394,23 +394,18 @@ export async function resolveCronDeliveryContext(params: {
       sourceDelivery: resolveCronSourceDeliveryPlan({ deliveryPlan, resolvedDelivery }),
     };
   }
-  if (deliveryPlan.mode === "none" && !hasExplicitCronDeliveryTarget(deliveryPlan)) {
-    const resolvedDelivery = {
-      ok: false as const,
-      channel: undefined,
-      to: undefined,
-      accountId: undefined,
-      threadId: undefined,
-      mode: "implicit" as const,
-      error: new Error("delivery is disabled"),
-    };
-    return {
-      deliveryPlan,
-      deliveryRequested: false,
-      resolvedDelivery,
-      sourceDelivery: resolveCronSourceDeliveryPlan({ deliveryPlan, resolvedDelivery }),
-    };
-  }
+  // mode: "none" (delivery.requested false) still goes through the normal
+  // resolveDeliveryTarget() call below, not a short-circuited empty result:
+  // resolveCronSourceDeliveryPlan's "cron_none" branch deliberately builds its
+  // message-tool-awareness `target` from resolvedDelivery, precisely so the
+  // agent's own explicit message(action="send") call (e.g. a silently
+  // scheduled recheck reporting a terminal result) still has a real
+  // channel/to/currentChannelId to fall back to -- only deliveryRequested
+  // (driven by deliveryPlan.requested, independently false for "none") gates
+  // cron's own auto-announcement. A session-scoped "none" job is never
+  // misread as keyless by the #91613 refusal below (that refusal is narrowed
+  // to `!rawSessionKey`), so this cannot resurrect the shared-bucket
+  // last-recipient bug that fix guards against.
   const { resolveDeliveryTarget } = await loadCronDeliveryRuntime();
   const resolvedDelivery = await resolveDeliveryTarget(params.cfg, params.agentId, {
     channel: deliveryPlan.channel ?? "last",

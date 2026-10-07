@@ -1,10 +1,12 @@
 /** Covers plugin runtime registration API behavior and registry mutation guards. */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { clearActivatedPluginRuntimeState } from "./loader.js";
 import { isPluginRegistryRetired } from "./registry-lifecycle.js";
 import { createEmptyPluginRegistry } from "./registry.js";
 import type { PluginHttpRouteRegistration } from "./registry.js";
 import {
   getActivePluginGatewayCommandRegistry,
+  getActivePluginHostServices,
   getActivePluginHttpRouteRegistryVersion,
   getActivePluginRegistryVersion,
   getActivePluginRegistry,
@@ -336,6 +338,37 @@ describe("setActivePluginRegistry", () => {
     setActivePluginRegistry(registry);
     setActivePluginRegistry(registry);
     expect(getActivePluginRegistry()?.httpRoutes).toHaveLength(1);
+  });
+
+  it("keeps the shared hostServices reference sticky across a later activation that provides none", () => {
+    const cron = {} as import("../cron/service-contract.js").CronServiceContract;
+    setActivePluginRegistry(createEmptyPluginRegistry(), undefined, undefined, undefined, { cron });
+    expect(getActivePluginHostServices()?.cron).toBe(cron);
+
+    // A later activation that doesn't pass hostServices (e.g. a reload whose
+    // own options happen not to include it) must not clobber the earlier one.
+    setActivePluginRegistry(createEmptyPluginRegistry());
+    expect(getActivePluginHostServices()?.cron).toBe(cron);
+  });
+
+  it("does not clear the shared hostServices reference via clearActivatedPluginRuntimeState (runs on every real reload, including ones unaware of hostServices)", () => {
+    const cron = {} as import("../cron/service-contract.js").CronServiceContract;
+    setActivePluginRegistry(createEmptyPluginRegistry(), undefined, undefined, undefined, { cron });
+    expect(getActivePluginHostServices()?.cron).toBe(cron);
+
+    clearActivatedPluginRuntimeState();
+
+    expect(getActivePluginHostServices()?.cron).toBe(cron);
+  });
+
+  it("clears the shared hostServices reference via resetPluginRuntimeStateForTest (test-only teardown)", () => {
+    const cron = {} as import("../cron/service-contract.js").CronServiceContract;
+    setActivePluginRegistry(createEmptyPluginRegistry(), undefined, undefined, undefined, { cron });
+    expect(getActivePluginHostServices()?.cron).toBe(cron);
+
+    resetPluginRuntimeStateForTest();
+
+    expect(getActivePluginHostServices()?.cron).toBeUndefined();
   });
 
   it("does not treat bundle-only loaded entries as imported runtime plugins", () => {

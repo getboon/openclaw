@@ -71,6 +71,7 @@ import { buildAgentRuntimeOutcomePlan } from "../../agents/runtime-plan/build.js
 import {
   messageOriginCodeCopy,
   messageOriginCodeRetryAffordance,
+  type GatewayFailureCode,
 } from "../../channels/message/message-origin.js";
 import { resolveGroupSessionKey, type SessionEntry } from "../../config/sessions.js";
 import { updateSessionEntry } from "../../config/sessions/session-accessor.js";
@@ -97,7 +98,10 @@ import {
 } from "../../utils/message-channel.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import { stripHeartbeatToken } from "../heartbeat.js";
-import { markReplyPayloadForSourceSuppressionDelivery } from "../reply-payload.js";
+import {
+  markReplyPayloadForSourceSuppressionDelivery,
+  setReplyPayloadMetadata,
+} from "../reply-payload.js";
 import type { TemplateContext } from "../templating.js";
 import type { VerboseLevel } from "../thinking.js";
 import {
@@ -995,7 +999,7 @@ function buildMissingApiKeyFailureText(input: { message: string; error?: unknown
     return null;
   }
   if (provider === "openai" && normalizedMessage.includes("OpenAI Codex OAuth")) {
-    return "⚠️ Missing API key for OpenAI on the gateway. Use `openai/gpt-5.5` with the OpenAI OAuth profile, or set `OPENAI_API_KEY` for direct OpenAI API-key runs.";
+    return "⚠️ Missing API key for OpenAI on the gateway. Use `openai/gpt-5.6-sol` with the OpenAI OAuth profile, or set `OPENAI_API_KEY` for direct OpenAI API-key runs.";
   }
   if (provider === "openai") {
     return '⚠️ Missing API key for provider "openai". Run `openclaw doctor --fix` to repair stale OpenAI model/session routes, restart the gateway if doctor asks, then try again. If doctor has nothing to repair or the error persists, re-auth with `openclaw models auth login --provider openai` or run `openclaw configure`.';
@@ -1117,18 +1121,20 @@ function markAgentRunFailureReplyPayload<T extends ReplyPayload>(payload: T): T 
  * per-surface policy already surfaces failures (returns `SILENT_REPLY_TOKEN`
  * text in that silent case, exactly as the generic path did).
  */
+function resolveTerminalGatewayFailureCode(err: unknown): GatewayFailureCode {
+  const resolvedCode = resolveGatewayFailureCode(err);
+  return messageOriginCodeRetryAffordance(resolvedCode) === "will_auto_retry"
+    ? "agent_failed_transient_after_retries"
+    : resolvedCode;
+}
+
 function resolveCodedGenericFailureText(params: {
-  err: unknown;
+  code: GatewayFailureCode;
   sessionCtx: TemplateContext;
   cfg?: OpenClawConfig;
 }): string {
-  const resolvedCode = resolveGatewayFailureCode(params.err);
-  const code =
-    messageOriginCodeRetryAffordance(resolvedCode) === "will_auto_retry"
-      ? "agent_failed_transient_after_retries"
-      : resolvedCode;
   return resolveExternalRunFailureTextForConversation({
-    text: messageOriginCodeCopy(code),
+    text: messageOriginCodeCopy(params.code),
     sessionCtx: params.sessionCtx,
     isGenericRunnerFailure: true,
     cfg: params.cfg,
@@ -3427,13 +3433,14 @@ export async function runAgentTurnWithFallback(params: {
       // this is byte-identical for silent cases. Skipped for heartbeat and
       // control-UI (their own copy) and for verbose mode, where the operator
       // wants the raw forwarded failure detail rather than a friendly class.
+      const gatewayFailureCode = resolveTerminalGatewayFailureCode(err);
       const codedGenericText =
         !params.isHeartbeat &&
         !shouldSurfaceToControlUi &&
         !isVerboseFailureDetailEnabled(params.resolvedVerboseLevel) &&
         externalRunFailureReply?.isGenericRunnerFailure
           ? resolveCodedGenericFailureText({
-              err,
+              code: gatewayFailureCode,
               sessionCtx: params.sessionCtx,
               cfg: params.followupRun.run.config,
             })
@@ -3497,11 +3504,12 @@ export async function runAgentTurnWithFallback(params: {
         });
       }
       params.replyOperation?.fail("run_failed", err);
+      // Every terminal branch carries the code, whichever copy it chose, so a
+      // channel can tell billing/overflow/transient apart without text matching.
+      const failurePayload = markAgentRunFailureReplyPayload({ text: userVisibleFallbackText });
       return {
         kind: "final",
-        payload: markAgentRunFailureReplyPayload({
-          text: userVisibleFallbackText,
-        }),
+        payload: setReplyPayloadMetadata(failurePayload, { gatewayFailureCode }),
       };
     }
   }

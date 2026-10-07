@@ -1,4 +1,9 @@
 import type { ToolFailureDigest } from "../agents/tool-failure-digest.js";
+import {
+  messageOriginCodeRetryAffordance,
+  type GatewayFailureCode,
+  type RetryAffordance,
+} from "../channels/message/message-origin.js";
 /** Reply payload contracts and metadata helpers shared by dispatch and channel renderers. */
 import type { ReplyToMode } from "../config/types.base.js";
 import type {
@@ -68,6 +73,8 @@ export type ReplyPayload = {
     question: string;
   };
   replyToId?: string;
+  /** Internal reply-policy provenance; implicit ids honor single-use reply modes. */
+  replyToIdSource?: "explicit" | "implicit";
   replyToTag?: boolean;
   /** True when [[reply_to_current]] was present but not yet mapped to a message id. */
   replyToCurrent?: boolean;
@@ -250,6 +257,8 @@ export type ReplyPayloadMetadata = {
    * (ENG-18812) — never a substitute for the plugin's own redaction policy.
    */
   toolFailureDigest?: ToolFailureDigest;
+  /** Terminal run-failure class behind an isError final reply (already downgraded at terminal). */
+  gatewayFailureCode?: GatewayFailureCode;
 };
 
 const replyPayloadMetadata = new WeakMap<object, ReplyPayloadMetadata>();
@@ -277,6 +286,17 @@ export function isReplyPayloadNonTerminalToolErrorWarning(payload: object): bool
 /** Reads the per-failure digest attached to a non-terminal tool-error warning payload, if any. */
 export function getReplyPayloadToolFailureDigest(payload: object): ToolFailureDigest | undefined {
   return getReplyPayloadMetadata(payload)?.toolFailureDigest;
+}
+
+/**
+ * Why a turn stopped, for a terminal run-failure reply: a closed code plus how the user can act.
+ * Lets a channel render its own stop state without matching the copy text.
+ */
+export function getReplyPayloadGatewayFailure(
+  payload: object,
+): { code: GatewayFailureCode; retryAffordance: RetryAffordance } | undefined {
+  const code = getReplyPayloadMetadata(payload)?.gatewayFailureCode;
+  return code ? { code, retryAffordance: messageOriginCodeRetryAffordance(code) } : undefined;
 }
 
 /** Copies internal payload metadata when cloning or transforming payload objects. */

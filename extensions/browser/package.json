@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/browser-plugin",
-  "version": "2026.6.11-boon.46",
+  "version": "2026.6.34-boon.2",
   "private": true,
   "description": "OpenClaw browser tool plugin",
   "type": "module",
@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*",
-    "undici": "8.9.0"
+    "undici": "8.10.2"
   },
   "openclaw": {
     "extensions": [
