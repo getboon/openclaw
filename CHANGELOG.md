@@ -2,6 +2,15 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.34-boon.2
+
+Keeps background sub-agents alive across a gateway crash, stop or restart: an interrupted native sub-agent now resumes after the next boot and delivers its real result, instead of ending with a lost-context error and a "Background task cancelled" notice.
+
+- **#266 (ENG-20801):** while the gateway closes, a non-ok end of a native sub-agent run stays unended and is marked `abortedLastRun`, so the existing orphan recovery resumes it after boot. Explicit kills, steers, ACP and plugin runs, and runs past their `runTimeoutSeconds` deadline still finalize. On boot, a child session that a crash left running is marked too, unless it is older than two hours. The sub-agent task follows the new run id, so no cancelled notice goes out and later restarts do not wait on a stale task. The resume prompt tells the child that tool calls may have been cut off, and a resumed parent is told which sub-agents are still running.
+- New switch `agents.defaults.subagents.restartResume`, default `true`. With `false`, interrupted runs end with an error, as before.
+- This diverges from upstream, which stopped relaunching interrupted sub-agents. A later upstream sync must carry or drop it.
+- Base = `2026.6.34-boon.1`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.34-boon.2` in lockstep. No separately published plugin source changed between boon.1 and boon.2.
+
 ## 2026.6.34-boon.1
 
 Advances the fork's upstream base from `2026.6.11` to `2026.6.34` — 23 upstream release trains, 304 commits, merged in one real (never squashed) merge commit, carrying fixes across browser/network sandboxing, agent and provider run resilience, channel recovery, and SQLite checkpoint robustness, while preserving every fork patch unchanged.
