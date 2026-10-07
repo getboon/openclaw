@@ -117,11 +117,30 @@ function extractMessageText(msg: unknown): string | undefined {
   return undefined;
 }
 
+// Built only from state the resume call cannot change: the gateway may rotate sessionId while
+// accepting it, and a retry must still send the same key.
+function resolveResumeIdempotencyKey(childSessionKey: string, entry: SessionEntry): string {
+  const recovery = entry.subagentRecovery;
+  const hex = crypto
+    .createHash("sha256")
+    .update(
+      [
+        "subagent-resume",
+        childSessionKey,
+        recovery?.lastAttemptAt ?? "",
+        recovery?.automaticAttempts ?? 0,
+      ].join("\0"),
+    )
+    .digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
 /**
  * Send a resume message to an orphaned subagent session via the gateway agent method.
  */
 async function resumeOrphanedSession(params: {
   sessionKey: string;
+  idempotencyKey: string;
   task: string;
   lastHumanMessage?: string;
   configChangeHint?: string;
@@ -134,15 +153,12 @@ async function resumeOrphanedSession(params: {
   }
 
   try {
-    // Known gap: each attempt uses a new key, so a resume the gateway accepts after the
-    // call timeout is started again by the retry.
-    const idempotencyKey = crypto.randomUUID();
     const result = await callGateway<{ runId: string }>({
       method: "agent",
       params: {
         message: resumeMessage,
         sessionKey: params.sessionKey,
-        idempotencyKey,
+        idempotencyKey: params.idempotencyKey,
         deliver: false,
         lane: "subagent",
         inputProvenance: {
@@ -198,12 +214,14 @@ export async function recoverOrphanedSubagentSessions(params: {
   recovered: number;
   failed: number;
   skipped: number;
+  deferred: number;
   failedRuns: Array<{ runId: string; childSessionKey: string; error?: string }>;
 }> {
   const result = {
     recovered: 0,
     failed: 0,
     skipped: 0,
+    deferred: 0,
     failedRuns: [] as Array<{ runId: string; childSessionKey: string; error?: string }>,
   };
   const resumedSessionKeys = params.resumedSessionKeys ?? new Set<string>();
@@ -266,7 +284,7 @@ export async function recoverOrphanedSubagentSessions(params: {
 
         if (resumeInFlightSessionKeys.has(childSessionKey)) {
           log.info(`skipping orphan recovery for ${childSessionKey}: resume already in progress`);
-          result.skipped++;
+          result.deferred++;
           continue;
         }
         // The per-scan store cache can be stale after awaiting another child's resume.
@@ -276,6 +294,7 @@ export async function recoverOrphanedSubagentSessions(params: {
           result.skipped++;
           continue;
         }
+        const idempotencyKey = resolveResumeIdempotencyKey(childSessionKey, currentEntry);
         resumeInFlightSessionKeys.add(childSessionKey);
         claimedResume = true;
 
@@ -350,6 +369,7 @@ export async function recoverOrphanedSubagentSessions(params: {
         // the flag stays true so the next restart can retry.
         const resumeResult = await resumeOrphanedSession({
           sessionKey: childSessionKey,
+          idempotencyKey,
           task: runRecord.task,
           lastHumanMessage: extractMessageText(lastHumanMessage),
           configChangeHint: configChangeDetected
@@ -379,7 +399,7 @@ export async function recoverOrphanedSubagentSessions(params: {
               }
             });
           } catch (err) {
-            // Known gap: abortedLastRun stays set, so a later scan can resume this child again.
+            // abortedLastRun stays set; a later scan reuses the same idempotency key, so the gateway dedupes it.
             log.warn(
               `resume succeeded but failed to update session store for ${childSessionKey}: ${String(err)}`,
             );
@@ -420,9 +440,9 @@ export async function recoverOrphanedSubagentSessions(params: {
     }
   }
 
-  if (result.recovered > 0 || result.failed > 0) {
+  if (result.recovered > 0 || result.failed > 0 || result.deferred > 0) {
     log.info(
-      `orphan recovery complete: recovered=${result.recovered} failed=${result.failed} skipped=${result.skipped}`,
+      `orphan recovery complete: recovered=${result.recovered} failed=${result.failed} skipped=${result.skipped} deferred=${result.deferred}`,
     );
   }
 
@@ -467,10 +487,10 @@ export function scheduleOrphanRecovery(params: {
         resumedSessionKeys,
       })
         .then((result) => {
-          if (result.failed > 0 && attempt < maxRetries) {
+          if ((result.failed > 0 || result.deferred > 0) && attempt < maxRetries) {
             const nextDelay = delay * RETRY_BACKOFF_MULTIPLIER;
             log.info(
-              `orphan recovery had ${result.failed} failure(s); retrying in ${nextDelay}ms (attempt ${attempt + 1}/${maxRetries})`,
+              `orphan recovery had ${result.failed} failure(s) and ${result.deferred} deferred; retrying in ${nextDelay}ms (attempt ${attempt + 1}/${maxRetries})`,
             );
             attemptRecovery(attempt + 1, nextDelay);
             return;

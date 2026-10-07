@@ -95,6 +95,15 @@ function mockSharedAbortedSessionStore(
   vi.mocked(sessions.updateSessionStore).mockImplementation(async (_storePath, mutator) =>
     mutator(store),
   );
+  return store;
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function resumeIdempotencyKeys() {
+  return vi
+    .mocked(gateway.callGateway)
+    .mock.calls.map(([request]) => (request.params as { idempotencyKey?: string }).idempotencyKey);
 }
 
 async function expectSkippedRecovery(store: ReturnType<typeof sessions.loadSessionStore>) {
@@ -745,7 +754,8 @@ describe("subagent-orphan-recovery", () => {
     expect(gateway.callGateway).toHaveBeenCalledOnce();
     expect(first.recovered).toBe(1);
     expect(second.recovered).toBe(0);
-    expect(second.skipped).toBe(1);
+    expect(second.deferred).toBe(1);
+    expect(second.skipped).toBe(0);
   });
 
   it("resumes each interrupted child once when overlapping scans cover two children", async () => {
@@ -805,5 +815,159 @@ describe("subagent-orphan-recovery", () => {
     expect(first.failed).toBe(1);
     expect(second.recovered).toBe(1);
     expect(gateway.callGateway).toHaveBeenCalledTimes(2);
+  });
+
+  it("reuses the idempotency key when a resume is retried after a gateway timeout", async () => {
+    mockSharedAbortedSessionStore();
+    vi.mocked(gateway.callGateway).mockResolvedValue({ runId: "retried-run" } as never);
+    vi.mocked(gateway.callGateway).mockRejectedValueOnce(
+      new Error("gateway timeout after 10000ms"),
+    );
+    const activeRuns = createActiveRuns(createTestRunRecord());
+
+    const first = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    const second = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+
+    expect(first.failed).toBe(1);
+    expect(second.recovered).toBe(1);
+    const [firstKey, secondKey] = resumeIdempotencyKeys();
+    expect(firstKey).toMatch(UUID_PATTERN);
+    expect(secondKey).toBe(firstKey);
+  });
+
+  it("reuses the idempotency key when the timed-out resume rotated the session id", async () => {
+    const store = mockSharedAbortedSessionStore();
+    vi.mocked(gateway.callGateway).mockResolvedValue({ runId: "retried-run" } as never);
+    vi.mocked(gateway.callGateway).mockImplementationOnce(async () => {
+      store["agent:main:subagent:test-session-1"].sessionId = "rotated-session";
+      throw new Error("gateway timeout after 10000ms");
+    });
+    const activeRuns = createActiveRuns(createTestRunRecord());
+
+    await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+
+    const [firstKey, secondKey] = resumeIdempotencyKeys();
+    expect(secondKey).toBe(firstKey);
+  });
+
+  it("reuses the idempotency key when the clear write fails after an accepted resume", async () => {
+    mockSingleAbortedSession();
+    vi.mocked(gateway.callGateway).mockResolvedValue({ runId: "resumed-run" } as never);
+    vi.mocked(sessions.updateSessionStore).mockRejectedValue(new Error("write failed"));
+    const activeRuns = createActiveRuns(createTestRunRecord());
+
+    await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+
+    expect(gateway.callGateway).toHaveBeenCalledTimes(2);
+    const [firstKey, secondKey] = resumeIdempotencyKeys();
+    expect(firstKey).toMatch(UUID_PATTERN);
+    expect(secondKey).toBe(firstKey);
+  });
+
+  it("uses a new idempotency key for a new interruption after an accepted resume", async () => {
+    const store = mockSharedAbortedSessionStore();
+    vi.mocked(gateway.callGateway).mockResolvedValue({ runId: "resumed-run" } as never);
+    const activeRuns = createActiveRuns(createTestRunRecord());
+
+    const first = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    const entry = store["agent:main:subagent:test-session-1"];
+    if (!entry) {
+      throw new Error("expected child session entry");
+    }
+    expect(entry.abortedLastRun).toBe(false);
+    entry.abortedLastRun = true;
+    const second = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+
+    expect(first.recovered).toBe(1);
+    expect(second.recovered).toBe(1);
+    const [firstKey, secondKey] = resumeIdempotencyKeys();
+    expect(firstKey).toMatch(UUID_PATTERN);
+    expect(secondKey).toMatch(UUID_PATTERN);
+    expect(secondKey).not.toBe(firstKey);
+  });
+
+  it("uses different idempotency keys for different children", async () => {
+    mockSharedAbortedSessionStore(["agent:main:subagent:a", "agent:main:subagent:b"]);
+    vi.mocked(gateway.callGateway).mockResolvedValue({ runId: "resumed-run" } as never);
+    const activeRuns = createActiveRuns(
+      createTestRunRecord({ runId: "run-a", childSessionKey: "agent:main:subagent:a" }),
+      createTestRunRecord({ runId: "run-b", childSessionKey: "agent:main:subagent:b" }),
+    );
+
+    const result = await recoverOrphanedSubagentSessions({ getActiveRuns: () => activeRuns });
+
+    expect(result.recovered).toBe(2);
+    const [firstKey, secondKey] = resumeIdempotencyKeys();
+    expect(firstKey).toMatch(UUID_PATTERN);
+    expect(secondKey).toMatch(UUID_PATTERN);
+    expect(secondKey).not.toBe(firstKey);
+  });
+
+  it("retries a scheduled scan that deferred a child behind another scan's claim", async () => {
+    mockSharedAbortedSessionStore();
+    let releaseHolderResume!: () => void;
+    const holderResumeReleased = new Promise<void>((resolve) => {
+      releaseHolderResume = resolve;
+    });
+    let signalHolderResumeStarted!: () => void;
+    const holderResumeStarted = new Promise<void>((resolve) => {
+      signalHolderResumeStarted = resolve;
+    });
+    vi.mocked(gateway.callGateway).mockResolvedValue({ runId: "retried-run" } as never);
+    vi.mocked(gateway.callGateway).mockImplementationOnce(async () => {
+      signalHolderResumeStarted();
+      await holderResumeReleased;
+      throw new Error("gateway connection closed");
+    });
+    const activeRuns = createActiveRuns(createTestRunRecord());
+
+    const holderScan = recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    await holderResumeStarted;
+
+    scheduleOrphanRecovery({ getActiveRuns: () => activeRuns, delayMs: 1, maxRetries: 1 });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(gateway.callGateway).toHaveBeenCalledOnce();
+
+    releaseHolderResume();
+    const holder = await holderScan;
+    expect(holder.failed).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(2);
+    await Promise.resolve();
+
+    expect(gateway.callGateway).toHaveBeenCalledTimes(2);
+    const [holderKey, retryKey] = resumeIdempotencyKeys();
+    expect(holderKey).toMatch(UUID_PATTERN);
+    expect(retryKey).toBe(holderKey);
+    expect(subagentRegistrySteerRuntime.finalizeInterruptedSubagentRun).not.toHaveBeenCalled();
   });
 });
