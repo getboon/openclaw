@@ -839,6 +839,7 @@ describe("subagent-orphan-recovery", () => {
     expect(second.recovered).toBe(1);
     const [firstKey, secondKey] = resumeIdempotencyKeys();
     expect(firstKey).toMatch(UUID_PATTERN);
+    expect(secondKey).toMatch(UUID_PATTERN);
     expect(secondKey).toBe(firstKey);
   });
 
@@ -861,6 +862,8 @@ describe("subagent-orphan-recovery", () => {
     });
 
     const [firstKey, secondKey] = resumeIdempotencyKeys();
+    expect(firstKey).toMatch(UUID_PATTERN);
+    expect(secondKey).toMatch(UUID_PATTERN);
     expect(secondKey).toBe(firstKey);
   });
 
