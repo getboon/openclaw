@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.34-boon.3
+
+Resumes an interrupted sub-agent once after a gateway restart. Before, a loaded host could resume the same child twice, so it repeated its tool calls and the parent's answer came late.
+
+- **#269 (ENG-20801):** the two boot recovery scans could both resume one interrupted sub-agent, and a resume accepted after the 10 s call timeout was retried with a new random idempotency key. A scan now claims the child in-process and re-reads its session entry before resuming; a scan that finds the claim retries later. The resume idempotency key is derived from the child session, the gateway lifecycle and the child's recovery marker, so every attempt for one interruption in one gateway lifecycle gets the run the gateway already accepted. A resume accepted after its call failed is tracked instead of ending as a failed recovery. Boot marking no longer marks a child that a scan resumed during the marking loop.
+- Not covered: a late accept on the last attempt of a recovery schedule, and a clear write that drops an abort mark written by the resumed run in the meantime.
+- Base = `2026.6.34-boon.2`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.34-boon.3` in lockstep. No separately published plugin source changed between boon.2 and boon.3.
+
 ## 2026.6.34-boon.2
 
 Keeps background sub-agents alive across a gateway crash, stop or restart: an interrupted native sub-agent now resumes after the next boot and delivers its real result, instead of ending with a lost-context error and a "Background task cancelled" notice.
