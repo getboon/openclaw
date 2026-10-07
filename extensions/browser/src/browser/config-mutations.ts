@@ -167,6 +167,7 @@ export async function createBrowserProfileConfig(params: {
         nextProfileConfig = {
           cdpPort,
           ...(params.driver ? { driver: params.driver } : {}),
+          ...(params.attachOnly ? { attachOnly: true } : {}),
           color: profileColor,
         };
       }

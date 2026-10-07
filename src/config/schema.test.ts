@@ -841,6 +841,14 @@ describe("config schema", () => {
     });
   });
 
+  it("rejects web fetch allowedHostnames entries that can never match a hostname", () => {
+    for (const bad of ["", "  ", "*", "https://example.com", "example.com/path"]) {
+      expect(() =>
+        ToolsSchema.parse({ web: { fetch: { ssrfPolicy: { allowedHostnames: [bad] } } } }),
+      ).toThrow();
+    }
+  });
+
   it("accepts web fetch ssrfPolicy in the runtime zod schema", () => {
     const parsed = ToolsSchema.parse({
       web: {

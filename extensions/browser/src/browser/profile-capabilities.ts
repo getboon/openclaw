@@ -113,10 +113,11 @@ function isAttachOnlyCdpRelay(profile: ResolvedBrowserProfile): boolean {
   try {
     const url = new URL(profile.cdpUrl);
     const path = url.pathname.replace(/\/$/, "");
-    // A bare Chrome debug socket (/devtools/browser/<id>) keeps its /json endpoints.
+    // A bare Chrome debug socket (/devtools/browser/<id>) keeps its /json
+    // endpoints; a root URL with a query (ws://host?token=...) is a relay too.
     return (
       (url.protocol === "ws:" || url.protocol === "wss:") &&
-      path !== "" &&
+      (path !== "" || url.search !== "") &&
       !path.startsWith("/devtools/")
     );
   } catch {

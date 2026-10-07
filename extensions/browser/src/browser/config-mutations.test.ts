@@ -102,4 +102,16 @@ describe("createBrowserProfileConfig replaceExisting", () => {
 
     expect(result?.color).toBe("#222222");
   });
+
+  it("persists attachOnly for an allocated-port profile too", async () => {
+    await createBrowserProfileConfig({
+      name: "relay-no-url",
+      resolved: resolveBrowserConfig(undefined, undefined),
+      driver: "openclaw",
+      attachOnly: true,
+    });
+    expect(configMocks.getRuntimeConfig().browser?.profiles?.["relay-no-url"]?.attachOnly).toBe(
+      true,
+    );
+  });
 });

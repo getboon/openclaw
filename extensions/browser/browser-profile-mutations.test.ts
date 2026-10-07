@@ -66,6 +66,7 @@ describe("unregisterRemoteCdpBrowserProfile", () => {
   });
 
   it("drives the remote browser with Playwright over CDP, attach-only, not through the Chrome MCP existing-session bridge", async () => {
+    createBrowserProfileConfigMock.mockClear();
     createBrowserProfileConfigMock.mockResolvedValue({ cdpUrl: "wss://proxy.example/cdp" });
 
     await registerRemoteCdpBrowserProfile({

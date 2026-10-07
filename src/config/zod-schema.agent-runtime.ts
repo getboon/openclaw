@@ -466,7 +466,16 @@ const ToolsWebFetchSchema = z
       .object({
         allowRfc2544BenchmarkRange: z.boolean().optional(),
         allowIpv6UniqueLocalRange: z.boolean().optional(),
-        allowedHostnames: z.array(z.string()).optional(),
+        // Exact hostnames only: the SSRF guard compares normalized hostnames, so a
+        // URL, path, wildcard or blank entry would silently never match.
+        allowedHostnames: z
+          .array(
+            z
+              .string()
+              .trim()
+              .regex(/^[a-z0-9.-]+$|^\[[0-9a-f:.]+\]$/i, "must be a bare hostname or IP"),
+          )
+          .optional(),
       })
       .strict()
       .optional(),

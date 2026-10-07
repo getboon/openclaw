@@ -1051,6 +1051,12 @@ describe("browser config", () => {
           color: "#0066CC",
         },
         local: { cdpPort: 18800, color: "#FF4500" },
+        rootRelay: {
+          cdpUrl: "ws://localhost:3000?token=abc",
+          driver: "openclaw",
+          attachOnly: true,
+          color: "#123456",
+        },
         chromeSocket: {
           cdpUrl: "ws://127.0.0.1:9222/devtools/browser/abc",
           attachOnly: true,
@@ -1058,6 +1064,9 @@ describe("browser config", () => {
         },
       },
     });
+
+    const rootRelay = getBrowserProfileCapabilities(resolveProfile(resolved, "rootRelay")!);
+    expect(rootRelay).toMatchObject({ mode: "remote-cdp", usesPersistentPlaywright: true });
 
     const chromeSocket = getBrowserProfileCapabilities(resolveProfile(resolved, "chromeSocket")!);
     expect(chromeSocket).toMatchObject({ mode: "local-managed", supportsJsonTabEndpoints: true });
