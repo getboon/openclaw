@@ -1,0 +1,39 @@
+extensions/browser/src/browser/config-mutations.test.ts
+  s_7d982217096b7e::t_eb4585242e3c77 105-114
+  s_7d982217096b7e::t_8f36128b589135 115-116
+src/config/zod-schema.agent-runtime.ts
+  s_7d982217096b7e::t_8151674eed00d7 469-473
+  s_7d982217096b7e::t_bf43a7c0f2b19d 474-478
+extensions/browser/src/browser/config-mutations.ts
+  s_7d982217096b7e::t_b1cfcfce55c007 170
+extensions/browser/src/browser/config.test.ts
+  s_7d982217096b7e::t_2a645bd69a762a 1054
+  s_7d982217096b7e::t_b6745b4a5cd167 1055-1059,1068-1070
+extensions/browser/browser-profile-mutations.test.ts
+  s_7d982217096b7e::t_2a645bd69a762a 69
+src/config/schema.test.ts
+  s_7d982217096b7e::t_3b71c7ec714429 844-849
+  s_7d982217096b7e::t_38092c37465c19 850-851
+extensions/browser/src/browser/profile-capabilities.ts
+  s_7d982217096b7e::t_c9b425a543f0a0 116-117,120
+src/agents/tools/web-fetch.ssrf.test.ts
+  s_7d982217096b7e::t_3b71c7ec714429 251-267
+src/agents/tools/web-fetch.ts
+  s_7d982217096b7e::t_d1fb74e7470098 493
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "54790a37f98ef016772369e1845a7f9674dd9a21",
+  "prompts": {},
+  "sessions": {
+    "s_7d982217096b7e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d02e7994-1c43-4ce1-8a93-a21bf7203ced",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "insomnius <arief.rahman@getboon.ai>"
+    }
+  }
+}
