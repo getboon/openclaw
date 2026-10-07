@@ -879,7 +879,14 @@ async function prepareRestoredSubagentRunsForRestartResume(heldRunIds: Set<strin
   const now = Date.now();
   const processStartedAt = now - process.uptime() * 1_000;
   const storeCache: SubagentSessionStoreCache = new Map();
+  const restoredRuns = new Map(subagentRuns);
   for (const [runId, run] of subagentRuns) {
+    // Orphan recovery can resume a child during the awaits below. Its replacement run already has
+    // a completion wait, and the cached session entry would wrongly show it as crashed.
+    if (restoredRuns.get(runId) !== run) {
+      heldRunIds.add(runId);
+      continue;
+    }
     const action = resolveRestoredSubagentRunResumeAction({
       run,
       session: loadSubagentSessionEntry({ childSessionKey: run.childSessionKey, storeCache, cfg }),
