@@ -82,6 +82,21 @@ function mockSingleAbortedSession(
   });
 }
 
+function mockSharedAbortedSessionStore(
+  childSessionKeys: string[] = ["agent:main:subagent:test-session-1"],
+) {
+  const store: ReturnType<typeof sessions.loadSessionStore> = Object.fromEntries(
+    childSessionKeys.map((childSessionKey) => [
+      childSessionKey,
+      { sessionId: `session-${childSessionKey}`, updatedAt: Date.now(), abortedLastRun: true },
+    ]),
+  );
+  vi.mocked(sessions.loadSessionStore).mockImplementation(() => structuredClone(store));
+  vi.mocked(sessions.updateSessionStore).mockImplementation(async (_storePath, mutator) =>
+    mutator(store),
+  );
+}
+
 async function expectSkippedRecovery(store: ReturnType<typeof sessions.loadSessionStore>) {
   vi.mocked(sessions.loadSessionStore).mockReturnValue(store);
 
@@ -695,5 +710,100 @@ describe("subagent-orphan-recovery", () => {
     expect(finalizeParams.childSessionKey).toBe("agent:main:subagent:test-session-1");
     expect(finalizeParams.error).toContain("Automatic recovery failed after 2 attempts");
     expect(finalizeParams.error).toContain("service restart");
+  });
+
+  it("resumes an interrupted child once when a second scan overlaps the first resume", async () => {
+    mockSharedAbortedSessionStore();
+    let releaseFirstResume!: () => void;
+    const firstResumeReleased = new Promise<void>((resolve) => {
+      releaseFirstResume = resolve;
+    });
+    let signalFirstResumeStarted!: () => void;
+    const firstResumeStarted = new Promise<void>((resolve) => {
+      signalFirstResumeStarted = resolve;
+    });
+    vi.mocked(gateway.callGateway).mockResolvedValue({ runId: "duplicate-run" } as never);
+    vi.mocked(gateway.callGateway).mockImplementationOnce(async () => {
+      signalFirstResumeStarted();
+      await firstResumeReleased;
+      return { runId: "resumed-run" } as never;
+    });
+    const activeRuns = createActiveRuns(createTestRunRecord());
+
+    const firstScan = recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    await firstResumeStarted;
+    const secondScan = recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    releaseFirstResume();
+    const [first, second] = await Promise.all([firstScan, secondScan]);
+
+    expect(gateway.callGateway).toHaveBeenCalledOnce();
+    expect(first.recovered).toBe(1);
+    expect(second.recovered).toBe(0);
+    expect(second.skipped).toBe(1);
+  });
+
+  it("resumes each interrupted child once when overlapping scans cover two children", async () => {
+    mockSharedAbortedSessionStore(["agent:main:subagent:a", "agent:main:subagent:b"]);
+    let releaseFirstResume!: () => void;
+    const firstResumeReleased = new Promise<void>((resolve) => {
+      releaseFirstResume = resolve;
+    });
+    let signalFirstResumeStarted!: () => void;
+    const firstResumeStarted = new Promise<void>((resolve) => {
+      signalFirstResumeStarted = resolve;
+    });
+    vi.mocked(gateway.callGateway).mockResolvedValue({ runId: "resumed-run" } as never);
+    vi.mocked(gateway.callGateway).mockImplementationOnce(async () => {
+      signalFirstResumeStarted();
+      await firstResumeReleased;
+      return { runId: "resumed-run-a" } as never;
+    });
+    const activeRuns = createActiveRuns(
+      createTestRunRecord({ runId: "run-a", childSessionKey: "agent:main:subagent:a" }),
+      createTestRunRecord({ runId: "run-b", childSessionKey: "agent:main:subagent:b" }),
+    );
+
+    const firstScan = recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    await firstResumeStarted;
+    await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    releaseFirstResume();
+    await firstScan;
+
+    const resumedSessionKeys = vi
+      .mocked(gateway.callGateway)
+      .mock.calls.map(([request]) => (request.params as { sessionKey?: string }).sessionKey);
+    expect(resumedSessionKeys).toEqual(["agent:main:subagent:a", "agent:main:subagent:b"]);
+  });
+
+  it("lets a later scan retry after a failed resume releases the claim", async () => {
+    mockSharedAbortedSessionStore();
+    vi.mocked(gateway.callGateway).mockResolvedValue({ runId: "retried-run" } as never);
+    vi.mocked(gateway.callGateway).mockRejectedValueOnce(new Error("gateway unavailable"));
+    const activeRuns = createActiveRuns(createTestRunRecord());
+
+    const first = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    const second = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+
+    expect(first.failed).toBe(1);
+    expect(second.recovered).toBe(1);
+    expect(gateway.callGateway).toHaveBeenCalledTimes(2);
   });
 });

@@ -40,6 +40,9 @@ const log = createSubsystemLogger("subagent-interrupted-resume");
 /** Delay before attempting recovery to let the gateway finish bootstrapping. */
 const DEFAULT_RECOVERY_DELAY_MS = 5_000;
 
+// Scans scheduled by different boot paths can overlap while a resume is still pending.
+const resumeInFlightSessionKeys = new Set<string>();
+
 function isLegacyRestartInterruptedTimeout(
   runRecord: SubagentRunRecord,
   entry: SessionEntry | undefined,
@@ -131,6 +134,8 @@ async function resumeOrphanedSession(params: {
   }
 
   try {
+    // Known gap: each attempt uses a new key, so a resume the gateway accepts after the
+    // call timeout is started again by the retry.
     const idempotencyKey = crypto.randomUUID();
     const result = await callGateway<{ runId: string }>({
       method: "agent",
@@ -224,6 +229,7 @@ export async function recoverOrphanedSubagentSessions(params: {
         continue;
       }
 
+      let claimedResume = false;
       try {
         const agentId = resolveAgentIdFromSessionKey(childSessionKey);
         const storePath = resolveStorePath(cfg.session?.store, { agentId });
@@ -258,7 +264,22 @@ export async function recoverOrphanedSubagentSessions(params: {
           continue;
         }
 
-        const recoveryGate = evaluateSubagentRecoveryGate(entry, now);
+        if (resumeInFlightSessionKeys.has(childSessionKey)) {
+          log.info(`skipping orphan recovery for ${childSessionKey}: resume already in progress`);
+          result.skipped++;
+          continue;
+        }
+        // The per-scan store cache can be stale after awaiting another child's resume.
+        const currentEntry = loadSessionStore(storePath)[childSessionKey];
+        if (currentEntry?.abortedLastRun !== true) {
+          log.info(`skipping orphan recovery for ${childSessionKey}: already resumed`);
+          result.skipped++;
+          continue;
+        }
+        resumeInFlightSessionKeys.add(childSessionKey);
+        claimedResume = true;
+
+        const recoveryGate = evaluateSubagentRecoveryGate(currentEntry, now);
         if (!recoveryGate.allowed) {
           if (recoveryGate.shouldMarkWedged) {
             try {
@@ -275,7 +296,7 @@ export async function recoverOrphanedSubagentSessions(params: {
                 }
               });
               markSubagentRecoveryWedged({
-                entry,
+                entry: currentEntry,
                 now,
                 runId,
                 reason: recoveryGate.reason,
@@ -301,8 +322,8 @@ export async function recoverOrphanedSubagentSessions(params: {
         const messages = await readSessionMessagesAsync(
           {
             agentId: resolveAgentIdFromSessionKey(childSessionKey),
-            sessionEntry: entry,
-            sessionId: entry.sessionId,
+            sessionEntry: currentEntry,
+            sessionId: currentEntry.sessionId,
             sessionKey: childSessionKey,
             storePath,
           },
@@ -345,6 +366,7 @@ export async function recoverOrphanedSubagentSessions(params: {
             await updateSessionStore(storePath, (currentStore) => {
               const current = currentStore[childSessionKey];
               if (current) {
+                // Known gap: this also drops an abort mark that the resumed run wrote meanwhile.
                 current.abortedLastRun = false;
                 markSubagentRecoveryAttempt({
                   entry: current,
@@ -357,6 +379,7 @@ export async function recoverOrphanedSubagentSessions(params: {
               }
             });
           } catch (err) {
+            // Known gap: abortedLastRun stays set, so a later scan can resume this child again.
             log.warn(
               `resume succeeded but failed to update session store for ${childSessionKey}: ${String(err)}`,
             );
@@ -383,6 +406,10 @@ export async function recoverOrphanedSubagentSessions(params: {
           childSessionKey,
           error,
         });
+      } finally {
+        if (claimedResume) {
+          resumeInFlightSessionKeys.delete(childSessionKey);
+        }
       }
     }
   } catch (err) {
