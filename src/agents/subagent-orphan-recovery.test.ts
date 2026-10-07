@@ -10,6 +10,7 @@ import * as announceDelivery from "./subagent-announce-delivery.js";
 import {
   recoverOrphanedSubagentSessions,
   scheduleOrphanRecovery,
+  testing,
 } from "./subagent-orphan-recovery.js";
 import * as subagentRegistrySteerRuntime from "./subagent-registry-steer-runtime.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
@@ -155,6 +156,7 @@ describe("subagent-orphan-recovery", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    testing.resetUnconfirmedResumes();
   });
 
   afterEach(() => {
@@ -940,6 +942,81 @@ describe("subagent-orphan-recovery", () => {
     expect(sameLifecycleKey).toBe(firstKey);
     expect(restartedKey).toMatch(UUID_PATTERN);
     expect(restartedKey).not.toBe(firstKey);
+  });
+
+  it("tracks a resume the gateway accepted after the call timed out", async () => {
+    const store = mockSharedAbortedSessionStore();
+    vi.mocked(subagentRegistrySteerRuntime.replaceSubagentRunAfterSteer).mockReturnValue(true);
+    vi.mocked(gateway.callGateway).mockImplementationOnce(async () => {
+      store["agent:main:subagent:test-session-1"].abortedLastRun = false;
+      throw new Error("gateway timeout after 10000ms");
+    });
+    const activeRuns = createActiveRuns(createTestRunRecord());
+
+    const first = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    const second = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+
+    const [sentKey] = resumeIdempotencyKeys();
+    expect(sentKey).toMatch(UUID_PATTERN);
+    expect(first.failed).toBe(1);
+    expect(second).toMatchObject({ recovered: 1, failed: 0, failedRuns: [] });
+    expect(gateway.callGateway).toHaveBeenCalledTimes(1);
+    expect(subagentRegistrySteerRuntime.replaceSubagentRunAfterSteer).toHaveBeenCalledWith(
+      expect.objectContaining({ previousRunId: "run-1", nextRunId: sentKey }),
+    );
+  });
+
+  it("does not take over a steer run that replaced the run of a timed-out resume", async () => {
+    const store = mockSharedAbortedSessionStore();
+    vi.mocked(subagentRegistrySteerRuntime.replaceSubagentRunAfterSteer).mockReturnValue(true);
+    vi.mocked(gateway.callGateway).mockRejectedValueOnce(
+      new Error("gateway timeout after 10000ms"),
+    );
+    const activeRuns = createActiveRuns(createTestRunRecord());
+
+    await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    activeRuns.delete("run-1");
+    activeRuns.set("run-steer", createTestRunRecord({ runId: "run-steer" }));
+    store["agent:main:subagent:test-session-1"].abortedLastRun = false;
+    const second = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+
+    expect(second.recovered).toBe(0);
+    expect(subagentRegistrySteerRuntime.replaceSubagentRunAfterSteer).not.toHaveBeenCalled();
+  });
+
+  it("does not track a timed-out resume from an earlier gateway lifecycle", async () => {
+    const store = mockSharedAbortedSessionStore();
+    vi.mocked(subagentRegistrySteerRuntime.replaceSubagentRunAfterSteer).mockReturnValue(true);
+    vi.mocked(gateway.callGateway).mockImplementationOnce(async () => {
+      store["agent:main:subagent:test-session-1"].abortedLastRun = false;
+      throw new Error("gateway timeout after 10000ms");
+    });
+    const activeRuns = createActiveRuns(createTestRunRecord());
+
+    await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    rotateAgentEventLifecycleGeneration();
+    const second = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+
+    expect(second.recovered).toBe(0);
+    expect(subagentRegistrySteerRuntime.replaceSubagentRunAfterSteer).not.toHaveBeenCalled();
   });
 
   it("uses different idempotency keys for different children", async () => {

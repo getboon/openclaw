@@ -43,6 +43,9 @@ const DEFAULT_RECOVERY_DELAY_MS = 5_000;
 
 // Scans scheduled by different boot paths can overlap while a resume is still pending.
 const resumeInFlightSessionKeys = new Set<string>();
+// Resumes whose call failed, by child. The gateway may still have accepted the run, whose id is the
+// key. Bound to the run it replaces, so a later steer run on the child is never taken over.
+const unconfirmedResumes = new Map<string, { idempotencyKey: string; originalRunId: string }>();
 
 function isLegacyRestartInterruptedTimeout(
   runRecord: SubagentRunRecord,
@@ -137,6 +140,19 @@ function resolveResumeIdempotencyKey(childSessionKey: string, entry: SessionEntr
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
+function remapToResumedRun(params: {
+  originalRunId: string;
+  originalRun: SubagentRunRecord;
+  runId: string;
+}): boolean {
+  return replaceSubagentRunAfterSteer({
+    previousRunId: params.originalRunId,
+    nextRunId: params.runId,
+    fallback: params.originalRun,
+    transcriptFile: resolveInternalSessionEffectsTranscriptPath(params.runId),
+  });
+}
+
 /**
  * Send a resume message to an orphaned subagent session via the gateway agent method.
  */
@@ -154,6 +170,10 @@ async function resumeOrphanedSession(params: {
     resumeMessage += params.configChangeHint;
   }
 
+  unconfirmedResumes.set(params.sessionKey, {
+    idempotencyKey: params.idempotencyKey,
+    originalRunId: params.originalRunId,
+  });
   try {
     const result = await callGateway<{ runId: string }>({
       method: "agent",
@@ -176,11 +196,11 @@ async function resumeOrphanedSession(params: {
       },
       timeoutMs: 10_000,
     });
-    const remapped = replaceSubagentRunAfterSteer({
-      previousRunId: params.originalRunId,
-      nextRunId: result.runId,
-      fallback: params.originalRun,
-      transcriptFile: resolveInternalSessionEffectsTranscriptPath(result.runId),
+    unconfirmedResumes.delete(params.sessionKey);
+    const remapped = remapToResumedRun({
+      originalRunId: params.originalRunId,
+      originalRun: params.originalRun,
+      runId: result.runId,
     });
     if (!remapped) {
       log.warn(
@@ -279,7 +299,10 @@ export async function recoverOrphanedSubagentSessions(params: {
         }
 
         // Check if this session was aborted by the restart
-        if (!entry.abortedLastRun) {
+        if (
+          !entry.abortedLastRun &&
+          unconfirmedResumes.get(childSessionKey)?.originalRunId !== runId
+        ) {
           result.skipped++;
           continue;
         }
@@ -292,8 +315,28 @@ export async function recoverOrphanedSubagentSessions(params: {
         // The per-scan store cache can be stale after awaiting another child's resume.
         const currentEntry = loadSessionStore(storePath)[childSessionKey];
         if (currentEntry?.abortedLastRun !== true) {
-          // Known gap: when a timed-out resume was accepted and its run already started, this skip
-          // leaves the registry on the old run id until the sweeper ends it.
+          // A failed call may have been accepted late: its run started and cleared the flag. Track
+          // that run instead of letting the old record end as a failure.
+          // Known gap: if the failed call was the schedule's last attempt, no scan reaches this.
+          const sent = unconfirmedResumes.get(childSessionKey);
+          unconfirmedResumes.delete(childSessionKey);
+          if (
+            currentEntry &&
+            sent?.originalRunId === runId &&
+            sent.idempotencyKey === resolveResumeIdempotencyKey(childSessionKey, currentEntry) &&
+            remapToResumedRun({
+              originalRunId: runId,
+              originalRun: runRecord,
+              runId: sent.idempotencyKey,
+            })
+          ) {
+            resumedSessionKeys.add(childSessionKey);
+            log.info(
+              `adopted late-accepted resume of ${childSessionKey}: run=${sent.idempotencyKey}`,
+            );
+            result.recovered++;
+            continue;
+          }
           log.info(`skipping orphan recovery for ${childSessionKey}: already resumed`);
           result.skipped++;
           continue;
@@ -469,6 +512,10 @@ function buildRecoveryFailureMessage(params: { attempts: number; error?: string 
   }
   return `${base} (${detail})`;
 }
+
+export const testing = {
+  resetUnconfirmedResumes: () => unconfirmedResumes.clear(),
+};
 
 /**
  * Schedule orphan recovery after a delay, with retry logic.
