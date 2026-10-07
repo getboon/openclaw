@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as sessions from "../config/sessions.js";
 import * as gateway from "../gateway/call.js";
 import * as sessionUtils from "../gateway/session-transcript-readers.js";
+import { rotateAgentEventLifecycleGeneration } from "../infra/agent-events.js";
 import { resolveInternalSessionEffectsTranscriptPath } from "./internal-session-effects.js";
 import * as announceDelivery from "./subagent-announce-delivery.js";
 import {
@@ -910,6 +911,32 @@ describe("subagent-orphan-recovery", () => {
     expect(firstKey).toMatch(UUID_PATTERN);
     expect(secondKey).toMatch(UUID_PATTERN);
     expect(secondKey).not.toBe(firstKey);
+  });
+
+  it("uses a new idempotency key after a gateway restart when the attempt was not recorded", async () => {
+    mockSingleAbortedSession();
+    vi.mocked(gateway.callGateway).mockResolvedValue({ runId: "resumed-run" } as never);
+    vi.mocked(sessions.updateSessionStore).mockRejectedValue(new Error("write failed"));
+    const activeRuns = createActiveRuns(createTestRunRecord());
+
+    await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+    rotateAgentEventLifecycleGeneration();
+    await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+      resumedSessionKeys: new Set<string>(),
+    });
+
+    const [firstKey, sameLifecycleKey, restartedKey] = resumeIdempotencyKeys();
+    expect(sameLifecycleKey).toBe(firstKey);
+    expect(restartedKey).toMatch(UUID_PATTERN);
+    expect(restartedKey).not.toBe(firstKey);
   });
 
   it("uses different idempotency keys for different children", async () => {

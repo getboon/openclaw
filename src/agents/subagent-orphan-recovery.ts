@@ -21,6 +21,7 @@ import {
 } from "../config/sessions.js";
 import { callGateway } from "../gateway/call.js";
 import { readSessionMessagesAsync } from "../gateway/session-transcript-readers.js";
+import { getAgentEventLifecycleGeneration } from "../infra/agent-events.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolveInternalSessionEffectsTranscriptPath } from "./internal-session-effects.js";
@@ -117,8 +118,8 @@ function extractMessageText(msg: unknown): string | undefined {
   return undefined;
 }
 
-// Built only from state the resume call cannot change: the gateway may rotate sessionId while
-// accepting it, and a retry must still send the same key.
+// One key per interruption and gateway lifecycle, so retries dedupe but a restart never reuses a
+// run id that still has a cached result. sessionId is excluded: it can change before a retry.
 function resolveResumeIdempotencyKey(childSessionKey: string, entry: SessionEntry): string {
   const recovery = entry.subagentRecovery;
   const hex = crypto
@@ -127,6 +128,7 @@ function resolveResumeIdempotencyKey(childSessionKey: string, entry: SessionEntr
       [
         "subagent-resume",
         childSessionKey,
+        getAgentEventLifecycleGeneration(),
         recovery?.lastAttemptAt ?? "",
         recovery?.automaticAttempts ?? 0,
       ].join("\0"),
@@ -290,11 +292,12 @@ export async function recoverOrphanedSubagentSessions(params: {
         // The per-scan store cache can be stale after awaiting another child's resume.
         const currentEntry = loadSessionStore(storePath)[childSessionKey];
         if (currentEntry?.abortedLastRun !== true) {
+          // Known gap: when a timed-out resume was accepted and its run already started, this skip
+          // leaves the registry on the old run id until the sweeper ends it.
           log.info(`skipping orphan recovery for ${childSessionKey}: already resumed`);
           result.skipped++;
           continue;
         }
-        const idempotencyKey = resolveResumeIdempotencyKey(childSessionKey, currentEntry);
         resumeInFlightSessionKeys.add(childSessionKey);
         claimedResume = true;
 
@@ -369,7 +372,7 @@ export async function recoverOrphanedSubagentSessions(params: {
         // the flag stays true so the next restart can retry.
         const resumeResult = await resumeOrphanedSession({
           sessionKey: childSessionKey,
-          idempotencyKey,
+          idempotencyKey: resolveResumeIdempotencyKey(childSessionKey, currentEntry),
           task: runRecord.task,
           lastHumanMessage: extractMessageText(lastHumanMessage),
           configChangeHint: configChangeDetected
@@ -399,7 +402,8 @@ export async function recoverOrphanedSubagentSessions(params: {
               }
             });
           } catch (err) {
-            // abortedLastRun stays set; a later scan reuses the same idempotency key, so the gateway dedupes it.
+            // abortedLastRun stays set; a later scan in this gateway lifecycle reuses the key, so the
+            // gateway dedupes it.
             log.warn(
               `resume succeeded but failed to update session store for ${childSessionKey}: ${String(err)}`,
             );
