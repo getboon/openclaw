@@ -21,6 +21,7 @@ import {
 } from "../config/sessions.js";
 import { callGateway } from "../gateway/call.js";
 import { readSessionMessagesAsync } from "../gateway/session-transcript-readers.js";
+import { getAgentEventLifecycleGeneration } from "../infra/agent-events.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolveInternalSessionEffectsTranscriptPath } from "./internal-session-effects.js";
@@ -39,6 +40,15 @@ const log = createSubsystemLogger("subagent-interrupted-resume");
 
 /** Delay before attempting recovery to let the gateway finish bootstrapping. */
 const DEFAULT_RECOVERY_DELAY_MS = 5_000;
+
+// Scans scheduled by different boot paths can overlap while a resume is still pending.
+const resumeInFlightSessionKeys = new Set<string>();
+// Resumes whose call failed, by child. The gateway may still have accepted the run, whose id is the
+// key. Bound to the run it replaces, so a later steer run on the child is never taken over.
+const unconfirmedResumes = new Map<
+  string,
+  { idempotencyKey: string; originalRunId: string; attempt: number }
+>();
 
 function isLegacyRestartInterruptedTimeout(
   runRecord: SubagentRunRecord,
@@ -114,11 +124,44 @@ function extractMessageText(msg: unknown): string | undefined {
   return undefined;
 }
 
+// One key per interruption and gateway lifecycle, so retries dedupe but a restart never reuses a
+// run id that still has a cached result. sessionId is excluded: it can change before a retry.
+function resolveResumeIdempotencyKey(childSessionKey: string, entry: SessionEntry): string {
+  const recovery = entry.subagentRecovery;
+  const hex = crypto
+    .createHash("sha256")
+    .update(
+      [
+        "subagent-resume",
+        childSessionKey,
+        getAgentEventLifecycleGeneration(),
+        recovery?.lastAttemptAt ?? "",
+        recovery?.automaticAttempts ?? 0,
+      ].join("\0"),
+    )
+    .digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+function remapToResumedRun(params: {
+  originalRunId: string;
+  originalRun: SubagentRunRecord;
+  runId: string;
+}): boolean {
+  return replaceSubagentRunAfterSteer({
+    previousRunId: params.originalRunId,
+    nextRunId: params.runId,
+    fallback: params.originalRun,
+    transcriptFile: resolveInternalSessionEffectsTranscriptPath(params.runId),
+  });
+}
+
 /**
  * Send a resume message to an orphaned subagent session via the gateway agent method.
  */
 async function resumeOrphanedSession(params: {
   sessionKey: string;
+  idempotencyKey: string;
   task: string;
   lastHumanMessage?: string;
   configChangeHint?: string;
@@ -131,13 +174,12 @@ async function resumeOrphanedSession(params: {
   }
 
   try {
-    const idempotencyKey = crypto.randomUUID();
     const result = await callGateway<{ runId: string }>({
       method: "agent",
       params: {
         message: resumeMessage,
         sessionKey: params.sessionKey,
-        idempotencyKey,
+        idempotencyKey: params.idempotencyKey,
         deliver: false,
         lane: "subagent",
         inputProvenance: {
@@ -153,11 +195,10 @@ async function resumeOrphanedSession(params: {
       },
       timeoutMs: 10_000,
     });
-    const remapped = replaceSubagentRunAfterSteer({
-      previousRunId: params.originalRunId,
-      nextRunId: result.runId,
-      fallback: params.originalRun,
-      transcriptFile: resolveInternalSessionEffectsTranscriptPath(result.runId),
+    const remapped = remapToResumedRun({
+      originalRunId: params.originalRunId,
+      originalRun: params.originalRun,
+      runId: result.runId,
     });
     if (!remapped) {
       log.warn(
@@ -193,12 +234,14 @@ export async function recoverOrphanedSubagentSessions(params: {
   recovered: number;
   failed: number;
   skipped: number;
+  deferred: number;
   failedRuns: Array<{ runId: string; childSessionKey: string; error?: string }>;
 }> {
   const result = {
     recovered: 0,
     failed: 0,
     skipped: 0,
+    deferred: 0,
     failedRuns: [] as Array<{ runId: string; childSessionKey: string; error?: string }>,
   };
   const resumedSessionKeys = params.resumedSessionKeys ?? new Set<string>();
@@ -224,6 +267,7 @@ export async function recoverOrphanedSubagentSessions(params: {
         continue;
       }
 
+      let claimedResume = false;
       try {
         const agentId = resolveAgentIdFromSessionKey(childSessionKey);
         const storePath = resolveStorePath(cfg.session?.store, { agentId });
@@ -253,12 +297,74 @@ export async function recoverOrphanedSubagentSessions(params: {
         }
 
         // Check if this session was aborted by the restart
-        if (!entry.abortedLastRun) {
+        if (
+          !entry.abortedLastRun &&
+          unconfirmedResumes.get(childSessionKey)?.originalRunId !== runId
+        ) {
           result.skipped++;
           continue;
         }
 
-        const recoveryGate = evaluateSubagentRecoveryGate(entry, now);
+        if (resumeInFlightSessionKeys.has(childSessionKey)) {
+          log.info(`skipping orphan recovery for ${childSessionKey}: resume already in progress`);
+          result.deferred++;
+          continue;
+        }
+        // The per-scan store cache can be stale after awaiting another child's resume.
+        const currentEntry = loadSessionStore(storePath)[childSessionKey];
+        if (currentEntry?.abortedLastRun !== true) {
+          // A failed call may have been accepted late: its run started and cleared the flag. Track
+          // that run instead of letting the old record end as a failure.
+          // Known gap: if the failed call was the schedule's last attempt, no scan reaches this.
+          const sent = unconfirmedResumes.get(childSessionKey);
+          unconfirmedResumes.delete(childSessionKey);
+          if (
+            currentEntry &&
+            sent?.originalRunId === runId &&
+            sent.idempotencyKey === resolveResumeIdempotencyKey(childSessionKey, currentEntry) &&
+            remapToResumedRun({
+              originalRunId: runId,
+              originalRun: runRecord,
+              runId: sent.idempotencyKey,
+            })
+          ) {
+            resumeInFlightSessionKeys.add(childSessionKey);
+            claimedResume = true;
+            resumedSessionKeys.add(childSessionKey);
+            log.info(
+              `adopted late-accepted resume of ${childSessionKey}: run=${sent.idempotencyKey}`,
+            );
+            // Record the attempt like a confirmed resume, so a later interruption gets a new key.
+            try {
+              await updateSessionStore(storePath, (currentStore) => {
+                const current = currentStore[childSessionKey];
+                if (current) {
+                  markSubagentRecoveryAttempt({
+                    entry: current,
+                    now: Date.now(),
+                    runId,
+                    attempt: sent.attempt,
+                  });
+                  current.updatedAt = Date.now();
+                  currentStore[childSessionKey] = current;
+                }
+              });
+            } catch (err) {
+              log.warn(
+                `adopted resume of ${childSessionKey} but failed to record the attempt: ${String(err)}`,
+              );
+            }
+            result.recovered++;
+            continue;
+          }
+          log.info(`skipping orphan recovery for ${childSessionKey}: already resumed`);
+          result.skipped++;
+          continue;
+        }
+        resumeInFlightSessionKeys.add(childSessionKey);
+        claimedResume = true;
+
+        const recoveryGate = evaluateSubagentRecoveryGate(currentEntry, now);
         if (!recoveryGate.allowed) {
           if (recoveryGate.shouldMarkWedged) {
             try {
@@ -275,7 +381,7 @@ export async function recoverOrphanedSubagentSessions(params: {
                 }
               });
               markSubagentRecoveryWedged({
-                entry,
+                entry: currentEntry,
                 now,
                 runId,
                 reason: recoveryGate.reason,
@@ -301,8 +407,8 @@ export async function recoverOrphanedSubagentSessions(params: {
         const messages = await readSessionMessagesAsync(
           {
             agentId: resolveAgentIdFromSessionKey(childSessionKey),
-            sessionEntry: entry,
-            sessionId: entry.sessionId,
+            sessionEntry: currentEntry,
+            sessionId: currentEntry.sessionId,
             sessionKey: childSessionKey,
             storePath,
           },
@@ -327,8 +433,15 @@ export async function recoverOrphanedSubagentSessions(params: {
         // We intentionally do NOT clear abortedLastRun before attempting
         // the resume — if callGateway fails (e.g. gateway still booting),
         // the flag stays true so the next restart can retry.
+        const idempotencyKey = resolveResumeIdempotencyKey(childSessionKey, currentEntry);
+        unconfirmedResumes.set(childSessionKey, {
+          idempotencyKey,
+          originalRunId: runId,
+          attempt: recoveryGate.nextAttempt,
+        });
         const resumeResult = await resumeOrphanedSession({
           sessionKey: childSessionKey,
+          idempotencyKey,
           task: runRecord.task,
           lastHumanMessage: extractMessageText(lastHumanMessage),
           configChangeHint: configChangeDetected
@@ -339,12 +452,14 @@ export async function recoverOrphanedSubagentSessions(params: {
         });
 
         if (resumeResult.resumed) {
+          unconfirmedResumes.delete(childSessionKey);
           resumedSessionKeys.add(childSessionKey);
           // Only clear the aborted flag after confirmed successful resume.
           try {
             await updateSessionStore(storePath, (currentStore) => {
               const current = currentStore[childSessionKey];
               if (current) {
+                // Known gap: this also drops an abort mark that the resumed run wrote meanwhile.
                 current.abortedLastRun = false;
                 markSubagentRecoveryAttempt({
                   entry: current,
@@ -357,6 +472,8 @@ export async function recoverOrphanedSubagentSessions(params: {
               }
             });
           } catch (err) {
+            // abortedLastRun stays set; a later scan in this gateway lifecycle reuses the key, so the
+            // gateway dedupes it.
             log.warn(
               `resume succeeded but failed to update session store for ${childSessionKey}: ${String(err)}`,
             );
@@ -383,6 +500,10 @@ export async function recoverOrphanedSubagentSessions(params: {
           childSessionKey,
           error,
         });
+      } finally {
+        if (claimedResume) {
+          resumeInFlightSessionKeys.delete(childSessionKey);
+        }
       }
     }
   } catch (err) {
@@ -393,9 +514,9 @@ export async function recoverOrphanedSubagentSessions(params: {
     }
   }
 
-  if (result.recovered > 0 || result.failed > 0) {
+  if (result.recovered > 0 || result.failed > 0 || result.deferred > 0) {
     log.info(
-      `orphan recovery complete: recovered=${result.recovered} failed=${result.failed} skipped=${result.skipped}`,
+      `orphan recovery complete: recovered=${result.recovered} failed=${result.failed} skipped=${result.skipped} deferred=${result.deferred}`,
     );
   }
 
@@ -419,6 +540,10 @@ function buildRecoveryFailureMessage(params: { attempts: number; error?: string 
   return `${base} (${detail})`;
 }
 
+export const testing = {
+  resetUnconfirmedResumes: () => unconfirmedResumes.clear(),
+};
+
 /**
  * Schedule orphan recovery after a delay, with retry logic.
  * The delay gives the gateway time to fully bootstrap after restart.
@@ -440,10 +565,10 @@ export function scheduleOrphanRecovery(params: {
         resumedSessionKeys,
       })
         .then((result) => {
-          if (result.failed > 0 && attempt < maxRetries) {
+          if ((result.failed > 0 || result.deferred > 0) && attempt < maxRetries) {
             const nextDelay = delay * RETRY_BACKOFF_MULTIPLIER;
             log.info(
-              `orphan recovery had ${result.failed} failure(s); retrying in ${nextDelay}ms (attempt ${attempt + 1}/${maxRetries})`,
+              `orphan recovery had ${result.failed} failure(s) and ${result.deferred} deferred; retrying in ${nextDelay}ms (attempt ${attempt + 1}/${maxRetries})`,
             );
             attemptRecovery(attempt + 1, nextDelay);
             return;
@@ -452,6 +577,11 @@ export function scheduleOrphanRecovery(params: {
             return;
           }
           const attempts = attempt + 1;
+          for (const run of result.failedRuns) {
+            if (unconfirmedResumes.get(run.childSessionKey)?.originalRunId === run.runId) {
+              unconfirmedResumes.delete(run.childSessionKey);
+            }
+          }
           void Promise.allSettled(
             result.failedRuns.map((run) =>
               finalizeInterruptedSubagentRun({
