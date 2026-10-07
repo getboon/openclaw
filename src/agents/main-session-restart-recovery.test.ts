@@ -8,12 +8,15 @@ import {
   readSessionStoreForTest,
   writeSessionStoreForTestAsync,
 } from "../config/sessions/test-helpers.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { callGateway } from "../gateway/call.js";
 import {
   getAgentEventLifecycleGeneration,
   registerAgentRunContext,
   resetAgentRunContextForTest,
 } from "../infra/agent-events.js";
+import { createTaskRecord, resetTaskRegistryForTests } from "../tasks/runtime-internal.js";
+import { withEnvAsync } from "../test-utils/env.js";
 import {
   INTERNAL_RUNTIME_CONTEXT_BEGIN,
   INTERNAL_RUNTIME_CONTEXT_END,
@@ -777,6 +780,95 @@ describe("main-session-restart-recovery", () => {
     expect(resumeParams.lane).toBe("main");
     const store = loadSessionStore(path.join(sessionsDir, "sessions.json"));
     expect(store["agent:main:main"]?.abortedLastRun).toBe(false);
+  });
+
+  describe("sub-agent note in the resume instruction", () => {
+    const resumeWithSubagentTasks = async (
+      tasks: Array<{ label?: string; task: string; status: "running" | "queued" | "cancelled" }>,
+      cfg?: OpenClawConfig,
+    ) => {
+      await withEnvAsync({ OPENCLAW_STATE_DIR: tmpDir }, async () => {
+        resetTaskRegistryForTests({ persist: false });
+        try {
+          for (const [index, task] of tasks.entries()) {
+            createTaskRecord({
+              runtime: "subagent",
+              ownerKey: "agent:main:main",
+              scopeKind: "session",
+              childSessionKey: `agent:main:subagent:child-${index}`,
+              runId: `run-child-${index}`,
+              label: task.label,
+              task: task.task,
+              status: task.status,
+              deliveryStatus: "pending",
+            });
+          }
+          const sessionsDir = await makeSessionsDir();
+          await writeStore(sessionsDir, {
+            "agent:main:main": {
+              sessionId: "main-session",
+              updatedAt: Date.now() - 10_000,
+              status: "running",
+              abortedLastRun: true,
+            },
+          });
+          await writeTranscript(sessionsDir, "main-session", [
+            { role: "user", content: "start the sub-agents" },
+          ]);
+          await recoverRestartAbortedMainSessions({ stateDir: tmpDir, cfg });
+        } finally {
+          resetTaskRegistryForTests({ persist: false });
+        }
+      });
+      return String(firstGatewayParams().message);
+    };
+
+    it("names running sub-agents and tells the parent not to start them again", async () => {
+      const message = await resumeWithSubagentTasks([
+        { label: "alpha", task: "a", status: "running" },
+        { label: "beta", task: "b", status: "queued" },
+        { task: "gamma\nreport", status: "running" },
+        { label: "delta", task: "d", status: "running" },
+        { label: "epsilon", task: "e", status: "running" },
+        { label: "zeta", task: "z", status: "running" },
+        { label: "done", task: "x", status: "cancelled" },
+      ]);
+
+      expect(message).toContain(
+        "Background sub-agents zeta, epsilon, delta, gamma report, beta and 1 more are still running or resuming. Their results arrive here. Do not start them again.",
+      );
+      expect(message).not.toContain("done");
+    });
+
+    it("caps each listed name so an unlabeled child does not leak its full prompt", async () => {
+      const longTask = `investigate ${"the supplier quote ".repeat(20)}`;
+      const longLabel = `label ${"x".repeat(100)}`;
+      const message = await resumeWithSubagentTasks([
+        { task: longTask, status: "running" },
+        { label: longLabel, task: "t", status: "running" },
+      ]);
+
+      expect(message).toContain(`${longLabel.slice(0, 80)}..., `);
+      expect(message).toContain(`${longTask.slice(0, 80).trimEnd()}... are still running`);
+      expect(message).not.toContain(longTask.trim());
+    });
+
+    it("adds no note when sub-agent restart resume is off", async () => {
+      const message = await resumeWithSubagentTasks(
+        [{ label: "alpha", task: "a", status: "running" }],
+        { agents: { defaults: { subagents: { restartResume: false } } } },
+      );
+
+      expect(message).not.toContain("Background sub-agents");
+    });
+
+    it("adds no note without running sub-agent tasks", async () => {
+      const message = await resumeWithSubagentTasks([
+        { label: "finished", task: "f", status: "cancelled" },
+      ]);
+
+      expect(message).not.toContain("Background sub-agents");
+    });
   });
 
   it("delivers resumed marked sessions through the current run recovery context", async () => {

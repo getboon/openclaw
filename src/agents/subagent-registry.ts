@@ -23,7 +23,7 @@ import {
   releaseLeasedAgentSteeringItemsFromSubagentRuns,
 } from "./agent-steering-queue.js";
 import { removeInternalSessionEffectsTranscript } from "./internal-session-effects.js";
-import { isAbortedAgentStopReason } from "./run-termination.js";
+import { isAbortedAgentStopReason, isExplicitAgentAbortStopReason } from "./run-termination.js";
 import type { ensureRuntimePluginsLoaded as ensureRuntimePluginsLoadedFn } from "./runtime-plugins.js";
 import type { SubagentRunOutcome } from "./subagent-announce-output.js";
 import {
@@ -82,11 +82,21 @@ import {
 import { configureSubagentRegistrySteerRuntime } from "./subagent-registry-steer-runtime.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 import {
+  isRestoredSubagentRunResumeCandidate,
+  isSubagentRestartResumeEnabled,
+  isSubagentRunPastDeadline,
+  resolveRestoredSubagentRunResumeAction,
+  resolveSubagentRunResumeAgeMs,
+  shouldKeepSubagentRunUnendedOnGatewayClose,
+  type SubagentFinalizeCause,
+} from "./subagent-restart-resume.js";
+import {
   loadSubagentSessionEntry,
   resolveCompletionFromSessionEntry,
   resolveSubagentRunOrphanReason,
   resolveSubagentSessionCompletion,
   resolveSubagentSessionStartedAt,
+  setSubagentSessionAbortedLastRun,
   type SubagentSessionStoreCache,
 } from "./subagent-session-reconciliation.js";
 import { resolveAgentTimeoutMs } from "./timeout.js";
@@ -364,7 +374,73 @@ type CompleteSubagentRunParams = {
   startedAt?: number;
 };
 
-async function completeSubagentRunWithRecovery(params: CompleteSubagentRunParams, source: string) {
+type SubagentRunGatewayCloseHold = { kept: false } | { kept: true; sessionMarked: Promise<void> };
+
+// A closing gateway interrupts the child; leaving the run unended with
+// abortedLastRun lets orphan recovery resume it after the next boot.
+function keepSubagentRunUnendedOnGatewayClose(params: {
+  runId: string;
+  outcome: SubagentRunOutcome;
+  cause: SubagentFinalizeCause;
+}): SubagentRunGatewayCloseHold {
+  const entry = subagentRuns.get(params.runId);
+  if (!entry || typeof entry.endedAt === "number") {
+    return { kept: false };
+  }
+  if (
+    !shouldKeepSubagentRunUnendedOnGatewayClose({
+      childSessionKey: entry.childSessionKey,
+      outcomeStatus: params.outcome.status,
+      explicitKill: params.cause === "explicit-kill",
+      run: entry,
+      getConfig: () => subagentRegistryDeps.getRuntimeConfig(),
+    })
+  ) {
+    return { kept: false };
+  }
+  log.info("kept subagent run for restart resume", {
+    runId: params.runId,
+    childSessionKey: entry.childSessionKey,
+    outcomeStatus: params.outcome.status,
+    source: params.cause,
+  });
+  clearPendingLifecycleError(params.runId);
+  clearPendingLifecycleTimeout(params.runId);
+  if (entry.execution?.status !== "interrupted") {
+    entry.execution = {
+      ...entry.execution,
+      status: "interrupted",
+      interruptedAt: Date.now(),
+      interruptionReason: "gateway-restart",
+      endedAt: undefined,
+      outcome: undefined,
+    };
+    persistSubagentRuns();
+  }
+  const sessionMarked = setSubagentSessionAbortedLastRun({
+    childSessionKey: entry.childSessionKey,
+    abortedLastRun: true,
+    cfg: subagentRegistryDeps.getRuntimeConfig(),
+  }).catch((error: unknown) => {
+    log.warn("failed to mark interrupted subagent session for restart resume", {
+      runId: params.runId,
+      childSessionKey: entry.childSessionKey,
+      error,
+    });
+  });
+  return { kept: true, sessionMarked };
+}
+
+async function completeSubagentRunWithRecovery(
+  params: CompleteSubagentRunParams,
+  source: string,
+  cause: SubagentFinalizeCause,
+) {
+  const hold = keepSubagentRunUnendedOnGatewayClose({ ...params, cause });
+  if (hold.kept) {
+    await hold.sessionMarked;
+    return;
+  }
   try {
     await completeSubagentRun(params);
     return;
@@ -414,8 +490,12 @@ async function completeSubagentRunWithRecovery(params: CompleteSubagentRunParams
   resumeSubagentRun(params.runId);
 }
 
-function completeSubagentRunInBackground(params: CompleteSubagentRunParams, source: string) {
-  void completeSubagentRunWithRecovery(params, source);
+function completeSubagentRunInBackground(
+  params: CompleteSubagentRunParams,
+  source: string,
+  cause: SubagentFinalizeCause,
+) {
+  void completeSubagentRunWithRecovery(params, source, cause);
 }
 
 function schedulePendingLifecycleError(params: {
@@ -452,7 +532,7 @@ function schedulePendingLifecycleError(params: {
       triggerCleanup: true,
       startedAt: pending.startedAt,
     };
-    completeSubagentRunInBackground(completionParams, "lifecycle-error-grace");
+    completeSubagentRunInBackground(completionParams, "lifecycle-error-grace", "listener");
   }, LIFECYCLE_ERROR_RETRY_GRACE_MS);
   timer.unref?.();
   pendingLifecycleErrorByRunId.set(params.runId, {
@@ -495,7 +575,7 @@ function schedulePendingLifecycleTimeout(params: {
       triggerCleanup: true,
       startedAt: pending.startedAt,
     };
-    completeSubagentRunInBackground(completionParams, "lifecycle-timeout-grace");
+    completeSubagentRunInBackground(completionParams, "lifecycle-timeout-grace", "listener");
   }, LIFECYCLE_TIMEOUT_RETRY_GRACE_MS);
   timer.unref?.();
   pendingLifecycleTimeoutByRunId.set(params.runId, {
@@ -752,17 +832,89 @@ function restoreSubagentRunsOnce() {
     ensureListener();
     // Always start sweeper — session-mode runs (no archiveAtMs) also need TTL cleanup.
     startSweeper();
-    for (const runId of subagentRuns.keys()) {
-      resumeSubagentRun(runId);
+    // Arm boot waits synchronously unless a restored run may need a resume mark first.
+    const hasResumeCandidate =
+      isSubagentRestartResumeEnabled(subagentRegistryDeps.getRuntimeConfig()) &&
+      [...subagentRuns.values()].some(isRestoredSubagentRunResumeCandidate);
+    if (hasResumeCandidate) {
+      void resumeRestoredSubagentRuns();
+    } else {
+      armRestoredSubagentRuns(new Set());
     }
-
-    // Cold-start restore path: queue the same recovery pass that restart
-    // startup also uses so resumed children are handled through one seam.
-    scheduleSubagentOrphanRecovery();
   } catch (err) {
     log.warn(
       `failed to restore subagent runs from disk: ${err instanceof Error ? err.message : String(err)}`,
     );
+  }
+}
+
+// Session marks must land before boot waits are armed and the orphan scan
+// runs, or a crashed child would be finalized instead of resumed.
+async function resumeRestoredSubagentRuns() {
+  const heldRunIds = new Set<string>();
+  try {
+    await prepareRestoredSubagentRunsForRestartResume(heldRunIds);
+  } catch (err) {
+    log.warn("failed to prepare restored subagent runs for restart resume", { error: err });
+  }
+  armRestoredSubagentRuns(heldRunIds);
+}
+
+function armRestoredSubagentRuns(heldRunIds: Set<string>) {
+  for (const runId of subagentRuns.keys()) {
+    if (!heldRunIds.has(runId)) {
+      resumeSubagentRun(runId);
+    }
+  }
+  // Cold-start restore path: queue the same recovery pass that restart
+  // startup also uses so resumed children are handled through one seam.
+  scheduleSubagentOrphanRecovery();
+}
+
+async function prepareRestoredSubagentRunsForRestartResume(heldRunIds: Set<string>) {
+  const cfg = subagentRegistryDeps.getRuntimeConfig();
+  if (!isSubagentRestartResumeEnabled(cfg)) {
+    return;
+  }
+  const now = Date.now();
+  const processStartedAt = now - process.uptime() * 1_000;
+  const storeCache: SubagentSessionStoreCache = new Map();
+  for (const [runId, run] of subagentRuns) {
+    const action = resolveRestoredSubagentRunResumeAction({
+      run,
+      session: loadSubagentSessionEntry({ childSessionKey: run.childSessionKey, storeCache, cfg }),
+      now,
+      processStartedAt,
+    });
+    const ids = { runId, childSessionKey: run.childSessionKey };
+    if (action === "none") {
+      continue;
+    }
+    if (action === "too-old") {
+      log.info("subagent run too old to resume", {
+        ...ids,
+        ageMs: resolveSubagentRunResumeAgeMs(run, now),
+      });
+      continue;
+    }
+    if (action === "clear-mark") {
+      await setSubagentSessionAbortedLastRun({
+        childSessionKey: run.childSessionKey,
+        abortedLastRun: false,
+        cfg,
+      });
+      log.info("subagent run past its deadline; not resuming", ids);
+      continue;
+    }
+    if (action === "mark-and-hold") {
+      await setSubagentSessionAbortedLastRun({
+        childSessionKey: run.childSessionKey,
+        abortedLastRun: true,
+        cfg,
+      });
+      log.info("marked crashed subagent session for restart resume", ids);
+    }
+    heldRunIds.add(runId);
   }
 }
 
@@ -950,6 +1102,15 @@ async function sweepSubagentRuns() {
             childSessionKey: entry.childSessionKey,
             storeCache,
           });
+          // A run held at close stays for orphan recovery even after an in-process restart clears the closing flag.
+          if (
+            entry.execution?.status === "interrupted" &&
+            sessionEntry?.abortedLastRun === true &&
+            !isSubagentRunPastDeadline(entry, now)
+          ) {
+            scheduleSubagentOrphanRecovery({ delayMs: 1_000 });
+            continue;
+          }
           const completion = resolveCompletionFromSessionEntry(sessionEntry, now, {
             notBeforeMs: entry.startedAt ?? entry.createdAt,
           });
@@ -966,6 +1127,7 @@ async function sweepSubagentRuns() {
                 triggerCleanup: true,
               },
               "sweeper-session-completion",
+              "sweeper",
             );
             continue;
           }
@@ -989,6 +1151,7 @@ async function sweepSubagentRuns() {
               triggerCleanup: true,
             },
             "sweeper-lost-context",
+            "sweeper",
           );
           continue;
         }
@@ -1150,6 +1313,7 @@ function ensureListener() {
             startedAt,
           },
           "lifecycle-killed-event",
+          isExplicitAgentAbortStopReason(stopReason) ? "explicit-kill" : "listener",
         );
         return;
       }
@@ -1178,7 +1342,7 @@ function ensureListener() {
           triggerCleanup: true,
           startedAt,
         };
-        await completeSubagentRunWithRecovery(blockedParams, "lifecycle-blocked-event");
+        await completeSubagentRunWithRecovery(blockedParams, "lifecycle-blocked-event", "listener");
         return;
       }
       if (evt.data?.aborted) {
@@ -1201,7 +1365,7 @@ function ensureListener() {
         triggerCleanup: true,
         startedAt,
       };
-      await completeSubagentRunWithRecovery(completionParams, "lifecycle-ok-event");
+      await completeSubagentRunWithRecovery(completionParams, "lifecycle-ok-event", "listener");
     })().catch((err: unknown) => {
       log.warn("lifecycle event handler failed", { err, runId: evt.runId });
     });
@@ -1234,6 +1398,7 @@ const subagentRunManager = createSubagentRunManager({
   notifyContextEngineSubagentEnded,
   completeCleanupBookkeeping,
   completeSubagentRun,
+  keepSubagentRunUnendedOnGatewayClose,
 });
 
 configureSubagentRegistrySteerRuntime({
@@ -1284,6 +1449,7 @@ export function resetSubagentRegistryForTests(opts?: { persist?: boolean }) {
   stopSweeper();
   sweepInProgress = false;
   restoreAttempted = false;
+  lastOrphanRecoveryScheduleAt = 0;
   if (listenerStop) {
     listenerStop();
     listenerStop = null;
@@ -1364,6 +1530,7 @@ export async function finalizeInterruptedSubagentRun(params: {
         triggerCleanup: true,
       },
       "explicit-failed-mark",
+      "explicit-kill",
     );
     updated += 1;
   }

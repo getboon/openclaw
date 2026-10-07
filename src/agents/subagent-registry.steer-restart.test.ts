@@ -2,6 +2,7 @@
 // commands while preserving lifecycle hooks and completion delivery.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContextEngine } from "../context-engine/types.js";
+import { listTaskRecords, resetTaskRegistryForTests } from "../tasks/runtime-internal.js";
 
 const noop = () => {};
 let lifecycleHandler:
@@ -318,6 +319,7 @@ describe("subagent registry steer restarts", () => {
     lifecycleHandler = undefined;
     removeInternalSessionEffectsTranscriptMock.mockClear();
     mod.resetSubagentRegistryForTests({ persist: false });
+    resetTaskRegistryForTests({ persist: false });
   });
 
   it("suppresses announce for interrupted runs and only announces the replacement run", async () => {
@@ -545,6 +547,33 @@ describe("subagent registry steer restarts", () => {
     expect(run.completion?.capturedAt).toBeUndefined();
     expect(run.cleanupCompletedAt).toBeUndefined();
     expect(run.cleanupHandled).toBe(false);
+  });
+
+  it("moves the live sub-agent task to the replacement run", () => {
+    registerRun({
+      runId: "run-task-old",
+      childSessionKey: "agent:main:subagent:task-rekey",
+      task: "follow the replacement run",
+    });
+    const liveTaskRunIds = () =>
+      listTaskRecords()
+        .filter(
+          (record) =>
+            record.childSessionKey === "agent:main:subagent:task-rekey" &&
+            record.runtime === "subagent" &&
+            record.status === "running",
+        )
+        .map((record) => record.runId);
+    expect(liveTaskRunIds()).toEqual(["run-task-old"]);
+
+    expect(
+      mod.replaceSubagentRunAfterSteer({
+        previousRunId: "run-task-old",
+        nextRunId: "run-task-new",
+      }),
+    ).toBe(true);
+
+    expect(liveTaskRunIds()).toEqual(["run-task-new"]);
   });
 
   it("preserves cumulative session timing across steer replacement runs", () => {

@@ -508,6 +508,44 @@ describe("subagent-orphan-recovery", () => {
     expect(message).toContain("...");
   });
 
+  it("warns the resumed child that tool calls may have been cut off", async () => {
+    mockSingleAbortedSession();
+
+    await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => createActiveRuns(createTestRunRecord()),
+    });
+
+    expect(getResumeMessage()).toContain(
+      "Some tool calls may have been cut off. Check what already ran before you repeat an action that changes data or sends messages.",
+    );
+  });
+
+  it("gives up after rapid repeated resumes with an error that names the restart", async () => {
+    mockSingleAbortedSession({
+      subagentRecovery: {
+        automaticAttempts: 2,
+        lastAttemptAt: Date.now() - 20_000,
+        lastRunId: "previous-run",
+      },
+    });
+    const activeRuns = createActiveRuns(createTestRunRecord());
+
+    scheduleOrphanRecovery({ getActiveRuns: () => activeRuns, delayMs: 1, maxRetries: 1 });
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.resolve();
+
+    const finalizeParams = requireRecord(
+      firstCallParam(
+        vi.mocked(subagentRegistrySteerRuntime.finalizeInterruptedSubagentRun).mock.calls,
+        "interrupted run finalization",
+      ),
+      "interrupted run finalization params",
+    );
+    expect(finalizeParams.error).toContain("interrupted by a gateway restart");
+    expect(finalizeParams.error).toContain("2 rapid accepted resume attempts");
+    expect(sessions.updateSessionStore).toHaveBeenCalledOnce();
+  });
+
   it("includes last human message in resume when available", async () => {
     mockSingleAbortedSession({ sessionFile: "session-abc.jsonl" });
 

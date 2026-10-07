@@ -82,7 +82,10 @@ function buildResumeMessage(task: string, lastHumanMessage?: string): string {
     message += `The last message from the user before the interruption was:\n\n${lastHumanMessage}\n\n`;
   }
 
-  message += `Please continue where you left off.`;
+  message +=
+    `Please continue where you left off.\n\n` +
+    `Some tool calls may have been cut off. ` +
+    `Check what already ran before you repeat an action that changes data or sends messages.`;
   return message;
 }
 
@@ -143,6 +146,8 @@ async function resumeOrphanedSession(params: {
           sourceChannel: "internal",
           sourceTool: "subagent_interrupted_resume",
         },
+        // oxlint-disable-next-line eslint/no-warning-comments -- deferred gap, kept visible until fixed
+        // TODO(okka): persist resumed turns to the child session transcript, so a second restart does not drop the first resume's tool calls from the child's history.
         sessionEffects: "internal",
         suppressPromptPersistence: true,
       },

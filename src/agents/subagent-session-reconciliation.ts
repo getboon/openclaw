@@ -11,7 +11,7 @@ import {
   resolveStorePath,
   type SessionEntry,
 } from "../config/sessions.js";
-import { loadSessionEntry } from "../config/sessions/session-accessor.js";
+import { loadSessionEntry, patchSessionEntry } from "../config/sessions/session-accessor.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { SubagentRunOutcome } from "./subagent-announce-output.js";
 import {
@@ -119,6 +119,27 @@ function loadSubagentSessionEntryForAccessor(params: {
     sessionKey: key,
     clone: false,
   });
+}
+
+/** Set abortedLastRun on a child session without counting the write as session activity. */
+export async function setSubagentSessionAbortedLastRun(params: {
+  childSessionKey: string;
+  abortedLastRun: boolean;
+  cfg?: OpenClawConfig;
+}): Promise<void> {
+  const key = params.childSessionKey.trim();
+  const cfg = params.cfg ?? getRuntimeConfig();
+  const storePath = resolveStorePath(cfg.session?.store, {
+    agentId: resolveAgentIdFromSessionKey(key),
+  });
+  await patchSessionEntry(
+    { storePath, sessionKey: key },
+    (entry) =>
+      (entry.abortedLastRun === true) === params.abortedLastRun
+        ? null
+        : { abortedLastRun: params.abortedLastRun },
+    { preserveActivity: true },
+  );
 }
 
 /** Resolves whether a registry row is orphaned from its child session entry. */
