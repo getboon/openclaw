@@ -34,6 +34,7 @@ const EXPECTED_BUNDLED_STARTUP_PLUGIN_IDS = [
   "acpx",
   "active-memory",
   "bonjour",
+  "boon-pdf-prep",
   "browser",
   "canvas",
   "device-pair",
@@ -58,6 +59,7 @@ const EXPECTED_BUNDLED_STARTUP_PLUGIN_IDS = [
 ] as const;
 const EXPECTED_EMPTY_CONFIG_GATEWAY_STARTUP_PLUGIN_IDS = [
   "acpx",
+  "boon-pdf-prep",
   "browser",
   "canvas",
   "device-pair",
