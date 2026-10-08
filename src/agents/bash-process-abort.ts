@@ -9,7 +9,12 @@ import {
 function cancelExecSession(session: ProcessSession): boolean {
   const supervisor = getProcessSupervisor();
   const record = supervisor.getRecord(session.id);
-  if (record && record.state !== "exited") {
+  if (record) {
+    if (record.state !== "running" && record.state !== "exiting") {
+      return false;
+    }
+    // A stopped session must not get an exit system event or heartbeat wake for its own kill.
+    session.exitNotified = true;
     supervisor.cancel(session.id, "manual-cancel");
     return true;
   }
@@ -17,6 +22,7 @@ function cancelExecSession(session: ProcessSession): boolean {
   if (typeof pid !== "number" || !Number.isFinite(pid) || pid <= 0) {
     return false;
   }
+  session.exitNotified = true;
   killProcessTree(pid);
   markExited(session, null, "SIGKILL", "killed");
   return true;
@@ -36,8 +42,6 @@ export function killExecProcessesForSessions(sessionKeys: readonly string[]): nu
     if (!owned) {
       continue;
     }
-    // A stopped session must not get an exit system event or heartbeat wake for its own kill.
-    session.exitNotified = true;
     if (cancelExecSession(session)) {
       killed += 1;
     }

@@ -136,6 +136,33 @@ describe("killExecProcessesForSessions", () => {
     expect(getFinishedSession("parent-unmanaged")?.status).toBe("killed");
   });
 
+  it("does not count or silence a supervisor run that is still starting", () => {
+    const session = addExecSession({
+      id: "parent-starting",
+      sessionKey: parentSessionKey,
+      backgrounded: true,
+      pid: 4242,
+    });
+    supervisorMock.getRecord.mockReturnValue({ state: "starting" });
+
+    expect(killExecProcessesForSessions([parentSessionKey])).toBe(0);
+    expect(supervisorMock.cancel).not.toHaveBeenCalled();
+    expect(killProcessTreeMock).not.toHaveBeenCalled();
+    expect(session.exitNotified).toBe(false);
+  });
+
+  it("does not count or silence a session without a supervisor run or pid", () => {
+    const session = addExecSession({
+      id: "parent-no-pid",
+      sessionKey: parentSessionKey,
+      backgrounded: true,
+    });
+
+    expect(killExecProcessesForSessions([parentSessionKey])).toBe(0);
+    expect(killProcessTreeMock).not.toHaveBeenCalled();
+    expect(session.exitNotified).toBe(false);
+  });
+
   it("returns zero without touching processes when no session keys are given", () => {
     addExecSession({ id: "parent-bg", sessionKey: parentSessionKey, backgrounded: true });
     supervisorMock.getRecord.mockReturnValue({ state: "running" });
