@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentRunRecord } from "../../agents/subagent-registry.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionAbortTargetResult } from "../../config/sessions/session-accessor.js";
+import type { TaskNotifyPolicy, TaskRecord } from "../../tasks/task-registry.types.js";
 import {
   testing as abortTesting,
   formatAbortReplyText,
@@ -57,6 +58,14 @@ vi.mock("../../agents/subagent-registry.js", () => ({
   listSubagentRunsForRequester: subagentRegistryMocks.listSubagentRunsForRequester,
   listSubagentRunsForController: subagentRegistryMocks.listSubagentRunsForRequester,
   markSubagentRunTerminated: subagentRegistryMocks.markSubagentRunTerminated,
+}));
+
+const stopCleanupMocks = vi.hoisted(() => ({
+  findTaskByRunId: vi.fn<(runId: string) => TaskRecord | undefined>(() => undefined),
+  updateTaskNotifyPolicyById: vi.fn<
+    (params: { taskId: string; notifyPolicy: TaskNotifyPolicy }) => TaskRecord | null
+  >(() => null),
+  killExecProcessesForSessions: vi.fn<(sessionKeys: readonly string[]) => number>(() => 0),
 }));
 
 const acpManagerMocks = vi.hoisted(() => ({
@@ -201,6 +210,9 @@ describe("abort detection", () => {
         subagentRegistryMocks.getLatestSubagentRunByChildSessionKey,
       listSubagentRunsForController: subagentRegistryMocks.listSubagentRunsForRequester,
       markSubagentRunTerminated: subagentRegistryMocks.markSubagentRunTerminated,
+      findTaskByRunId: stopCleanupMocks.findTaskByRunId,
+      updateTaskNotifyPolicyById: stopCleanupMocks.updateTaskNotifyPolicyById,
+      killExecProcessesForSessions: stopCleanupMocks.killExecProcessesForSessions,
     });
     queueCleanupTesting.setDepsForTests({
       resolveEmbeddedSessionLane: (key) => `session:${key.trim() || "main"}`,
@@ -221,6 +233,9 @@ describe("abort detection", () => {
     runtimeAbortMocks.abortEmbeddedAgentRun.mockReset().mockReturnValue(true);
     runtimeAbortMocks.resolveActiveEmbeddedRunSessionId.mockReset().mockReturnValue(undefined);
     subagentRegistryMocks.getLatestSubagentRunByChildSessionKey.mockReset().mockReturnValue(null);
+    stopCleanupMocks.findTaskByRunId.mockReset().mockReturnValue(undefined);
+    stopCleanupMocks.updateTaskNotifyPolicyById.mockReset().mockReturnValue(null);
+    stopCleanupMocks.killExecProcessesForSessions.mockReset().mockReturnValue(0);
   });
 
   it("isAbortTrigger matches standalone abort trigger phrases", () => {
@@ -1483,7 +1498,165 @@ describe("abort detection", () => {
       requesterSessionKey: oldParentKey,
     });
 
-    expect(result).toEqual({ stopped: 0 });
+    expect(result).toEqual({ stopped: 0, childSessionKeys: [] });
     expect(subagentRegistryMocks.markSubagentRunTerminated).not.toHaveBeenCalled();
+  });
+
+  function mockParentChildGrandchildRuns(params: {
+    parentKey: string;
+    childKey: string;
+    grandchildKey: string;
+  }) {
+    const now = Date.now();
+    subagentRegistryMocks.listSubagentRunsForRequester
+      .mockReturnValueOnce([
+        {
+          runId: "run-child",
+          childSessionKey: params.childKey,
+          requesterSessionKey: params.parentKey,
+          requesterDisplayKey: params.parentKey,
+          task: "orchestrator",
+          cleanup: "keep",
+          createdAt: now - 1_000,
+        },
+      ])
+      .mockReturnValueOnce([
+        {
+          runId: "run-grandchild",
+          childSessionKey: params.grandchildKey,
+          requesterSessionKey: params.childKey,
+          requesterDisplayKey: params.childKey,
+          task: "leaf worker",
+          cleanup: "keep",
+          createdAt: now - 500,
+        },
+      ])
+      .mockReturnValueOnce([]);
+  }
+
+  describe("stop cleanup for exec processes and subagent tasks", () => {
+    const parentKey = "agent:main:789:thread-1:thread:1";
+    const childKey = "agent:main:subagent:child-1";
+    const grandchildKey = "agent:main:subagent:child-1:subagent:grandchild-1";
+
+    beforeEach(() => {
+      subagentRegistryMocks.listSubagentRunsForRequester.mockReset().mockReturnValue([]);
+      subagentRegistryMocks.markSubagentRunTerminated.mockReset().mockReturnValue(1);
+    });
+
+    it("stopSubagentsForRequester reports direct and cascaded stopped child keys", async () => {
+      const { cfg } = await createAbortConfig();
+      mockParentChildGrandchildRuns({ parentKey, childKey, grandchildKey });
+
+      const result = stopSubagentsForRequester({ cfg, requesterSessionKey: parentKey });
+
+      expect(result).toEqual({ stopped: 2, childSessionKeys: [childKey, grandchildKey] });
+    });
+
+    it("fast-abort kills exec processes of the target and its stopped subagents", async () => {
+      const { cfg } = await createAbortConfig({
+        sessionIdsByKey: { [parentKey]: "session-parent" },
+      });
+      mockParentChildGrandchildRuns({ parentKey, childKey, grandchildKey });
+
+      const result = await runStopCommand({
+        cfg,
+        sessionKey: parentKey,
+        from: "telegram:parent",
+        to: "telegram:parent",
+      });
+
+      expect(result.handled).toBe(true);
+      expect(stopCleanupMocks.killExecProcessesForSessions).toHaveBeenCalledTimes(1);
+      expect(stopCleanupMocks.killExecProcessesForSessions).toHaveBeenCalledWith([
+        parentKey,
+        childKey,
+        grandchildKey,
+      ]);
+    });
+
+    it("fast-abort kills exec processes of an ended subagent without counting it as stopped", async () => {
+      const { cfg } = await createAbortConfig({
+        sessionIdsByKey: { [parentKey]: "session-parent" },
+      });
+      const now = Date.now();
+      subagentRegistryMocks.listSubagentRunsForRequester
+        .mockReturnValueOnce([
+          {
+            runId: "run-ended-child",
+            childSessionKey: childKey,
+            requesterSessionKey: parentKey,
+            requesterDisplayKey: parentKey,
+            task: "background exec",
+            cleanup: "keep",
+            createdAt: now - 1_000,
+            endedAt: now - 500,
+          },
+        ])
+        .mockReturnValueOnce([]);
+
+      const result = await runStopCommand({
+        cfg,
+        sessionKey: parentKey,
+        from: "telegram:parent",
+        to: "telegram:parent",
+      });
+
+      expect(result).toMatchObject({ handled: true, stoppedSubagents: 0 });
+      expect(subagentRegistryMocks.markSubagentRunTerminated).not.toHaveBeenCalled();
+      expect(stopCleanupMocks.killExecProcessesForSessions).toHaveBeenCalledWith([
+        parentKey,
+        childKey,
+      ]);
+    });
+
+    it("fast-abort makes the task of each killed subagent run silent", async () => {
+      const { cfg } = await createAbortConfig({
+        sessionIdsByKey: { [parentKey]: "session-parent" },
+      });
+      mockParentChildGrandchildRuns({ parentKey, childKey, grandchildKey });
+      stopCleanupMocks.findTaskByRunId.mockImplementation((runId) => {
+        if (runId === "run-child") {
+          return { taskId: "task-child", notifyPolicy: "done_only" } as TaskRecord;
+        }
+        if (runId === "run-grandchild") {
+          return { taskId: "task-grandchild", notifyPolicy: "silent" } as TaskRecord;
+        }
+        return undefined;
+      });
+
+      await runStopCommand({
+        cfg,
+        sessionKey: parentKey,
+        from: "telegram:parent",
+        to: "telegram:parent",
+      });
+
+      expect(stopCleanupMocks.updateTaskNotifyPolicyById.mock.calls).toEqual([
+        [{ taskId: "task-child", notifyPolicy: "silent" }],
+      ]);
+    });
+
+    it("fast-abort stays handled when task silencing or exec kill throws", async () => {
+      const { cfg } = await createAbortConfig({
+        sessionIdsByKey: { [parentKey]: "session-parent" },
+      });
+      mockParentChildGrandchildRuns({ parentKey, childKey, grandchildKey });
+      stopCleanupMocks.findTaskByRunId.mockImplementation(() => {
+        throw new Error("task registry unavailable");
+      });
+      stopCleanupMocks.killExecProcessesForSessions.mockImplementation(() => {
+        throw new Error("supervisor unavailable");
+      });
+
+      const result = await runStopCommand({
+        cfg,
+        sessionKey: parentKey,
+        from: "telegram:parent",
+        to: "telegram:parent",
+      });
+
+      expect(result).toMatchObject({ handled: true, stoppedSubagents: 2 });
+    });
   });
 });
