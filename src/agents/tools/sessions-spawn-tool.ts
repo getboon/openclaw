@@ -16,7 +16,7 @@ import { logVerbose } from "../../globals.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { resolveSnakeCaseParamKey } from "../../param-key.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
-import { findTaskByRunId, updateTaskNotifyPolicyById } from "../../tasks/task-registry.js";
+import { findTaskByRunId, updateTaskNotifyPolicyById } from "../../tasks/runtime-internal.js";
 import { normalizeDeliveryContext } from "../../utils/delivery-context.shared.js";
 import type { GatewayMessageChannel } from "../../utils/message-channel.js";
 import {

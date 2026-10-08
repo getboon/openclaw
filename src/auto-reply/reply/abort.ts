@@ -33,7 +33,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { isAcpSessionKey, parseAgentSessionKey } from "../../routing/session-key.js";
-import { findTaskByRunId, updateTaskNotifyPolicyById } from "../../tasks/task-registry.js";
+import { findTaskByRunId, updateTaskNotifyPolicyById } from "../../tasks/runtime-internal.js";
 import { resolveCommandAuthorization } from "../command-auth.js";
 import type { FinalizedMsgContext } from "../templating.js";
 import {
