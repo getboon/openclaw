@@ -841,6 +841,14 @@ describe("config schema", () => {
     });
   });
 
+  it("rejects web fetch allowedHostnames entries that can never match a hostname", () => {
+    for (const bad of ["", "  ", "*", "https://example.com", "example.com/path"]) {
+      expect(() =>
+        ToolsSchema.parse({ web: { fetch: { ssrfPolicy: { allowedHostnames: [bad] } } } }),
+      ).toThrow();
+    }
+  });
+
   it("accepts web fetch ssrfPolicy in the runtime zod schema", () => {
     const parsed = ToolsSchema.parse({
       web: {
@@ -848,6 +856,7 @@ describe("config schema", () => {
           ssrfPolicy: {
             allowRfc2544BenchmarkRange: true,
             allowIpv6UniqueLocalRange: true,
+            allowedHostnames: ["localhost"],
           },
         },
       },
@@ -856,6 +865,7 @@ describe("config schema", () => {
     expect(parsed?.web?.fetch?.ssrfPolicy).toEqual({
       allowRfc2544BenchmarkRange: true,
       allowIpv6UniqueLocalRange: true,
+      allowedHostnames: ["localhost"],
     });
   });
 

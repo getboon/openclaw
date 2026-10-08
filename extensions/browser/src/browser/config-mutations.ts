@@ -77,6 +77,8 @@ export async function createBrowserProfileConfig(params: {
   parsedCdpUrl?: string;
   userDataDir?: string;
   driver?: "openclaw" | "existing-session";
+  /** Never launch for this profile; only attach. Implied by existing-session. */
+  attachOnly?: boolean;
   /**
    * Overwrite an existing profile with this name in the same mutation instead
    * of rejecting the conflict. Keeps replace-on-reattach atomic: the old entry
@@ -138,7 +140,9 @@ export async function createBrowserProfileConfig(params: {
         nextProfileConfig = {
           cdpUrl: params.parsedCdpUrl,
           ...(params.driver ? { driver: params.driver } : {}),
-          ...(params.driver === "existing-session" ? { attachOnly: true } : {}),
+          ...(params.driver === "existing-session" || params.attachOnly
+            ? { attachOnly: true }
+            : {}),
           color: profileColor,
         };
       } else if (params.driver === "existing-session") {
@@ -163,6 +167,7 @@ export async function createBrowserProfileConfig(params: {
         nextProfileConfig = {
           cdpPort,
           ...(params.driver ? { driver: params.driver } : {}),
+          ...(params.attachOnly ? { attachOnly: true } : {}),
           color: profileColor,
         };
       }

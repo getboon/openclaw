@@ -37,7 +37,11 @@ export function getBrowserProfileCapabilities(
     };
   }
 
-  if (!profile.cdpIsLoopback) {
+  // An attach-only ws(s) endpoint with a path is a CDP relay/proxy, not a local
+  // Chrome debug port, even on loopback (e.g. a local app relaying to a cloud
+  // browser): it has no /json endpoints, so drive it over Playwright like any
+  // remote CDP.
+  if (!profile.cdpIsLoopback || isAttachOnlyCdpRelay(profile)) {
     return {
       mode: "remote-cdp",
       isRemote: true,
@@ -100,4 +104,23 @@ export function shouldUsePlaywrightForAriaSnapshot(params: {
   wsUrl?: string;
 }): boolean {
   return !params.wsUrl;
+}
+
+function isAttachOnlyCdpRelay(profile: ResolvedBrowserProfile): boolean {
+  if (!profile.attachOnly) {
+    return false;
+  }
+  try {
+    const url = new URL(profile.cdpUrl);
+    const path = url.pathname.replace(/\/$/, "");
+    // A bare Chrome debug socket (/devtools/browser/<id>) keeps its /json
+    // endpoints; a root URL with a query (ws://host?token=...) is a relay too.
+    return (
+      (url.protocol === "ws:" || url.protocol === "wss:") &&
+      (path !== "" || url.search !== "") &&
+      !path.startsWith("/devtools/")
+    );
+  } catch {
+    return false;
+  }
 }

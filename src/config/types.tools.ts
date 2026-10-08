@@ -680,6 +680,8 @@ export type ToolsConfig = {
         allowRfc2544BenchmarkRange?: boolean;
         /** Allow IPv6 Unique Local Addresses (fc00::/7) for trusted fake-IP proxy compatibility. */
         allowIpv6UniqueLocalRange?: boolean;
+        /** Hostnames exempt from the private-network block (e.g. localhost for local dev). */
+        allowedHostnames?: string[];
       };
     };
   };
