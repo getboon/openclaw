@@ -6,10 +6,16 @@ const hoisted = vi.hoisted(() => {
   const spawnSubagentDirectMock = vi.fn();
   const spawnAcpDirectMock = vi.fn();
   const registerSubagentRunMock = vi.fn();
+  const killSubagentRunAdminMock = vi.fn();
+  const findTaskByRunIdMock = vi.fn();
+  const updateTaskNotifyPolicyByIdMock = vi.fn();
   return {
     spawnSubagentDirectMock,
     spawnAcpDirectMock,
     registerSubagentRunMock,
+    killSubagentRunAdminMock,
+    findTaskByRunIdMock,
+    updateTaskNotifyPolicyByIdMock,
   };
 });
 
@@ -28,6 +34,16 @@ vi.mock("../acp-spawn.js", () => ({
 
 vi.mock("../subagent-registry.js", () => ({
   registerSubagentRun: (...args: unknown[]) => hoisted.registerSubagentRunMock(...args),
+}));
+
+vi.mock("../subagent-control.js", () => ({
+  killSubagentRunAdmin: (...args: unknown[]) => hoisted.killSubagentRunAdminMock(...args),
+}));
+
+vi.mock("../../tasks/task-registry.js", () => ({
+  findTaskByRunId: (...args: unknown[]) => hoisted.findTaskByRunIdMock(...args),
+  updateTaskNotifyPolicyById: (...args: unknown[]) =>
+    hoisted.updateTaskNotifyPolicyByIdMock(...args),
 }));
 
 let createSessionsSpawnTool: typeof import("./sessions-spawn-tool.js").createSessionsSpawnTool;
@@ -52,6 +68,17 @@ describe("sessions_spawn tool", () => {
       runId: "run-acp",
     });
     hoisted.registerSubagentRunMock.mockReset();
+    hoisted.killSubagentRunAdminMock.mockReset().mockResolvedValue({
+      found: true,
+      killed: true,
+      runId: "run-subagent",
+      sessionKey: "agent:main:subagent:1",
+    });
+    hoisted.findTaskByRunIdMock.mockReset().mockReturnValue({
+      taskId: "task-subagent",
+      notifyPolicy: "done_only",
+    });
+    hoisted.updateTaskNotifyPolicyByIdMock.mockReset();
   });
 
   function registerAcpBackendForTest() {
@@ -341,6 +368,67 @@ describe("sessions_spawn tool", () => {
     const spawnContext = mockCallArg(hoisted.spawnSubagentDirectMock, 0, 1, "spawnSubagentDirect");
     expect(spawnContext.agentSessionKey).toBe("agent:main:main");
     expect(hoisted.spawnAcpDirectMock).not.toHaveBeenCalled();
+  });
+
+  it("kills and silences an accepted subagent when the parent run was aborted", async () => {
+    const tool = createSessionsSpawnTool({ agentSessionKey: "agent:main:main" });
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await tool.execute("call-aborted", { task: "build feature" }, controller.signal);
+
+    expectDetailFields(result.details, {
+      status: "accepted",
+      childSessionKey: "agent:main:subagent:1",
+    });
+    expect(hoisted.killSubagentRunAdminMock).toHaveBeenCalledTimes(1);
+    expect(mockCallArg(hoisted.killSubagentRunAdminMock, 0, 0, "kill").sessionKey).toBe(
+      "agent:main:subagent:1",
+    );
+    expect(hoisted.findTaskByRunIdMock).toHaveBeenCalledWith("run-subagent");
+    expect(hoisted.updateTaskNotifyPolicyByIdMock).toHaveBeenCalledWith({
+      taskId: "task-subagent",
+      notifyPolicy: "silent",
+    });
+  });
+
+  it("does not silence the task when the aborted spawn's child was found but not killed", async () => {
+    hoisted.killSubagentRunAdminMock.mockResolvedValue({
+      found: true,
+      killed: false,
+      runId: "run-subagent",
+      sessionKey: "agent:main:subagent:1",
+    });
+    const tool = createSessionsSpawnTool({ agentSessionKey: "agent:main:main" });
+    const controller = new AbortController();
+    controller.abort();
+
+    await tool.execute("call-aborted-ended", { task: "build feature" }, controller.signal);
+
+    expect(hoisted.killSubagentRunAdminMock).toHaveBeenCalledTimes(1);
+    expect(hoisted.updateTaskNotifyPolicyByIdMock).not.toHaveBeenCalled();
+  });
+
+  it("does not kill an accepted subagent when the parent run is live", async () => {
+    const tool = createSessionsSpawnTool({ agentSessionKey: "agent:main:main" });
+
+    await tool.execute("call-live", { task: "build feature" }, new AbortController().signal);
+
+    expect(hoisted.killSubagentRunAdminMock).not.toHaveBeenCalled();
+  });
+
+  it("does not kill when an aborted spawn was not accepted", async () => {
+    hoisted.spawnSubagentDirectMock.mockResolvedValue({
+      status: "error",
+      error: "spawn failed",
+    });
+    const tool = createSessionsSpawnTool({ agentSessionKey: "agent:main:main" });
+    const controller = new AbortController();
+    controller.abort();
+
+    await tool.execute("call-aborted-error", { task: "build feature" }, controller.signal);
+
+    expect(hoisted.killSubagentRunAdminMock).not.toHaveBeenCalled();
   });
 
   it("passes inherited tool denies to subagent spawns", async () => {

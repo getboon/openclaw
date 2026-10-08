@@ -5,6 +5,7 @@ import {
 } from "@openclaw/normalization-core/string-coerce";
 import { getAcpSessionManager } from "../../acp/control-plane/manager.js";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
+import { killExecProcessesForSessions } from "../../agents/bash-process-abort.js";
 import {
   abortEmbeddedAgentRun,
   resolveActiveEmbeddedRunSessionId,
@@ -32,6 +33,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { isAcpSessionKey, parseAgentSessionKey } from "../../routing/session-key.js";
+import { findTaskByRunId, updateTaskNotifyPolicyById } from "../../tasks/runtime-internal.js";
 import { resolveCommandAuthorization } from "../command-auth.js";
 import type { FinalizedMsgContext } from "../templating.js";
 import {
@@ -72,6 +74,9 @@ const defaultAbortDeps = {
   getLatestSubagentRunByChildSessionKey,
   listSubagentRunsForController,
   markSubagentRunTerminated,
+  findTaskByRunId,
+  updateTaskNotifyPolicyById,
+  killExecProcessesForSessions,
 };
 
 const abortDeps = {
@@ -97,6 +102,11 @@ export const testing = {
       deps?.listSubagentRunsForController ?? defaultAbortDeps.listSubagentRunsForController;
     abortDeps.markSubagentRunTerminated =
       deps?.markSubagentRunTerminated ?? defaultAbortDeps.markSubagentRunTerminated;
+    abortDeps.findTaskByRunId = deps?.findTaskByRunId ?? defaultAbortDeps.findTaskByRunId;
+    abortDeps.updateTaskNotifyPolicyById =
+      deps?.updateTaskNotifyPolicyById ?? defaultAbortDeps.updateTaskNotifyPolicyById;
+    abortDeps.killExecProcessesForSessions =
+      deps?.killExecProcessesForSessions ?? defaultAbortDeps.killExecProcessesForSessions;
   },
   resetDepsForTests(): void {
     abortDeps.getAcpSessionManager = defaultAbortDeps.getAcpSessionManager;
@@ -109,6 +119,9 @@ export const testing = {
       defaultAbortDeps.getLatestSubagentRunByChildSessionKey;
     abortDeps.listSubagentRunsForController = defaultAbortDeps.listSubagentRunsForController;
     abortDeps.markSubagentRunTerminated = defaultAbortDeps.markSubagentRunTerminated;
+    abortDeps.findTaskByRunId = defaultAbortDeps.findTaskByRunId;
+    abortDeps.updateTaskNotifyPolicyById = defaultAbortDeps.updateTaskNotifyPolicyById;
+    abortDeps.killExecProcessesForSessions = defaultAbortDeps.killExecProcessesForSessions;
   },
 };
 
@@ -218,13 +231,37 @@ function normalizeRequesterSessionKey(
   return resolveInternalSessionKey({ key: cleaned, alias, mainKey });
 }
 
+// A killed subagent's terminal task update would otherwise post "Background task cancelled".
+function silenceKilledSubagentTask(runId: string): void {
+  try {
+    const task = abortDeps.findTaskByRunId(runId);
+    if (task && task.notifyPolicy !== "silent") {
+      abortDeps.updateTaskNotifyPolicyById({ taskId: task.taskId, notifyPolicy: "silent" });
+    }
+  } catch (error) {
+    logVerbose(`abort: failed to silence task for run ${runId}: ${formatErrorMessage(error)}`);
+  }
+}
+
+function killStoppedSessionExecProcesses(sessionKeys: Array<string | undefined>): void {
+  const keys = [...new Set(sessionKeys.filter((key): key is string => Boolean(key)))];
+  try {
+    const killed = abortDeps.killExecProcessesForSessions(keys);
+    if (killed > 0) {
+      logVerbose(`abort: killed ${killed} exec process(es) for ${keys.join(",")}`);
+    }
+  } catch (error) {
+    logVerbose(`abort: failed to kill exec processes: ${formatErrorMessage(error)}`);
+  }
+}
+
 export function stopSubagentsForRequester(params: {
   cfg: OpenClawConfig;
   requesterSessionKey?: string;
-}): { stopped: number } {
+}): { stopped: number; childSessionKeys: string[] } {
   const requesterKey = normalizeRequesterSessionKey(params.cfg, params.requesterSessionKey);
   if (!requesterKey) {
-    return { stopped: 0 };
+    return { stopped: 0, childSessionKeys: [] };
   }
   const dedupedRunsByChildKey = new Map<string, SubagentRunRecord>();
   for (const run of abortDeps.listSubagentRunsForController(requesterKey)) {
@@ -253,10 +290,11 @@ export function stopSubagentsForRequester(params: {
   }
   const runs = Array.from(dedupedRunsByChildKey.values());
   if (runs.length === 0) {
-    return { stopped: 0 };
+    return { stopped: 0, childSessionKeys: [] };
   }
 
   const seenChildKeys = new Set<string>();
+  const childSessionKeys: string[] = [];
   let stopped = 0;
 
   for (const run of runs) {
@@ -265,6 +303,7 @@ export function stopSubagentsForRequester(params: {
       continue;
     }
     seenChildKeys.add(childKey);
+    childSessionKeys.push(childKey);
 
     if (!run.endedAt) {
       const cleared = clearSessionQueues([childKey]);
@@ -287,6 +326,9 @@ export function stopSubagentsForRequester(params: {
             childSessionKey: childKey,
             reason: "killed",
           }) > 0;
+      if (markedTerminated) {
+        silenceKilledSubagentTask(run.runId);
+      }
 
       if (
         !abortRejected &&
@@ -305,12 +347,13 @@ export function stopSubagentsForRequester(params: {
       requesterSessionKey: childKey,
     });
     stopped += cascadeResult.stopped;
+    childSessionKeys.push(...cascadeResult.childSessionKeys);
   }
 
   if (stopped > 0) {
     logVerbose(`abort: stopped ${stopped} subagent run(s) for ${requesterKey}`);
   }
-  return { stopped };
+  return { stopped, childSessionKeys };
 }
 
 export async function tryFastAbortFromMessage(params: {
@@ -465,7 +508,13 @@ export async function tryFastAbortFromMessage(params: {
         `abort: cleared followups=${cleared.followupCleared} lane=${cleared.laneCleared} keys=${cleared.keys.join(",")}`,
       );
     }
-    const { stopped } = stopSubagentsForRequester({ cfg, requesterSessionKey });
+    const { stopped, childSessionKeys } = stopSubagentsForRequester({ cfg, requesterSessionKey });
+    killStoppedSessionExecProcesses([
+      ...abortTargetKeys,
+      sourceAbortKey,
+      requesterSessionKey,
+      ...childSessionKeys,
+    ]);
     if (activeAbortRejected && !aborted) {
       return {
         handled: true,

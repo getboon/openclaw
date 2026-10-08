@@ -12,8 +12,11 @@ import {
 import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { callGateway } from "../../gateway/call.js";
+import { logVerbose } from "../../globals.js";
+import { formatErrorMessage } from "../../infra/errors.js";
 import { resolveSnakeCaseParamKey } from "../../param-key.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
+import { findTaskByRunId, updateTaskNotifyPolicyById } from "../../tasks/runtime-internal.js";
 import { normalizeDeliveryContext } from "../../utils/delivery-context.shared.js";
 import type { GatewayMessageChannel } from "../../utils/message-channel.js";
 import {
@@ -25,6 +28,7 @@ import {
 import { optionalStringEnum } from "../schema/typebox.js";
 import type { SpawnedToolContext } from "../spawned-context.js";
 import { resolveAcpSessionsSpawnImageAttachments } from "../subagent-attachments.js";
+import { killSubagentRunAdmin } from "../subagent-control.js";
 import { registerSubagentRun } from "../subagent-registry.js";
 import { resolveSubagentSpawnOwnership } from "../subagent-spawn-ownership.js";
 import {
@@ -122,6 +126,28 @@ async function cleanupUntrackedAcpSession(sessionKey: string): Promise<void> {
     });
   } catch {
     // Best-effort cleanup only.
+  }
+}
+
+// The parent's /stop can list children before this spawn registers, so the child would run on.
+async function killSubagentSpawnedAfterAbort(
+  config: OpenClawConfig | undefined,
+  childSessionKey: string,
+) {
+  try {
+    const cfg = config ?? getRuntimeConfig();
+    const killResult = await killSubagentRunAdmin({ cfg, sessionKey: childSessionKey });
+    if (!killResult.found || !killResult.killed) {
+      return;
+    }
+    const task = findTaskByRunId(killResult.runId);
+    if (task && task.notifyPolicy !== "silent") {
+      updateTaskNotifyPolicyById({ taskId: task.taskId, notifyPolicy: "silent" });
+    }
+  } catch (error) {
+    logVerbose(
+      `sessions_spawn: failed to kill subagent ${childSessionKey} spawned after abort: ${formatErrorMessage(error)}`,
+    );
   }
 }
 
@@ -279,7 +305,7 @@ export function createSessionsSpawnTool(
       : SESSIONS_SPAWN_SUBAGENT_TOOL_DISPLAY_SUMMARY,
     description: describeSessionsSpawnTool({ acpAvailable, threadAvailable }),
     parameters: createSessionsSpawnToolSchema({ acpAvailable, threadAvailable }),
-    execute: async (_toolCallId, args) => {
+    execute: async (_toolCallId, args, signal) => {
       const params = args as Record<string, unknown>;
       const unsupportedParam = UNSUPPORTED_SESSIONS_SPAWN_PARAM_KEYS.find((key) =>
         Object.hasOwn(params, key),
@@ -511,6 +537,9 @@ export function createSessionsSpawnTool(
         },
       );
 
+      if (result.status === "accepted" && result.childSessionKey && signal?.aborted) {
+        await killSubagentSpawnedAfterAbort(opts?.config, result.childSessionKey);
+      }
       return jsonResult(addRoleToFailureResult(result, requestedAgentId));
     },
   };

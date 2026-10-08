@@ -6,6 +6,7 @@ export {
   ensureTaskRegistryReady,
   resetTaskRegistryControlRuntimeForTests,
   findLatestTaskForFlowId,
+  findTaskByRunId,
   finalizeTaskRunByRunId,
   getTaskById,
   hasActiveTaskForChildSessionKey,
