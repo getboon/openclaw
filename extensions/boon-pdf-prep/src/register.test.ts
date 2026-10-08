@@ -183,7 +183,17 @@ describe("before_prompt_build", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it("forgets the oldest seen hash after 1,000 hashes", async () => {
+  it("notes a PDF once as ready after earlier progress lines", async () => {
+    const { beforePromptBuild } = setup();
+    const lines = async () => (await beforePromptBuild(PDF_LINE))?.appendContext.split("\n")[1];
+    mockStatus({ stdout: statusJson([fileRecord({ state: "text", pages_done: 3, eta_s: 1 })]) });
+    expect(await lines()).toContain("Text search covers pages 1-3.");
+    mockStatus({ stdout: statusJson([fileRecord()]) });
+    expect(await lines()).toBe(`- "plans.pdf" (sha256 ${HEX_A}): 6 pages. Ready.`);
+    await expect(beforePromptBuild(PDF_LINE)).resolves.toBeUndefined();
+  });
+
+  it("forgets the oldest ready hash after 1,000 hashes", async () => {
     const { beforePromptBuild } = setup();
     const hex = (i: number) => i.toString(16).padStart(64, "0");
     for (let i = 0; i <= 1_000; i += 1) {

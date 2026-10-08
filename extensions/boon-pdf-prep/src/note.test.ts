@@ -26,28 +26,33 @@ describe("parsePdfRefs", () => {
   it("reads numbered media lines and skips the count header and non-PDF types", () => {
     const prompt = [
       "[media attached: 3 files]",
-      "[media attached 1/3: /tmp/a.png (image/png)]",
-      "[media attached 2/3: /tmp/b.bin (application/pdf) | https://example.com/b]",
-      "[media attached 3/3: /tmp/c.PDF]",
+      "[media attached 1/3: media://inbound/a.png (image/png)]",
+      "[media attached 2/3: media://inbound/b.bin (application/pdf) | https://example.com/b]",
+      "[media attached 3/3: media://inbound/c.PDF]",
       "what is on page 3?",
     ].join("\n");
-    expect(parsePdfRefs(prompt)).toEqual(["/tmp/b.bin", "/tmp/c.PDF"]);
+    expect(parsePdfRefs(prompt)).toEqual(["media://inbound/b.bin", "media://inbound/c.PDF"]);
   });
 
   it("keeps refs that hold spaces and parentheses", () => {
-    expect(parsePdfRefs("[media attached: /tmp/my plans (v2).pdf (application/pdf)]")).toEqual([
-      "/tmp/my plans (v2).pdf",
-    ]);
+    expect(
+      parsePdfRefs("[media attached: media://inbound/my plans (v2).pdf (application/pdf)]"),
+    ).toEqual(["media://inbound/my plans (v2).pdf"]);
   });
 
   it("drops duplicate refs", () => {
-    const line = "[media attached: /tmp/a.pdf (application/pdf)]";
-    expect(parsePdfRefs(`${line}\n${line}`)).toEqual(["/tmp/a.pdf"]);
+    const line = "[media attached: media://inbound/a.pdf (application/pdf)]";
+    expect(parsePdfRefs(`${line}\n${line}`)).toEqual(["media://inbound/a.pdf"]);
   });
 
   it.each([
     { label: "a flag-like ref", line: "[media attached: --wait=110 (application/pdf)]" },
     { label: "a relative path", line: "[media attached: plans/a.pdf (application/pdf)]" },
+    { label: "an absolute path", line: "[media attached: /tmp/a.pdf (application/pdf)]" },
+    {
+      label: "another media store",
+      line: "[media attached: media://outbound/a.pdf (application/pdf)]",
+    },
   ])("drops $label", ({ line }) => {
     expect(parsePdfRefs(line)).toEqual([]);
   });

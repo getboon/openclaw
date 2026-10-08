@@ -11,8 +11,8 @@ The bundled `boon-pdf-prep` plugin starts text preparation for each inbound PDF 
 
 ## What it does
 
-- **Message arrives:** for each attached PDF, the plugin runs `pdf-index enqueue <paths...>`. It does not wait for the command.
-- **Before the model call:** the plugin reads the `[media attached: ...]` lines of the turn prompt and runs `pdf-index status <refs...>` with a 1.5 second limit. For a file that `status` does not know, it runs `pdf-index enqueue` again without waiting.
+- **Message arrives:** for each attached PDF in the message metadata, the plugin runs `pdf-index enqueue <paths...>` with the inbound file paths. It does not wait for the command.
+- **Before the model call:** the plugin reads the `[media attached: ...]` lines of the turn prompt. It keeps only managed inbound refs (`media://inbound/<id>`). It runs `pdf-index status <refs...>` with a 1.5 second limit. For a file that `status` does not know, it runs `pdf-index enqueue <refs...>` again without waiting.
 - **Status note:** the plugin adds a short note to the model input only. The note does not go into the session transcript. Example:
 
   ```text
@@ -21,8 +21,9 @@ The bundled `boon-pdf-prep` plugin starts text preparation for each inbound PDF 
   Use: pdf-index search <sha256> --q="<keywords>". The result states its coverage.
   ```
 
-- A ready PDF gets a line only the first time the Gateway process sees its hash. A PDF that is not ready gets a line on every turn.
-- The suggested command uses the file hash, so file names never reach a command line. File names are cleaned before they go into the note.
+- A PDF that is not ready gets a line on every turn once its hash is known. A new PDF can get no line until `pdf-index` has hashed it.
+- A ready PDF gets a `Ready.` line once per Gateway process. A PDF shown as queued or in progress earlier gets one `Ready.` line when it becomes ready.
+- The suggested `pdf-index search` command uses the file hash. Only `enqueue` and `status` receive file refs: inbound paths or `media://inbound/<id>` refs. File names never reach a command line, and they are cleaned before they go into the note.
 
 The plugin starts every command with an argument list, never through a shell.
 
@@ -42,7 +43,7 @@ The plugin has no config.
 
 ## Failure behavior
 
-The plugin never blocks or fails a turn.
+The plugin never fails a turn. The status check can delay the model call by at most 1.5 seconds.
 
 - If `pdf-index` is missing, an `enqueue` error is dropped.
 - If `status` times out, exits non-zero, does not know the command, or prints bad JSON, the turn continues with no note.

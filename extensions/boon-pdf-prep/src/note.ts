@@ -23,9 +23,10 @@ export function isPdfMedia(path: string, type: string | undefined): boolean {
   return type?.toLowerCase() === "application/pdf" || path.toLowerCase().endsWith(".pdf");
 }
 
-// Only refs openclaw itself renders; a user-typed line could otherwise pass a flag to pdf-index.
+// Prompt text can hold user-typed media lines, so trust only managed inbound refs here.
+// Other paths still get prepared from trusted message metadata on arrival.
 function isPdfRef(ref: string): boolean {
-  return ref.startsWith("media://inbound/") || ref.startsWith("/");
+  return ref.startsWith("media://inbound/");
 }
 
 export function parsePdfRefs(prompt: string): string[] {

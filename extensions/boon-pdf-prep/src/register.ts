@@ -13,7 +13,7 @@ export const PLUGIN_ID = "boon-pdf-prep";
 
 const PDF_INDEX_BIN = "pdf-index";
 const STATUS_TIMEOUT_MS = 1_500;
-const SEEN_HASHES_MAX = 1_000;
+const READY_NOTED_MAX = 1_000;
 
 export type BoonPdfPrepApi = Pick<OpenClawPluginApi, "on">;
 
@@ -92,15 +92,15 @@ function readStatus(refs: string[]): Promise<PdfStatusFile[] | undefined> {
 }
 
 export function registerBoonPdfPrep(api: BoonPdfPrepApi): void {
-  const seenHashes = new Set<string>();
+  const readyNoted = new Set<string>();
 
-  const firstSight = (hex: string): boolean => {
-    if (seenHashes.has(hex)) {
+  const noteReadyOnce = (hex: string): boolean => {
+    if (readyNoted.has(hex)) {
       return false;
     }
-    seenHashes.add(hex);
-    if (seenHashes.size > SEEN_HASHES_MAX) {
-      seenHashes.delete(seenHashes.values().next().value as string);
+    readyNoted.add(hex);
+    if (readyNoted.size > READY_NOTED_MAX) {
+      readyNoted.delete(readyNoted.values().next().value as string);
     }
     return true;
   };
@@ -124,8 +124,7 @@ export function registerBoonPdfPrep(api: BoonPdfPrepApi): void {
       if (!hex || file.state === "unknown" || noted.has(hex)) {
         return false;
       }
-      const isNew = firstSight(hex);
-      if (file.state === "ready" && !isNew) {
+      if (file.state === "ready" && !noteReadyOnce(hex)) {
         return false;
       }
       noted.add(hex);
