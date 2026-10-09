@@ -181,6 +181,45 @@ describe("buildNote", () => {
     });
   });
 
+  describe("fan-out line", () => {
+    const fanOut =
+      "Whole-file read, summary or review of a PDF over 20 pages: do not read the pages yourself. Split them into 10-20 page ranges, one sub-agent each (sessions_spawn, then sessions_yield). Attached file text is not a read of the file.";
+
+    it("follows the usage line for a file over 20 pages", () => {
+      expect(buildNote([statusFile({ pages_done: 32, total_pages: 32 })])?.split("\n")).toEqual([
+        "[PDF preparation]",
+        `- "plans.pdf" (sha256 ${HEX}): 32 pages. Ready.`,
+        usage,
+        fanOut,
+      ]);
+    });
+
+    it("comes before the save line", () => {
+      const lines =
+        buildNote([statusFile({ total_pages: 1546, findings: { count: 0 } })])?.split("\n") ?? [];
+      expect(lines.slice(-3, -1)).toEqual([usage, fanOut]);
+    });
+
+    it("appears once for two big files", () => {
+      const note = buildNote([
+        statusFile({ total_pages: 40 }),
+        statusFile({ file_hash: `sha256:${"b".repeat(64)}`, state: "text", total_pages: 900 }),
+      ]);
+      expect(note?.split("\n").filter((line) => line === fanOut)).toHaveLength(1);
+    });
+
+    it.each([
+      { label: "20 pages", file: { total_pages: 20 } },
+      { label: "no page count", file: { state: "queued", total_pages: null } },
+      { label: "a failed file", file: { state: "failed", total_pages: 300, reason: "encrypted" } },
+    ] satisfies { label: string; file: Partial<PdfStatusFile> }[])(
+      "is absent for $label",
+      ({ file }) => {
+        expect(buildNote([statusFile(file)])?.split("\n")).not.toContain(fanOut);
+      },
+    );
+  });
+
   it("writes the fixed note shape", () => {
     expect(buildNote([statusFile()])).toBe(
       ["[PDF preparation]", `- "plans.pdf" (sha256 ${HEX}): 6 pages. Ready.`, usage].join("\n"),

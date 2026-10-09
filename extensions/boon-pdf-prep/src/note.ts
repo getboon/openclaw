@@ -23,6 +23,7 @@ const FILE_NAME_MAX = 80;
 const HASH_RE = /^sha256:([0-9a-f]{64})$/u;
 const UNSAFE_PAGES_RE = /[^0-9,-]/gu;
 const PAGES_MAX = 80;
+const FAN_OUT_PAGES = 20;
 
 export function isPdfMedia(path: string, type: string | undefined): boolean {
   const essence = type?.split(";")[0]?.trim().toLowerCase();
@@ -100,11 +101,13 @@ function noteLine(file: PdfStatusFile, hex: string): string {
 export function buildNote(files: PdfStatusFile[]): string | undefined {
   const lines: string[] = [];
   let memoryAvailable = false;
+  let fanOut = false;
   for (const file of files) {
     const hex = hashHex(file);
     if (hex && file.state !== "unknown") {
       lines.push(noteLine(file, hex));
       memoryAvailable ||= findingsCount(file.findings) !== undefined;
+      fanOut ||= file.state !== "failed" && (file.total_pages ?? 0) > FAN_OUT_PAGES;
     }
   }
   if (lines.length === 0) {
@@ -114,6 +117,12 @@ export function buildNote(files: PdfStatusFile[]): string | undefined {
     "[PDF preparation]",
     ...lines,
     'Use: pdf-index search <sha256> --q="<keywords>". The result states its coverage.',
+    // Agents skipped this rule when only the system prompt held it; it must sit next to the turn.
+    ...(fanOut
+      ? [
+          `Whole-file read, summary or review of a PDF over ${FAN_OUT_PAGES} pages: do not read the pages yourself. Split them into 10-20 page ranges, one sub-agent each (sessions_spawn, then sessions_yield). Attached file text is not a read of the file.`,
+        ]
+      : []),
     ...(memoryAvailable
       ? [
           'After you read pages for an answer, save the result once: pdf-index note <sha256> --pages=<N> --kind=<count|extraction|answer> --source=<text_layer|vision> --topic="<short topic>" --body="<result>".',
