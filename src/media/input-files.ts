@@ -300,7 +300,11 @@ function buildTextNotice(
   if (!coverage || !pageCut) {
     return undefined;
   }
-  if (source.kind === "pdf" && source.imagesUsed) {
+  // The page count is exact only for a page cut on text: image pages and a text-limit cut inside a page are not.
+  if (
+    (source.kind === "pdf" && source.imagesUsed) ||
+    coverage.truncationReasons.includes("text_limit")
+  ) {
     return `[Incomplete text: only part of this ${coverage.documentPageCount}-page PDF was extracted. Read the rest from the file before you say what the document contains or lacks.]`;
   }
   return `[Incomplete text: it covers ${coverage.pagesProcessed.length} of the ${coverage.documentPageCount} pages of this PDF. Read the other pages from the file before you say what the document contains or lacks.]`;

@@ -104,17 +104,18 @@ describe("extractFileContentFromSource text notice", () => {
     );
   });
 
-  it("marks PDF text that stops at the extractor text limit", async () => {
+  it("marks PDF text that stops at the extractor text limit without a page count", async () => {
     const result = await extractPdf(
       "short text",
       coverage({
         documentPageCount: 108,
-        pagesProcessed: [1, 2, 3],
+        requestedPages: Array.from({ length: 108 }, (_, i) => i + 1),
+        pagesProcessed: Array.from({ length: 108 }, (_, i) => i + 1),
         truncationReasons: ["text_limit"],
       }),
     );
     expect(result.textNotice).toBe(
-      "[Incomplete text: it covers 3 of the 108 pages of this PDF. Read the other pages from the file before you say what the document contains or lacks.]",
+      "[Incomplete text: only part of this 108-page PDF was extracted. Read the rest from the file before you say what the document contains or lacks.]",
     );
   });
 
