@@ -41,7 +41,7 @@ function limits() {
 function coverage(overrides: Partial<DocumentExtractionCoverage> = {}): DocumentExtractionCoverage {
   return {
     documentPageCount: 243,
-    requestedPages: [],
+    requestedPages: Array.from({ length: 120 }, (_, index) => index + 1),
     pagesProcessed: Array.from({ length: 120 }, (_, index) => index + 1),
     complete: false,
     textChars: 0,
@@ -142,7 +142,16 @@ describe("extractFileContentFromSource text notice", () => {
     { label: "image_error only", reasons: ["image_error"] as const },
     { label: "no reasons", reasons: [] as const },
   ])("adds no notice for PDF coverage with $label", async ({ reasons }) => {
-    const result = await extractPdf("short text", coverage({ truncationReasons: [...reasons] }));
+    const allPages = Array.from({ length: 243 }, (_, index) => index + 1);
+    const result = await extractPdf(
+      "short text",
+      coverage({
+        requestedPages: allPages,
+        pagesProcessed: allPages,
+        complete: reasons.length === 0,
+        truncationReasons: [...reasons],
+      }),
+    );
     expect(result.textNotice).toBeUndefined();
   });
 
