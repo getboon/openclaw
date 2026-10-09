@@ -602,20 +602,20 @@ export async function handleOpenResponsesHttpRequest(
                 limits: limits.files,
               });
               const rawText = file.text;
+              const withNotice = (content: string) =>
+                file.textNotice ? `${content}\n${file.textNotice}` : content;
               if (rawText?.trim()) {
                 fileContexts.push(
                   renderFileContextBlock({
                     filename: file.filename,
-                    content: file.textNotice
-                      ? `${wrapUntrustedFileContent(rawText)}\n${file.textNotice}`
-                      : wrapUntrustedFileContent(rawText),
+                    content: withNotice(wrapUntrustedFileContent(rawText)),
                   }),
                 );
               } else if (file.images && file.images.length > 0) {
                 fileContexts.push(
                   renderFileContextBlock({
                     filename: file.filename,
-                    content: "[PDF content rendered to images]",
+                    content: withNotice("[PDF content rendered to images]"),
                     surroundContentWithNewlines: false,
                   }),
                 );
@@ -623,7 +623,7 @@ export async function handleOpenResponsesHttpRequest(
                 fileContexts.push(
                   renderFileContextBlock({
                     filename: file.filename,
-                    content: "[No extractable text]",
+                    content: withNotice("[No extractable text]"),
                     surroundContentWithNewlines: false,
                   }),
                 );

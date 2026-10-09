@@ -277,7 +277,9 @@ function clampText(text: string, maxChars: number): string {
   return text.slice(0, maxChars);
 }
 
-type TextNoticeSource = { kind: "text" } | { kind: "pdf"; coverage?: DocumentExtractionCoverage };
+type TextNoticeSource =
+  | { kind: "text" }
+  | { kind: "pdf"; coverage?: DocumentExtractionCoverage; imagesUsed: boolean };
 
 function buildTextNotice(
   shown: number,
@@ -297,6 +299,9 @@ function buildTextNotice(
   );
   if (!coverage || !pageCut) {
     return undefined;
+  }
+  if (source.kind === "pdf" && source.imagesUsed) {
+    return `[Incomplete text: only part of this ${coverage.documentPageCount}-page PDF was extracted. Read the rest from the file before you say what the document contains or lacks.]`;
   }
   return `[Incomplete text: it covers ${coverage.pagesProcessed.length} of the ${coverage.documentPageCount} pages of this PDF. Read the other pages from the file before you say what the document contains or lacks.]`;
 }
@@ -480,6 +485,7 @@ export async function extractFileContentFromSource(params: {
     const textNotice = buildTextNotice(text.length, fullText.length, {
       kind: "pdf",
       coverage: extracted.coverage,
+      imagesUsed: extracted.images.length > 0,
     });
     return {
       filename,

@@ -145,6 +145,26 @@ describe("extractFileContentFromSource text notice", () => {
     expect(result.textNotice).toBeUndefined();
   });
 
+  it("marks a page-cut PDF that used page images without a page count", async () => {
+    extractPdfContentMock.mockResolvedValueOnce({
+      text: "",
+      images: [{ type: "image", data: "aGk=", mimeType: "image/png" }],
+      coverage: coverage(),
+    });
+    const result = await extractFileContentFromSource({
+      source: {
+        type: "base64",
+        data: Buffer.from("%PDF-1.4").toString("base64"),
+        mediaType: "application/pdf",
+        filename: "scan.pdf",
+      },
+      limits: limits(),
+    });
+    expect(result.textNotice).toBe(
+      "[Incomplete text: only part of this 243-page PDF was extracted. Read the rest from the file before you say what the document contains or lacks.]",
+    );
+  });
+
   it("adds no notice for complete PDF text without coverage", async () => {
     const result = await extractPdf("short text");
     expect(result.textNotice).toBeUndefined();

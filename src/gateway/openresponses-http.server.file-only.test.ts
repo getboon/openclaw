@@ -138,6 +138,48 @@ describe("OpenResponses file-only input that renders to images", () => {
     expect(prompt.indexOf(notice)).toBeLessThan(prompt.lastIndexOf("</file>"));
   });
 
+  it("puts the incomplete-text notice after the images placeholder", async () => {
+    const notice =
+      "[Incomplete text: only part of this 243-page PDF was extracted. Read the rest from the file before you say what the document contains or lacks.]";
+    extractFileContentFromSourceMock.mockResolvedValueOnce({
+      filename: "scan.pdf",
+      text: "",
+      textNotice: notice,
+      images: [
+        { type: "image", data: Buffer.alloc(8, 1).toString("base64"), mimeType: "image/png" },
+      ],
+    });
+    agentCommand.mockResolvedValueOnce({ payloads: [{ text: "ok" }] } as never);
+
+    const res = await postResponses({
+      model: "openclaw",
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_file",
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: Buffer.from("%PDF-1.4 scanned").toString("base64"),
+                filename: "scan.pdf",
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const body = await res.text();
+    expect(res.status, body).toBe(200);
+    const opts = agentCommand.mock.calls[0]?.[0] as { extraSystemPrompt?: string } | undefined;
+    const prompt = opts?.extraSystemPrompt ?? "";
+    expect(prompt).toContain(`[PDF content rendered to images]\n${notice}`);
+    expect(prompt.indexOf(notice)).toBeLessThan(prompt.lastIndexOf("</file>"));
+  });
+
   it("keeps an empty extracted file visible to the model", async () => {
     extractFileContentFromSourceMock.mockResolvedValueOnce({
       filename: "empty.txt",
