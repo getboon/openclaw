@@ -511,6 +511,10 @@ async function extractFileBlocks(params: {
     }
     const text = extracted?.text?.trim() ?? "";
     let blockText = text ? wrapUntrustedAttachmentContent(text) : "";
+    if (blockText && extracted.textNotice) {
+      // Outside the untrusted wrapper, so the model reads it as a fact about the file, not file content.
+      blockText += `\n${extracted.textNotice}`;
+    }
     if (!blockText) {
       if (extracted?.images && extracted.images.length > 0) {
         blockText = "[PDF content rendered to images; images not forwarded to model]";

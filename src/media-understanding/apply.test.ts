@@ -1878,6 +1878,35 @@ describe("applyMediaUnderstanding", () => {
     expect(ctx.Body).not.toContain("SECURITY NOTICE:");
   });
 
+  it("puts the incomplete-text notice after the untrusted end marker in the file block", async () => {
+    const filePath = await createTempMediaFile({
+      fileName: "long.txt",
+      content: "a".repeat(30),
+    });
+    const cfg: OpenClawConfig = {
+      ...createMediaDisabledConfig(),
+      gateway: { http: { endpoints: { responses: { files: { maxChars: 10 } } } } },
+    };
+
+    const { ctx, result } = await applyWithDisabledMedia({
+      body: "<media:document>",
+      mediaPath: filePath,
+      mediaType: "text/plain",
+      cfg,
+    });
+
+    expect(result.appliedFile).toBe(true);
+    const body = ctx.Body ?? "";
+    const notice =
+      "[Incomplete text: it stops after 10 of 30 characters of this file. Read the rest from the file before you say what the file contains or lacks.]";
+    const endMarker = body.lastIndexOf("<<<END_EXTERNAL_UNTRUSTED_CONTENT");
+    expect(endMarker).toBeGreaterThan(-1);
+    expect(body.indexOf(notice)).toBeGreaterThan(endMarker);
+    expect(body.indexOf(notice)).toBeLessThan(body.lastIndexOf("</file>"));
+    expect(body).toContain(`${"a".repeat(10)}\n`);
+    expect(body).not.toContain("a".repeat(11));
+  });
+
   it("handles files with non-ASCII Unicode filenames", async () => {
     const filePath = await createTempMediaFile({
       fileName: "文档.txt",

@@ -606,7 +606,9 @@ export async function handleOpenResponsesHttpRequest(
                 fileContexts.push(
                   renderFileContextBlock({
                     filename: file.filename,
-                    content: wrapUntrustedFileContent(rawText),
+                    content: file.textNotice
+                      ? `${wrapUntrustedFileContent(rawText)}\n${file.textNotice}`
+                      : wrapUntrustedFileContent(rawText),
                   }),
                 );
               } else if (file.images && file.images.length > 0) {

@@ -97,6 +97,47 @@ describe("OpenResponses file-only input that renders to images", () => {
     await res.text();
   });
 
+  it("puts the incomplete-text notice after the untrusted end marker", async () => {
+    const notice =
+      "[Incomplete text: it covers 120 of the 243 pages of this PDF. Read the other pages from the file before you say what the document contains or lacks.]";
+    extractFileContentFromSourceMock.mockResolvedValueOnce({
+      filename: "set.pdf",
+      text: "page text",
+      textNotice: notice,
+    });
+    agentCommand.mockResolvedValueOnce({ payloads: [{ text: "ok" }] } as never);
+
+    const res = await postResponses({
+      model: "openclaw",
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_file",
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: Buffer.from("%PDF-1.4").toString("base64"),
+                filename: "set.pdf",
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const body = await res.text();
+    expect(res.status, body).toBe(200);
+    const opts = agentCommand.mock.calls[0]?.[0] as { extraSystemPrompt?: string } | undefined;
+    const prompt = opts?.extraSystemPrompt ?? "";
+    const endMarker = prompt.lastIndexOf("<<<END_EXTERNAL_UNTRUSTED_CONTENT");
+    expect(endMarker).toBeGreaterThan(-1);
+    expect(prompt.indexOf(notice)).toBeGreaterThan(endMarker);
+    expect(prompt.indexOf(notice)).toBeLessThan(prompt.lastIndexOf("</file>"));
+  });
+
   it("keeps an empty extracted file visible to the model", async () => {
     extractFileContentFromSourceMock.mockResolvedValueOnce({
       filename: "empty.txt",

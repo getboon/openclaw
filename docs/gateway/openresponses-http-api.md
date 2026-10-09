@@ -264,6 +264,7 @@ Defaults when omitted:
 - `images.maxRedirects`: 3
 - `images.timeoutMs`: 10s
 - HEIC/HEIF `input_image` sources are accepted when a system converter is available and are normalized to JPEG before provider delivery. Supported converters are macOS `sips`, ImageMagick, GraphicsMagick, or ffmpeg.
+- When file text is cut at `files.maxChars`, or PDF text covers only some pages, the file block ends with an `[Incomplete text: ...]` line outside the untrusted-content markers. It gives the shown and total characters or pages.
 
 Security note:
 

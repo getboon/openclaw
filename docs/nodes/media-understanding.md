@@ -321,6 +321,7 @@ When `mode: "all"`, outputs are labeled `[Image 1/2]`, `[Audio 2/2]`, etc.
     - The injected block uses explicit boundary markers like `<<<EXTERNAL_UNTRUSTED_CONTENT id="...">>>` / `<<<END_EXTERNAL_UNTRUSTED_CONTENT id="...">>>` and includes a `Source: External` metadata line.
     - This attachment-extraction path intentionally omits the long `SECURITY NOTICE:` banner to avoid bloating the media prompt; the boundary markers and metadata still remain.
     - If a file has no extractable text, OpenClaw injects `[No extractable text]`.
+    - If the text stops before the file ends (character limit, or a PDF page limit), an `[Incomplete text: ...]` line follows the end marker. It gives the shown and total characters or pages, and tells the model to read the rest before it says what the file lacks.
     - If a PDF falls back to rendered page images in this path, the media prompt keeps the placeholder `[PDF content rendered to images; images not forwarded to model]` because this attachment-extraction step forwards text blocks, not the rendered PDF images.
 
   </Accordion>
