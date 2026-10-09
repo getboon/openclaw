@@ -57,8 +57,8 @@ function setup() {
   return {
     on,
     messageReceived: handler("message_received"),
-    beforePromptBuild: (prompt: string) =>
-      handler("before_prompt_build")({ prompt, messages: [] }, {}) as Promise<
+    beforePromptBuild: (prompt: string, ctx: Record<string, unknown> = { sessionId: "s-a" }) =>
+      handler("before_prompt_build")({ prompt, messages: [] }, ctx) as Promise<
         { appendContext: string } | undefined
       >,
   };
@@ -195,6 +195,41 @@ describe("before_prompt_build", () => {
     mockStatus({ stdout: statusJson([fileRecord()]) });
     expect(await lines()).toBe(`- "plans.pdf" (sha256 ${HEX_A}): 6 pages. Ready.`);
     await expect(beforePromptBuild(PDF_LINE)).resolves.toBeUndefined();
+  });
+
+  it("notes a ready PDF once per session", async () => {
+    mockStatus({ stdout: statusJson([fileRecord()]) });
+    const { beforePromptBuild } = setup();
+    await expect(beforePromptBuild(PDF_LINE, { sessionId: "s-a" })).resolves.toBeDefined();
+    await expect(beforePromptBuild(PDF_LINE, { sessionId: "s-a" })).resolves.toBeUndefined();
+    await expect(beforePromptBuild(PDF_LINE, { sessionId: "s-b" })).resolves.toBeDefined();
+  });
+
+  it("keys on sessionId first, then on sessionKey", async () => {
+    mockStatus({ stdout: statusJson([fileRecord()]) });
+    const { beforePromptBuild } = setup();
+    const thread = { sessionKey: "agent:main:thread-7" };
+    await expect(beforePromptBuild(PDF_LINE, thread)).resolves.toBeDefined();
+    await expect(beforePromptBuild(PDF_LINE, thread)).resolves.toBeUndefined();
+    await expect(
+      beforePromptBuild(PDF_LINE, { ...thread, sessionId: "after-reset" }),
+    ).resolves.toBeDefined();
+  });
+
+  it("notes a ready PDF on every turn without a session identity", async () => {
+    mockStatus({ stdout: statusJson([fileRecord()]) });
+    const { beforePromptBuild } = setup();
+    await expect(beforePromptBuild(PDF_LINE, {})).resolves.toBeDefined();
+    await expect(beforePromptBuild(PDF_LINE, {})).resolves.toBeDefined();
+  });
+
+  it("adds earlier findings from the status record", async () => {
+    mockStatus({ stdout: statusJson([fileRecord({ findings: { count: 2, pages: "6,32" } })]) });
+    const { beforePromptBuild } = setup();
+    const result = await beforePromptBuild(PDF_LINE);
+    expect(result?.appendContext.split("\n")[1]).toBe(
+      `- "plans.pdf" (sha256 ${HEX_A}): 6 pages. Ready. Earlier findings: 2 on pages 6,32. Run pdf-index recall ${HEX_A} before you read these pages.`,
+    );
   });
 
   it("forgets the oldest ready hash after 1,000 hashes", async () => {

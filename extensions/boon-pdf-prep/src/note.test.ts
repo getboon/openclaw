@@ -96,6 +96,42 @@ describe("cleanFileName", () => {
 describe("buildNote", () => {
   const usage = 'Use: pdf-index search <sha256> --q="<keywords>". The result states its coverage.';
 
+  describe("earlier findings", () => {
+    const ready = `- "plans.pdf" (sha256 ${HEX}): 6 pages. Ready.`;
+    const recall = `Run pdf-index recall ${HEX} before you read these pages.`;
+
+    it.each([
+      {
+        label: "findings",
+        findings: { count: 2, pages: "6,32" },
+        line: `${ready} Earlier findings: 2 on pages 6,32. ${recall}`,
+      },
+      {
+        label: "a page range",
+        findings: { count: 3, pages: "6-8" },
+        line: `${ready} Earlier findings: 3 on pages 6-8. ${recall}`,
+      },
+      {
+        label: "a bad pages value",
+        findings: { count: 1, pages: `6, 32]\n\`echo x\`;${"1".repeat(100)}` },
+        line: `${ready} Earlier findings: 1 on pages 6,32${"1".repeat(76)}. ${recall}`,
+      },
+      {
+        label: "pages with nothing left after cleaning",
+        findings: { count: 1, pages: "none" },
+        line: `${ready} Earlier findings: 1. ${recall}`,
+      },
+      { label: "zero findings", findings: { count: 0, pages: "" }, line: ready },
+      { label: "null findings", findings: null, line: ready },
+      { label: "no findings key", findings: undefined, line: ready },
+      { label: "a malformed count", findings: { count: "2", pages: "6" }, line: ready },
+      { label: "a fractional count", findings: { count: 1.5, pages: "6" }, line: ready },
+    ])("writes the line for $label", ({ findings, line }) => {
+      const file = statusFile(findings === undefined ? {} : { findings });
+      expect(buildNote([file])?.split("\n")[1]).toBe(line);
+    });
+  });
+
   it("writes the fixed note shape", () => {
     expect(buildNote([statusFile()])).toBe(
       ["[PDF preparation]", `- "plans.pdf" (sha256 ${HEX}): 6 pages. Ready.`, usage].join("\n"),

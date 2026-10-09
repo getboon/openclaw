@@ -95,18 +95,26 @@ function readStatus(refs: string[]): Promise<PdfStatusFile[] | undefined> {
 export function registerBoonPdfPrep(api: BoonPdfPrepApi): void {
   const readyNoted = new Set<string>();
 
-  const noteReadyOnce = (hex: string): boolean => {
-    if (readyNoted.has(hex)) {
+  // No session identity means nothing to dedupe on, so the ready line repeats.
+  const noteReadyOnce = (session: string | undefined, hex: string): boolean => {
+    if (session === undefined) {
+      return true;
+    }
+    const key = `${session}:${hex}`;
+    if (readyNoted.has(key)) {
       return false;
     }
-    readyNoted.add(hex);
+    readyNoted.add(key);
     if (readyNoted.size > READY_NOTED_MAX) {
       readyNoted.delete(readyNoted.values().next().value as string);
     }
     return true;
   };
 
-  const preparationNote = async (prompt: string): Promise<string | undefined> => {
+  const preparationNote = async (
+    prompt: string,
+    session: string | undefined,
+  ): Promise<string | undefined> => {
     const refs = parsePdfRefs(prompt);
     if (refs.length === 0) {
       return undefined;
@@ -125,7 +133,7 @@ export function registerBoonPdfPrep(api: BoonPdfPrepApi): void {
       if (!hex || file.state === "unknown" || noted.has(hex)) {
         return false;
       }
-      if (file.state === "ready" && !noteReadyOnce(hex)) {
+      if (file.state === "ready" && !noteReadyOnce(session, hex)) {
         return false;
       }
       noted.add(hex);
@@ -141,9 +149,9 @@ export function registerBoonPdfPrep(api: BoonPdfPrepApi): void {
     }
   });
 
-  api.on("before_prompt_build", async (event) => {
+  api.on("before_prompt_build", async (event, ctx) => {
     try {
-      const note = await preparationNote(event.prompt);
+      const note = await preparationNote(event.prompt, ctx.sessionId ?? ctx.sessionKey);
       return note ? { appendContext: note } : undefined;
     } catch {
       return undefined;

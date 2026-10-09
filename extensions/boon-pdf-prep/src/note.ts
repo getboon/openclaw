@@ -9,6 +9,8 @@ export type PdfStatusFile = {
   eta_s: number | null;
   file_name: string | null;
   reason: string | null;
+  // Newer pdf-index versions only; read defensively because older ones omit the key.
+  findings?: unknown;
 };
 
 const MEDIA_LINE_RE = /^\[media attached(?: \d+\/\d+)?: (.+)\]$/gmu;
@@ -19,6 +21,8 @@ const MEDIA_BODY_RE = /^(.+?)(?: \(([^()\s;]+\/[^()\s;]+(?:;[^()]*)?)\))?(?: \| 
 const UNSAFE_NAME_RE = /[\p{Cc}\]"'`]/gu;
 const FILE_NAME_MAX = 80;
 const HASH_RE = /^sha256:([0-9a-f]{64})$/u;
+const UNSAFE_PAGES_RE = /[^0-9,-]/gu;
+const PAGES_MAX = 80;
 
 export function isPdfMedia(path: string, type: string | undefined): boolean {
   const essence = type?.split(";")[0]?.trim().toLowerCase();
@@ -65,11 +69,25 @@ function coverageSentence(file: PdfStatusFile): string {
   return "Queued.";
 }
 
+function findingsSentence(findings: unknown, hex: string): string {
+  if (typeof findings !== "object" || findings === null) {
+    return "";
+  }
+  const { count, pages } = findings as { count?: unknown; pages?: unknown };
+  if (typeof count !== "number" || !Number.isInteger(count) || count < 1) {
+    return "";
+  }
+  const cleanPages =
+    typeof pages === "string" ? pages.replace(UNSAFE_PAGES_RE, "").slice(0, PAGES_MAX) : "";
+  const where = cleanPages ? ` on pages ${cleanPages}` : "";
+  return ` Earlier findings: ${count}${where}. Run pdf-index recall ${hex} before you read these pages.`;
+}
+
 function noteLine(file: PdfStatusFile, hex: string): string {
   const name = file.file_name ? cleanFileName(file.file_name) : "";
   const label = name ? `"${name}"` : "PDF";
   const pages = file.total_pages === null ? "" : `${file.total_pages} pages. `;
-  return `- ${label} (sha256 ${hex}): ${pages}${coverageSentence(file)}`;
+  return `- ${label} (sha256 ${hex}): ${pages}${coverageSentence(file)}${findingsSentence(file.findings, hex)}`;
 }
 
 export function buildNote(files: PdfStatusFile[]): string | undefined {
