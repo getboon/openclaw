@@ -2,9 +2,44 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { withMockedPlatform } from "../test-utils/vitest-spies.js";
 
-const { spawnMock } = vi.hoisted(() => ({
+const { spawnMock, procTable } = vi.hoisted(() => ({
   spawnMock: vi.fn(),
+  procTable: { stats: new Map<number, string>(), readdirError: false },
 }));
+
+vi.mock("node:fs", async () => {
+  const { mockNodeBuiltinModule } = await import("openclaw/plugin-sdk/test-node-mocks");
+  return mockNodeBuiltinModule(
+    () => vi.importActual<typeof import("node:fs")>("node:fs"),
+    {
+      readdirSync: ((dir: string) => {
+        if (dir !== "/proc") {
+          throw new Error(`unexpected readdir ${dir}`);
+        }
+        if (procTable.readdirError) {
+          throw new Error("EACCES");
+        }
+        return [...procTable.stats.keys()].map(String).concat("self", "uptime");
+      }) as unknown as typeof import("node:fs").readdirSync,
+      readFileSync: ((file: string) => {
+        const match = /^\/proc\/(\d+)\/stat$/.exec(file);
+        const stat = match ? procTable.stats.get(Number(match[1])) : undefined;
+        if (stat === undefined) {
+          throw new Error(`ENOENT ${file}`);
+        }
+        return stat;
+      }) as unknown as typeof import("node:fs").readFileSync,
+    },
+    { mirrorToDefault: true },
+  );
+});
+
+function setProcParents(entries: Array<[pid: number, ppid: number, comm?: string]>) {
+  procTable.stats.clear();
+  for (const [pid, ppid, comm] of entries) {
+    procTable.stats.set(pid, `${pid} (${comm ?? "sh"}) S ${ppid} ${pid} ${pid} 0 -1 4194304`);
+  }
+}
 
 vi.mock("node:child_process", async () => {
   const { mockNodeBuiltinModule } = await import("openclaw/plugin-sdk/test-node-mocks");
@@ -39,6 +74,8 @@ describe("killProcessTree", () => {
   });
 
   beforeEach(() => {
+    procTable.stats.clear();
+    procTable.readdirError = false;
     spawnMock.mockClear();
     killSpy = vi.spyOn(process, "kill");
     vi.useFakeTimers();
@@ -215,6 +252,69 @@ describe("killProcessTree", () => {
       expect(killSpy).toHaveBeenCalledWith(-7777, "SIGTERM");
       expect(killSpy).not.toHaveBeenCalledWith(-7777, "SIGKILL");
     });
+  });
+
+  it("on Linux non-detached SIGTERM signals descendants before the shell pid", async () => {
+    killSpy.mockImplementation(() => true);
+    setProcParents([
+      [7100, 1],
+      [7101, 7100, "sleep"],
+      [7102, 7101, "odd ) name (x"],
+      [7200, 1],
+    ]);
+
+    await withMockedPlatform("linux", async () => {
+      signalProcessTree(7100, "SIGTERM", { detached: false });
+    });
+
+    expect(killSpy.mock.calls).toEqual([
+      [7101, "SIGTERM"],
+      [7102, "SIGTERM"],
+      [7100, "SIGTERM"],
+    ]);
+  });
+
+  it("on Linux non-detached kill never signals the gateway, its parent, or init", async () => {
+    killSpy.mockImplementation(() => true);
+    setProcParents([
+      [7300, 1],
+      [process.pid, 7300, "node"],
+      [process.ppid, 7300, "systemd"],
+      [1, 7300, "init"],
+      [7301, 7300, "sleep"],
+    ]);
+
+    await withMockedPlatform("linux", async () => {
+      signalProcessTree(7300, "SIGTERM", { detached: false });
+    });
+
+    const signaledPids = killSpy.mock.calls.map((call: unknown[]) => call[0]);
+    expect(signaledPids).toEqual([7301, 7300]);
+  });
+
+  it("on Linux non-detached kill falls back to the shell pid when /proc is unreadable", async () => {
+    killSpy.mockImplementation(() => true);
+    procTable.readdirError = true;
+
+    await withMockedPlatform("linux", async () => {
+      signalProcessTree(7400, "SIGTERM", { detached: false });
+    });
+
+    expect(killSpy.mock.calls).toEqual([[7400, "SIGTERM"]]);
+  });
+
+  it("on Linux group kill still signals only the process group", async () => {
+    killSpy.mockImplementation(() => true);
+    setProcParents([
+      [7500, 1],
+      [7501, 7500, "sleep"],
+    ]);
+
+    await withMockedPlatform("linux", async () => {
+      signalProcessTree(7500, "SIGTERM");
+    });
+
+    expect(killSpy.mock.calls).toEqual([[-7500, "SIGTERM"]]);
   });
 
   it("on Windows maps requested tree signals to taskkill force mode", async () => {

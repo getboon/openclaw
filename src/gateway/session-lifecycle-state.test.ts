@@ -1,12 +1,26 @@
 /**
  * Session lifecycle state derivation tests.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { updateSessionStoreEntry } from "../config/sessions.js";
 import {
   deriveGatewaySessionLifecycleSnapshot,
   derivePersistedSessionLifecyclePatch,
   isStaleLifecycleEventForSession,
+  persistGatewaySessionLifecycleEvent,
 } from "./session-lifecycle-state.js";
+import { loadSessionEntry } from "./session-utils.js";
+
+vi.mock("../config/sessions.js", () => ({
+  updateSessionStoreEntry: vi.fn(),
+}));
+
+vi.mock("./session-utils.js", () => ({
+  loadSessionEntry: vi.fn(),
+}));
+
+const THREAD_SESSION_KEY = "agent:main:99:thread-15004:thread:15004";
+const SUBAGENT_SESSION_KEY = "agent:main:subagent:rand-printer";
 
 type PersistedLifecycleInput = Parameters<typeof derivePersistedSessionLifecyclePatch>[0];
 type PersistedLifecycleData = PersistedLifecycleInput["event"]["data"];
@@ -37,6 +51,7 @@ function terminalPatch(
 }
 
 function expectPersistedLifecyclePatch(options: {
+  sessionKey?: string;
   entry?: Partial<PersistedLifecycleInput["entry"]>;
   data: PersistedLifecycleData;
   runId?: string;
@@ -45,6 +60,7 @@ function expectPersistedLifecyclePatch(options: {
 }): void {
   expect(
     derivePersistedSessionLifecyclePatch({
+      sessionKey: options.sessionKey,
       entry: {
         updatedAt: 1_000,
         startedAt: 1_050,
@@ -144,6 +160,144 @@ describe("session lifecycle state", () => {
         stopReason: "aborted",
       },
       expected: terminalPatch(1_100, 1_800, "killed", true),
+    });
+  });
+
+  it.each([
+    { existingFlag: true, expected: true },
+    { existingFlag: false, expected: false },
+  ])(
+    "keeps abortedLastRun=$existingFlag when a blocked run ends aborted after a user stop",
+    ({ existingFlag, expected }) => {
+      expectPersistedLifecyclePatch({
+        sessionKey: THREAD_SESSION_KEY,
+        entry: { status: "running", abortedLastRun: existingFlag },
+        data: {
+          phase: "end",
+          aborted: true,
+          stopReason: "toolUse",
+          livenessState: "blocked",
+          endedAt: 1_800,
+        },
+        expected: terminalPatch(1_050, 1_800, "failed", expected),
+      });
+    },
+  );
+
+  it("keeps abortedLastRun when a run errors aborted after a user stop", () => {
+    expectPersistedLifecyclePatch({
+      sessionKey: THREAD_SESSION_KEY,
+      entry: { status: "running", abortedLastRun: true },
+      data: { phase: "error", aborted: true, error: "aborted", endedAt: 1_800 },
+      expected: terminalPatch(1_050, 1_800, "failed", true),
+    });
+  });
+
+  it.each([
+    {
+      name: "a timed-out subagent run",
+      sessionKey: SUBAGENT_SESSION_KEY,
+      data: { phase: "end", aborted: true, endedAt: 1_800 },
+      status: "timeout",
+    },
+    {
+      name: "a blocked aborted subagent run",
+      sessionKey: SUBAGENT_SESSION_KEY,
+      data: {
+        phase: "end",
+        aborted: true,
+        stopReason: "toolUse",
+        livenessState: "blocked",
+        endedAt: 1_800,
+      },
+      status: "failed",
+    },
+    {
+      name: "an aborted run without a session key",
+      sessionKey: undefined,
+      data: {
+        phase: "end",
+        aborted: true,
+        stopReason: "toolUse",
+        livenessState: "blocked",
+        endedAt: 1_800,
+      },
+      status: "failed",
+    },
+  ] as const)("clears abortedLastRun for $name", ({ sessionKey, data, status }) => {
+    expectPersistedLifecyclePatch({
+      sessionKey,
+      entry: { status: "running", abortedLastRun: true },
+      data,
+      expected: terminalPatch(1_050, 1_800, status, false),
+    });
+  });
+
+  it("keeps abortedLastRun when persisting an aborted end for a parent thread session", async () => {
+    vi.mocked(loadSessionEntry).mockReturnValue({
+      storePath: "/tmp/sessions.json",
+      canonicalKey: THREAD_SESSION_KEY,
+      entry: { sessionId: "session-parent", updatedAt: 1_000 },
+    } as unknown as ReturnType<typeof loadSessionEntry>);
+    let patch: unknown;
+    vi.mocked(updateSessionStoreEntry).mockImplementation(async (params) => {
+      patch = await params.update({
+        sessionId: "session-parent",
+        updatedAt: 1_000,
+        startedAt: 1_050,
+        status: "running",
+        abortedLastRun: true,
+      });
+      return null;
+    });
+
+    await persistGatewaySessionLifecycleEvent({
+      sessionKey: THREAD_SESSION_KEY,
+      event: {
+        ts: 2_000,
+        sessionId: "session-parent",
+        data: {
+          phase: "end",
+          aborted: true,
+          stopReason: "toolUse",
+          livenessState: "blocked",
+          endedAt: 1_800,
+        },
+      },
+    });
+
+    expect(patch).toEqual(terminalPatch(1_050, 1_800, "failed", true));
+  });
+
+  it("clears abortedLastRun when the last restart-marked run ends aborted and blocked", () => {
+    expectPersistedLifecyclePatch({
+      sessionKey: THREAD_SESSION_KEY,
+      entry: {
+        status: "running",
+        abortedLastRun: true,
+        restartRecoveryRuns: [{ runId: "restart-run", lifecycleGeneration: "pre-restart" }],
+      },
+      runId: "restart-run",
+      lifecycleGeneration: "pre-restart",
+      data: {
+        phase: "end",
+        aborted: true,
+        stopReason: "toolUse",
+        livenessState: "blocked",
+        endedAt: 1_800,
+      },
+      expected: {
+        ...terminalPatch(1_050, 1_800, "failed", false),
+        restartRecoveryRuns: undefined,
+      },
+    });
+  });
+
+  it("clears abortedLastRun when a run ends normally after the flag was set", () => {
+    expectPersistedLifecyclePatch({
+      entry: { status: "running", abortedLastRun: true },
+      data: { phase: "end", endedAt: 1_800 },
+      expected: terminalPatch(1_050, 1_800, "done", false),
     });
   });
 
