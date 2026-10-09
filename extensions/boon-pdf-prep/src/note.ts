@@ -69,14 +69,21 @@ function coverageSentence(file: PdfStatusFile): string {
   return "Queued.";
 }
 
-function findingsSentence(findings: unknown, hex: string): string {
+// Undefined means no findings memory: an older pdf-index omits `findings`, an unavailable store gives null.
+function findingsCount(findings: unknown): number | undefined {
   if (typeof findings !== "object" || findings === null) {
+    return undefined;
+  }
+  const { count } = findings as { count?: unknown };
+  return typeof count === "number" && Number.isInteger(count) && count >= 0 ? count : undefined;
+}
+
+function findingsSentence(findings: unknown, hex: string): string {
+  const count = findingsCount(findings);
+  if (count === undefined || count < 1) {
     return "";
   }
-  const { count, pages } = findings as { count?: unknown; pages?: unknown };
-  if (typeof count !== "number" || !Number.isInteger(count) || count < 1) {
-    return "";
-  }
+  const { pages } = findings as { pages?: unknown };
   const cleanPages =
     typeof pages === "string" ? pages.replace(UNSAFE_PAGES_RE, "").slice(0, PAGES_MAX) : "";
   const where = cleanPages ? ` on pages ${cleanPages}` : "";
@@ -92,10 +99,12 @@ function noteLine(file: PdfStatusFile, hex: string): string {
 
 export function buildNote(files: PdfStatusFile[]): string | undefined {
   const lines: string[] = [];
+  let memoryAvailable = false;
   for (const file of files) {
     const hex = hashHex(file);
     if (hex && file.state !== "unknown") {
       lines.push(noteLine(file, hex));
+      memoryAvailable ||= findingsCount(file.findings) !== undefined;
     }
   }
   if (lines.length === 0) {
@@ -105,5 +114,10 @@ export function buildNote(files: PdfStatusFile[]): string | undefined {
     "[PDF preparation]",
     ...lines,
     'Use: pdf-index search <sha256> --q="<keywords>". The result states its coverage.',
+    ...(memoryAvailable
+      ? [
+          'After you read pages for an answer, save the result once: pdf-index note <sha256> --pages=<N> --kind=<count|extraction|answer> --topic="<short topic>" --body="<result>".',
+        ]
+      : []),
   ].join("\n");
 }

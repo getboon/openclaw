@@ -136,6 +136,51 @@ describe("buildNote", () => {
     });
   });
 
+  describe("save line", () => {
+    const save =
+      'After you read pages for an answer, save the result once: pdf-index note <sha256> --pages=<N> --kind=<count|extraction|answer> --topic="<short topic>" --body="<result>".';
+    const ready = `- "plans.pdf" (sha256 ${HEX}): 6 pages. Ready.`;
+
+    it("follows the usage line when memory is available with no findings", () => {
+      expect(buildNote([statusFile({ findings: { count: 0 } })])?.split("\n")).toEqual([
+        "[PDF preparation]",
+        ready,
+        usage,
+        save,
+      ]);
+    });
+
+    it("comes with the recall sentence when findings exist", () => {
+      expect(buildNote([statusFile({ findings: { count: 3, pages: "6" } })])?.split("\n")).toEqual([
+        "[PDF preparation]",
+        `${ready} Earlier findings: 3 on pages 6. Run pdf-index recall ${HEX} before you read these pages.`,
+        usage,
+        save,
+      ]);
+    });
+
+    it.each([
+      { label: "null findings", findings: null },
+      { label: "no findings key", findings: undefined },
+      { label: "a boolean count", findings: { count: true } },
+      { label: "a negative count", findings: { count: -1 } },
+      { label: "a fractional count", findings: { count: 1.5 } },
+    ])("is absent for $label", ({ findings }) => {
+      const file = statusFile(findings === undefined ? {} : { findings });
+      expect(buildNote([file])?.split("\n").at(-1)).toBe(usage);
+    });
+
+    it("appears once when only one of two files has memory", () => {
+      const note = buildNote([
+        statusFile({ findings: { count: 0 } }),
+        statusFile({ file_hash: `sha256:${"b".repeat(64)}`, findings: null }),
+      ]);
+      const lines = note?.split("\n") ?? [];
+      expect(lines.filter((line) => line === save)).toHaveLength(1);
+      expect(lines.slice(-2)).toEqual([usage, save]);
+    });
+  });
+
   it("writes the fixed note shape", () => {
     expect(buildNote([statusFile()])).toBe(
       ["[PDF preparation]", `- "plans.pdf" (sha256 ${HEX}): 6 pages. Ready.`, usage].join("\n"),
