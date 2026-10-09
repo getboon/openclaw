@@ -183,7 +183,7 @@ describe("buildNote", () => {
 
   describe("fan-out line", () => {
     const fanOut =
-      "Whole-file read, summary or review of a PDF over 20 pages: do not read the pages yourself. Split them into 10-20 page ranges, one sub-agent each (sessions_spawn, then sessions_yield). Attached file text is not a read of the file.";
+      "Whole-file read, summary or review of a PDF over 20 pages: do not read the pages yourself. Split them into 10-20 page ranges, one sub-agent each: spawn at most 5 with sessions_spawn, call sessions_yield last, and spawn the rest after the results arrive. Attached file text is not a read of the file.";
 
     it("follows the usage line for a file over 20 pages", () => {
       expect(buildNote([statusFile({ pages_done: 32, total_pages: 32 })])?.split("\n")).toEqual([

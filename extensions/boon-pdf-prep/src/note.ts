@@ -120,7 +120,7 @@ export function buildNote(files: PdfStatusFile[]): string | undefined {
     // Agents skipped this rule when only the system prompt held it; it must sit next to the turn.
     ...(fanOut
       ? [
-          `Whole-file read, summary or review of a PDF over ${FAN_OUT_PAGES} pages: do not read the pages yourself. Split them into 10-20 page ranges, one sub-agent each (sessions_spawn, then sessions_yield). Attached file text is not a read of the file.`,
+          `Whole-file read, summary or review of a PDF over ${FAN_OUT_PAGES} pages: do not read the pages yourself. Split them into 10-20 page ranges, one sub-agent each: spawn at most 5 with sessions_spawn, call sessions_yield last, and spawn the rest after the results arrive. Attached file text is not a read of the file.`,
         ]
       : []),
     ...(memoryAvailable
