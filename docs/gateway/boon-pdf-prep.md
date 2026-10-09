@@ -23,7 +23,7 @@ The bundled `boon-pdf-prep` plugin starts text preparation for each inbound PDF 
 
 - A PDF that is not ready gets a line on every turn once its hash is known. A new PDF can get no line until `pdf-index` has hashed it.
 - A ready PDF gets a `Ready.` line once per session. The session is the run `sessionId`, else its `sessionKey`. A new session for the same thread, for example after `/new`, gets the line again. A run with neither gets the line on every turn. A PDF shown as queued or in progress earlier gets one `Ready.` line when it becomes ready.
-- When `pdf-index status` reports earlier findings for a PDF, its line ends with `Earlier findings: <count> on pages <pages>. Run pdf-index recall <sha256> before you read these pages.` The plugin keeps only digits, commas and hyphens in the pages value, at most 80 characters. Older `pdf-index` versions report no findings, and the line has no findings part.
+- When `pdf-index status` reports earlier findings for a PDF, its line ends with `Earlier findings: <count> on pages <pages>. Run pdf-index recall <sha256> before you read these pages.` The plugin keeps only digits, commas and hyphens in the pages value, at most 80 characters. If the pages value is missing or empty after cleaning, the line has no `on pages <pages>` part. Older `pdf-index` versions report no findings, and the line has no findings part.
 - The suggested `pdf-index search` command uses the file hash. Only `enqueue` and `status` receive file refs: inbound paths or `media://inbound/<id>` refs. File names never reach a command line, and they are cleaned before they go into the note.
 
 The plugin starts every command with an argument list, never through a shell.
