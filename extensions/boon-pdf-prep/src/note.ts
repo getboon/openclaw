@@ -116,7 +116,7 @@ export function buildNote(files: PdfStatusFile[]): string | undefined {
     'Use: pdf-index search <sha256> --q="<keywords>". The result states its coverage.',
     ...(memoryAvailable
       ? [
-          'After you read pages for an answer, save the result once: pdf-index note <sha256> --pages=<N> --kind=<count|extraction|answer> --topic="<short topic>" --body="<result>".',
+          'After you read pages for an answer, save the result once: pdf-index note <sha256> --pages=<N> --kind=<count|extraction|answer> --source=<text_layer|vision> --topic="<short topic>" --body="<result>".',
         ]
       : []),
   ].join("\n");

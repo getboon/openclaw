@@ -138,7 +138,7 @@ describe("buildNote", () => {
 
   describe("save line", () => {
     const save =
-      'After you read pages for an answer, save the result once: pdf-index note <sha256> --pages=<N> --kind=<count|extraction|answer> --topic="<short topic>" --body="<result>".';
+      'After you read pages for an answer, save the result once: pdf-index note <sha256> --pages=<N> --kind=<count|extraction|answer> --source=<text_layer|vision> --topic="<short topic>" --body="<result>".';
     const ready = `- "plans.pdf" (sha256 ${HEX}): 6 pages. Ready.`;
 
     it("follows the usage line when memory is available with no findings", () => {
