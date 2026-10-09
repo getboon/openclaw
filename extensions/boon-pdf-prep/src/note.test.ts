@@ -40,6 +40,14 @@ describe("parsePdfRefs", () => {
     ).toEqual(["media://inbound/my plans (v2).pdf"]);
   });
 
+  it("reads a parameterized MIME type", () => {
+    const prompt = [
+      "[media attached 1/2: media://inbound/a.bin (Application/PDF; charset=binary)]",
+      "[media attached 2/2: media://inbound/b.ogg (audio/ogg; codecs=opus) | https://example.com/b]",
+    ].join("\n");
+    expect(parsePdfRefs(prompt)).toEqual(["media://inbound/a.bin"]);
+  });
+
   it("drops duplicate refs", () => {
     const line = "[media attached: media://inbound/a.pdf (application/pdf)]";
     expect(parsePdfRefs(`${line}\n${line}`)).toEqual(["media://inbound/a.pdf"]);
@@ -67,6 +75,7 @@ describe("isPdfMedia", () => {
     { path: "/tmp/a.pdf", type: undefined, expected: true },
     { path: "/tmp/a.PDF", type: "", expected: true },
     { path: "/tmp/a.bin", type: "Application/PDF", expected: true },
+    { path: "/tmp/a.bin", type: "application/pdf; charset=binary", expected: true },
     { path: "/tmp/a.png", type: "image/png", expected: false },
     { path: "/tmp/pdf", type: undefined, expected: false },
   ])("$path ($type) -> $expected", ({ path, type, expected }) => {
@@ -103,6 +112,11 @@ describe("buildNote", () => {
       label: "text without an eta",
       file: { state: "text", pages_done: 400, total_pages: 1546, eta_s: null },
       line: `- "plans.pdf" (sha256 ${HEX}): 1546 pages. Text search covers pages 1-400.`,
+    },
+    {
+      label: "text without a page count",
+      file: { state: "text", pages_done: 400, total_pages: null, eta_s: 57 },
+      line: `- "plans.pdf" (sha256 ${HEX}): Text search covers pages 1-400. The rest in about 57 s.`,
     },
     {
       label: "text before the first commit",

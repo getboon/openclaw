@@ -17,6 +17,7 @@ type ExecCallback = (error: Error | null, stdout: string, stderr: string) => voi
 
 class FakeChild extends EventEmitter {
   kill = vi.fn(() => true);
+  unref = vi.fn();
 }
 
 function statusJson(files: Record<string, unknown>[]): string {
@@ -101,6 +102,9 @@ describe("message_received", () => {
       stdio: "ignore",
       detached: false,
     });
+    const child = vi.mocked(spawn).mock.results[0]?.value as FakeChild;
+    expect(child.unref).toHaveBeenCalledOnce();
+    expect(child.listenerCount("error")).toBe(1);
   });
 
   it.each([

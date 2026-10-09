@@ -35,6 +35,7 @@ function enqueue(refs: string[]): void {
     const child = spawn(PDF_INDEX_BIN, ["enqueue", ...refs], { stdio: "ignore", detached: false });
     // Without a listener, a missing binary (ENOENT) would crash the gateway.
     child.on("error", () => undefined);
+    child.unref();
   } catch {
     // Preparation is best effort; the first search starts it too.
   }
