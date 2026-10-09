@@ -2,6 +2,16 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.34-boon.4
+
+Stops a session's shell commands on /stop, and makes remote-CDP browser profiles for Browser Sessions fast. Also brings `npm-shrinkwrap.json` back in line with the pnpm lock.
+
+- **#272 (ENG-16829):** a fast abort now cancels every running exec process owned by the session, by its stopped sub-agents, and by its sub-agents that already ended. Each process is marked exit-notified first, so the kill does not wake the session. A sessions_spawn accepted after its abort signal fired kills the new child run and its descendants. Killed sub-agent tasks are silent, so /stop and /new no longer post "Background task cancelled" for them. This applies on every channel: on Slack and Teams, "stop" or /stop now also ends shell commands that earlier turns started in the background.
+- **#270 (ENG-21111):** registered remote-CDP browser profiles use the Playwright driver, still attach-only. An attach-only loopback ws(s) relay with a non-`/devtools/` path is treated as remote CDP. `act` resolves tab aliases before the target mismatch check. `web_fetch` accepts `ssrfPolicy.allowedHostnames`.
+- **#268:** `@modelcontextprotocol/sdk` 1.29.0 -> 1.31.0.
+- `npm-shrinkwrap.json` matches the pnpm lock again: `@modelcontextprotocol/sdk` 1.31.0, `express-rate-limit` 8.7.1, `eventsource-parser` 3.1.1, `content-type` 2.1.0 and `iconv-lite` 0.7.3. The shrinkwraps were generated with a temporary npm-only override that pinned `@opentelemetry/sdk-trace-base` and `@opentelemetry/resources` under `@sentry/node` to 2.11.0, the pnpm lock versions. The override is not part of this release.
+- Base = `2026.6.34-boon.3`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.34-boon.4` in lockstep. `@openclaw/slack` and `@openclaw/msteams` also change in their shrinkwrap only: `content-type` 2.0.0 -> 2.1.0 and `iconv-lite` 0.7.2 -> 0.7.3. No plugin source changed.
+
 ## 2026.6.34-boon.3
 
 Resumes an interrupted sub-agent once after a gateway restart. Before, a loaded host could resume the same child twice, so it repeated its tool calls and the parent's answer came late.
