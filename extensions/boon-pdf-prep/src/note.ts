@@ -17,8 +17,8 @@ const MEDIA_LINE_RE = /^\[media attached(?: \d+\/\d+)?: (.+)\]$/gmu;
 // Media notes render `<ref> (<mime>) | <url>`; the ref itself may hold spaces and parentheses,
 // and the mime may carry parameters such as `; charset=binary`.
 const MEDIA_BODY_RE = /^(.+?)(?: \(([^()\s;]+\/[^()\s;]+(?:;[^()]*)?)\))?(?: \| .*)?$/u;
-// Same rule as pdf-index `clean_name`, so names stay identical across both tools.
-const UNSAFE_NAME_RE = /[\p{Cc}\]"'`]/gu;
+// pdf-index `clean_name` rule plus every Unicode line break, so a name cannot split the note.
+const UNSAFE_NAME_RE = /[\p{Cc}\p{Zl}\p{Zp}\]"'`]/gu;
 const FILE_NAME_MAX = 80;
 const HASH_RE = /^sha256:([0-9a-f]{64})$/u;
 const UNSAFE_PAGES_RE = /[^0-9,-]/gu;
