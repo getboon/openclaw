@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/boon-pdf-prep",
-  "version": "2026.6.34-boon.4",
+  "version": "2026.6.34-boon.5",
   "private": true,
   "type": "module",
   "devDependencies": {
