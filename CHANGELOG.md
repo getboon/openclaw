@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.34-boon.5
+
+Prepares inbound PDFs in the background and marks attachment text that was cut, so the agent knows to search or read the rest of a big PDF.
+
+- **#273 (ENG-21106):** new bundled `boon-pdf-prep` plugin, enabled by default and gated by `plugins.allow`. It queues each inbound PDF with `pdf-index enqueue` and adds a short preparation note to the model input. When `pdf-index` is missing, slow or old, the turn runs with no note.
+- **#273 (ENG-21106):** cut attachment text now ends with an `[Incomplete text: ...]` line after the untrusted content end marker. It says where the text stops: the character limit, the page limit, or pages with no text layer.
+- Base = `2026.6.34-boon.4`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.34-boon.5` in lockstep. No source or dependency change in those three plugins.
+
 ## 2026.6.34-boon.4
 
 Stops a session's shell commands on /stop, and makes remote-CDP browser profiles for Browser Sessions fast. Also brings `npm-shrinkwrap.json` back in line with the pnpm lock.
