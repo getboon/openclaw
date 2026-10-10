@@ -62,12 +62,15 @@ async function waitFor<T>(read: () => T | undefined, timeoutMs: number): Promise
 describe.runIf(process.platform === "linux")("signalProcessTree on Linux", () => {
   afterEach(() => {
     for (const pid of spawnedPids.splice(0)) {
+      for (const childPid of findChildPids(pid)) {
+        killIfStillTestSleep(childPid);
+      }
       killIfStillTestSleep(pid);
     }
   });
 
   it("kills the grandchild of a non-detached shell", async () => {
-    const child = spawn("bash", ["-c", "sleep 300 && echo done"], {
+    const child = spawn("sh", ["-c", "sleep 300 && echo done"], {
       detached: false,
       stdio: "ignore",
     });

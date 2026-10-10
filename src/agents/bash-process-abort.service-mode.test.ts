@@ -96,6 +96,9 @@ describe.runIf(process.platform === "linux")("killExecProcessesForSessions in se
 
   afterEach(() => {
     for (const pid of leftoverPids.splice(0)) {
+      for (const descendantPid of findDescendantPids(pid)) {
+        killIfStillTestSleep(descendantPid);
+      }
       killIfStillTestSleep(pid);
     }
     resetProcessRegistryForTests();

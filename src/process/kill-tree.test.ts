@@ -34,6 +34,11 @@ vi.mock("node:fs", async () => {
   );
 });
 
+// Fixture pids must not collide with the test process, which the kill path never signals.
+const PID_BASE = [7000, 17000, 27000].find((base) =>
+  [process.pid, process.ppid].every((pid) => pid < base || pid >= base + 1000),
+) as number;
+
 function setProcParents(entries: Array<[pid: number, ppid: number, comm?: string]>) {
   procTable.stats.clear();
   for (const [pid, ppid, comm] of entries) {
@@ -257,39 +262,39 @@ describe("killProcessTree", () => {
   it("on Linux non-detached SIGTERM signals descendants before the shell pid", async () => {
     killSpy.mockImplementation(() => true);
     setProcParents([
-      [7100, 1],
-      [7101, 7100, "sleep"],
-      [7102, 7101, "odd ) name (x"],
-      [7200, 1],
+      [PID_BASE + 100, 1],
+      [PID_BASE + 101, PID_BASE + 100, "sleep"],
+      [PID_BASE + 102, PID_BASE + 101, "odd ) name (x"],
+      [PID_BASE + 200, 1],
     ]);
 
     await withMockedPlatform("linux", async () => {
-      signalProcessTree(7100, "SIGTERM", { detached: false });
+      signalProcessTree(PID_BASE + 100, "SIGTERM", { detached: false });
     });
 
     expect(killSpy.mock.calls).toEqual([
-      [7101, "SIGTERM"],
-      [7102, "SIGTERM"],
-      [7100, "SIGTERM"],
+      [PID_BASE + 101, "SIGTERM"],
+      [PID_BASE + 102, "SIGTERM"],
+      [PID_BASE + 100, "SIGTERM"],
     ]);
   });
 
   it("on Linux non-detached kill never signals the gateway, its parent, or init", async () => {
     killSpy.mockImplementation(() => true);
     setProcParents([
-      [7300, 1],
-      [process.pid, 7300, "node"],
-      [process.ppid, 7300, "systemd"],
-      [1, 7300, "init"],
-      [7301, 7300, "sleep"],
+      [PID_BASE + 300, 1],
+      [process.pid, PID_BASE + 300, "node"],
+      [process.ppid, PID_BASE + 300, "systemd"],
+      [1, PID_BASE + 300, "init"],
+      [PID_BASE + 301, PID_BASE + 300, "sleep"],
     ]);
 
     await withMockedPlatform("linux", async () => {
-      signalProcessTree(7300, "SIGTERM", { detached: false });
+      signalProcessTree(PID_BASE + 300, "SIGTERM", { detached: false });
     });
 
     const signaledPids = killSpy.mock.calls.map((call: unknown[]) => call[0]);
-    expect(signaledPids).toEqual([7301, 7300]);
+    expect(signaledPids).toEqual([PID_BASE + 301, PID_BASE + 300]);
   });
 
   it("on Linux non-detached kill falls back to the shell pid when /proc is unreadable", async () => {
@@ -297,24 +302,24 @@ describe("killProcessTree", () => {
     procTable.readdirError = true;
 
     await withMockedPlatform("linux", async () => {
-      signalProcessTree(7400, "SIGTERM", { detached: false });
+      signalProcessTree(PID_BASE + 400, "SIGTERM", { detached: false });
     });
 
-    expect(killSpy.mock.calls).toEqual([[7400, "SIGTERM"]]);
+    expect(killSpy.mock.calls).toEqual([[PID_BASE + 400, "SIGTERM"]]);
   });
 
   it("on Linux group kill still signals only the process group", async () => {
     killSpy.mockImplementation(() => true);
     setProcParents([
-      [7500, 1],
-      [7501, 7500, "sleep"],
+      [PID_BASE + 500, 1],
+      [PID_BASE + 501, PID_BASE + 500, "sleep"],
     ]);
 
     await withMockedPlatform("linux", async () => {
-      signalProcessTree(7500, "SIGTERM");
+      signalProcessTree(PID_BASE + 500, "SIGTERM");
     });
 
-    expect(killSpy.mock.calls).toEqual([[-7500, "SIGTERM"]]);
+    expect(killSpy.mock.calls).toEqual([[-(PID_BASE + 500), "SIGTERM"]]);
   });
 
   it("on Windows maps requested tree signals to taskkill force mode", async () => {
