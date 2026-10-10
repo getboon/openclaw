@@ -33843,6 +33843,31 @@
       "hasChildren": false
     },
     {
+      "path": "tools.web.fetch.ssrfPolicy.allowedHostnames",
+      "kind": "core",
+      "type": "array",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "access",
+        "tools"
+      ],
+      "label": "Web Fetch Allowed Hostnames",
+      "help": "Hostnames web_fetch may reach even when they resolve to private or loopback addresses, such as localhost for local development.",
+      "hasChildren": true
+    },
+    {
+      "path": "tools.web.fetch.ssrfPolicy.allowedHostnames.*",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
       "path": "tools.web.fetch.timeoutSeconds",
       "kind": "core",
       "type": "integer",

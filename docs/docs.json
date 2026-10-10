@@ -1578,6 +1578,7 @@
                       "gateway/opentelemetry",
                       "gateway/prometheus",
                       "gateway/sentry-monitor",
+                      "gateway/boon-pdf-prep",
                       "gateway/logging",
                       "gateway/diagnostics",
                       "gateway/troubleshooting"

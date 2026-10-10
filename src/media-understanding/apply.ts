@@ -518,6 +518,10 @@ async function extractFileBlocks(params: {
         blockText = "[No extractable text]";
       }
     }
+    if (extracted.textNotice) {
+      // Outside the untrusted wrapper, so the model reads it as a fact about the file, not file content.
+      blockText += `\n${extracted.textNotice}`;
+    }
     blocks.push(
       renderFileContextBlock({
         filename: bufferResult.fileName,
