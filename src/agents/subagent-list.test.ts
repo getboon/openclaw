@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import { updateSessionStore } from "../config/sessions/store.js";
+import { SUBAGENT_ENDED_REASON_KILLED } from "./subagent-lifecycle-events.js";
 import { buildSubagentList } from "./subagent-list.js";
 import {
   addSubagentRunForTests,
@@ -108,6 +109,35 @@ describe("buildSubagentList", () => {
 
     expect(list.active[0]?.taskName).toBe("review_subagents");
     expect(list.active[0]?.line).toContain("review_subagents: Review worker");
+  });
+
+  it.each([
+    { name: "killed", endedReason: SUBAGENT_ENDED_REASON_KILLED, expected: "killed" },
+    { name: "failed", endedReason: undefined, expected: "failed" },
+  ])("lists an ended error run as $expected when it was $name", ({ endedReason, expected }) => {
+    const now = Date.now();
+    const run = {
+      runId: `run-ended-${expected}`,
+      childSessionKey: `agent:main:subagent:ended-${expected}`,
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "print random numbers",
+      cleanup: "keep",
+      createdAt: now - 60_000,
+      startedAt: now - 60_000,
+      endedAt: now - 30_000,
+      outcome: { status: "error", error: "killed" },
+      ...(endedReason ? { endedReason } : {}),
+    } satisfies SubagentRunRecord;
+    addSubagentRunForTests(run);
+    const cfg = {
+      commands: { text: true },
+      channels: { whatsapp: { allowFrom: ["*"] } },
+    } as OpenClawConfig;
+
+    const list = buildSubagentList({ cfg, runs: [run], recentMinutes: 30 });
+
+    expect(list.recent[0]?.status).toBe(expected);
   });
 
   it("keeps ended orchestrators active while descendants remain pending", () => {

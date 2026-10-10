@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentRunRecord } from "../../agents/subagent-registry.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionAbortTargetResult } from "../../config/sessions/session-accessor.js";
+import {
+  peekSystemEventEntries,
+  peekSystemEvents,
+  resetSystemEventsForTest,
+} from "../../infra/system-events.js";
 import type { TaskNotifyPolicy, TaskRecord } from "../../tasks/task-registry.types.js";
 import {
   testing as abortTesting,
@@ -29,6 +34,7 @@ import {
   replyRunRegistry,
   testing as replyRunRegistryTesting,
 } from "./reply-run-registry.js";
+import { drainFormattedSystemEvents } from "./session-system-events.js";
 import { buildTestCtx } from "./test-ctx.js";
 
 vi.mock("../../agents/embedded-agent.js", () => ({
@@ -1657,6 +1663,214 @@ describe("abort detection", () => {
       });
 
       expect(result).toMatchObject({ handled: true, stoppedSubagents: 2 });
+    });
+  });
+
+  describe("stopped subagent note for the requester", () => {
+    const parentKey = "agent:main:99:thread-15004:thread:15004";
+    const childKey = "agent:main:subagent:rand-printer";
+    const grandchildKey = "agent:main:subagent:rand-printer:subagent:leaf";
+
+    function activeRun(params: {
+      runId: string;
+      childSessionKey: string;
+      requesterSessionKey: string;
+      label?: string;
+      taskName?: string;
+    }): SubagentRunRecord {
+      return {
+        runId: params.runId,
+        childSessionKey: params.childSessionKey,
+        requesterSessionKey: params.requesterSessionKey,
+        requesterDisplayKey: params.requesterSessionKey,
+        task: "print random numbers",
+        cleanup: "keep",
+        createdAt: Date.now(),
+        ...(params.label ? { label: params.label } : {}),
+        ...(params.taskName ? { taskName: params.taskName } : {}),
+      };
+    }
+
+    beforeEach(() => {
+      resetSystemEventsForTest();
+      subagentRegistryMocks.listSubagentRunsForRequester.mockReset().mockReturnValue([]);
+      subagentRegistryMocks.markSubagentRunTerminated.mockReset().mockReturnValue(1);
+    });
+
+    afterEach(() => {
+      resetSystemEventsForTest();
+    });
+
+    it("fast-abort tells the requester which subagent was stopped", async () => {
+      const { cfg } = await createAbortConfig({
+        sessionIdsByKey: { [parentKey]: "session-parent" },
+      });
+      subagentRegistryMocks.listSubagentRunsForRequester
+        .mockReturnValueOnce([
+          activeRun({
+            runId: "run-child",
+            childSessionKey: childKey,
+            requesterSessionKey: parentKey,
+            taskName: "rand_printer",
+          }),
+        ])
+        .mockReturnValueOnce([]);
+
+      await runStopCommand({
+        cfg,
+        sessionKey: parentKey,
+        from: "telegram:parent",
+        to: "telegram:parent",
+      });
+
+      const events = peekSystemEventEntries(parentKey);
+      expect(events).toHaveLength(1);
+      expect(events[0]?.contextKey).toBe("user-stop:subagents");
+      expect(events[0]?.text).toBe(
+        "The user stopped 1 subagent before it finished: rand_printer. It is not running and will not report back. Do not restart it unless the user asks.",
+      );
+    });
+
+    it("fast-abort with no subagents adds no note", async () => {
+      const { cfg } = await createAbortConfig({
+        sessionIdsByKey: { [parentKey]: "session-parent" },
+      });
+
+      await runStopCommand({
+        cfg,
+        sessionKey: parentKey,
+        from: "telegram:parent",
+        to: "telegram:parent",
+      });
+
+      expect(peekSystemEventEntries(parentKey)).toEqual([]);
+    });
+
+    it("names only direct subagents, not cascaded grandchildren", async () => {
+      const { cfg } = await createAbortConfig();
+      subagentRegistryMocks.listSubagentRunsForRequester
+        .mockReturnValueOnce([
+          activeRun({
+            runId: "run-child",
+            childSessionKey: childKey,
+            requesterSessionKey: parentKey,
+            label: "orchestrator",
+          }),
+        ])
+        .mockReturnValueOnce([
+          activeRun({
+            runId: "run-grandchild",
+            childSessionKey: grandchildKey,
+            requesterSessionKey: childKey,
+            taskName: "leaf_worker",
+          }),
+        ])
+        .mockReturnValueOnce([]);
+
+      const result = stopSubagentsForRequester({
+        cfg,
+        requesterSessionKey: parentKey,
+        notifyRequester: true,
+      });
+
+      expect(result.stopped).toBe(2);
+      expect(peekSystemEvents(parentKey)).toEqual([
+        "The user stopped 1 subagent before it finished: orchestrator. It is not running and will not report back. Do not restart it unless the user asks.",
+      ]);
+      expect(peekSystemEvents(childKey)).toEqual([]);
+    });
+
+    it("lists at most five names and counts the rest", async () => {
+      const { cfg } = await createAbortConfig();
+      const names = ["a", "b", "c", "d", "e", "f", "g"];
+      subagentRegistryMocks.listSubagentRunsForRequester.mockReturnValueOnce([
+        ...names.map((name) =>
+          activeRun({
+            runId: `run-${name}`,
+            childSessionKey: `agent:main:subagent:${name}`,
+            requesterSessionKey: parentKey,
+            taskName: name,
+          }),
+        ),
+        activeRun({
+          runId: "run-unnamed",
+          childSessionKey: "agent:main:subagent:unnamed",
+          requesterSessionKey: parentKey,
+        }),
+      ]);
+
+      stopSubagentsForRequester({ cfg, requesterSessionKey: parentKey, notifyRequester: true });
+
+      expect(peekSystemEvents(parentKey)).toEqual([
+        "The user stopped 8 subagents before they finished: a, b, c, d, e, and 3 more. They are not running and will not report back. Do not restart them unless the user asks.",
+      ]);
+    });
+
+    it("uses unnamed when a stopped subagent has no task name or label", async () => {
+      const { cfg } = await createAbortConfig();
+      subagentRegistryMocks.listSubagentRunsForRequester.mockReturnValueOnce([
+        activeRun({
+          runId: "run-unnamed",
+          childSessionKey: childKey,
+          requesterSessionKey: parentKey,
+        }),
+      ]);
+
+      stopSubagentsForRequester({ cfg, requesterSessionKey: parentKey, notifyRequester: true });
+
+      expect(peekSystemEvents(parentKey)[0]).toContain("before it finished: unnamed.");
+    });
+
+    it("adds no note when called without the notify flag", async () => {
+      const { cfg } = await createAbortConfig();
+      subagentRegistryMocks.listSubagentRunsForRequester
+        .mockReturnValueOnce([
+          activeRun({
+            runId: "run-child",
+            childSessionKey: childKey,
+            requesterSessionKey: parentKey,
+            taskName: "rand_printer",
+          }),
+        ])
+        .mockReturnValueOnce([]);
+
+      const result = stopSubagentsForRequester({ cfg, requesterSessionKey: parentKey });
+
+      expect(result.stopped).toBe(1);
+      expect(peekSystemEvents(parentKey)).toEqual([]);
+    });
+
+    it("the next reply turn drains the note for a Boon web thread key", async () => {
+      const sessionKey = parentKey;
+      const { cfg } = await createAbortConfig({
+        sessionIdsByKey: { [sessionKey]: "session-parent" },
+      });
+      subagentRegistryMocks.listSubagentRunsForRequester
+        .mockReturnValueOnce([
+          activeRun({
+            runId: "run-child",
+            childSessionKey: childKey,
+            requesterSessionKey: sessionKey,
+            taskName: "rand_printer",
+          }),
+        ])
+        .mockReturnValueOnce([]);
+
+      await runStopCommand({
+        cfg,
+        sessionKey,
+        from: "telegram:parent",
+        to: "telegram:parent",
+      });
+
+      const block = await drainFormattedSystemEvents({
+        cfg,
+        sessionKey,
+        isMainSession: false,
+        isNewSession: false,
+      });
+      expect(block).toContain("rand_printer");
+      expect(block).toContain("Do not restart");
     });
   });
 });
