@@ -1,5 +1,6 @@
 // Agent Core module implements kill tree behavior.
 import { spawn } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
 
 const DEFAULT_GRACE_MS = 3000;
 const MAX_GRACE_MS = 60_000;
@@ -101,11 +102,80 @@ function signalProcessTreeUnix(
     }
   }
 
+  // A non-detached child shares the gateway's process group, so its descendants
+  // can only be reached one pid at a time.
+  const descendants =
+    !useGroupKill && process.platform === "linux" ? listSignalableDescendantsLinux(pid) : [];
+  for (const descendant of descendants) {
+    signalPid(descendant, signal);
+  }
+  signalPid(pid, signal);
+}
+
+function signalPid(pid: number, signal: "SIGTERM" | "SIGKILL"): void {
   try {
     process.kill(pid, signal);
   } catch {
     // Already gone.
   }
+}
+
+function listSignalableDescendantsLinux(rootPid: number): number[] {
+  let entries: string[];
+  try {
+    entries = readdirSync("/proc");
+  } catch {
+    return [];
+  }
+  const childrenByParent = new Map<number, number[]>();
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry)) {
+      continue;
+    }
+    const parentPid = readParentPidLinux(entry);
+    if (parentPid === undefined) {
+      continue;
+    }
+    const siblings = childrenByParent.get(parentPid);
+    if (siblings) {
+      siblings.push(Number(entry));
+    } else {
+      childrenByParent.set(parentPid, [Number(entry)]);
+    }
+  }
+  const protectedPids = new Set([process.pid, process.ppid]);
+  const descendants: number[] = [];
+  const visited = new Set([rootPid]);
+  const queue = [rootPid];
+  for (let parent = queue.shift(); parent !== undefined; parent = queue.shift()) {
+    for (const child of childrenByParent.get(parent) ?? []) {
+      if (visited.has(child)) {
+        continue;
+      }
+      visited.add(child);
+      if (child > 1 && !protectedPids.has(child)) {
+        descendants.push(child);
+        queue.push(child);
+      }
+    }
+  }
+  return descendants;
+}
+
+function readParentPidLinux(pid: string): number | undefined {
+  let stat: string;
+  try {
+    stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+  } catch {
+    return undefined;
+  }
+  // The command name field may contain spaces and parentheses, so fields start after the last ")".
+  const commandEnd = stat.lastIndexOf(")");
+  if (commandEnd < 0) {
+    return undefined;
+  }
+  const parentPid = Number(stat.slice(commandEnd + 2).split(" ")[1]);
+  return Number.isInteger(parentPid) ? parentPid : undefined;
 }
 
 function runTaskkill(args: string[]): void {

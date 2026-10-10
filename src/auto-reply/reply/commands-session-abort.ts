@@ -169,6 +169,7 @@ export const handleStopCommand: CommandHandler = async (params, allowTextCommand
   const { stopped } = stopSubagentsForRequester({
     cfg: params.cfg,
     requesterSessionKey: abortTarget.key ?? params.sessionKey,
+    notifyRequester: true,
   });
 
   const rejectionReason =

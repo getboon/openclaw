@@ -218,6 +218,7 @@ import {
 } from "../../subagent-capabilities.js";
 import {
   ackPendingAgentSteeringItems,
+  isSubagentRunKilled,
   leasePendingAgentSteeringItems,
   prependAgentSteeringPrompt,
   releasePendingAgentSteeringItems,
@@ -4787,6 +4788,15 @@ export async function runEmbeddedAttempt(
                 `effectiveReserveTokens=${preemptiveCompaction.effectiveReserveTokens} ` +
                 `sessionFile=${params.sessionFile}`,
             );
+            skipPromptSubmission = true;
+          }
+
+          // A stop before this run became active, or during the awaits above, only marks the
+          // registry record. Without this check the prompt would still reach the model.
+          if (isSubagentSessionKey(params.sessionKey) && isSubagentRunKilled(params.runId)) {
+            if (!runAbortController.signal.aborted) {
+              abortActiveRunExternally("user_abort");
+            }
             skipPromptSubmission = true;
           }
 
