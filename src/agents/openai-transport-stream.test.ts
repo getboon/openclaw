@@ -8522,6 +8522,188 @@ describe("openai transport stream", () => {
         | undefined;
       expect(assistant?.tool_calls?.[0]?.extra_content).toBeUndefined();
     });
+
+    describe("proxied Gemini with compat.requiresGoogleThoughtSignatures", () => {
+      const proxiedGeminiModel = {
+        id: "gemini-3.8-flash",
+        name: "Gemini 3.8 Flash",
+        api: "openai-completions",
+        provider: "boon-llm-gateway",
+        baseUrl: "https://gateway.example.com/v1",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1_000_000,
+        maxTokens: 8192,
+        compat: { requiresGoogleThoughtSignatures: true },
+      } as unknown as Model<"openai-completions">;
+      const unflaggedProxiedGeminiModel = {
+        ...proxiedGeminiModel,
+        compat: {},
+      } as Model<"openai-completions">;
+
+      function buildToolCallReplay(
+        model: Model<"openai-completions">,
+        source: { api: string; provider: string; model: string },
+        toolCall: Record<string, unknown>,
+      ) {
+        const params = buildOpenAICompletionsParams(
+          model,
+          {
+            messages: [
+              { role: "user", content: "weather" },
+              {
+                role: "assistant",
+                ...source,
+                usage: {
+                  input: 0,
+                  output: 0,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  totalTokens: 0,
+                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                },
+                stopReason: "toolUse",
+                timestamp: 1,
+                content: [
+                  {
+                    type: "toolCall",
+                    name: "get_weather",
+                    arguments: { city: "Paris" },
+                    ...toolCall,
+                  },
+                ],
+              },
+              {
+                role: "toolResult",
+                toolCallId: toolCall.id,
+                toolName: "get_weather",
+                content: [{ type: "text", text: "sunny" }],
+                isError: false,
+              },
+            ],
+            tools: [],
+          } as never,
+          undefined,
+        ) as { messages: Array<Record<string, unknown>> };
+        return params.messages.find((message) => message.role === "assistant") as
+          | { tool_calls?: Array<{ extra_content?: { google?: { thought_signature?: string } } }> }
+          | undefined;
+      }
+
+      it("re-emits the same-route thought_signature when the compat flag is set", () => {
+        const assistant = buildToolCallReplay(
+          proxiedGeminiModel,
+          {
+            api: proxiedGeminiModel.api,
+            provider: proxiedGeminiModel.provider,
+            model: proxiedGeminiModel.id,
+          },
+          { id: "call_1", thoughtSignature: "SIG-OPAQUE-ABC==" },
+        );
+
+        expect(assistant?.tool_calls?.[0]?.extra_content?.google?.thought_signature).toBe(
+          "SIG-OPAQUE-ABC==",
+        );
+      });
+
+      it("does not emit extra_content when the compat flag is absent", () => {
+        const assistant = buildToolCallReplay(
+          unflaggedProxiedGeminiModel,
+          {
+            api: unflaggedProxiedGeminiModel.api,
+            provider: unflaggedProxiedGeminiModel.provider,
+            model: unflaggedProxiedGeminiModel.id,
+          },
+          { id: "call_1", thoughtSignature: "SIG-OPAQUE-ABC==" },
+        );
+
+        expect(assistant?.tool_calls?.[0]?.extra_content).toBeUndefined();
+      });
+
+      it("uses the Gemini skip-validator signature for unsigned tool calls from another route", () => {
+        const assistant = buildToolCallReplay(
+          proxiedGeminiModel,
+          { api: "openai-completions", provider: "openai", model: "gpt-5.5" },
+          { id: "call_1" },
+        );
+
+        expect(assistant?.tool_calls?.[0]?.extra_content?.google?.thought_signature).toBe(
+          "skip_thought_signature_validator",
+        );
+      });
+
+      it("keeps the thought_signature on the first of parallel streamed tool calls", async () => {
+        const output = makeAssistantOutput(proxiedGeminiModel);
+        const chunks = [
+          {
+            choices: [
+              {
+                delta: {
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      extra_content: { google: { thought_signature: "SIG-OPAQUE-ABC==" } },
+                      function: { arguments: '{"city":"Paris"}', name: "get_weather" },
+                      id: "call_1",
+                      index: 0,
+                      type: "function",
+                    },
+                  ],
+                },
+                index: 0,
+              },
+            ],
+          },
+          {
+            choices: [
+              {
+                delta: {
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      function: { arguments: '{"city":"Rome"}', name: "get_weather" },
+                      id: "call_2",
+                      index: 1,
+                      type: "function",
+                    },
+                  ],
+                },
+                index: 0,
+              },
+            ],
+          },
+          {
+            choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }],
+            usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+          },
+        ];
+        async function* mockStream() {
+          for (const chunk of chunks) {
+            yield chunk as never;
+          }
+        }
+
+        await testing.processOpenAICompletionsStream(mockStream(), output, proxiedGeminiModel, {
+          push() {},
+        });
+
+        expectRecordFields(output.content[0], {
+          type: "toolCall",
+          id: "call_1",
+          name: "get_weather",
+          arguments: { city: "Paris" },
+          thoughtSignature: "SIG-OPAQUE-ABC==",
+        });
+        expectRecordFields(output.content[1], {
+          type: "toolCall",
+          id: "call_2",
+          name: "get_weather",
+          arguments: { city: "Rome" },
+        });
+        expect(output.content[1]).not.toHaveProperty("thoughtSignature");
+      });
+    });
   });
 
   it("uses Mistral compat defaults for direct Mistral completions providers", () => {
