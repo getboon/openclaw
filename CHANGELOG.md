@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.34-boon.6
+
+Claude 5 models now use the configured thinking level.
+
+- **#278 (ENG-21157):** Opus 5, Opus 5.5, Sonnet 5 and Sonnet 5.5 get adaptive thinking with the configured effort, no interleaved-thinking beta and no custom temperature. Before, they got the legacy `enabled` thinking with `budget_tokens`. Bedrock rejects that form for these models, and behind the Boon LLM gateway they ran at the model's default effort. Opus 4.7, Opus 4.8 and Sonnet 4.6 requests do not change.
+- Base = `2026.6.34-boon.5`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.34-boon.6` in lockstep. No source or dependency change in those three plugins.
+
 ## 2026.6.34-boon.5
 
 Prepares inbound PDFs in the background and marks attachment text that was cut, so the agent knows to search or read the rest of a big PDF. Sub-agents stopped by /stop now stay stopped.
