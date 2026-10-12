@@ -580,8 +580,14 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
         // retryAsync's sleep is not abort-aware, so an abort mid-backoff
         // still waits out the current delay — but this at least stops a
         // *new* retry from being scheduled once the signal is known-aborted.
+        // A Retry-After beyond our own max delay is a cooldown we can't
+        // honor without clamping it — and retrying early would violate the
+        // server's contract instead of just missing out on a retry — so
+        // give up and surface the 429 rather than retry too soon.
         shouldRetry: (err) =>
-          err instanceof WebFetchTooManyRequestsRetryError && !params.signal?.aborted,
+          err instanceof WebFetchTooManyRequestsRetryError &&
+          !params.signal?.aborted &&
+          (err.retryAfterMs === undefined || err.retryAfterMs <= WEB_FETCH_429_MAX_DELAY_MS),
         retryAfterMs: (err) =>
           err instanceof WebFetchTooManyRequestsRetryError ? err.retryAfterMs : undefined,
       });

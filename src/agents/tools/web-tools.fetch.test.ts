@@ -883,6 +883,25 @@ describe("web_fetch extraction fallbacks", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   }, 10_000);
 
+  // cubic review (PR #282): a Retry-After beyond WEB_FETCH_429_MAX_DELAY_MS
+  // (8s) was being silently clamped to 8s and retried anyway — violating the
+  // server's stated cooldown instead of just missing a retry opportunity.
+  it("does not retry a 429 whose Retry-After exceeds the max delay — surfaces it instead of violating the cooldown", async () => {
+    const fetchMock = installMockFetch(
+      () =>
+        Promise.resolve(
+          errorResponse(429, { statusText: "Too Many Requests", retryAfter: "30" }),
+        ) as Promise<Response>,
+    );
+
+    const tool = createFetchTool({ firecrawl: { enabled: false } });
+    const error = await captureToolError({ tool, url: "https://example.com/long-cooldown" });
+
+    expect(error?.message).toBe("Web fetch failed: HTTP 429 Too Many Requests");
+    expect(error?.code).toBe("http_429");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("does not retry a 403 — retrying would not change the outcome", async () => {
     const fetchMock = installMockFetch(
       () => Promise.resolve(errorResponse(403, { statusText: "Forbidden" })) as Promise<Response>,
