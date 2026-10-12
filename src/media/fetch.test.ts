@@ -656,6 +656,47 @@ describe("readRemoteMediaBuffer", () => {
     await expect(fs.readFile(saved.path)).resolves.toStrictEqual(Buffer.from([1, 2, 3, 4]));
   });
 
+  it("refreshes the guarded fetch's timeout deadline on every streamed chunk", async () => {
+    // A flat timeoutMs deadline that is never refreshed would abort a
+    // continuously-progressing download once it elapses, even with no
+    // stall (the bug: a bounded idle timer exists separately, but the
+    // outer fetch-wide deadline was never reset on body activity).
+    const refreshTimeout = vi.fn();
+    fetchWithSsrFGuardMock.mockReset().mockImplementation(async (paramsUnknown: unknown) => {
+      const params = paramsUnknown as {
+        url: string;
+        fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+        init?: RequestInit;
+      };
+      const fetcher = params.fetchImpl ?? globalThis.fetch;
+      if (!fetcher) {
+        throw new Error("fetch is not available");
+      }
+      return {
+        response: await fetcher(params.url, params.init),
+        finalUrl: params.url,
+        release: async () => {},
+        refreshTimeout,
+      };
+    });
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(makeStream([new Uint8Array([1, 2, 3]), new Uint8Array([4])]), {
+          status: 200,
+        }),
+    );
+
+    await saveRemoteMedia({
+      url: "https://example.com/download",
+      fetchImpl,
+      lookupFn: makeLookupFn(),
+      maxBytes: 8,
+      timeoutMs: 120_000,
+    });
+
+    expect(refreshTimeout).toHaveBeenCalledTimes(2);
+  });
+
   it("clamps oversized saved-response idle timeout timers", async () => {
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
     try {
