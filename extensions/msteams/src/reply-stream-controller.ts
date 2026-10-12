@@ -173,17 +173,29 @@ export function createTeamsReplyStreamController(params: {
       // appending sink. Without this, "Here's a" → "Here's a sonnet" → ...
       // gets emitted as full repeats and the SDK concatenates the lot.
       const fullText = payload.text;
-      let prefixLength = 0;
-      while (
-        prefixLength < emittedText.length &&
-        prefixLength < fullText.length &&
-        emittedText[prefixLength] === fullText[prefixLength]
-      ) {
-        prefixLength += 1;
+      // Fast path: ordinary append-only streaming is the overwhelming common
+      // case, and native startsWith is a single optimized scan instead of a
+      // per-character JS loop re-run from index 0 on every callback.
+      let prefixLength: number;
+      if (fullText.startsWith(emittedText)) {
+        prefixLength = emittedText.length;
+      } else {
+        prefixLength = 0;
+        while (
+          prefixLength < emittedText.length &&
+          prefixLength < fullText.length &&
+          emittedText[prefixLength] === fullText[prefixLength]
+        ) {
+          prefixLength += 1;
+        }
       }
       const previousRemainder = emittedText.slice(prefixLength);
       const delta = fullText.slice(prefixLength);
       // Duplicate or prefix-only out-of-order snapshots produce no delta.
+      // A transient shrink is deliberately ignored here too — it is common
+      // for a later snapshot to grow back past the previous length, and
+      // preparePayload separately guards against finalizing on a stale
+      // emittedText if the real final text never catches back up.
       if (!delta) {
         return;
       }
@@ -292,14 +304,25 @@ export function createTeamsReplyStreamController(params: {
       // Partial mode with tokens already streamed: stream carries the text;
       // strip text from the payload (keep media if any) so block delivery
       // doesn't duplicate. Exception: if a non-cancel stream failure was
-      // latched mid-flight, fall through to block delivery so the user gets
-      // the full reply instead of the truncated streamed prefix.
-      if (tokensEmitted && !streamFailed) {
+      // latched mid-flight, or the real final text does not match what the
+      // stream actually emitted (a shrink/replacement that onPartialReply
+      // deliberately ignored as possibly-transient never grew back to this
+      // final text), fall through to block delivery so the user gets the
+      // correct reply instead of Teams closing on the stale streamed prefix.
+      const finalTextMatchesStreamed =
+        payload.text === undefined || payload.text.startsWith(emittedText);
+      if (tokensEmitted && !streamFailed && finalTextMatchesStreamed) {
         const hasMedia = Boolean(payload.mediaUrl || payload.mediaUrls?.length);
         pendingFinalPayload = fallbackPayloadForSuppressedFinal(payload);
         streamFinalizationPending = true;
         tokensEmitted = false;
         return hasMedia ? { ...payload, text: undefined } : undefined;
+      }
+      if (tokensEmitted && !streamFailed) {
+        stream.clearText();
+        streamFailed = true;
+        streamFinalizationPending = true;
+        tokensEmitted = false;
       }
       // Progress mode (or partial mode that received no tokens — e.g. a
       // tool-only response): emit the final text into the stream so the
