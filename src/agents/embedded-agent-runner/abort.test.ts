@@ -1,6 +1,6 @@
 // Coverage for abort-shape detection used to classify embedded-runner
-// rejections (ENG-21233: a caller's own external timeout abort must not be
-// reported as a run error).
+// rejections: a caller's own external timeout abort must not be reported
+// as a run error.
 import { describe, expect, it } from "vitest";
 import { isExternalTimeoutAbortRejection, isRunnerAbortError } from "./abort.js";
 import { abortable } from "./run/abortable.js";

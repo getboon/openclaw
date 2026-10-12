@@ -21,7 +21,7 @@ export function isRunnerAbortError(err: unknown): boolean {
 
 /**
  * True only for a rejection that is BOTH abort-shaped AND already attributed
- * to the caller's own external abortSignal firing as a timeout (ENG-21233).
+ * to the caller's own external abortSignal firing as a timeout.
  * `isRunnerAbortError` alone is too broad — it also matches OpenClaw's own
  * internal watchdog timeouts (scheduleAbortTimer/idleTimeoutTrigger), which
  * never set `externalAbort` and must keep reporting as a real error. Gating

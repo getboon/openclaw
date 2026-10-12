@@ -4929,13 +4929,18 @@ export async function runEmbeddedAttempt(
               handleMidTurnPrecheckRequest(err.request);
             });
           } else if (isExternalTimeoutAbortRejection({ err, externalAbort, timedOut })) {
-            // Already classified by onExternalAbortSignal/abortRun: aborted +
-            // timedOut. The rejection is the abortable() wrapper echoing the
-            // caller's own abort reason, not a run failure. Leave
-            // promptError/promptErrorSource null so agent_end reports a clean
-            // interruption instead of an error (ENG-21233) — an internal
-            // watchdog timeout (externalAbort stays false there) still falls
-            // through to the error branch below, unchanged.
+            // The rejection is the abortable() wrapper echoing the caller's
+            // own abort reason, not a run failure — clear both fields so
+            // agent_end reports a clean interruption instead of an error. An
+            // internal watchdog timeout (externalAbort stays false there)
+            // still falls through to the error branch below, unchanged.
+            // Explicit reset, not just skipping the assignment below: an
+            // external signal firing before abortRunForExternalSignal is
+            // installed takes onExternalAbortSignal's early-exit path, which
+            // sets promptError directly: this branch must override that, not
+            // merely decline to overwrite it.
+            promptError = null;
+            promptErrorSource = null;
           } else {
             promptError = err;
             promptErrorSource = "prompt";
