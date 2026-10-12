@@ -366,8 +366,8 @@ async function collectMarkdownFiles(rootDir: string, relativeDir: string): Promi
   const dirPath = path.join(rootDir, relativeDir);
   const entries = await fs
     .readdir(dirPath, { withFileTypes: true, recursive: true })
-    .catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") {
+    .catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return [];
       }
       throw error;
