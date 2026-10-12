@@ -1957,6 +1957,13 @@
     "ui:install": "node scripts/ui.js install",
     "verify": "node scripts/verify.mjs"
   },
+  "overrides": {
+    "@sentry/node": {
+      ".": "10.75.3",
+      "@opentelemetry/resources": "2.11.0",
+      "@opentelemetry/sdk-trace-base": "2.11.0"
+    }
+  },
   "dependencies": {
     "@agentclientprotocol/sdk": "0.22.1",
     "@anthropic-ai/sdk": "0.100.1",

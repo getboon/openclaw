@@ -1025,7 +1025,7 @@ async function finalizeExecutedToolCall(
   let result = executed.result;
   let isError = executed.isError;
 
-  if (executed.executionStarted !== false && config.afterToolCall) {
+  if (config.afterToolCall) {
     try {
       const afterResult = await config.afterToolCall(
         {

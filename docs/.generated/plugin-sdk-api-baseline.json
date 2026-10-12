@@ -28,7 +28,7 @@
           "exportName": "createOpenAiCompatibleImageGenerationProvider",
           "kind": "function",
           "source": {
-            "line": 131,
+            "line": 146,
             "path": "src/image-generation/openai-compatible-image-provider.ts"
           }
         },
@@ -73,7 +73,7 @@
           "exportName": "generatedImageAssetFromBase64",
           "kind": "function",
           "source": {
-            "line": 121,
+            "line": 136,
             "path": "src/image-generation/image-assets.ts"
           }
         },
@@ -82,7 +82,7 @@
           "exportName": "generatedImageAssetFromDataUrl",
           "kind": "function",
           "source": {
-            "line": 157,
+            "line": 172,
             "path": "src/image-generation/image-assets.ts"
           }
         },
@@ -91,7 +91,7 @@
           "exportName": "generatedImageAssetFromOpenAiCompatibleEntry",
           "kind": "function",
           "source": {
-            "line": 174,
+            "line": 189,
             "path": "src/image-generation/image-assets.ts"
           }
         },
@@ -109,7 +109,7 @@
           "exportName": "imageFileExtensionForMimeType",
           "kind": "function",
           "source": {
-            "line": 39,
+            "line": 54,
             "path": "src/image-generation/image-assets.ts"
           }
         },
@@ -118,7 +118,7 @@
           "exportName": "imageSourceUploadFileName",
           "kind": "function",
           "source": {
-            "line": 234,
+            "line": 249,
             "path": "src/image-generation/image-assets.ts"
           }
         },
@@ -145,7 +145,7 @@
           "exportName": "parseImageDataUrl",
           "kind": "function",
           "source": {
-            "line": 100,
+            "line": 115,
             "path": "src/image-generation/image-assets.ts"
           }
         },
@@ -154,7 +154,7 @@
           "exportName": "parseOpenAiCompatibleImageResponse",
           "kind": "function",
           "source": {
-            "line": 194,
+            "line": 209,
             "path": "src/image-generation/image-assets.ts"
           }
         },
@@ -168,11 +168,20 @@
           }
         },
         {
+          "declaration": "export function resolveInlineImageJsonResponseMaxBytes(maxImages: number, maxImageBytes: number): number;",
+          "exportName": "resolveInlineImageJsonResponseMaxBytes",
+          "kind": "function",
+          "source": {
+            "line": 33,
+            "path": "src/image-generation/image-assets.ts"
+          }
+        },
+        {
           "declaration": "export function sniffImageMimeType(buffer: Buffer<ArrayBufferLike>, fallbackMimeType?: string): ImageMimeTypeDetection;",
           "exportName": "sniffImageMimeType",
           "kind": "function",
           "source": {
-            "line": 59,
+            "line": 74,
             "path": "src/image-generation/image-assets.ts"
           }
         },
@@ -190,7 +199,7 @@
           "exportName": "toImageDataUrl",
           "kind": "function",
           "source": {
-            "line": 88,
+            "line": 103,
             "path": "src/image-generation/image-assets.ts"
           }
         },
@@ -784,7 +793,7 @@
           "exportName": "ImageMimeTypeDetection",
           "kind": "type",
           "source": {
-            "line": 16,
+            "line": 18,
             "path": "src/image-generation/image-assets.ts"
           }
         },
@@ -973,7 +982,7 @@
           "exportName": "OpenAiCompatibleImageProviderOptions",
           "kind": "type",
           "source": {
-            "line": 43,
+            "line": 48,
             "path": "src/image-generation/openai-compatible-image-provider.ts"
           }
         },
@@ -982,7 +991,7 @@
           "exportName": "OpenAiCompatibleImageProviderRequestBody",
           "kind": "type",
           "source": {
-            "line": 39,
+            "line": 44,
             "path": "src/image-generation/openai-compatible-image-provider.ts"
           }
         },
@@ -991,7 +1000,7 @@
           "exportName": "OpenAiCompatibleImageProviderRequestParams",
           "kind": "type",
           "source": {
-            "line": 31,
+            "line": 36,
             "path": "src/image-generation/openai-compatible-image-provider.ts"
           }
         },
@@ -1000,7 +1009,7 @@
           "exportName": "OpenAiCompatibleImageRequestMode",
           "kind": "type",
           "source": {
-            "line": 29,
+            "line": 34,
             "path": "src/image-generation/openai-compatible-image-provider.ts"
           }
         },
@@ -1009,7 +1018,7 @@
           "exportName": "OpenAiCompatibleImageResponseEntry",
           "kind": "type",
           "source": {
-            "line": 21,
+            "line": 23,
             "path": "src/image-generation/image-assets.ts"
           }
         },
@@ -1018,7 +1027,7 @@
           "exportName": "OpenAiCompatibleImageResponsePayload",
           "kind": "type",
           "source": {
-            "line": 27,
+            "line": 29,
             "path": "src/image-generation/image-assets.ts"
           }
         },
@@ -1715,7 +1724,7 @@
           "exportName": "calculateAuthProfileCooldownMs",
           "kind": "function",
           "source": {
-            "line": 431,
+            "line": 435,
             "path": "src/agents/auth-profiles/usage.ts"
           }
         },
@@ -1760,7 +1769,7 @@
           "exportName": "clearAuthProfileCooldown",
           "kind": "function",
           "source": {
-            "line": 946,
+            "line": 950,
             "path": "src/agents/auth-profiles/usage.ts"
           }
         },
@@ -2507,7 +2516,7 @@
           "exportName": "markAuthProfileBlockedUntil",
           "kind": "function",
           "source": {
-            "line": 856,
+            "line": 860,
             "path": "src/agents/auth-profiles/usage.ts"
           }
         },
@@ -2516,7 +2525,7 @@
           "exportName": "markAuthProfileCooldown",
           "kind": "function",
           "source": {
-            "line": 927,
+            "line": 931,
             "path": "src/agents/auth-profiles/usage.ts"
           }
         },
@@ -2525,7 +2534,7 @@
           "exportName": "markAuthProfileFailure",
           "kind": "function",
           "source": {
-            "line": 724,
+            "line": 728,
             "path": "src/agents/auth-profiles/usage.ts"
           }
         },
@@ -3443,7 +3452,7 @@
           "exportName": "resolveProfileUnusableUntilForDisplay",
           "kind": "function",
           "source": {
-            "line": 557,
+            "line": 561,
             "path": "src/agents/auth-profiles/usage.ts"
           }
         },
@@ -3452,7 +3461,7 @@
           "exportName": "resolveProfilesUnavailableReason",
           "kind": "function",
           "source": {
-            "line": 352,
+            "line": 356,
             "path": "src/agents/auth-profiles/usage.ts"
           }
         },

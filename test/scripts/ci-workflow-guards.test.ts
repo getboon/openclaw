@@ -397,10 +397,10 @@ describe("ci workflow guards", () => {
       '-c "http.https://github.com/${CHECKOUT_REPO}.git.extraheader=AUTHORIZATION: basic ${auth_header}"',
     );
 
+    // Fork removed the testbox CI workflows (ci-check-testbox,
+    // ci-build-artifacts-testbox); only the still-present one is asserted.
     for (const [workflowPath, jobName] of [
-      [".github/workflows/ci-check-testbox.yml", "check"],
       [".github/workflows/ci-check-arm-testbox.yml", "check-arm"],
-      [".github/workflows/ci-build-artifacts-testbox.yml", "build-artifacts"],
     ]) {
       const testboxWorkflow = parse(readFileSync(workflowPath, "utf8"));
       const prepareStep = testboxWorkflow.jobs[jobName].steps.find(
@@ -418,18 +418,6 @@ describe("ci workflow guards", () => {
         '-c "http.https://github.com/${CHECKOUT_REPO}.git.extraheader=AUTHORIZATION: basic ${auth_header}"',
       );
     }
-
-    const artifactWorkflow = parse(
-      readFileSync(".github/workflows/ci-build-artifacts-testbox.yml", "utf8"),
-    );
-    const cacheSeedStep = artifactWorkflow.jobs["build-artifacts"].steps.find(
-      (step) => step.name === "Resolve release dist cache seeds",
-    );
-    expect(cacheSeedStep.env.CHECKOUT_TOKEN).toBe("${{ github.token }}");
-    expect(cacheSeedStep.run).toContain(
-      '-c "http.https://github.com/${CHECKOUT_REPO}.git.extraheader=AUTHORIZATION: basic ${auth_header}"',
-    );
-    expect(cacheSeedStep.run).toContain('ls-remote --tags origin "refs/tags/${tag}"');
 
     const workflowSanity = readWorkflowSanityWorkflow();
     for (const jobName of ["no-tabs", "actionlint", "generated-doc-baselines"]) {
