@@ -24,6 +24,7 @@ import type {
 } from "../../plugins/document-extractor-types.js";
 import { resolveUserPath } from "../../utils.js";
 import type { AuthProfileStore } from "../auth-profiles/types.js";
+import { getModelProviderRequestTransport } from "../provider-request-config.js";
 import type { AgentToolUpdateCallback } from "../runtime/index.js";
 import { optionalFiniteNumberSchema } from "../schema/typebox.js";
 import { readFiniteNumberParam, ToolInputError } from "./common.js";
@@ -424,6 +425,10 @@ async function runPdfPrompt(params: {
             pdfs,
             maxTokens: resolvePdfToolMaxTokens(model.maxTokens),
             baseUrl: model.baseUrl,
+            requestConfig: {
+              headers: model.headers,
+              request: getModelProviderRequestTransport(model),
+            },
           });
           return { text, provider, model: modelId, native: true };
         }
@@ -435,6 +440,10 @@ async function runPdfPrompt(params: {
             prompt: params.prompt,
             pdfs,
             baseUrl: model.baseUrl,
+            requestConfig: {
+              headers: model.headers,
+              request: getModelProviderRequestTransport(model),
+            },
           });
           return { text, provider, model: modelId, native: true };
         }

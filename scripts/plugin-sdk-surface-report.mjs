@@ -201,7 +201,7 @@ let budgets;
 let publicDeprecatedExportsByEntrypointBudget;
 try {
   budgets = {
-    // Budgets re-measured post-merge (upstream v2026.6.34): the merged surface
+    // Budgets re-measured post-merge (upstream v2026.6.35): the merged surface
     // exceeds both parents', so neither side's value alone is correct — set to
     // the exact `pnpm plugin-sdk:surface` output measured on the merged tree.
     publicEntrypoints: readBudgetEnv("OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_ENTRYPOINTS", 324),

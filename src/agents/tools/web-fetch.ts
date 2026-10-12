@@ -591,7 +591,7 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
     throwIfFetchAborted(params.signal);
     const body = bodyResult.text;
     const responseTruncatedWarning = bodyResult.truncated
-      ? `Response body truncated after ${params.maxResponseBytes} bytes.`
+      ? `Response body incomplete after ${bodyResult.bytesRead} bytes.`
       : undefined;
 
     let title: string | undefined;
