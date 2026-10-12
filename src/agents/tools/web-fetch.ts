@@ -4,7 +4,6 @@
  * Fetches HTTP(S) content through SSRF guards, provider config, caching, and bounded extraction.
  */
 import {
-  normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
@@ -12,6 +11,7 @@ import { Type } from "typebox";
 import { resolveWebProviderConfig } from "../../../packages/web-content-core/src/provider-runtime-shared.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { SsrFBlockedError, type LookupFn, type SsrFPolicy } from "../../infra/net/ssrf.js";
+import { retryAsync } from "../../infra/retry.js";
 import { logDebug } from "../../logger.js";
 import type { RuntimeWebFetchMetadata } from "../../secrets/runtime-web-tools.types.js";
 import { wrapExternalContent, wrapWebContent } from "../../security/external-content.js";
@@ -29,7 +29,6 @@ import {
 } from "./common.js";
 import {
   extractBasicHtmlContent,
-  htmlToMarkdown,
   markdownToText,
   truncateText,
   type ExtractMode,
@@ -56,8 +55,13 @@ const FETCH_MAX_RESPONSE_BYTES_MAX = 10_000_000;
 const DEFAULT_FETCH_MAX_REDIRECTS = 3;
 const WEB_FETCH_PROGRESS_THRESHOLD_MS = 5_000;
 const WEB_FETCH_PROGRESS_TEXT = "Fetching page content...";
-const DEFAULT_ERROR_MAX_CHARS = 4_000;
-const DEFAULT_ERROR_MAX_BYTES = 64_000;
+// ENG-21225: a 429 is usually transient, so retry a bounded number of times
+// with backoff before surfacing it as a tool failure. 403/404 are not
+// retried — the response won't change on a second try.
+const WEB_FETCH_429_MAX_ATTEMPTS = 3;
+const WEB_FETCH_429_MIN_DELAY_MS = 500;
+const WEB_FETCH_429_MAX_DELAY_MS = 8_000;
+const WEB_FETCH_429_JITTER = 0.2;
 const DEFAULT_FETCH_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
@@ -169,33 +173,52 @@ function resolveMaxRedirects(value: unknown, fallback: number): number {
   return Math.max(0, Math.floor(parsed));
 }
 
-function looksLikeHtml(value: string): boolean {
-  const trimmed = value.trimStart();
-  if (!trimmed) {
-    return false;
+/**
+ * Thrown for a non-OK HTTP response from an external web_fetch target.
+ * Carries a stable `code` (`http_<status>`) rather than a free-form message so
+ * `after_tool_call` hook consumers (see sentry-monitor's `captures.ts`) can
+ * classify a routine external 403/404/429 without sniffing error text — see
+ * ENG-21225. Deliberately does not echo the response body: that body is
+ * untrusted external content, and a thrown Error has no structured field to
+ * carry it as anything other than a plain string the model/telemetry would
+ * read unwrapped.
+ */
+class WebFetchStatusError extends Error {
+  readonly code: string;
+  constructor(status: number, statusText: string) {
+    super(`Web fetch failed: HTTP ${status} ${statusText || "Error"}`);
+    this.name = "WebFetchStatusError";
+    this.code = `http_${status}`;
   }
-  const head = normalizeLowercaseStringOrEmpty(trimmed.slice(0, 256));
-  return head.startsWith("<!doctype html") || head.startsWith("<html");
 }
 
-function formatWebFetchErrorDetail(params: {
-  detail: string;
-  contentType?: string | null;
-  maxChars: number;
-}): string {
-  const { detail, contentType, maxChars } = params;
-  if (!detail) {
-    return "";
+/**
+ * Internal retry signal for a 429 response — never escapes `runWebFetch`.
+ * Carries the Response so the retry loop can fall through to normal
+ * `!res.ok` handling (including provider fallback) once attempts are
+ * exhausted, using the last response actually received.
+ */
+class WebFetchTooManyRequestsRetryError extends Error {
+  constructor(
+    readonly response: Response,
+    readonly retryAfterMs?: number,
+  ) {
+    super(`HTTP 429 ${response.statusText || "Too Many Requests"}`);
+    this.name = "WebFetchTooManyRequestsRetryError";
   }
-  let text = detail;
-  const contentTypeLower = normalizeOptionalLowercaseString(contentType);
-  if (contentTypeLower?.includes("text/html") || looksLikeHtml(detail)) {
-    const rendered = htmlToMarkdown(detail);
-    const withTitle = rendered.title ? `${rendered.title}\n${rendered.text}` : rendered.text;
-    text = markdownToText(withTitle);
+}
+
+/** Parses a `Retry-After` header value (delta-seconds or an HTTP-date). */
+function parseRetryAfterMs(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
   }
-  const truncated = truncateText(text.trim(), maxChars);
-  return truncated.text;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+  const dateMs = Date.parse(value);
+  return Number.isFinite(dateMs) ? Math.max(0, dateMs - Date.now()) : undefined;
 }
 
 function redactUrlForDebugLog(rawUrl: string): string {
@@ -509,29 +532,67 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
 
   const start = Date.now();
   let res: Response;
-  let release: (() => Promise<void>) | null;
+  // A plain `let` here gets reassigned from inside the attemptFetch closure
+  // below (invoked indirectly via retryAsync), which some type-checkers
+  // narrow incorrectly across that boundary — an object property read isn't
+  // narrowed the same way, so it sidesteps the issue.
+  const releaseHolder: { current: (() => Promise<void>) | null } = { current: null };
   let finalUrl = params.url;
   try {
     const fetchWithWebToolsNetworkGuard = await loadWebGuardedFetch();
-    const result = await fetchWithWebToolsNetworkGuard({
-      url: params.url,
-      maxRedirects: params.maxRedirects,
-      timeoutSeconds: params.timeoutSeconds,
-      signal: params.signal,
-      lookupFn: params.lookupFn,
-      useEnvProxy: useTrustedEnvProxy,
-      policy: ssrfPolicy,
-      init: {
-        headers: {
-          Accept: "text/markdown, text/html;q=0.9, */*;q=0.1",
-          "User-Agent": params.userAgent,
-          "Accept-Language": "en-US,en;q=0.9",
+    const attemptFetch = async (): Promise<Response> => {
+      const result = await fetchWithWebToolsNetworkGuard({
+        url: params.url,
+        maxRedirects: params.maxRedirects,
+        timeoutSeconds: params.timeoutSeconds,
+        signal: params.signal,
+        lookupFn: params.lookupFn,
+        useEnvProxy: useTrustedEnvProxy,
+        policy: ssrfPolicy,
+        init: {
+          headers: {
+            Accept: "text/markdown, text/html;q=0.9, */*;q=0.1",
+            "User-Agent": params.userAgent,
+            "Accept-Language": "en-US,en;q=0.9",
+          },
         },
-      },
-    });
-    res = result.response;
-    finalUrl = result.finalUrl;
-    release = result.release;
+      });
+      finalUrl = result.finalUrl;
+      if (result.response.status === 429) {
+        // This attempt's body is never read (see WebFetchStatusError), so the
+        // SSRF guard's connection hold can be released immediately whether
+        // this attempt is retried or turns out to be the last one.
+        await result.release();
+        throw new WebFetchTooManyRequestsRetryError(
+          result.response,
+          parseRetryAfterMs(result.response.headers.get("retry-after")),
+        );
+      }
+      releaseHolder.current = result.release;
+      return result.response;
+    };
+    try {
+      res = await retryAsync(attemptFetch, {
+        attempts: WEB_FETCH_429_MAX_ATTEMPTS,
+        minDelayMs: WEB_FETCH_429_MIN_DELAY_MS,
+        maxDelayMs: WEB_FETCH_429_MAX_DELAY_MS,
+        jitter: WEB_FETCH_429_JITTER,
+        // retryAsync's sleep is not abort-aware, so an abort mid-backoff
+        // still waits out the current delay — but this at least stops a
+        // *new* retry from being scheduled once the signal is known-aborted.
+        shouldRetry: (err) =>
+          err instanceof WebFetchTooManyRequestsRetryError && !params.signal?.aborted,
+        retryAfterMs: (err) =>
+          err instanceof WebFetchTooManyRequestsRetryError ? err.retryAfterMs : undefined,
+      });
+    } catch (err) {
+      if (!(err instanceof WebFetchTooManyRequestsRetryError)) {
+        throw err;
+      }
+      // Retries exhausted — fall through to the normal `!res.ok` handling
+      // below (including provider fallback) with the last 429 response.
+      res = err.response;
+    }
 
     // Cloudflare Markdown for Agents — log token budget hint when present
     const markdownTokens = res.headers.get("x-markdown-tokens");
@@ -573,16 +634,7 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
       if (payload) {
         return payload;
       }
-      const rawDetailResult = await readResponseText(res, { maxBytes: DEFAULT_ERROR_MAX_BYTES });
-      throwIfFetchAborted(params.signal);
-      const rawDetail = rawDetailResult.text;
-      const detail = formatWebFetchErrorDetail({
-        detail: rawDetail,
-        contentType: res.headers.get("content-type"),
-        maxChars: DEFAULT_ERROR_MAX_CHARS,
-      });
-      const wrappedDetail = wrapWebFetchContent(detail || res.statusText, DEFAULT_ERROR_MAX_CHARS);
-      throw new Error(`Web fetch failed (${res.status}): ${wrappedDetail.text}`);
+      throw new WebFetchStatusError(res.status, res.statusText);
     }
 
     const contentType = res.headers.get("content-type") ?? "application/octet-stream";
@@ -698,8 +750,8 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
     writeCache(FETCH_CACHE, cacheKey, payload, params.cacheTtlMs);
     return payload;
   } finally {
-    if (release) {
-      await release();
+    if (releaseHolder.current) {
+      await releaseHolder.current();
     }
   }
 }
