@@ -12,11 +12,21 @@ function makeExternalTimeoutSignal(): AbortSignal {
   return controller.signal;
 }
 
-/** Reproduces OpenClaw's own internal-watchdog timeout reason shape. */
-function makeInternalTimeoutError(): Error {
-  const err = new Error("request timed out");
-  err.name = "TimeoutError";
-  return err;
+/**
+ * Reproduces the exact rejection shape OpenClaw's own internal-watchdog
+ * timeout produces once it reaches the catch block: like the external case,
+ * it passes through abortable()'s makeAbortError wrapper, which always sets
+ * name="AbortError" regardless of the original reason's name. The only
+ * actual difference between the two cases is the externalAbort/timedOut
+ * state flags, not the error's shape — a fixture that skips the wrapper
+ * would pass this suite's "stays false" assertion for the wrong reason.
+ */
+async function makeInternalTimeoutRejection(): Promise<unknown> {
+  const controller = new AbortController();
+  const reason = new Error("request timed out");
+  reason.name = "TimeoutError";
+  controller.abort(reason);
+  return abortable(controller.signal, new Promise(() => {})).catch((e: unknown) => e);
 }
 
 describe("isRunnerAbortError", () => {
@@ -44,11 +54,15 @@ describe("isExternalTimeoutAbortRejection", () => {
     );
   });
 
-  it("stays false for OpenClaw's own internal-watchdog timeout (externalAbort never set)", () => {
+  it("stays false for OpenClaw's own internal-watchdog timeout (externalAbort never set)", async () => {
     // scheduleAbortTimer/idleTimeoutTrigger call abortRun(true, ...) directly
     // without going through onExternalAbortSignal/onAbort, so externalAbort
-    // stays false even though timedOut is true and the error is abort-shaped.
-    const err = makeInternalTimeoutError();
+    // stays false even though timedOut is true and the error is abort-shaped
+    // (confirm isRunnerAbortError(err) is true for this fixture, so the
+    // false result below is actually exercising the externalAbort gate, not
+    // isRunnerAbortError's own check).
+    const err = await makeInternalTimeoutRejection();
+    expect(isRunnerAbortError(err)).toBe(true);
     expect(isExternalTimeoutAbortRejection({ err, externalAbort: false, timedOut: true })).toBe(
       false,
     );
