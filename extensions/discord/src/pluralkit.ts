@@ -65,6 +65,8 @@ export async function fetchPluralKitMessageInfo(params: {
       signal: timeout.signal,
     });
     if (res.status === 404) {
+      // Consume/release the body so a stalled 404 doesn't hold the connection open.
+      await res.body?.cancel().catch(() => undefined);
       return null;
     }
     if (!res.ok) {

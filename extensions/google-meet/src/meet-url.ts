@@ -28,7 +28,7 @@ export function normalizeMeetUrl(input: unknown): string {
   ) {
     throw new Error("url must be an explicit https://meet.google.com/... URL");
   }
-  if (!/^\/[a-z]{3}-[a-z]{4}-[a-z]{3}(?:$|[/?#])/i.test(url.pathname)) {
+  if (!/^\/[a-z]{3}-[a-z]{4}-[a-z]{3}\/?$/i.test(url.pathname)) {
     throw new Error("url must include a Google Meet meeting code");
   }
   return url.toString();

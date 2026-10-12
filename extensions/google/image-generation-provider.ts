@@ -59,7 +59,7 @@ function resolveGeneratedImageMaxBytes(req: {
 }): number {
   const configured = req.cfg.agents?.defaults?.mediaMaxMb;
   if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
-    return Math.floor(configured * MB);
+    return Math.max(1, Math.floor(configured * MB));
   }
   return MAX_IMAGE_BYTES;
 }

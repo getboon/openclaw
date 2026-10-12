@@ -274,6 +274,10 @@ export function buildDeepInfraVideoGenerationProvider(options?: {
         const payload = await readProviderJsonResponse<DeepInfraVideoResponse>(
           response,
           "DeepInfra video generation failed",
+          // Base64-inline video payloads inflate ~4/3x over the binary size, so
+          // the default 16 MiB JSON cap rejects a valid 16 MiB video before it
+          // can be decoded. Give headroom for the encoding overhead.
+          { maxBytes: 24 * 1024 * 1024 },
         );
         const failed = failureMessage(payload);
         if (failed) {

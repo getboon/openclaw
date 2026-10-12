@@ -346,7 +346,16 @@ async function resolveMemoryReadFailureResult(params: {
 }
 
 function isMissingMemoryReadResult(result: MemoryReadResult, relPath: string): boolean {
-  return result.path === relPath && result.text === "" && result.from === undefined;
+  const normalizePath = (value: string) =>
+    value
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/^(?:\.\/)+/, "");
+  return (
+    normalizePath(result.path) === normalizePath(relPath) &&
+    result.text === "" &&
+    result.from === undefined
+  );
 }
 
 async function executeMemoryReadResult(params: {
@@ -360,15 +369,20 @@ async function executeMemoryReadResult(params: {
   try {
     const result = await params.read();
     if (params.requestedCorpus === "all" && isMissingMemoryReadResult(result, params.relPath)) {
-      const supplement = await getSupplementMemoryReadResult({
-        relPath: params.relPath,
-        from: params.from,
-        lines: params.lines,
-        agentSessionKey: params.agentSessionKey,
-        corpus: params.requestedCorpus,
-      });
-      if (supplement) {
-        return jsonResult(supplement);
+      try {
+        const supplement = await getSupplementMemoryReadResult({
+          relPath: params.relPath,
+          from: params.from,
+          lines: params.lines,
+          agentSessionKey: params.agentSessionKey,
+          corpus: params.requestedCorpus,
+        });
+        if (supplement) {
+          return jsonResult(supplement);
+        }
+      } catch {
+        // Supplement lookup is best-effort after a successful primary miss;
+        // the outer catch is for primary-read failures, not this.
       }
     }
     return jsonResult(result);

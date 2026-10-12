@@ -411,6 +411,14 @@ export function createProfileTabOps({
     // `/json/new` must create a page. Do not tighten the shared list filter:
     // some CDP list endpoints omit `type` for otherwise usable legacy tabs.
     if (created.type !== "page" || !isSelectableCdpBrowserTarget({ url: resolvedUrl })) {
+      // Best-effort: `/json/new` already created this target, so close it
+      // before rejecting or it accumulates as an orphaned browser tab.
+      await fetchOk(
+        appendCdpPath(cdpHttpBase, `/json/close/${encodeURIComponent(created.id)}`),
+        undefined,
+        undefined,
+        getCdpControlPolicy(),
+      ).catch(() => {});
       throw new Error("Failed to open tab (non-selectable target)");
     }
     await assertBrowserNavigationResultAllowed({ url: resolvedUrl, ...ssrfPolicyOpts });
