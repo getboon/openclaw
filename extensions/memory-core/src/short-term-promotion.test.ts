@@ -3409,4 +3409,71 @@ describe("short-term promotion", () => {
       });
     });
   });
+
+  describe("symlinked MEMORY.md", () => {
+    it.runIf(process.platform !== "win32")(
+      "writes through a symlinked MEMORY.md to its real target",
+      async () => {
+        await withTempWorkspace(async (workspaceDir) => {
+          await writeDailyMemoryNote(workspaceDir, "2026-04-29", [
+            "Notes",
+            "",
+            "Rotate the staging Postgres credentials before next deploy.",
+          ]);
+
+          // MEMORY.md is a symlink into a canonical location outside the
+          // workspace (e.g. a synced dotfiles-style setup).
+          const canonicalDir = await fs.mkdtemp(path.join(os.tmpdir(), "memory-canonical-"));
+          const canonicalPath = path.join(canonicalDir, "MEMORY.md");
+          await fs.writeFile(canonicalPath, "# Long-Term Memory\n\n", "utf-8");
+          const memoryPath = path.join(workspaceDir, "MEMORY.md");
+          await fs.symlink(canonicalPath, memoryPath);
+
+          await recordShortTermRecalls({
+            workspaceDir,
+            query: "rotate creds",
+            nowMs: Date.parse("2026-04-29T10:00:00.000Z"),
+            results: [
+              {
+                path: "memory/2026-04-29.md",
+                startLine: 3,
+                endLine: 3,
+                score: 0.96,
+                snippet: "Rotate the staging Postgres credentials before next deploy.",
+                source: "memory",
+              },
+            ],
+          });
+
+          const ranked = await rankShortTermPromotionCandidates({
+            workspaceDir,
+            minScore: 0,
+            minRecallCount: 0,
+            minUniqueQueries: 0,
+          });
+
+          const applied = await applyShortTermPromotions({
+            workspaceDir,
+            candidates: ranked,
+            minScore: 0,
+            minRecallCount: 0,
+            minUniqueQueries: 0,
+            nowMs: Date.parse("2026-04-29T10:00:00.000Z"),
+          });
+
+          expect(applied.applied).toBe(1);
+
+          // The symlink itself must survive (rename-over-dest would otherwise
+          // replace it with a plain file, leaving the canonical file stale).
+          const linkStat = await fs.lstat(memoryPath);
+          expect(linkStat.isSymbolicLink()).toBe(true);
+
+          const canonicalText = await fs.readFile(canonicalPath, "utf-8");
+          expect(canonicalText).toContain("Rotate the staging Postgres credentials");
+
+          await fs.rm(canonicalDir, { recursive: true, force: true });
+        });
+      },
+    );
+  });
 });

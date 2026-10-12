@@ -2375,7 +2375,18 @@ export async function applyShortTermPromotions(
     DEFAULT_PROMOTION_MIN_UNIQUE_QUERIES,
   );
   const maxAgeDays = toFiniteNonNegativeInt(options.maxAgeDays, -1);
-  const memoryPath = path.join(workspaceDir, "MEMORY.md");
+  // replaceFileAtomic renames a temp file onto this path, which replaces a
+  // symlink itself rather than writing through to its target (standard
+  // POSIX rename semantics). Resolve to the real path first so a symlinked
+  // MEMORY.md (e.g. into a synced directory) gets updated at its actual
+  // location instead of promotion silently reporting success while the
+  // canonical file never changes.
+  const memoryPath = await fs.realpath(path.join(workspaceDir, "MEMORY.md")).catch((err) => {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+      return path.join(workspaceDir, "MEMORY.md");
+    }
+    throw err;
+  });
 
   return await withShortTermLock(workspaceDir, async () => {
     const store = await readStore(workspaceDir, nowIso);
