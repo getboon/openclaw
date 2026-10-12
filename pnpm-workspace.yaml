@@ -146,6 +146,11 @@ overrides:
   brace-expansion: 5.0.11
   # GHSA-r28c-9q8g-f849: postcss <=8.5.17 path traversal in source-map auto-load.
   postcss: 8.5.22
+  # GHSA-jqcg-44mw-7w3h: proxy-addr <2.0.8 IP spoofing via IPv4-mapped IPv6 trust subnet.
+  proxy-addr: 2.0.8
+  # GHSA-68fv-2mgg-jv7q: source-map-js <1.2.2 event-loop DoS via indexed
+  # source-map section offsets.
+  source-map-js: 1.2.2
   # Scope the undici security pin per major line. jsdom needs `undici@^7.25.0`
   # and imports lib/handler/wrap-handler.js, removed in 8.x, while the 6.11
   # extensions depend on undici 8.5.0 directly — a single flat override would
