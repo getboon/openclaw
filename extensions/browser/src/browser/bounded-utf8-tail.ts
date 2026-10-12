@@ -18,6 +18,13 @@ export function decodeBoundedUtf8Tail(buffer: Buffer, maxBytes: number): string 
 
 export function createBoundedUtf8Tail(maxBytes: number) {
   const storage = Buffer.allocUnsafe(Math.max(0, maxBytes));
+  // Ring buffer: `start` is the offset of the oldest retained byte, valid
+  // bytes run `totalBytes` forward from it (wrapping past the end of
+  // `storage`). Appending a small chunk after the cap fills no longer
+  // shifts the whole retained buffer -- only evicted/written bytes move, so
+  // repeated small appends (e.g. noisy subprocess stderr) cost O(chunk
+  // length) instead of O(maxBytes) each.
+  let start = 0;
   let totalBytes = 0;
 
   return {
@@ -28,22 +35,36 @@ export function createBoundedUtf8Tail(maxBytes: number) {
       }
       if (buffer.length >= maxBytes) {
         buffer.copy(storage, 0, buffer.length - maxBytes);
+        start = 0;
         totalBytes = maxBytes;
         return;
       }
 
       const overflowBytes = Math.max(0, totalBytes + buffer.length - maxBytes);
       if (overflowBytes > 0) {
-        storage.copyWithin(0, overflowBytes, totalBytes);
+        start = (start + overflowBytes) % maxBytes;
         totalBytes -= overflowBytes;
       }
-      buffer.copy(storage, totalBytes);
+      const writePos = (start + totalBytes) % maxBytes;
+      const firstPartLen = Math.min(buffer.length, maxBytes - writePos);
+      buffer.copy(storage, writePos, 0, firstPartLen);
+      if (firstPartLen < buffer.length) {
+        buffer.copy(storage, 0, firstPartLen, buffer.length);
+      }
       totalBytes += buffer.length;
     },
     text() {
-      return decodeUtf8Tail(storage.subarray(0, totalBytes));
+      if (start + totalBytes <= maxBytes) {
+        return decodeUtf8Tail(storage.subarray(start, start + totalBytes));
+      }
+      const wrapped = Buffer.concat([
+        storage.subarray(start, maxBytes),
+        storage.subarray(0, start + totalBytes - maxBytes),
+      ]);
+      return decodeUtf8Tail(wrapped);
     },
     clear() {
+      start = 0;
       totalBytes = 0;
     },
   };
