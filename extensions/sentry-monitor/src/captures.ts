@@ -110,38 +110,55 @@ export function buildAgentEndCapture(
   if (event.success) {
     return null;
   }
+  // run_id is a TAG, not just a context field. `contexts` is payload you can only
+  // read once you have already found the event; tags are indexed, so this is what
+  // makes an event findable BY the correlation id. run_id is boon-core's
+  // `dispatch_ref` — minted per turn, sent here as run_id / X-Request-Id, printed
+  // in the Slack stall alert, and tagged on boon-core's own Sentry events. Without
+  // it you could not SEARCH the fleet project for the box's side of a turn whose
+  // id you already had.
+  //
+  // pruneTags drops undefined/empty, so a run without these ids emits no empty
+  // facets. Tags do not affect grouping — `fingerprint` below is unchanged, so
+  // this cannot fragment existing issues.
+  const tags = pruneTags({
+    hook: "agent_end",
+    host,
+    run_id: event.runId,
+    session_id: ctx?.sessionId,
+    agent_id: ctx?.agentId,
+  });
+  // runContext has always taken a sessionId; every caller passed only runId, so
+  // the field was permanently undefined. It resolves the box's session file.
+  const contexts = { run: runContext(event.runId, ctx?.sessionId) };
+  const extra = {
+    duration_ms: event.durationMs,
+    message_count: Array.isArray(event.messages) ? event.messages.length : undefined,
+  };
+  if (!event.error) {
+    // A caller-driven abort with no error text (ENG-21233: the embedded
+    // runner's own classification only clears `error` for a prompt rejection
+    // it attributes to the CALLER's external abortSignal firing as a
+    // timeout) is an interruption, not a crash. Alerting on every expected,
+    // policy-driven stop would bury genuine failures in noise, so this shape
+    // reports as a low-severity breadcrumb instead of an exception.
+    return {
+      kind: "message",
+      message: "agent_end aborted (no error)",
+      level: "info",
+      tags,
+      fingerprint: fingerprintOf("agent_end", "aborted-no-error"),
+      contexts,
+      extra,
+    };
+  }
   return {
     kind: "exception",
-    message: event.error ?? "agent_end success=false",
-    // run_id is a TAG, not just a context field. `contexts` is payload you can only
-    // read once you have already found the event; tags are indexed, so this is what
-    // makes an event findable BY the correlation id. run_id is boon-core's
-    // `dispatch_ref` — minted per turn, sent here as run_id / X-Request-Id, printed
-    // in the Slack stall alert, and tagged on boon-core's own Sentry events. Without
-    // it you could not SEARCH the fleet project for the box's side of a turn whose
-    // id you already had.
-    //
-    // pruneTags drops undefined/empty, so a run without these ids emits no empty
-    // facets. Tags do not affect grouping — `fingerprint` below is unchanged, so
-    // this cannot fragment existing issues.
-    tags: pruneTags({
-      hook: "agent_end",
-      host,
-      run_id: event.runId,
-      session_id: ctx?.sessionId,
-      agent_id: ctx?.agentId,
-    }),
-    fingerprint: fingerprintOf(
-      "agent_end",
-      event.error ? normalizeFingerprintText(event.error) : "success=false",
-    ),
-    // runContext has always taken a sessionId; every caller passed only runId, so
-    // the field was permanently undefined. It resolves the box's session file.
-    contexts: { run: runContext(event.runId, ctx?.sessionId) },
-    extra: {
-      duration_ms: event.durationMs,
-      message_count: Array.isArray(event.messages) ? event.messages.length : undefined,
-    },
+    message: event.error,
+    tags,
+    fingerprint: fingerprintOf("agent_end", normalizeFingerprintText(event.error)),
+    contexts,
+    extra,
   };
 }
 

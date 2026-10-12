@@ -267,7 +267,7 @@ import {
   isWorkspaceBootstrapPending,
   type WorkspaceBootstrapFile,
 } from "../../workspace.js";
-import { isRunnerAbortError } from "../abort.js";
+import { isExternalTimeoutAbortRejection, isRunnerAbortError } from "../abort.js";
 import { isCacheTtlEligibleProvider, readLastCacheTtlTimestamp } from "../cache-ttl.js";
 import { resolveCompactionTimeoutMs } from "../compaction-safety-timeout.js";
 import {
@@ -4928,6 +4928,14 @@ export async function runEmbeddedAttempt(
             await withOwnedSessionWriteLock(() => {
               handleMidTurnPrecheckRequest(err.request);
             });
+          } else if (isExternalTimeoutAbortRejection({ err, externalAbort, timedOut })) {
+            // Already classified by onExternalAbortSignal/abortRun: aborted +
+            // timedOut. The rejection is the abortable() wrapper echoing the
+            // caller's own abort reason, not a run failure. Leave
+            // promptError/promptErrorSource null so agent_end reports a clean
+            // interruption instead of an error (ENG-21233) — an internal
+            // watchdog timeout (externalAbort stays false there) still falls
+            // through to the error branch below, unchanged.
           } else {
             promptError = err;
             promptErrorSource = "prompt";

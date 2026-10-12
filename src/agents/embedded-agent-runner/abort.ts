@@ -18,3 +18,22 @@ export function isRunnerAbortError(err: unknown): boolean {
       : "";
   return message.includes("aborted");
 }
+
+/**
+ * True only for a rejection that is BOTH abort-shaped AND already attributed
+ * to the caller's own external abortSignal firing as a timeout (ENG-21233).
+ * `isRunnerAbortError` alone is too broad — it also matches OpenClaw's own
+ * internal watchdog timeouts (scheduleAbortTimer/idleTimeoutTrigger), which
+ * never set `externalAbort` and must keep reporting as a real error. Gating
+ * on all three (externalAbort + timedOut + abort-shaped) is what lets a
+ * caller-driven timeout (e.g. a channel plugin's own wall-clock turn budget)
+ * be classified as a clean interruption instead of a reported exception,
+ * without hiding a genuine internal-timeout failure.
+ */
+export function isExternalTimeoutAbortRejection(params: {
+  err: unknown;
+  externalAbort: boolean;
+  timedOut: boolean;
+}): boolean {
+  return params.externalAbort && params.timedOut && isRunnerAbortError(params.err);
+}
