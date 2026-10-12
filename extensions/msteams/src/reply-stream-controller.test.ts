@@ -91,6 +91,38 @@ describe("createTeamsReplyStreamController", () => {
     expect(stream.emit).toHaveBeenCalledWith("abcdef");
   });
 
+  it("falls back to block delivery when a mid-stream shrink never grows back", async () => {
+    // A prefix-only shrink (e.g. "abcdef" -> "abc") produces no delta in
+    // onPartialReply and is ignored there as possibly-transient. If the real
+    // final text never catches back up to what was already streamed,
+    // preparePayload must not suppress it — Teams can only append, so the
+    // stale (now-wrong, longer) streamed prefix would otherwise be all the
+    // user ever sees.
+    const stream = makeStream();
+    const ctrl = makeController({ stream });
+
+    ctrl.onPartialReply({ text: "abcdef" });
+    ctrl.onPartialReply({ text: "abc" }); // shrink — ignored mid-stream
+
+    expect(stream.emit).toHaveBeenCalledTimes(1);
+    expect(ctrl.preparePayload({ text: "abc" })).toEqual({ text: "abc" });
+
+    await ctrl.finalize();
+    expect(stream.clearText).toHaveBeenCalledTimes(1);
+    expect(stream.close).toHaveBeenCalled();
+  });
+
+  it("still suppresses block delivery when a transient shrink grows back past the streamed text", () => {
+    const stream = makeStream();
+    const ctrl = makeController({ stream });
+
+    ctrl.onPartialReply({ text: "abcdef" });
+    ctrl.onPartialReply({ text: "abc" }); // transient shrink, ignored
+    ctrl.onPartialReply({ text: "abcdef and more" }); // grows back past streamed text
+
+    expect(ctrl.preparePayload({ text: "abcdef and more" })).toBeUndefined();
+  });
+
   it("does not touch native stream on reply start before text or progress work", async () => {
     const stream = makeStream();
     const ctrl = makeController({ stream });
