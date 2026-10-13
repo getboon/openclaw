@@ -47,9 +47,6 @@ overrides:
   vite: 8.0.16
   ws: 8.21.0
   '@vitest/browser': 4.1.11
-  simple-git: 4.0.2
-  proxy-addr: 2.0.8
-  source-map-js: 1.2.2
 
 packageExtensionsChecksum: sha256-zZ8fyodhMTumshonC7kktCqTPsiHL3UAyS9vltFAlMo=
 
