@@ -14,6 +14,7 @@ import { resolveLocalMediaPath } from "../media/local-media-path.js";
 import {
   createImageProcessor,
   getImageMetadata,
+  MAX_IMAGE_INPUT_PIXELS,
   readImageProbeFromHeader,
 } from "../media/media-services.js";
 import { MEDIA_MAX_BYTES, saveMediaBuffer, saveMediaSource } from "../media/store.js";
@@ -932,6 +933,12 @@ export async function createManagedOutgoingImageBlocks(params: {
           throw createManagedImageAttachmentError(metadataLimitError);
         }
         if (resizeAttempt >= 3) {
+          throw createManagedImageAttachmentError(metadataLimitError);
+        }
+        // Reject outright instead of decoding: the shared processor's decode
+        // ceiling is far above this feature's own limits above, so a source
+        // this large would otherwise cost a full in-process decode first.
+        if (effectiveMetadata.width * effectiveMetadata.height > MAX_IMAGE_INPUT_PIXELS) {
           throw createManagedImageAttachmentError(metadataLimitError);
         }
         const resized = await resizeManagedImageBufferToLimits({

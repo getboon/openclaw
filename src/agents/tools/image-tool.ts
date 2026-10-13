@@ -23,6 +23,7 @@ import {
   classifyMediaReferenceSource,
   normalizeMediaReferenceSource,
 } from "../../media/media-reference.js";
+import { isImageTooLargeToDecodeError } from "../../media/media-services.js";
 import type {
   ImageCompressionModelPolicy,
   ImageCompressionPolicy,
@@ -1006,31 +1007,53 @@ export function createImageTool(options?: {
         });
         const imageWebMedia = await imageToolProviderDeps.loadImageWebMediaRuntime();
 
-        const media = isDataUrl
-          ? await (async () => {
-              const decoded = decodeDataUrl(resolvedImage, { maxBytes });
-              return await imageWebMedia.optimizeImageBufferForWebMedia({
-                buffer: decoded.buffer,
-                contentType: decoded.mimeType,
-                maxBytes,
-                imageCompression,
-              });
-            })()
-          : sandboxConfig
-            ? await imageWebMedia.loadWebMedia(resolvedPath ?? resolvedImage, {
-                maxBytes,
-                sandboxValidated: true,
-                readFile: createSandboxBridgeReadFile({ sandbox: sandboxConfig }),
-                imageCompression,
-              })
-            : await imageWebMedia.loadWebMedia(resolvedPath ?? resolvedImage, {
-                maxBytes,
-                localRoots: mediaLocalRoots,
-                inboundRoots: mediaInboundRoots,
-                ssrfPolicy: remoteMediaSsrfPolicy,
-                ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
-                imageCompression,
-              });
+        let media: WebMediaResult;
+        try {
+          media = isDataUrl
+            ? await (async () => {
+                const decoded = decodeDataUrl(resolvedImage, { maxBytes });
+                return await imageWebMedia.optimizeImageBufferForWebMedia({
+                  buffer: decoded.buffer,
+                  contentType: decoded.mimeType,
+                  maxBytes,
+                  imageCompression,
+                });
+              })()
+            : sandboxConfig
+              ? await imageWebMedia.loadWebMedia(resolvedPath ?? resolvedImage, {
+                  maxBytes,
+                  sandboxValidated: true,
+                  readFile: createSandboxBridgeReadFile({ sandbox: sandboxConfig }),
+                  imageCompression,
+                })
+              : await imageWebMedia.loadWebMedia(resolvedPath ?? resolvedImage, {
+                  maxBytes,
+                  localRoots: mediaLocalRoots,
+                  inboundRoots: mediaInboundRoots,
+                  ssrfPolicy: remoteMediaSsrfPolicy,
+                  ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
+                  imageCompression,
+                });
+        } catch (err) {
+          // A source too large even for the raised decode ceiling is a user
+          // input problem — return gracefully like the unsupported-reference
+          // case above instead of letting the raw error escape.
+          if (isImageTooLargeToDecodeError(err)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Image too large to process: ${imageRawInput} exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.`,
+                },
+              ],
+              details: {
+                error: "image_too_large",
+                image: imageRawInput,
+              },
+            };
+          }
+          throw err;
+        }
         if (media.kind !== "image") {
           throw new Error(`Unsupported media type: ${media.kind}`);
         }

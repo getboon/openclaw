@@ -1,5 +1,6 @@
 // image_generate tool tests cover provider/model selection, edit inputs,
 // background task handling, media saving, and duplicate-generation guards.
+import { RastermillError } from "rastermill";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 
@@ -1813,6 +1814,27 @@ describe("createImageGenerateTool", () => {
     if (!loadArgs || typeof loadArgs !== "object") {
       throw new Error("expected loadWebMedia options");
     }
+  });
+
+  it("returns a graceful error instead of throwing when a reference image is too large to decode even under the raised ceiling", async () => {
+    vi.spyOn(webMedia, "loadWebMedia").mockRejectedValue(
+      new RastermillError(
+        "RASTERMILL_INPUT_TOO_LARGE",
+        "Image dimensions exceed the 100,000,000 pixel input limit: 20000x20000 (400000000 pixels)",
+      ),
+    );
+    const tool = createToolWithPrimaryImageModel("google/gemini-3-pro-image-preview", {
+      workspaceDir: process.cwd(),
+    });
+
+    await expect(
+      tool.execute("call-edit-too-large", {
+        prompt: "Use this reference.",
+        image: "./fixtures/reference.png",
+      }),
+    ).rejects.toThrow(
+      "Image too large to process: ./fixtures/reference.png exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.",
+    );
   });
 
   it("passes web_fetch SSRF policy to remote reference images", async () => {

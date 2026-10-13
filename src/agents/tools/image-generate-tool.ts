@@ -34,7 +34,7 @@ import {
   classifyMediaReferenceSource,
   normalizeMediaReferenceSource,
 } from "../../media/media-reference.js";
-import { getImageMetadata } from "../../media/media-services.js";
+import { getImageMetadata, isImageTooLargeToDecodeError } from "../../media/media-services.js";
 import { saveMediaBuffer } from "../../media/store.js";
 import { loadWebMedia } from "../../media/web-media.js";
 import { readSnakeCaseParamRaw } from "../../param-key.js";
@@ -612,20 +612,33 @@ async function loadReferenceImages(params: {
       resolvedPath ? [resolvedPath] : undefined,
     );
 
-    const media = isDataUrl
-      ? decodeDataUrl(resolvedImage, { maxBytes: params.maxBytes })
-      : params.sandboxConfig
-        ? await loadWebMedia(resolvedPath ?? resolvedImage, {
-            maxBytes: params.maxBytes,
-            sandboxValidated: true,
-            readFile: createSandboxBridgeReadFile({ sandbox: params.sandboxConfig }),
-          })
-        : await loadWebMedia(resolvedPath ?? resolvedImage, {
-            maxBytes: params.maxBytes,
-            localRoots,
-            ssrfPolicy: params.ssrfPolicy,
-            ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
-          });
+    let media: Awaited<ReturnType<typeof loadWebMedia>> | ReturnType<typeof decodeDataUrl>;
+    try {
+      media = isDataUrl
+        ? decodeDataUrl(resolvedImage, { maxBytes: params.maxBytes })
+        : params.sandboxConfig
+          ? await loadWebMedia(resolvedPath ?? resolvedImage, {
+              maxBytes: params.maxBytes,
+              sandboxValidated: true,
+              readFile: createSandboxBridgeReadFile({ sandbox: params.sandboxConfig }),
+            })
+          : await loadWebMedia(resolvedPath ?? resolvedImage, {
+              maxBytes: params.maxBytes,
+              localRoots,
+              ssrfPolicy: params.ssrfPolicy,
+              ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
+            });
+    } catch (err) {
+      // Same reasoning as the image tool's identical guard: a reference
+      // image too large even for the raised decode ceiling is a user input
+      // problem, not a host defect.
+      if (isImageTooLargeToDecodeError(err)) {
+        throw new ToolInputError(
+          `Image too large to process: ${imageRawInput} exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.`,
+        );
+      }
+      throw err;
+    }
     if (media.kind !== "image") {
       throw new ToolInputError(`Unsupported media type: ${media.kind}`);
     }
