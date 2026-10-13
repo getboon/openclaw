@@ -7,6 +7,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { URL } from "node:url";
 import { detectMime } from "@openclaw/media-core/mime";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isWindowsDrivePath } from "../infra/archive-path.js";
 import { toErrorObject } from "../infra/errors.js";
 import {
@@ -23,6 +24,7 @@ import {
   resolveMediaReferenceSandboxPath,
 } from "../media/media-reference.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
+import { resolveMemoryFlushPlan } from "../plugins/memory-state.js";
 import {
   REQUIRED_PARAM_GROUPS,
   assertRequiredParams,
@@ -555,6 +557,13 @@ type MemoryFlushAppendOnlyWriteOptions = {
   root: string;
   relativePath: string;
   containerWorkdir?: string;
+  /**
+   * Config used to re-derive today's flush path at execute() time (see
+   * `wrapToolMemoryFlushAppendOnlyWrite` — ENG-21229). Omit only when no config is
+   * available (e.g. some test/CLI paths); the wrapper then falls back to the single
+   * `relativePath` pinned at tool-build time.
+   */
+  cfg?: OpenClawConfig;
   sandbox?: {
     root: string;
     bridge: SandboxFsBridge;
@@ -670,24 +679,46 @@ export function wrapToolMemoryFlushAppendOnlyWrite(
         root: options.root,
         containerWorkdir: options.containerWorkdir,
       });
-      if (resolvedPath !== allowedAbsolutePath) {
+
+      // `options.relativePath` is pinned when the memory-flush tool set is built, which
+      // can predate actual execution by an unbounded amount (provider fallback/retry
+      // backoff, a long-running flush turn) — long enough to cross a date rollover.
+      // Re-derive "today" at execute() time (same plan resolver + timezone logic the
+      // flush prompt itself uses) and additionally accept that path, so a flush that
+      // straddles midnight isn't rejected for using the — correct — current date.
+      // See ENG-21229.
+      const currentPlan = resolveMemoryFlushPlan({ cfg: options.cfg, nowMs: Date.now() });
+      const candidates = [
+        { relativePath: options.relativePath, absolutePath: allowedAbsolutePath },
+      ];
+      if (currentPlan && currentPlan.relativePath !== options.relativePath) {
+        candidates.push({
+          relativePath: currentPlan.relativePath,
+          absolutePath: path.resolve(options.root, currentPlan.relativePath),
+        });
+      }
+      const matched = candidates.find((candidate) => candidate.absolutePath === resolvedPath);
+      if (!matched) {
+        const allowedDescription = candidates
+          .map((candidate) => candidate.relativePath)
+          .join(" or ");
         throw new Error(
-          `Memory flush writes are restricted to ${options.relativePath}; use that path only.`,
+          `Memory flush writes are restricted to ${allowedDescription}; use that path only.`,
         );
       }
 
       await appendMemoryFlushContent({
-        absolutePath: allowedAbsolutePath,
+        absolutePath: matched.absolutePath,
         root: options.root,
-        relativePath: options.relativePath,
+        relativePath: matched.relativePath,
         content,
         sandbox: options.sandbox,
         signal,
       });
       return {
-        content: [{ type: "text", text: `Appended content to ${options.relativePath}.` }],
+        content: [{ type: "text", text: `Appended content to ${matched.relativePath}.` }],
         details: {
-          path: options.relativePath,
+          path: matched.relativePath,
           appendOnly: true,
         },
       };
