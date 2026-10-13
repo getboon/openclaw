@@ -2,7 +2,11 @@
 // rejections: a caller's own external timeout abort must not be reported
 // as a run error.
 import { describe, expect, it } from "vitest";
-import { isExternalTimeoutAbortRejection, isRunnerAbortError } from "./abort.js";
+import {
+  classifyAsyncTaskWaitTimeout,
+  isExternalTimeoutAbortRejection,
+  isRunnerAbortError,
+} from "./abort.js";
 import { abortable } from "./run/abortable.js";
 
 /** Reproduces exactly what a channel plugin's own wall-clock budget sends. */
@@ -105,5 +109,40 @@ describe("isExternalTimeoutAbortRejection", () => {
     const signal = makeExternalTimeoutSignal();
     const err = await abortable(signal, new Promise(() => {})).catch((e: unknown) => e);
     expect(formatErrorMessage(err)).toBe("Turn budget exceeded | 23");
+  });
+});
+
+describe("classifyAsyncTaskWaitTimeout", () => {
+  it("is a no-op when nothing timed out", () => {
+    expect(
+      classifyAsyncTaskWaitTimeout({ timedOutRunIds: [], externalTimeoutAbortClassified: false }),
+    ).toEqual({ kind: "none" });
+    expect(
+      classifyAsyncTaskWaitTimeout({ timedOutRunIds: [], externalTimeoutAbortClassified: true }),
+    ).toEqual({ kind: "none" });
+  });
+
+  it("sets a real promptError when the run was not classified as a clean external abort", () => {
+    const outcome = classifyAsyncTaskWaitTimeout({
+      timedOutRunIds: ["run-1"],
+      externalTimeoutAbortClassified: false,
+    });
+    expect(outcome).toEqual({
+      kind: "error",
+      message: "Timed out waiting for async task completion: run-1",
+    });
+  });
+
+  it("logs instead of setting promptError when the run was already classified as a clean external abort", () => {
+    // Regression guard: the completion-required async-task wait's own
+    // deadline collapses to ~now once the run is already externally
+    // aborted, so a still-pending task there must not silently undo the
+    // classification by repopulating promptError.
+    const outcome = classifyAsyncTaskWaitTimeout({
+      timedOutRunIds: ["run-1", "run-2"],
+      externalTimeoutAbortClassified: true,
+    });
+    expect(outcome.kind).toBe("log");
+    expect(outcome.message).toContain("run-1, run-2");
   });
 });

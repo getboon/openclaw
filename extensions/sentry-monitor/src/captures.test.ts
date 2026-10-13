@@ -178,7 +178,7 @@ describe("buildAgentEndCapture", () => {
     if (capture?.kind !== "message") {
       throw new Error("expected a message-kind capture");
     }
-    expect(capture.level).toBe("info");
+    expect(capture.level).toBe("warning");
     expect(capture.message).toBe("agent_end aborted (no error)");
     expect(capture.fingerprint).toEqual(["agent_end", "aborted-no-error"]);
   });

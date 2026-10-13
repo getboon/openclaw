@@ -37,3 +37,33 @@ export function isExternalTimeoutAbortRejection(params: {
 }): boolean {
   return params.externalAbort && params.timedOut && isRunnerAbortError(params.err);
 }
+
+export type AsyncTaskWaitTimeoutOutcome =
+  | { kind: "none" }
+  | { kind: "log"; message: string }
+  | { kind: "error"; message: string };
+
+/**
+ * Decides what a still-pending async task at the completion-required wait's
+ * deadline means. When the run was already classified as a clean external
+ * abort, that wait's own deadline collapses to ~now, so a pending task there
+ * is a consequence of the same caller-driven stop, not an independent
+ * failure — log it instead of setting promptError and undoing the
+ * classification.
+ */
+export function classifyAsyncTaskWaitTimeout(params: {
+  timedOutRunIds: readonly string[];
+  externalTimeoutAbortClassified: boolean;
+}): AsyncTaskWaitTimeoutOutcome {
+  if (params.timedOutRunIds.length === 0) {
+    return { kind: "none" };
+  }
+  const runIds = params.timedOutRunIds.join(", ");
+  if (params.externalTimeoutAbortClassified) {
+    return {
+      kind: "log",
+      message: `async task(s) still pending at external-timeout abort: ${runIds}`,
+    };
+  }
+  return { kind: "error", message: `Timed out waiting for async task completion: ${runIds}` };
+}
