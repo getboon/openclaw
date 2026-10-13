@@ -34,9 +34,13 @@ import {
   classifyMediaReferenceSource,
   normalizeMediaReferenceSource,
 } from "../../media/media-reference.js";
-import { getImageMetadata } from "../../media/media-services.js";
+import { getImageMetadata, isImageTooLargeToDecodeError } from "../../media/media-services.js";
 import { saveMediaBuffer } from "../../media/store.js";
-import { loadWebMedia } from "../../media/web-media.js";
+import {
+  loadWebMedia,
+  optimizeImageBufferForWebMedia,
+  type WebMediaResult,
+} from "../../media/web-media.js";
 import { readSnakeCaseParamRaw } from "../../param-key.js";
 import { resolveUserPath } from "../../utils.js";
 import type { DeliveryContext } from "../../utils/delivery-context.js";
@@ -612,28 +616,54 @@ async function loadReferenceImages(params: {
       resolvedPath ? [resolvedPath] : undefined,
     );
 
-    const media = isDataUrl
-      ? decodeDataUrl(resolvedImage, { maxBytes: params.maxBytes })
-      : params.sandboxConfig
-        ? await loadWebMedia(resolvedPath ?? resolvedImage, {
-            maxBytes: params.maxBytes,
-            sandboxValidated: true,
-            readFile: createSandboxBridgeReadFile({ sandbox: params.sandboxConfig }),
-          })
-        : await loadWebMedia(resolvedPath ?? resolvedImage, {
-            maxBytes: params.maxBytes,
-            localRoots,
-            ssrfPolicy: params.ssrfPolicy,
-            ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
-          });
+    // A data: URL now goes through optimizeImageBufferForWebMedia too (same
+    // downscale pass as loadWebMedia), so every branch below produces a
+    // WebMediaResult — decodeDataUrl's raw shape is only an intermediate.
+    let media: WebMediaResult;
+    try {
+      media = isDataUrl
+        ? await (async () => {
+            const decoded = decodeDataUrl(resolvedImage, { maxBytes: params.maxBytes });
+            // A data: URL skips the loadWebMedia branches below, so it needs
+            // the same downscale pass or an oversized reference reaches the
+            // provider unresized.
+            return await optimizeImageBufferForWebMedia({
+              buffer: decoded.buffer,
+              contentType: decoded.mimeType,
+              maxBytes: params.maxBytes,
+            });
+          })()
+        : params.sandboxConfig
+          ? await loadWebMedia(resolvedPath ?? resolvedImage, {
+              maxBytes: params.maxBytes,
+              sandboxValidated: true,
+              readFile: createSandboxBridgeReadFile({ sandbox: params.sandboxConfig }),
+            })
+          : await loadWebMedia(resolvedPath ?? resolvedImage, {
+              maxBytes: params.maxBytes,
+              localRoots,
+              ssrfPolicy: params.ssrfPolicy,
+              ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
+            });
+    } catch (err) {
+      // Same reasoning as the image tool's identical guard: a reference
+      // image too large even for the raised decode ceiling is a user input
+      // problem, not a host defect.
+      if (isImageTooLargeToDecodeError(err)) {
+        // A data: URL reference is the full base64 payload; never echo that
+        // back into a model-visible error message.
+        const imageReference = isDataUrl ? "the provided data URL image" : imageRawInput;
+        throw new ToolInputError(
+          `Image too large to process: ${imageReference} exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.`,
+        );
+      }
+      throw err;
+    }
     if (media.kind !== "image") {
       throw new ToolInputError(`Unsupported media type: ${media.kind}`);
     }
 
-    const mimeType =
-      ("contentType" in media && media.contentType) ||
-      ("mimeType" in media && media.mimeType) ||
-      "image/png";
+    const mimeType = media.contentType ?? "image/png";
 
     loaded.push({
       sourceImage: {

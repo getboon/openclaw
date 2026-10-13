@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { isInboundPathAllowed } from "@openclaw/media-core/inbound-path-policy";
+import { RastermillError } from "rastermill";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { ModelDefinitionConfig } from "../../config/types.models.js";
@@ -2805,6 +2806,75 @@ describe("image tool MiniMax VLM routing", () => {
         image: `data:image/png;base64,${ONE_PIXEL_PNG_B64}`,
       }),
     ).rejects.toThrow(/MiniMax VLM API error/i);
+  });
+
+  it("returns a graceful error instead of throwing when a source image is too large to decode even under the raised ceiling", async () => {
+    // Overrides this describe block's beforeEach-installed deps so
+    // optimizeImageBufferForWebMedia simulates a Rastermill input-too-large
+    // failure instead of hitting the real backend.
+    installImageUnderstandingProviderDeps([minimaxProvider], {
+      loadImageWebMediaRuntime: async () => ({
+        loadWebMedia: async () => {
+          throw new Error("loadWebMedia should not be called for a data: URL image");
+        },
+        optimizeImageBufferForWebMedia: async () => {
+          throw new RastermillError(
+            "RASTERMILL_INPUT_TOO_LARGE",
+            "Image dimensions exceed the 100,000,000 pixel input limit: 20000x20000 (400000000 pixels)",
+          );
+        },
+      }),
+    });
+    const { fetch, tool } = await createMinimaxVlmFixture({ status_code: 0, status_msg: "" });
+    const image = `data:image/png;base64,${ONE_PIXEL_PNG_B64}`;
+
+    const result = await tool.execute("t1", {
+      prompt: "Describe the image.",
+      image,
+    });
+
+    expect(fetch).not.toHaveBeenCalled();
+    // A data: URL is the full base64 payload — the message/details must
+    // never echo it back, regardless of how large that payload is.
+    expectToolText(
+      result,
+      "Image too large to process: the provided data URL image exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.",
+    );
+    const details = result.details as { error?: string; image?: string } | undefined;
+    expect(details?.error).toBe("image_too_large");
+    expect(details?.image).toBe("the provided data URL image");
+  });
+
+  it("returns a graceful error naming the file path when a local image is too large to decode", async () => {
+    installImageUnderstandingProviderDeps([minimaxProvider], {
+      loadImageWebMediaRuntime: async () => ({
+        loadWebMedia: async () => {
+          throw new RastermillError(
+            "RASTERMILL_INPUT_TOO_LARGE",
+            "Image dimensions exceed the 100,000,000 pixel input limit: 20000x20000 (400000000 pixels)",
+          );
+        },
+        optimizeImageBufferForWebMedia: async () => {
+          throw new Error("optimizeImageBufferForWebMedia should not be called for a file path");
+        },
+      }),
+    });
+    const { fetch, tool } = await createMinimaxVlmFixture({ status_code: 0, status_msg: "" });
+    const imagePath = "./fixtures/too-large.png";
+
+    const result = await tool.execute("t1", {
+      prompt: "Describe the image.",
+      image: imagePath,
+    });
+
+    expect(fetch).not.toHaveBeenCalled();
+    expectToolText(
+      result,
+      `Image too large to process: ${imagePath} exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.`,
+    );
+    const details = result.details as { error?: string; image?: string } | undefined;
+    expect(details?.error).toBe("image_too_large");
+    expect(details?.image).toBe(imagePath);
   });
 });
 
