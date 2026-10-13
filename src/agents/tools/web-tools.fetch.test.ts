@@ -783,9 +783,7 @@ describe("web_fetch extraction fallbacks", () => {
   // it must carry a stable `code` so after_tool_call hook consumers (e.g.
   // sentry-monitor) can classify it without sniffing the message text.
   it("throws a clean, bannerless error with an http_<status> code for a 403", async () => {
-    installMockFetch(
-      () => Promise.resolve(errorResponse(403, { statusText: "Forbidden" })) as Promise<Response>,
-    );
+    installMockFetch(() => Promise.resolve(errorResponse(403, { statusText: "Forbidden" })));
 
     const tool = createFetchTool({ firecrawl: { enabled: false } });
     const error = await captureToolError({ tool, url: "https://example.com/blocked" });
@@ -797,9 +795,7 @@ describe("web_fetch extraction fallbacks", () => {
   });
 
   it("throws a clean, bannerless error with an http_<status> code for a 404", async () => {
-    installMockFetch(
-      () => Promise.resolve(errorResponse(404, { statusText: "Not Found" })) as Promise<Response>,
-    );
+    installMockFetch(() => Promise.resolve(errorResponse(404, { statusText: "Not Found" })));
 
     const tool = createFetchTool({ firecrawl: { enabled: false } });
     const error = await captureToolError({ tool, url: "https://example.com/missing" });
@@ -809,11 +805,8 @@ describe("web_fetch extraction fallbacks", () => {
   });
 
   it("tags a non-4xx failure with an http_<status> code too, for consistency", async () => {
-    installMockFetch(
-      () =>
-        Promise.resolve(
-          errorResponse(500, { statusText: "Internal Server Error" }),
-        ) as Promise<Response>,
+    installMockFetch(() =>
+      Promise.resolve(errorResponse(500, { statusText: "Internal Server Error" })),
     );
 
     const tool = createFetchTool({ firecrawl: { enabled: false } });
@@ -827,13 +820,9 @@ describe("web_fetch extraction fallbacks", () => {
     const fetchMock = installMockFetch((input: RequestInfo | URL) => {
       const attempt = fetchMock.mock.calls.length;
       if (attempt < 3) {
-        return Promise.resolve(
-          errorResponse(429, { statusText: "Too Many Requests" }),
-        ) as Promise<Response>;
+        return Promise.resolve(errorResponse(429, { statusText: "Too Many Requests" }));
       }
-      return Promise.resolve(
-        textResponse("recovered", resolveRequestUrl(input)),
-      ) as Promise<Response>;
+      return Promise.resolve(textResponse("recovered", resolveRequestUrl(input)));
     });
 
     const tool = createFetchTool({ firecrawl: { enabled: false } });
@@ -854,9 +843,9 @@ describe("web_fetch extraction fallbacks", () => {
       if (attempt < 2) {
         return Promise.resolve(
           errorResponse(429, { statusText: "Too Many Requests", retryAfter: "1" }),
-        ) as Promise<Response>;
+        );
       }
-      return Promise.resolve(textResponse("recovered")) as Promise<Response>;
+      return Promise.resolve(textResponse("recovered"));
     });
 
     const tool = createFetchTool({ firecrawl: { enabled: false } });
@@ -871,11 +860,8 @@ describe("web_fetch extraction fallbacks", () => {
   }, 10_000);
 
   it("throws http_429 once retries are exhausted against a persistently rate-limited target", async () => {
-    const fetchMock = installMockFetch(
-      () =>
-        Promise.resolve(
-          errorResponse(429, { statusText: "Too Many Requests" }),
-        ) as Promise<Response>,
+    const fetchMock = installMockFetch(() =>
+      Promise.resolve(errorResponse(429, { statusText: "Too Many Requests" })),
     );
 
     const tool = createFetchTool({ firecrawl: { enabled: false } });
@@ -891,11 +877,8 @@ describe("web_fetch extraction fallbacks", () => {
   // (8s) was being silently clamped to 8s and retried anyway — violating the
   // server's stated cooldown instead of just missing a retry opportunity.
   it("does not retry a 429 whose Retry-After exceeds the max delay — surfaces it instead of violating the cooldown", async () => {
-    const fetchMock = installMockFetch(
-      () =>
-        Promise.resolve(
-          errorResponse(429, { statusText: "Too Many Requests", retryAfter: "30" }),
-        ) as Promise<Response>,
+    const fetchMock = installMockFetch(() =>
+      Promise.resolve(errorResponse(429, { statusText: "Too Many Requests", retryAfter: "30" })),
     );
 
     const tool = createFetchTool({ firecrawl: { enabled: false } });
@@ -907,8 +890,8 @@ describe("web_fetch extraction fallbacks", () => {
   });
 
   it("does not retry a 403 — retrying would not change the outcome", async () => {
-    const fetchMock = installMockFetch(
-      () => Promise.resolve(errorResponse(403, { statusText: "Forbidden" })) as Promise<Response>,
+    const fetchMock = installMockFetch(() =>
+      Promise.resolve(errorResponse(403, { statusText: "Forbidden" })),
     );
 
     const tool = createFetchTool({ firecrawl: { enabled: false } });
