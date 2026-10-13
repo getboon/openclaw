@@ -145,6 +145,13 @@ export function buildAgentEndCapture(
   };
 }
 
+// ENG-21225: a web_fetch target returning one of these is a routine external
+// outcome (blocked/missing/rate-limited), not a host defect — scoped to
+// exactly these three codes (the ticket's reproduction), not the whole
+// "upstream" bucket, which also covers web_fetch's own network/DNS/extraction
+// failures and every other tool's real dependency failures.
+const WEB_FETCH_ROUTINE_HTTP_ERROR_CODES = new Set(["http_403", "http_404", "http_429"]);
+
 export function buildAfterToolCallCapture(
   event: PluginHookAfterToolCallEvent,
   host: string,
@@ -184,6 +191,27 @@ export function buildAfterToolCallCapture(
   );
   const contexts = { run: runContext(event.runId, ctx?.sessionId) };
   const extra = { tool_call_id: event.toolCallId, duration_ms: event.durationMs };
+  // A web_fetch target returning 403/404/429 is the external site's call, not
+  // a host defect — downgrade instead of dropping, so "is a site blocking us
+  // a lot" stays visible without paging on it. Scoped narrowly (tool, kind,
+  // AND errorCode) so web_fetch's own network/SSRF/extraction failures, and
+  // every other tool's "upstream" failures, still report as full exceptions.
+  if (
+    event.toolName === "web_fetch" &&
+    event.errorKind === "upstream" &&
+    event.errorCode &&
+    WEB_FETCH_ROUTINE_HTTP_ERROR_CODES.has(event.errorCode)
+  ) {
+    return {
+      kind: "message",
+      level: "warning",
+      message: event.error,
+      tags,
+      fingerprint,
+      contexts,
+      extra,
+    };
+  }
   // A validation/argument-preparation rejection is a model-input problem, not
   // a host exception, but it can still signal a real schema mismatch — so
   // downgrade to a non-paging warning instead of dropping it outright.
