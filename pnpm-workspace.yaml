@@ -188,6 +188,18 @@ overrides:
   vite: 8.0.16
   ws: 8.21.0
   "@vitest/browser": 4.1.11
+  # GHSA-v5rq-49vh-5v5c / GHSA-x6jw-m9v5-85vh / GHSA-g4wm-2vf7-vfgr /
+  # GHSA-858h-whjf-mvg5: simple-git <=3.36.0 — unsafe-operation guard gaps
+  # (VISUAL env var, git-config includes, long-option abbreviation) allowing
+  # command execution; no fix exists on the 3.x line, fixed at 4.0.1. Only a
+  # transitive dep of node-llama-cpp's build tooling, never imported directly.
+  simple-git: 4.0.2
+  # GHSA-jqcg-44mw-7w3h: proxy-addr <2.0.8 — IP spoofing via IPv4-mapped IPv6
+  # trust-subnet bypass. Transitive dep of express.
+  proxy-addr: 2.0.8
+  # GHSA-68fv-2mgg-jv7q: source-map-js <1.2.2 — event-loop DoS via indexed
+  # source-map section offsets. Transitive dep of postcss/css-tree/magicast.
+  source-map-js: 1.2.2
 
 allowBuilds:
   "@openclaw/fs-safe": true
