@@ -169,10 +169,18 @@ describe("buildAgentEndCapture", () => {
     });
   });
 
-  it("falls back to a generic message when no error string is present", () => {
-    expect(buildAgentEndCapture({ messages: [], success: false }, HOST)?.message).toBe(
-      "agent_end success=false",
-    );
+  it("reports a no-error abort as a low-severity message, not an exception", () => {
+    // A caller-driven abort (e.g. a channel plugin's own wall-clock turn
+    // budget) that the embedded runner classifies as a clean interruption
+    // carries no error text. That must not page as an exception.
+    const capture = buildAgentEndCapture({ messages: [], success: false }, HOST);
+    expect(capture?.kind).toBe("message");
+    if (capture?.kind !== "message") {
+      throw new Error("expected a message-kind capture");
+    }
+    expect(capture.level).toBe("warning");
+    expect(capture.message).toBe("agent_end aborted (no error)");
+    expect(capture.fingerprint).toEqual(["agent_end", "aborted-no-error"]);
   });
 
   // run_id is boon-core's `dispatch_ref`: minted per turn, sent to the box as
