@@ -36,7 +36,11 @@ import {
 } from "../../media/media-reference.js";
 import { getImageMetadata, isImageTooLargeToDecodeError } from "../../media/media-services.js";
 import { saveMediaBuffer } from "../../media/store.js";
-import { loadWebMedia, optimizeImageBufferForWebMedia } from "../../media/web-media.js";
+import {
+  loadWebMedia,
+  optimizeImageBufferForWebMedia,
+  type WebMediaResult,
+} from "../../media/web-media.js";
 import { readSnakeCaseParamRaw } from "../../param-key.js";
 import { resolveUserPath } from "../../utils.js";
 import type { DeliveryContext } from "../../utils/delivery-context.js";
@@ -612,7 +616,10 @@ async function loadReferenceImages(params: {
       resolvedPath ? [resolvedPath] : undefined,
     );
 
-    let media: Awaited<ReturnType<typeof loadWebMedia>> | ReturnType<typeof decodeDataUrl>;
+    // A data: URL now goes through optimizeImageBufferForWebMedia too (same
+    // downscale pass as loadWebMedia), so every branch below produces a
+    // WebMediaResult — decodeDataUrl's raw shape is only an intermediate.
+    let media: WebMediaResult;
     try {
       media = isDataUrl
         ? await (async () => {
@@ -656,10 +663,7 @@ async function loadReferenceImages(params: {
       throw new ToolInputError(`Unsupported media type: ${media.kind}`);
     }
 
-    const mimeType =
-      ("contentType" in media && media.contentType) ||
-      ("mimeType" in media && media.mimeType) ||
-      "image/png";
+    const mimeType = media.contentType ?? "image/png";
 
     loaded.push({
       sourceImage: {
