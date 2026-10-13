@@ -39,21 +39,15 @@ overrides:
   postcss: 8.5.22
   proxy-addr: 2.0.8
   source-map-js: 1.2.2
+  '@simple-git/argv-parser': 2.0.1
   simple-git: 4.0.2
   undici@7: 7.29.1
   undici@8: 8.10.2
   nanoid@3: 3.3.18
   nanoid@5: 5.1.16
-  '@simple-git/argv-parser': 2.0.1
-  simple-git: 4.0.1
-  proxy-addr: 2.0.8
-  source-map-js: 1.2.2
   vite: 8.0.16
   ws: 8.21.0
   '@vitest/browser': 4.1.11
-  simple-git: 4.0.2
-  proxy-addr: 2.0.8
-  source-map-js: 1.2.2
 
 packageExtensionsChecksum: sha256-zZ8fyodhMTumshonC7kktCqTPsiHL3UAyS9vltFAlMo=
 
