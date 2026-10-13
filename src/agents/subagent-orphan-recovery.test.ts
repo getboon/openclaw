@@ -7,6 +7,7 @@ import * as sessionUtils from "../gateway/session-transcript-readers.js";
 import { rotateAgentEventLifecycleGeneration } from "../infra/agent-events.js";
 import { resolveInternalSessionEffectsTranscriptPath } from "./internal-session-effects.js";
 import * as announceDelivery from "./subagent-announce-delivery.js";
+import { SUBAGENT_ENDED_REASON_KILLED } from "./subagent-lifecycle-events.js";
 import {
   recoverOrphanedSubagentSessions,
   scheduleOrphanRecovery,
@@ -272,6 +273,29 @@ describe("subagent-orphan-recovery", () => {
     expect(result.failed).toBe(0);
     expect(result.skipped).toBe(0);
     expect(gateway.callGateway).toHaveBeenCalledOnce();
+  });
+
+  it("does not resume a user-killed run whose session still has abortedLastRun=true", async () => {
+    mockSingleAbortedSession();
+    const killedAt = Date.now() - 1_000;
+    const activeRuns = createActiveRuns(
+      createTestRunRecord({
+        endedAt: killedAt,
+        endedReason: SUBAGENT_ENDED_REASON_KILLED,
+        outcome: { status: "error", error: "killed" },
+        cleanupHandled: true,
+        cleanupCompletedAt: killedAt,
+        suppressAnnounceReason: "killed",
+      }),
+    );
+
+    const result = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => activeRuns,
+    });
+
+    expect(result.recovered).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(gateway.callGateway).not.toHaveBeenCalled();
   });
 
   it("handles multiple orphaned sessions", async () => {

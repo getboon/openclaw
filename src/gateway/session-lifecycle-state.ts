@@ -6,6 +6,7 @@ import {
 } from "../agents/agent-run-terminal-outcome.js";
 import { updateSessionStoreEntry, type SessionEntry } from "../config/sessions.js";
 import type { AgentEventPayload } from "../infra/agent-events.js";
+import { isSubagentSessionKey } from "../sessions/session-key-utils.js";
 import { loadSessionEntry } from "./session-utils.js";
 import type { GatewaySessionRow, SessionRunStatus } from "./session-utils.types.js";
 
@@ -129,6 +130,7 @@ function resolveRuntimeMs(params: {
 }
 
 export function deriveGatewaySessionLifecycleSnapshot(params: {
+  sessionKey?: string;
   session?: Partial<LifecycleSessionShape> | null;
   event: LifecycleEventLike;
 }): GatewaySessionLifecycleSnapshot {
@@ -156,9 +158,17 @@ export function deriveGatewaySessionLifecycleSnapshot(params: {
   const startedAt = resolveLifecycleStartedAt(existing?.startedAt, params.event);
   const endedAt = resolveLifecycleEndedAt(params.event);
   const updatedAt = endedAt ?? existing?.updatedAt;
+  const status = resolveTerminalStatus(params.event);
+  // Keep a flag set by a user stop. Subagent runs are excluded: orphan recovery reads the flag as
+  // a restart marker, and a timed-out agent run also sets it before its end event.
+  const keepsStopFlag =
+    params.sessionKey !== undefined &&
+    !isSubagentSessionKey(params.sessionKey) &&
+    params.event.data?.aborted === true &&
+    existing?.abortedLastRun === true;
   return {
     updatedAt,
-    status: resolveTerminalStatus(params.event),
+    status,
     startedAt,
     endedAt,
     runtimeMs: resolveRuntimeMs({
@@ -166,11 +176,12 @@ export function deriveGatewaySessionLifecycleSnapshot(params: {
       endedAt,
       existingRuntimeMs: existing?.runtimeMs,
     }),
-    abortedLastRun: resolveTerminalStatus(params.event) === "killed",
+    abortedLastRun: status === "killed" || keepsStopFlag,
   };
 }
 
 export function derivePersistedSessionLifecyclePatch(params: {
+  sessionKey?: string;
   entry?: Partial<PersistedLifecycleSessionShape> | null;
   event: LifecycleEventLike;
 }): Partial<PersistedLifecycleSessionShape> {
@@ -178,6 +189,7 @@ export function derivePersistedSessionLifecyclePatch(params: {
     return {};
   }
   const snapshot = deriveGatewaySessionLifecycleSnapshot({
+    sessionKey: params.sessionKey,
     session: params.entry ?? undefined,
     event: params.event,
   });
@@ -203,11 +215,14 @@ export function derivePersistedSessionLifecyclePatch(params: {
       return { restartRecoveryRuns: remainingRuns };
     }
     patch.restartRecoveryRuns = undefined;
+    // Restart drain also sets the flag; only a real kill keeps it for a recovered run.
+    patch.abortedLastRun = patch.status === "killed";
   }
   return patch;
 }
 
 export function deriveGatewaySessionLifecycleProjectionPatch(params: {
+  sessionKey?: string;
   entry?: Partial<PersistedLifecycleSessionShape> | null;
   event: LifecycleEventLike;
 }): GatewaySessionLifecycleSnapshot {
@@ -290,6 +305,7 @@ export async function persistGatewaySessionLifecycleEvent(params: {
         return null;
       }
       const patch = derivePersistedSessionLifecyclePatch({
+        sessionKey: sessionEntry.canonicalKey,
         entry,
         event: params.event,
       });

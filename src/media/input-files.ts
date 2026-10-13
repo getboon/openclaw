@@ -11,6 +11,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { fetchWithSsrFGuard } from "../infra/net/fetch-guard.js";
 import type { SsrFPolicy } from "../infra/net/ssrf.js";
 import { logWarn } from "../logger.js";
+import type { DocumentExtractionCoverage } from "../plugins/document-extractor-types.js";
 import { convertHeicToJpeg } from "./media-services.js";
 import { extractPdfContent, type PdfExtractedImage } from "./pdf-extract.js";
 
@@ -21,6 +22,7 @@ type InputImageContent = PdfExtractedImage;
 type InputFileExtractResult = {
   filename: string;
   text?: string;
+  textNotice?: string;
   images?: InputImageContent[];
 };
 
@@ -275,6 +277,39 @@ function clampText(text: string, maxChars: number): string {
   return text.slice(0, maxChars);
 }
 
+type TextNoticeSource =
+  | { kind: "text" }
+  | { kind: "pdf"; coverage?: DocumentExtractionCoverage; imagesUsed: boolean };
+
+function buildTextNotice(
+  shown: number,
+  total: number,
+  source: TextNoticeSource,
+): string | undefined {
+  const coverage = source.kind === "pdf" ? source.coverage : undefined;
+  if (shown < total) {
+    if (source.kind === "text") {
+      return `[Incomplete text: it stops after ${shown} of ${total} characters of this file. Read the rest from the file before you say what the file contains or lacks.]`;
+    }
+    const where = coverage ? `this ${coverage.documentPageCount}-page PDF` : "this PDF";
+    return `[Incomplete text: it stops after ${shown} of ${total} extracted characters, part-way through ${where}. Read the rest from the file before you say what the document contains or lacks.]`;
+  }
+  const pageCut = coverage?.truncationReasons.some(
+    (reason) => reason === "page_limit" || reason === "text_limit",
+  );
+  if (!coverage || !pageCut) {
+    return undefined;
+  }
+  // The page count is exact only for a page cut on text: image pages and a text-limit cut inside a page are not.
+  if (
+    (source.kind === "pdf" && source.imagesUsed) ||
+    coverage.truncationReasons.includes("text_limit")
+  ) {
+    return `[Incomplete text: only part of this ${coverage.documentPageCount}-page PDF was extracted. Read the rest from the file before you say what the document contains or lacks.]`;
+  }
+  return `[Incomplete text: it covers ${coverage.pagesProcessed.length} of the ${coverage.documentPageCount} pages of this PDF. Read the other pages from the file before you say what the document contains or lacks.]`;
+}
+
 async function normalizeInputImage(params: {
   buffer: Buffer;
   mimeType?: string;
@@ -449,14 +484,23 @@ export async function extractFileContentFromSource(params: {
         logWarn(`media: PDF image extraction skipped, ${String(err)}`);
       },
     });
-    const text = extracted.text ? clampText(extracted.text, limits.maxChars) : "";
+    const fullText = extracted.text ?? "";
+    const text = clampText(fullText, limits.maxChars);
+    const textNotice = buildTextNotice(text.length, fullText.length, {
+      kind: "pdf",
+      coverage: extracted.coverage,
+      imagesUsed: extracted.images.length > 0,
+    });
     return {
       filename,
       text,
+      ...(textNotice ? { textNotice } : {}),
       images: extracted.images.length > 0 ? extracted.images : undefined,
     };
   }
 
-  const text = clampText(decodeTextContent(buffer, charset), limits.maxChars);
-  return { filename, text };
+  const fullText = decodeTextContent(buffer, charset);
+  const text = clampText(fullText, limits.maxChars);
+  const textNotice = buildTextNotice(text.length, fullText.length, { kind: "text" });
+  return { filename, text, ...(textNotice ? { textNotice } : {}) };
 }

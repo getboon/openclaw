@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026.6.34-boon.6
+
+### Changes
+
+- Version alignment with core OpenClaw release numbers.
+
+## 2026.6.34-boon.5
+
+### Changes
+
+- Version alignment with core OpenClaw release numbers.
+
 ## 2026.6.34-boon.4
 
 ### Changes

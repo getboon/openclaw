@@ -3,6 +3,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContextEngine } from "../context-engine/types.js";
 import { listTaskRecords, resetTaskRegistryForTests } from "../tasks/runtime-internal.js";
+import { SUBAGENT_ENDED_REASON_KILLED } from "./subagent-lifecycle-events.js";
 
 const noop = () => {};
 let lifecycleHandler:
@@ -752,6 +753,29 @@ describe("subagent registry steer restarts", () => {
     expect(hookCall.ctx.requesterSessionKey).toBe(MAIN_REQUESTER_SESSION_KEY);
   });
 
+  it("reports a run as killed only after a kill marker", async () => {
+    registerRun({
+      runId: "run-kill-check",
+      childSessionKey: "agent:main:subagent:kill-check",
+      task: "kill check",
+    });
+    registerRun({
+      runId: "run-complete-check",
+      childSessionKey: "agent:main:subagent:complete-check",
+      task: "complete check",
+    });
+
+    expect(mod.isSubagentRunKilled("run-kill-check")).toBe(false);
+    expect(mod.isSubagentRunKilled("run-unknown")).toBe(false);
+
+    mod.markSubagentRunTerminated({ runId: "run-kill-check", reason: "killed" });
+    emitLifecycleEnd("run-complete-check");
+    await flushAnnounce();
+
+    expect(mod.isSubagentRunKilled("run-kill-check")).toBe(true);
+    expect(mod.isSubagentRunKilled("run-complete-check")).toBe(false);
+  });
+
   it("treats a child session as inactive when only a stale older row is still unended", () => {
     const childSessionKey = "agent:main:subagent:stale-active-older-row";
 
@@ -810,6 +834,51 @@ describe("subagent registry steer restarts", () => {
     expect(run?.suppressAnnounceReason).toBeUndefined();
     expect(run?.cleanupHandled).toBe(true);
     expect(typeof run?.cleanupCompletedAt).toBe("number");
+    expect(runSubagentEndedHookMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      name: "an aborted lifecycle end",
+      emitLateCompletion: (runId: string) => emitLifecycleEnd(runId, { aborted: true }),
+    },
+    {
+      name: "a lifecycle error",
+      emitLateCompletion: (runId: string) =>
+        lifecycleHandler?.({
+          stream: "lifecycle",
+          runId,
+          data: { phase: "error", error: "run failed" },
+        }),
+    },
+  ])("keeps the kill when $name arrives after a kill marker", async ({ emitLateCompletion }) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const childSessionKey = "agent:main:subagent:kill-late-failure";
+    registerRun({
+      runId: "run-kill-late-failure",
+      childSessionKey,
+      task: "late failure after kill",
+    });
+
+    expect(
+      mod.markSubagentRunTerminated({ runId: "run-kill-late-failure", reason: "killed" }),
+    ).toBe(1);
+    const killedAt = listMainRuns()[0]?.endedAt;
+    expect(killedAt).toBeTypeOf("number");
+    await flushAnnounce();
+
+    emitLateCompletion("run-kill-late-failure");
+    await flushAnnounce();
+    await vi.advanceTimersByTimeAsync(15_000);
+    await flushAnnounce();
+    await flushAnnounce();
+
+    const run = listMainRuns()[0];
+    expect(run?.outcome?.status).toBe("error");
+    expect(run?.endedReason).toBe(SUBAGENT_ENDED_REASON_KILLED);
+    expect(run?.endedAt).toBe(killedAt);
+    expect(run?.suppressAnnounceReason).toBe("killed");
+    expect(announceSpy).not.toHaveBeenCalled();
     expect(runSubagentEndedHookMock).toHaveBeenCalledTimes(1);
   });
 

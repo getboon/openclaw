@@ -414,6 +414,7 @@ export function createAgentEventHandler({
         currentSessionId: row?.sessionId,
       })
         ? deriveGatewaySessionLifecycleProjectionPatch({
+            sessionKey,
             entry: row
               ? {
                   updatedAt: row.updatedAt ?? undefined,

@@ -58,6 +58,42 @@ describe("Claude model contracts", () => {
       "high",
     ]);
   });
+
+  it("recognizes Claude 5 Opus and Sonnet families as adaptive", () => {
+    for (const id of [
+      "claude-opus-5",
+      "claude-opus-5-5",
+      "claude-opus-5-5-bedrock",
+      "us.anthropic.claude-opus-5-5",
+      "claude-sonnet-5",
+      "claude-sonnet-5-5-bedrock",
+    ]) {
+      expect(supportsClaudeAdaptiveThinking({ id }), id).toBe(true);
+    }
+  });
+
+  it("recognizes native xhigh and max effort for Claude 5.5 Bedrock aliases", () => {
+    for (const id of ["claude-opus-5-5-bedrock", "claude-sonnet-5-5-bedrock"]) {
+      expect(supportsClaudeNativeXhighEffort({ id }), id).toBe(true);
+      expect(supportsClaudeNativeMaxEffort({ id }), id).toBe(true);
+    }
+  });
+
+  it("does not classify later numeric Claude 5 versions as supported aliases", () => {
+    for (const id of ["claude-opus-50", "claude-sonnet-50"]) {
+      expect(supportsClaudeAdaptiveThinking({ id }), id).toBe(false);
+      expect(supportsClaudeNativeXhighEffort({ id }), id).toBe(false);
+      expect(supportsClaudeNativeMaxEffort({ id }), id).toBe(false);
+    }
+  });
+
+  it("exposes xhigh, adaptive, and max levels for Claude Opus 5.5 Bedrock aliases", () => {
+    expectLevelIdsInclude(resolveClaudeThinkingProfile("claude-opus-5-5-bedrock"), [
+      "xhigh",
+      "adaptive",
+      "max",
+    ]);
+  });
 });
 
 describe("buildProviderReplayFamilyHooks", () => {

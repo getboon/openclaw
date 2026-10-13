@@ -2919,6 +2919,8 @@ describe("anthropic transport stream", () => {
 
   it.each([
     { canonicalModelId: "claude-opus-4-8", expectedTemperature: undefined },
+    { canonicalModelId: "claude-opus-5-5", expectedTemperature: undefined },
+    { canonicalModelId: "claude-sonnet-5-5", expectedTemperature: undefined },
     { canonicalModelId: "claude-opus-4-6", expectedTemperature: 0.2 },
   ] as const)(
     "normalizes temperature for canonical $canonicalModelId transport aliases when thinking is off",
@@ -3149,6 +3151,49 @@ describe("anthropic transport stream", () => {
     const payload = latestAnthropicRequest().payload;
     expect(payload.thinking).toEqual({ type: "adaptive" });
     expect(payload.output_config).toEqual({ effort: "xhigh" });
+  });
+
+  it("maps thinking effort to adaptive for Claude Opus 5.5 Bedrock aliases", async () => {
+    const model = makeAnthropicTransportModel({
+      id: "claude-opus-5-5-bedrock",
+      name: "Claude Opus 5.5",
+      maxTokens: 8192,
+    });
+
+    await runTransportStream(
+      model,
+      {
+        messages: [{ role: "user", content: "Think carefully." }],
+      } as AnthropicStreamContext,
+      {
+        apiKey: "sk-ant-api",
+        reasoning: "medium",
+      } as AnthropicStreamOptions,
+    );
+
+    const payload = latestAnthropicRequest().payload;
+    expect(payload.thinking).toEqual({ type: "adaptive" });
+    expect(payload.output_config).toEqual({ effort: "medium" });
+    expect(payload.thinking).not.toHaveProperty("budget_tokens");
+    expect(latestAnthropicRequestHeaders().get("anthropic-beta")).toBe(
+      "fine-grained-tool-streaming-2025-05-14",
+    );
+  });
+
+  it("omits custom temperature for Claude Opus 5.5 Bedrock aliases when thinking is off", async () => {
+    const model = makeAnthropicTransportModel({
+      id: "claude-opus-5-5-bedrock",
+      name: "Claude Opus 5.5",
+      maxTokens: 8192,
+    });
+
+    await runTransportStream(
+      model,
+      { messages: [{ role: "user", content: "Reply briefly." }] } as AnthropicStreamContext,
+      { apiKey: "sk-ant-api", temperature: 0.3 } as AnthropicStreamOptions,
+    );
+
+    expect(latestAnthropicRequest().payload).not.toHaveProperty("temperature");
   });
 
   it("preserves max thinking effort for Claude Opus 4.8 transport runs", async () => {

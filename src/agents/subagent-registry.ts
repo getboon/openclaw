@@ -1564,6 +1564,11 @@ export function isSubagentSessionRunActive(childSessionKey: string): boolean {
   return isSubagentSessionRunActiveFromRuns(subagentRuns, childSessionKey);
 }
 
+export function isSubagentRunKilled(runId: string): boolean {
+  const entry = subagentRegistryDeps.getSubagentRunsSnapshotForRead(subagentRuns).get(runId);
+  return entry?.endedReason === SUBAGENT_ENDED_REASON_KILLED;
+}
+
 export function shouldIgnorePostCompletionAnnounceForSession(childSessionKey: string): boolean {
   return shouldIgnorePostCompletionAnnounceForSessionFromRuns(
     subagentRegistryDeps.getSubagentRunsSnapshotForRead(subagentRuns),

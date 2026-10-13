@@ -180,10 +180,11 @@ describe("handleStopCommand target fallback", () => {
     expect(persistAbortTargetParams?.sessionStore).toBe(params.sessionStore);
     expect(persistAbortTargetParams?.storePath).toBe("/tmp/sessions.json");
     const [[stopSubagentsParams]] = stopSubagentsForRequesterMock.mock.calls as unknown as Array<
-      [{ cfg?: unknown; requesterSessionKey?: string }]
+      [{ cfg?: unknown; requesterSessionKey?: string; notifyRequester?: boolean }]
     >;
     expect(stopSubagentsParams?.cfg).toBe(params.cfg);
     expect(stopSubagentsParams?.requesterSessionKey).toBe("agent:target:telegram:direct:123");
+    expect(stopSubagentsParams?.notifyRequester).toBe(true);
     expect(createInternalHookEventMock).toHaveBeenCalledWith(
       "command",
       "stop",

@@ -1,0 +1,14 @@
+{
+  "id": "boon-pdf-prep",
+  "name": "Boon PDF Prep",
+  "description": "Queue inbound PDFs for background text preparation with pdf-index and add a short preparation status note to the model input.",
+  "enabledByDefault": true,
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

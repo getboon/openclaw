@@ -32,6 +32,7 @@ import {
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { isAcpSessionKey, parseAgentSessionKey } from "../../routing/session-key.js";
 import { findTaskByRunId, updateTaskNotifyPolicyById } from "../../tasks/runtime-internal.js";
 import { resolveCommandAuthorization } from "../command-auth.js";
@@ -77,6 +78,7 @@ const defaultAbortDeps = {
   findTaskByRunId,
   updateTaskNotifyPolicyById,
   killExecProcessesForSessions,
+  enqueueSystemEvent,
 };
 
 const abortDeps = {
@@ -107,6 +109,7 @@ export const testing = {
       deps?.updateTaskNotifyPolicyById ?? defaultAbortDeps.updateTaskNotifyPolicyById;
     abortDeps.killExecProcessesForSessions =
       deps?.killExecProcessesForSessions ?? defaultAbortDeps.killExecProcessesForSessions;
+    abortDeps.enqueueSystemEvent = deps?.enqueueSystemEvent ?? defaultAbortDeps.enqueueSystemEvent;
   },
   resetDepsForTests(): void {
     abortDeps.getAcpSessionManager = defaultAbortDeps.getAcpSessionManager;
@@ -122,6 +125,7 @@ export const testing = {
     abortDeps.findTaskByRunId = defaultAbortDeps.findTaskByRunId;
     abortDeps.updateTaskNotifyPolicyById = defaultAbortDeps.updateTaskNotifyPolicyById;
     abortDeps.killExecProcessesForSessions = defaultAbortDeps.killExecProcessesForSessions;
+    abortDeps.enqueueSystemEvent = defaultAbortDeps.enqueueSystemEvent;
   },
 };
 
@@ -255,9 +259,32 @@ function killStoppedSessionExecProcesses(sessionKeys: Array<string | undefined>)
   }
 }
 
+const MAX_STOPPED_SUBAGENT_NAMES = 5;
+
+function formatStoppedSubagentsNote(names: string[]): string {
+  const listed = names.slice(0, MAX_STOPPED_SUBAGENT_NAMES).join(", ");
+  const remaining = names.length - MAX_STOPPED_SUBAGENT_NAMES;
+  const nameList = remaining > 0 ? `${listed}, and ${remaining} more` : listed;
+  if (names.length === 1) {
+    return `The user stopped 1 subagent before it finished: ${nameList}. It is not running and will not report back. Do not restart it unless the user asks.`;
+  }
+  return `The user stopped ${names.length} subagents before they finished: ${nameList}. They are not running and will not report back. Do not restart them unless the user asks.`;
+}
+
+function notifyRequesterOfStoppedSubagents(requesterKey: string, names: string[]): void {
+  if (names.length === 0) {
+    return;
+  }
+  abortDeps.enqueueSystemEvent(formatStoppedSubagentsNote(names), {
+    sessionKey: requesterKey,
+    contextKey: "user-stop:subagents",
+  });
+}
+
 export function stopSubagentsForRequester(params: {
   cfg: OpenClawConfig;
   requesterSessionKey?: string;
+  notifyRequester?: boolean;
 }): { stopped: number; childSessionKeys: string[] } {
   const requesterKey = normalizeRequesterSessionKey(params.cfg, params.requesterSessionKey);
   if (!requesterKey) {
@@ -295,6 +322,7 @@ export function stopSubagentsForRequester(params: {
 
   const seenChildKeys = new Set<string>();
   const childSessionKeys: string[] = [];
+  const stoppedNames: string[] = [];
   let stopped = 0;
 
   for (const run of runs) {
@@ -338,6 +366,9 @@ export function stopSubagentsForRequester(params: {
           cleared.laneCleared > 0)
       ) {
         stopped += 1;
+        stoppedNames.push(
+          normalizeOptionalString(run.taskName) ?? normalizeOptionalString(run.label) ?? "unnamed",
+        );
       }
     }
 
@@ -352,6 +383,9 @@ export function stopSubagentsForRequester(params: {
 
   if (stopped > 0) {
     logVerbose(`abort: stopped ${stopped} subagent run(s) for ${requesterKey}`);
+  }
+  if (params.notifyRequester) {
+    notifyRequesterOfStoppedSubagents(requesterKey, stoppedNames);
   }
   return { stopped, childSessionKeys };
 }
@@ -508,7 +542,11 @@ export async function tryFastAbortFromMessage(params: {
         `abort: cleared followups=${cleared.followupCleared} lane=${cleared.laneCleared} keys=${cleared.keys.join(",")}`,
       );
     }
-    const { stopped, childSessionKeys } = stopSubagentsForRequester({ cfg, requesterSessionKey });
+    const { stopped, childSessionKeys } = stopSubagentsForRequester({
+      cfg,
+      requesterSessionKey,
+      notifyRequester: true,
+    });
     killStoppedSessionExecProcesses([
       ...abortTargetKeys,
       sourceAbortKey,
@@ -555,7 +593,11 @@ export async function tryFastAbortFromMessage(params: {
   if (abortKey) {
     setAbortMemory(abortKey, true);
   }
-  const { stopped } = stopSubagentsForRequester({ cfg, requesterSessionKey });
+  const { stopped } = stopSubagentsForRequester({
+    cfg,
+    requesterSessionKey,
+    notifyRequester: true,
+  });
   return { handled: true, aborted: false, stoppedSubagents: stopped };
 }
 export { testing as __testing };

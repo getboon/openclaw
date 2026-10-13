@@ -17,6 +17,7 @@ import {
   truncateLine,
 } from "../shared/subagents-format.js";
 import { resolveModelDisplayName, resolveModelDisplayRef } from "./model-selection-display.js";
+import { SUBAGENT_ENDED_REASON_KILLED } from "./subagent-lifecycle-events.js";
 import { subagentRuns } from "./subagent-registry-memory.js";
 import {
   countActiveDescendantRunsFromRuns,
@@ -172,6 +173,9 @@ function resolveRunStatus(entry: SubagentRunRecord, options?: { pendingDescendan
   }
   if (!hasSubagentRunEnded(entry)) {
     return "running";
+  }
+  if (entry.endedReason === SUBAGENT_ENDED_REASON_KILLED) {
+    return "killed";
   }
   const status = entry.outcome?.status ?? "done";
   if (status === "ok") {

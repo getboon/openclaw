@@ -39,6 +39,7 @@ import {
 } from "./subagent-delivery-state.js";
 import {
   SUBAGENT_ENDED_REASON_COMPLETE,
+  SUBAGENT_ENDED_REASON_KILLED,
   type SubagentLifecycleEndedReason,
 } from "./subagent-lifecycle-events.js";
 import {
@@ -1140,8 +1141,18 @@ export function createSubagentRegistryLifecycleController(params: {
       return;
     }
 
+    // A late failure or timeout from the killed run itself must not replace the user kill.
+    const keepsKill =
+      entry.endedReason === SUBAGENT_ENDED_REASON_KILLED &&
+      completeParams.reason !== SUBAGENT_ENDED_REASON_KILLED &&
+      completeParams.outcome.status !== "ok" &&
+      typeof entry.endedAt === "number" &&
+      entry.outcome !== undefined;
+    const killedState = keepsKill ? { endedAt: entry.endedAt, outcome: entry.outcome } : undefined;
+
     let mutated = false;
     if (
+      !killedState &&
       completeParams.reason === SUBAGENT_ENDED_REASON_COMPLETE &&
       entry.suppressAnnounceReason === "killed" &&
       (entry.cleanupHandled || typeof entry.cleanupCompletedAt === "number")
@@ -1153,9 +1164,11 @@ export function createSubagentRegistryLifecycleController(params: {
       mutated = true;
     }
 
-    let endedAt = typeof completeParams.endedAt === "number" ? completeParams.endedAt : Date.now();
-    let completionOutcome = completeParams.outcome;
-    let completionReason = completeParams.reason;
+    let endedAt =
+      killedState?.endedAt ??
+      (typeof completeParams.endedAt === "number" ? completeParams.endedAt : Date.now());
+    let completionOutcome = killedState?.outcome ?? completeParams.outcome;
+    let completionReason = killedState ? SUBAGENT_ENDED_REASON_KILLED : completeParams.reason;
     if (
       shouldPreservePublishedExplicitRunTimeout({
         entry,
@@ -1176,12 +1189,14 @@ export function createSubagentRegistryLifecycleController(params: {
       mutated = true;
     }
 
-    const expiredDeadlineMs = resolveExpiredExplicitRunDeadlineMs({
-      entry,
-      nextOutcome: completionOutcome,
-      nextEndedAt: endedAt,
-      observedStartedAt,
-    });
+    const expiredDeadlineMs = killedState
+      ? undefined
+      : resolveExpiredExplicitRunDeadlineMs({
+          entry,
+          nextOutcome: completionOutcome,
+          nextEndedAt: endedAt,
+          observedStartedAt,
+        });
     if (expiredDeadlineMs !== undefined) {
       endedAt = expiredDeadlineMs;
       completionOutcome = { status: "timeout" };

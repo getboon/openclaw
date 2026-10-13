@@ -68,6 +68,11 @@
       - any-glob-to-any-file:
           - "extensions/sentry-monitor/**"
           - "docs/gateway/sentry-monitor.md"
+"plugin: boon-pdf-prep":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/boon-pdf-prep/**"
+          - "docs/gateway/boon-pdf-prep.md"
 "channel: imessage":
   - changed-files:
       - any-glob-to-any-file:
