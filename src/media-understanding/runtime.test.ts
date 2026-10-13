@@ -61,6 +61,8 @@ vi.mock("./image-runtime.js", () => ({
 
 vi.mock("../media/media-services.js", () => ({
   convertHeicToJpeg: mocks.convertHeicToJpeg,
+  MAX_IMAGE_INPUT_PIXELS: 25_000_000,
+  readImageMetadataFromHeader: () => null,
 }));
 
 function requireRunCapabilityRequest(): unknown {

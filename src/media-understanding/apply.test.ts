@@ -298,6 +298,8 @@ describe("applyMediaUnderstanding", () => {
     vi.doMock("../media/media-services.js", () => ({
       runFfmpeg: runFfmpegMock,
       convertHeicToJpeg: convertHeicToJpegMock,
+      MAX_IMAGE_INPUT_PIXELS: 25_000_000,
+      readImageMetadataFromHeader: () => null,
     }));
     vi.doMock("../process/exec.js", () => ({
       runExec: runExecMock,
