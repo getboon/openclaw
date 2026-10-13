@@ -36,10 +36,7 @@ describe("bounded UTF-8 tail", () => {
   });
 
   it("keeps the correct tail across many small appends that wrap the ring repeatedly", () => {
-    // Regression for the ring-buffer rewrite: a flat shift-on-overflow
-    // implementation only needed to get this right once, but a ring buffer
-    // must correctly advance `start` and wrap `writePos` on every single
-    // append, so exercise many more appends than the ring's capacity.
+    // Repeated appends exercise advancing the retained start and wrapping writes.
     const tail = createBoundedUtf8Tail(5);
     let expected = "";
     for (let i = 0; i < 50; i += 1) {
@@ -53,8 +50,8 @@ describe("bounded UTF-8 tail", () => {
   it("wraps correctly when a single append straddles the end of the ring", () => {
     const tail = createBoundedUtf8Tail(6);
     tail.append("abcd"); // start=0, totalBytes=4
-    tail.append("ef"); // fills exactly to capacity, writePos wraps to 0 next time
-    tail.append("gh"); // evicts "ab", writes "gh" straddling the ring boundary
-    expect(tail.text()).toBe("cdefgh");
+    tail.append("e"); // leaves the next write at the final ring slot
+    tail.append("fg"); // writes across the boundary after evicting "a"
+    expect(tail.text()).toBe("bcdefg");
   });
 });
