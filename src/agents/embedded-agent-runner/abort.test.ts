@@ -142,7 +142,9 @@ describe("classifyAsyncTaskWaitTimeout", () => {
       timedOutRunIds: ["run-1", "run-2"],
       externalTimeoutAbortClassified: true,
     });
-    expect(outcome.kind).toBe("log");
-    expect(outcome.message).toContain("run-1, run-2");
+    expect(outcome).toEqual({
+      kind: "log",
+      message: expect.stringContaining("run-1, run-2"),
+    });
   });
 });
