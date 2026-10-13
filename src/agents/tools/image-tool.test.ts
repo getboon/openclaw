@@ -2834,13 +2834,47 @@ describe("image tool MiniMax VLM routing", () => {
     });
 
     expect(fetch).not.toHaveBeenCalled();
+    // A data: URL is the full base64 payload — the message/details must
+    // never echo it back, regardless of how large that payload is.
     expectToolText(
       result,
-      `Image too large to process: ${image} exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.`,
+      "Image too large to process: the provided data URL image exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.",
     );
     const details = result.details as { error?: string; image?: string } | undefined;
     expect(details?.error).toBe("image_too_large");
-    expect(details?.image).toBe(image);
+    expect(details?.image).toBe("the provided data URL image");
+  });
+
+  it("returns a graceful error naming the file path when a local image is too large to decode", async () => {
+    installImageUnderstandingProviderDeps([minimaxProvider], {
+      loadImageWebMediaRuntime: async () => ({
+        loadWebMedia: async () => {
+          throw new RastermillError(
+            "RASTERMILL_INPUT_TOO_LARGE",
+            "Image dimensions exceed the 100,000,000 pixel input limit: 20000x20000 (400000000 pixels)",
+          );
+        },
+        optimizeImageBufferForWebMedia: async () => {
+          throw new Error("optimizeImageBufferForWebMedia should not be called for a file path");
+        },
+      }),
+    });
+    const { fetch, tool } = await createMinimaxVlmFixture({ status_code: 0, status_msg: "" });
+    const imagePath = "./fixtures/too-large.png";
+
+    const result = await tool.execute("t1", {
+      prompt: "Describe the image.",
+      image: imagePath,
+    });
+
+    expect(fetch).not.toHaveBeenCalled();
+    expectToolText(
+      result,
+      `Image too large to process: ${imagePath} exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.`,
+    );
+    const details = result.details as { error?: string; image?: string } | undefined;
+    expect(details?.error).toBe("image_too_large");
+    expect(details?.image).toBe(imagePath);
   });
 });
 

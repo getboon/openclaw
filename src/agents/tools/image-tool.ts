@@ -1039,16 +1039,19 @@ export function createImageTool(options?: {
           // input problem — return gracefully like the unsupported-reference
           // case above instead of letting the raw error escape.
           if (isImageTooLargeToDecodeError(err)) {
+            // A data: URL reference is the full base64 payload; never echo
+            // that back into a text/details field the model or logs can see.
+            const imageReference = isDataUrl ? "the provided data URL image" : imageRawInput;
             return {
               content: [
                 {
                   type: "text",
-                  text: `Image too large to process: ${imageRawInput} exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.`,
+                  text: `Image too large to process: ${imageReference} exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.`,
                 },
               ],
               details: {
                 error: "image_too_large",
-                image: imageRawInput,
+                image: imageReference,
               },
             };
           }

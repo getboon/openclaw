@@ -765,15 +765,7 @@ async function optimizeImageWithFallback(params: {
 }): Promise<OptimizedImage> {
   const { buffer, cap } = params;
   const grid = resolveImageCompressionGrid(params.imageCompression);
-  // Unconditional (not verbose-gated): a source this large used to fail
-  // outright before the decode/output pixel budgets were split, so this
-  // now-successful downscale is a real event, not debug noise.
   const sourceMeta = readImageMetadataFromHeader(buffer);
-  if (sourceMeta && sourceMeta.width * sourceMeta.height > MAX_IMAGE_INPUT_PIXELS) {
-    log.info(
-      `Decoding oversized source image for downscaling: ${sourceMeta.width}x${sourceMeta.height} exceeds the ${MAX_IMAGE_INPUT_PIXELS.toLocaleString("en-US")}px safe-decode threshold`,
-    );
-  }
   const optimized = await createImageProcessor().encode(buffer, {
     format: "auto",
     maxBytes: cap,
@@ -785,6 +777,13 @@ async function optimizeImageWithFallback(params: {
     },
     transparency: "auto",
   });
+  // Unconditional (not verbose-gated): a source this large used to be
+  // rejected outright before the decode/output pixel budgets were split.
+  if (sourceMeta && sourceMeta.width * sourceMeta.height > MAX_IMAGE_INPUT_PIXELS) {
+    log.info(
+      `Downscaled oversized source image: ${sourceMeta.width}x${sourceMeta.height} exceeded the ${MAX_IMAGE_INPUT_PIXELS.toLocaleString("en-US")}px output limit`,
+    );
+  }
   if (optimized.chosen.transparency === "flattened" && shouldLogVerbose()) {
     logVerbose(`Image transparency flattened to fit ${formatMb(cap, 0)}MB optimization budget`);
   }

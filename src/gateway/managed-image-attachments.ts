@@ -939,7 +939,9 @@ export async function createManagedOutgoingImageBlocks(params: {
         // ceiling is far above this feature's own limits above, so a source
         // this large would otherwise cost a full in-process decode first.
         if (effectiveMetadata.width * effectiveMetadata.height > MAX_IMAGE_INPUT_PIXELS) {
-          throw createManagedImageAttachmentError(metadataLimitError);
+          throw createManagedImageAttachmentError(
+            `Managed image attachment ${JSON.stringify(alt)} exceeds the ${MAX_IMAGE_INPUT_PIXELS.toLocaleString("en-US")} pixel decode limit and cannot be downscaled for forwarding`,
+          );
         }
         const resized = await resizeManagedImageBufferToLimits({
           buffer: originalBuffer,

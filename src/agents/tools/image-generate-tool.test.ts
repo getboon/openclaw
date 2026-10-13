@@ -1837,6 +1837,56 @@ describe("createImageGenerateTool", () => {
     );
   });
 
+  it("downscales a data: URL reference image through the same optimization path as other references", async () => {
+    const generateImage = stubEditedImageFlow({ width: 1024, height: 1024 });
+    const optimizeImageBufferForWebMedia = vi
+      .spyOn(webMedia, "optimizeImageBufferForWebMedia")
+      .mockResolvedValue({
+        kind: "image",
+        buffer: Buffer.from("optimized-reference"),
+        contentType: "image/jpeg",
+      });
+    const tool = createToolWithPrimaryImageModel("google/gemini-3-pro-image-preview", {
+      workspaceDir: process.cwd(),
+    });
+
+    await tool.execute("call-edit-data-url", {
+      prompt: "Use this reference.",
+      image: `data:image/png;base64,${Buffer.from("raw-reference").toString("base64")}`,
+    });
+
+    expect(optimizeImageBufferForWebMedia).toHaveBeenCalledTimes(1);
+    const generateArgs = mockCallArg(generateImage, 0, "generateImage");
+    expect(generateArgs.inputImages).toEqual([
+      {
+        buffer: Buffer.from("optimized-reference"),
+        mimeType: "image/jpeg",
+      },
+    ]);
+  });
+
+  it("returns a graceful error without echoing the payload when a data: URL reference is too large to decode", async () => {
+    vi.spyOn(webMedia, "optimizeImageBufferForWebMedia").mockRejectedValue(
+      new RastermillError(
+        "RASTERMILL_INPUT_TOO_LARGE",
+        "Image dimensions exceed the 100,000,000 pixel input limit: 20000x20000 (400000000 pixels)",
+      ),
+    );
+    const tool = createToolWithPrimaryImageModel("google/gemini-3-pro-image-preview", {
+      workspaceDir: process.cwd(),
+    });
+    const image = `data:image/png;base64,${Buffer.from("raw-reference").toString("base64")}`;
+
+    await expect(
+      tool.execute("call-edit-data-url-too-large", {
+        prompt: "Use this reference.",
+        image,
+      }),
+    ).rejects.toThrow(
+      "Image too large to process: the provided data URL image exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.",
+    );
+  });
+
   it("passes web_fetch SSRF policy to remote reference images", async () => {
     stubImageGenerationProviders();
     const generateImage = stubEditedImageFlow({ width: 1024, height: 1024 });

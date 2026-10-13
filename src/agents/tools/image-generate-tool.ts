@@ -36,7 +36,7 @@ import {
 } from "../../media/media-reference.js";
 import { getImageMetadata, isImageTooLargeToDecodeError } from "../../media/media-services.js";
 import { saveMediaBuffer } from "../../media/store.js";
-import { loadWebMedia } from "../../media/web-media.js";
+import { loadWebMedia, optimizeImageBufferForWebMedia } from "../../media/web-media.js";
 import { readSnakeCaseParamRaw } from "../../param-key.js";
 import { resolveUserPath } from "../../utils.js";
 import type { DeliveryContext } from "../../utils/delivery-context.js";
@@ -615,7 +615,17 @@ async function loadReferenceImages(params: {
     let media: Awaited<ReturnType<typeof loadWebMedia>> | ReturnType<typeof decodeDataUrl>;
     try {
       media = isDataUrl
-        ? decodeDataUrl(resolvedImage, { maxBytes: params.maxBytes })
+        ? await (async () => {
+            const decoded = decodeDataUrl(resolvedImage, { maxBytes: params.maxBytes });
+            // A data: URL skips the loadWebMedia branches below, so it needs
+            // the same downscale pass or an oversized reference reaches the
+            // provider unresized.
+            return await optimizeImageBufferForWebMedia({
+              buffer: decoded.buffer,
+              contentType: decoded.mimeType,
+              maxBytes: params.maxBytes,
+            });
+          })()
         : params.sandboxConfig
           ? await loadWebMedia(resolvedPath ?? resolvedImage, {
               maxBytes: params.maxBytes,
@@ -633,8 +643,11 @@ async function loadReferenceImages(params: {
       // image too large even for the raised decode ceiling is a user input
       // problem, not a host defect.
       if (isImageTooLargeToDecodeError(err)) {
+        // A data: URL reference is the full base64 payload; never echo that
+        // back into a model-visible error message.
+        const imageReference = isDataUrl ? "the provided data URL image" : imageRawInput;
         throw new ToolInputError(
-          `Image too large to process: ${imageRawInput} exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.`,
+          `Image too large to process: ${imageReference} exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.`,
         );
       }
       throw err;
