@@ -7,6 +7,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { URL } from "node:url";
 import { detectMime } from "@openclaw/media-core/mime";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isWindowsDrivePath } from "../infra/archive-path.js";
 import { toErrorObject } from "../infra/errors.js";
 import {
@@ -23,6 +24,7 @@ import {
   resolveMediaReferenceSandboxPath,
 } from "../media/media-reference.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
+import { resolveMemoryFlushPlan } from "../plugins/memory-state.js";
 import {
   REQUIRED_PARAM_GROUPS,
   assertRequiredParams,
@@ -555,6 +557,13 @@ type MemoryFlushAppendOnlyWriteOptions = {
   root: string;
   relativePath: string;
   containerWorkdir?: string;
+  /**
+   * Forwarded to the registered flush-plan resolver when re-deriving today's path
+   * at execute() time; only the resolver decides whether `cfg` is required. If no
+   * resolver is registered at all, execute() falls back to the single
+   * `relativePath` pinned at tool-build time regardless of `cfg`.
+   */
+  cfg?: OpenClawConfig;
   sandbox?: {
     root: string;
     bridge: SandboxFsBridge;
@@ -670,24 +679,42 @@ export function wrapToolMemoryFlushAppendOnlyWrite(
         root: options.root,
         containerWorkdir: options.containerWorkdir,
       });
-      if (resolvedPath !== allowedAbsolutePath) {
+
+      // The pinned relativePath can predate execution long enough (retry backoff, a
+      // long flush turn) to cross a date rollover. Also accept the freshly-resolved
+      // current-date path, or a legitimate same-day write gets rejected as stale.
+      const currentPlan = resolveMemoryFlushPlan({ cfg: options.cfg, nowMs: Date.now() });
+      const candidates = [
+        { relativePath: options.relativePath, absolutePath: allowedAbsolutePath },
+      ];
+      if (currentPlan && currentPlan.relativePath !== options.relativePath) {
+        candidates.push({
+          relativePath: currentPlan.relativePath,
+          absolutePath: path.resolve(options.root, currentPlan.relativePath),
+        });
+      }
+      const matched = candidates.find((candidate) => candidate.absolutePath === resolvedPath);
+      if (!matched) {
+        const allowedDescription = candidates
+          .map((candidate) => candidate.relativePath)
+          .join(" or ");
         throw new Error(
-          `Memory flush writes are restricted to ${options.relativePath}; use that path only.`,
+          `Memory flush writes are restricted to ${allowedDescription}; use that path only.`,
         );
       }
 
       await appendMemoryFlushContent({
-        absolutePath: allowedAbsolutePath,
+        absolutePath: matched.absolutePath,
         root: options.root,
-        relativePath: options.relativePath,
+        relativePath: matched.relativePath,
         content,
         sandbox: options.sandbox,
         signal,
       });
       return {
-        content: [{ type: "text", text: `Appended content to ${options.relativePath}.` }],
+        content: [{ type: "text", text: `Appended content to ${matched.relativePath}.` }],
         details: {
-          path: options.relativePath,
+          path: matched.relativePath,
           appendOnly: true,
         },
       };

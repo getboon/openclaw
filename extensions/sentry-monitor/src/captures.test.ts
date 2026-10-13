@@ -291,6 +291,73 @@ describe("buildAfterToolCallCapture", () => {
     expect(capture).toBeNull();
   });
 
+  // ENG-21225: a web_fetch target returning 403/404/429 is the external
+  // site's call, not a host defect — downgrade instead of paging, but keep
+  // it visible (unlike `denied`) since "is a site blocking us a lot" is
+  // still useful signal.
+  it("downgrades web_fetch's routine HTTP 403/404/429 failures to a non-paging warning", () => {
+    for (const errorCode of ["http_403", "http_404", "http_429"]) {
+      const capture = buildAfterToolCallCapture(
+        {
+          toolName: "web_fetch",
+          params: {},
+          error: `Web fetch failed: HTTP ${errorCode.replace("http_", "")} Blocked`,
+          errorKind: "upstream",
+          errorCode,
+        },
+        HOST,
+      );
+      expect(capture?.kind).toBe("message");
+      expect(capture?.kind === "message" && capture.level).toBe("warning");
+      expect(capture?.tags.error_kind).toBe("upstream");
+      expect(capture?.tags.error_code).toBe(errorCode);
+    }
+  });
+
+  // The suppression must stay scoped to the exact (tool, kind, code) tuple —
+  // broadening it to all "upstream" errors would hide real web_fetch network
+  // failures and every other tool's genuine dependency failures.
+  it("still captures web_fetch's own non-HTTP upstream failures as an exception", () => {
+    const capture = buildAfterToolCallCapture(
+      {
+        toolName: "web_fetch",
+        params: {},
+        error: "fetch failed: ENOTFOUND example.invalid",
+        errorKind: "upstream",
+      },
+      HOST,
+    );
+    expect(capture?.kind).toBe("exception");
+  });
+
+  it("still captures a non-web_fetch tool's upstream http_403 as an exception", () => {
+    const capture = buildAfterToolCallCapture(
+      {
+        toolName: "some_other_tool",
+        params: {},
+        error: "HTTP 403",
+        errorKind: "upstream",
+        errorCode: "http_403",
+      },
+      HOST,
+    );
+    expect(capture?.kind).toBe("exception");
+  });
+
+  it("still captures web_fetch's own upstream failure with an unrelated errorCode as an exception", () => {
+    const capture = buildAfterToolCallCapture(
+      {
+        toolName: "web_fetch",
+        params: {},
+        error: "Invalid URL: must be http or https",
+        errorKind: "upstream",
+        errorCode: "INVALID_URL",
+      },
+      HOST,
+    );
+    expect(capture?.kind).toBe("exception");
+  });
+
   // A model-bad-args rejection is real signal for a genuine schema/producer
   // mismatch, but the host didn't fail — downgrade instead of dropping it
   // or paging on it as an exception.

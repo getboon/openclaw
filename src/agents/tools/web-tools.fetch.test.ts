@@ -30,6 +30,7 @@ const lookupMock = vi.fn();
 type MockResponse = {
   ok: boolean;
   status: number;
+  statusText?: string;
   url?: string;
   headers?: { get: (key: string) => string | null };
   text?: () => Promise<string>;
@@ -60,18 +61,17 @@ function textResponse(
   };
 }
 
-function errorHtmlResponse(
-  html: string,
-  status = 404,
-  url = "https://example.com/",
-  contentType: string | null = "text/html; charset=utf-8",
+function errorResponse(
+  status: number,
+  options?: { url?: string; statusText?: string; retryAfter?: string },
 ): MockResponse {
   return {
     ok: false,
     status,
-    url,
-    headers: contentType ? makeFetchHeaders({ "content-type": contentType }) : makeFetchHeaders({}),
-    text: async () => html,
+    url: options?.url ?? "https://example.com/",
+    statusText: options?.statusText ?? "",
+    headers: makeFetchHeaders(options?.retryAfter ? { "retry-after": options.retryAfter } : {}),
+    text: async () => "body is never read on the error path (ENG-21225)",
   };
 }
 function installMockFetch(
@@ -143,6 +143,18 @@ async function captureToolErrorMessage(params: {
     return "";
   } catch (error) {
     return (error as Error).message;
+  }
+}
+
+async function captureToolError(params: {
+  tool: ReturnType<typeof createWebFetchTool>;
+  url: string;
+}): Promise<(Error & { code?: string }) | undefined> {
+  try {
+    await params.tool?.execute?.("call", { url: params.url });
+    return undefined;
+  } catch (error) {
+    return error as Error & { code?: string };
   }
 }
 
@@ -761,52 +773,144 @@ describe("web_fetch extraction fallbacks", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("strips and truncates HTML from error responses", async () => {
-    const long = "x".repeat(12_000);
-    const html =
-      "<!doctype html><html><head><title>Not Found</title></head><body><h1>Not Found</h1><p>" +
-      long +
-      "</p></body></html>";
+  // ENG-21225: a routine external HTTP failure must not carry the
+  // untrusted-content security banner or a scraped page body into the thrown
+  // error — that's what made Sentry issue titles for these unreadable, and
+  // it must carry a stable `code` so after_tool_call hook consumers (e.g.
+  // sentry-monitor) can classify it without sniffing the message text.
+  it("throws a clean, bannerless error with an http_<status> code for a 403", async () => {
     installMockFetch(
-      (input: RequestInfo | URL) =>
-        Promise.resolve(
-          errorHtmlResponse(html, 404, resolveRequestUrl(input), "Text/HTML; charset=utf-8"),
-        ) as Promise<Response>,
+      () => Promise.resolve(errorResponse(403, { statusText: "Forbidden" })) as Promise<Response>,
     );
 
     const tool = createFetchTool({ firecrawl: { enabled: false } });
-    const message = await captureToolErrorMessage({
-      tool,
-      url: "https://example.com/missing",
-    });
+    const error = await captureToolError({ tool, url: "https://example.com/blocked" });
 
-    expect(message).toContain("Web fetch failed (404):");
-    expect(message).toMatch(/<<<EXTERNAL_UNTRUSTED_CONTENT id="[a-f0-9]{16}">>>/);
-    expect(message).toContain("SECURITY NOTICE");
-    expect(message).toContain("Not Found");
-    expect(message).not.toContain("<html");
-    expect(message.length).toBeLessThan(5_000);
+    expect(error?.message).toBe("Web fetch failed: HTTP 403 Forbidden");
+    expect(error?.code).toBe("http_403");
+    expect(error?.message).not.toContain("SECURITY NOTICE");
+    expect(error?.message).not.toContain("EXTERNAL_UNTRUSTED_CONTENT");
   });
 
-  it("strips HTML errors when content-type is missing", async () => {
-    const html =
-      "<!DOCTYPE HTML><html><head><title>Oops</title></head><body><h1>Oops</h1></body></html>";
+  it("throws a clean, bannerless error with an http_<status> code for a 404", async () => {
     installMockFetch(
-      (input: RequestInfo | URL) =>
+      () => Promise.resolve(errorResponse(404, { statusText: "Not Found" })) as Promise<Response>,
+    );
+
+    const tool = createFetchTool({ firecrawl: { enabled: false } });
+    const error = await captureToolError({ tool, url: "https://example.com/missing" });
+
+    expect(error?.message).toBe("Web fetch failed: HTTP 404 Not Found");
+    expect(error?.code).toBe("http_404");
+  });
+
+  it("tags a non-4xx failure with an http_<status> code too, for consistency", async () => {
+    installMockFetch(
+      () =>
         Promise.resolve(
-          errorHtmlResponse(html, 500, resolveRequestUrl(input), null),
+          errorResponse(500, { statusText: "Internal Server Error" }),
         ) as Promise<Response>,
     );
 
     const tool = createFetchTool({ firecrawl: { enabled: false } });
-    const message = await captureToolErrorMessage({
-      tool,
-      url: "https://example.com/oops",
+    const error = await captureToolError({ tool, url: "https://example.com/oops" });
+
+    expect(error?.message).toBe("Web fetch failed: HTTP 500 Internal Server Error");
+    expect(error?.code).toBe("http_500");
+  });
+
+  it("retries a 429 with backoff and succeeds once the target recovers", async () => {
+    const fetchMock = installMockFetch((input: RequestInfo | URL) => {
+      const attempt = fetchMock.mock.calls.length;
+      if (attempt < 3) {
+        return Promise.resolve(
+          errorResponse(429, { statusText: "Too Many Requests" }),
+        ) as Promise<Response>;
+      }
+      return Promise.resolve(
+        textResponse("recovered", resolveRequestUrl(input)),
+      ) as Promise<Response>;
     });
 
-    expect(message).toContain("Web fetch failed (500):");
-    expect(message).toMatch(/<<<EXTERNAL_UNTRUSTED_CONTENT id="[a-f0-9]{16}">>>/);
-    expect(message).toContain("Oops");
+    const tool = createFetchTool({ firecrawl: { enabled: false } });
+    const result = await executeFetch(tool, { url: "https://example.com/rate-limited" });
+    const details = result?.details as { text?: string };
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(details.text).toContain("recovered");
+  }, 10_000);
+
+  it("honors a Retry-After header while retrying a 429", async () => {
+    // Real timers deliberately: faking timers risks perturbing the SSRF
+    // guard's own internal abort/timeout plumbing. A 1s Retry-After — double
+    // the 500ms default backoff floor — is enough to prove the header value
+    // is actually being read, not just the default backoff recurring.
+    const fetchMock = installMockFetch(() => {
+      const attempt = fetchMock.mock.calls.length;
+      if (attempt < 2) {
+        return Promise.resolve(
+          errorResponse(429, { statusText: "Too Many Requests", retryAfter: "1" }),
+        ) as Promise<Response>;
+      }
+      return Promise.resolve(textResponse("recovered")) as Promise<Response>;
+    });
+
+    const tool = createFetchTool({ firecrawl: { enabled: false } });
+    const start = Date.now();
+    const result = await executeFetch(tool, { url: "https://example.com/retry-after" });
+    const elapsedMs = Date.now() - start;
+    const details = result?.details as { text?: string };
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(details.text).toContain("recovered");
+    expect(elapsedMs).toBeGreaterThanOrEqual(900);
+  }, 10_000);
+
+  it("throws http_429 once retries are exhausted against a persistently rate-limited target", async () => {
+    const fetchMock = installMockFetch(
+      () =>
+        Promise.resolve(
+          errorResponse(429, { statusText: "Too Many Requests" }),
+        ) as Promise<Response>,
+    );
+
+    const tool = createFetchTool({ firecrawl: { enabled: false } });
+    const error = await captureToolError({ tool, url: "https://example.com/always-limited" });
+
+    expect(error?.message).toBe("Web fetch failed: HTTP 429 Too Many Requests");
+    expect(error?.code).toBe("http_429");
+    // 1 initial attempt + 2 retries, per WEB_FETCH_429_MAX_ATTEMPTS.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  }, 10_000);
+
+  // cubic review (PR #282): a Retry-After beyond WEB_FETCH_429_MAX_DELAY_MS
+  // (8s) was being silently clamped to 8s and retried anyway — violating the
+  // server's stated cooldown instead of just missing a retry opportunity.
+  it("does not retry a 429 whose Retry-After exceeds the max delay — surfaces it instead of violating the cooldown", async () => {
+    const fetchMock = installMockFetch(
+      () =>
+        Promise.resolve(
+          errorResponse(429, { statusText: "Too Many Requests", retryAfter: "30" }),
+        ) as Promise<Response>,
+    );
+
+    const tool = createFetchTool({ firecrawl: { enabled: false } });
+    const error = await captureToolError({ tool, url: "https://example.com/long-cooldown" });
+
+    expect(error?.message).toBe("Web fetch failed: HTTP 429 Too Many Requests");
+    expect(error?.code).toBe("http_429");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a 403 — retrying would not change the outcome", async () => {
+    const fetchMock = installMockFetch(
+      () => Promise.resolve(errorResponse(403, { statusText: "Forbidden" })) as Promise<Response>,
+    );
+
+    const tool = createFetchTool({ firecrawl: { enabled: false } });
+    await captureToolError({ tool, url: "https://example.com/blocked" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("surfaces provider fallback errors when direct fetch throws", async () => {

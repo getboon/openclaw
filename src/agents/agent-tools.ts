@@ -1081,6 +1081,7 @@ export function createOpenClawCodingTools(options?: {
             root: memoryFlushWriteRoot,
             relativePath: memoryFlushWritePath,
             containerWorkdir: sandbox?.containerWorkdir,
+            cfg: options?.config,
             sandbox:
               sandboxRoot && sandboxFsBridge
                 ? { root: sandboxRoot, bridge: sandboxFsBridge }
