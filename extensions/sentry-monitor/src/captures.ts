@@ -136,13 +136,9 @@ export function buildAgentEndCapture(
     message_count: Array.isArray(event.messages) ? event.messages.length : undefined,
   };
   if (!event.error) {
-    // A no-error-text abort is an interruption, not a crash — the embedded
-    // runner only clears `error` for a prompt rejection it attributes to the
-    // caller's own external abortSignal firing as a timeout. Still a
-    // warning, not dropped entirely: this shape isn't provably limited to
-    // that one caller-driven case, so an unrelated cause that happens to
-    // leave the same shape stays visible for triage instead of silently
-    // vanishing into info-level noise.
+    // The runner clears `error` only for a caller-timeout abort, but other
+    // causes may produce this same no-error shape — keep it visible as a
+    // warning for triage instead of dropping it to info.
     return {
       kind: "message",
       message: "agent_end aborted (no error)",

@@ -5021,6 +5021,13 @@ export async function runEmbeddedAttempt(
             if (!timedOut || !isRunnerAbortError(err)) {
               throw err;
             }
+            // A caller timeout can also fire here, after the main prompt
+            // already resolved cleanly (so the classification branch above
+            // never ran). Classify it the same way so the outcome below
+            // doesn't repopulate promptError for this same external abort.
+            if (isExternalTimeoutAbortRejection({ err, externalAbort, timedOut })) {
+              externalTimeoutAbortClassified = true;
+            }
             asyncTaskWait = await waitForCompletionRequiredAsyncTasks({
               getToolMetas: getAsyncStartedToolMetas,
               sessionKey: params.sessionKey,
