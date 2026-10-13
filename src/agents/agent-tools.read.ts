@@ -558,10 +558,10 @@ type MemoryFlushAppendOnlyWriteOptions = {
   relativePath: string;
   containerWorkdir?: string;
   /**
-   * Config used to re-derive today's flush path at execute() time (see
-   * `wrapToolMemoryFlushAppendOnlyWrite` — ENG-21229). Omit only when no config is
-   * available (e.g. some test/CLI paths); the wrapper then falls back to the single
-   * `relativePath` pinned at tool-build time.
+   * Forwarded to the registered flush-plan resolver when re-deriving today's path
+   * at execute() time; only the resolver decides whether `cfg` is required. If no
+   * resolver is registered at all, execute() falls back to the single
+   * `relativePath` pinned at tool-build time regardless of `cfg`.
    */
   cfg?: OpenClawConfig;
   sandbox?: {
@@ -680,13 +680,9 @@ export function wrapToolMemoryFlushAppendOnlyWrite(
         containerWorkdir: options.containerWorkdir,
       });
 
-      // `options.relativePath` is pinned when the memory-flush tool set is built, which
-      // can predate actual execution by an unbounded amount (provider fallback/retry
-      // backoff, a long-running flush turn) — long enough to cross a date rollover.
-      // Re-derive "today" at execute() time (same plan resolver + timezone logic the
-      // flush prompt itself uses) and additionally accept that path, so a flush that
-      // straddles midnight isn't rejected for using the — correct — current date.
-      // See ENG-21229.
+      // The pinned relativePath can predate execution long enough (retry backoff, a
+      // long flush turn) to cross a date rollover. Also accept the freshly-resolved
+      // current-date path, or a legitimate same-day write gets rejected as stale.
       const currentPlan = resolveMemoryFlushPlan({ cfg: options.cfg, nowMs: Date.now() });
       const candidates = [
         { relativePath: options.relativePath, absolutePath: allowedAbsolutePath },

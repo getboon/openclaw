@@ -123,8 +123,18 @@ describe("wrapToolMemoryFlushAppendOnlyWrite date rollover", () => {
       cfg: {},
     });
 
+    const result = await wrapped.execute("call-sameday", {
+      path: STALE_RELATIVE_PATH,
+      content: "same-day note",
+    });
+
+    expect(result.details).toEqual({ path: STALE_RELATIVE_PATH, appendOnly: true });
+    await expect(fs.readFile(path.join(tmpDir, STALE_RELATIVE_PATH), "utf-8")).resolves.toBe(
+      "same-day note",
+    );
+
     await expect(
-      wrapped.execute("call-sameday", { path: "memory/unrelated-day.md", content: "nope" }),
+      wrapped.execute("call-sameday-reject", { path: "memory/unrelated-day.md", content: "nope" }),
     ).rejects.toThrow(
       `Memory flush writes are restricted to ${STALE_RELATIVE_PATH}; use that path only.`,
     );
