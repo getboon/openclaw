@@ -870,7 +870,14 @@ describe("describeImageWithModel", () => {
     });
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), MAX_TIMER_TIMEOUT_MS);
     const firstCall = requireFirstMockCall(completeMock, "image completion");
-    expect(firstCall[2].timeoutMs).toBe(MAX_TIMER_TIMEOUT_MS);
+    // ENG-21406: the provider request now draws from the shared deadline
+    // (`deadlineAtMs`), so by the time this phase computes its remaining
+    // budget a small, real-clock amount of time has already elapsed since
+    // the clamp was applied — exact equality to MAX_TIMER_TIMEOUT_MS is no
+    // longer guaranteed, only that it's at most the clamp and not some
+    // unrelated smaller/fresh value.
+    expect(firstCall[2].timeoutMs).toBeLessThanOrEqual(MAX_TIMER_TIMEOUT_MS);
+    expect(firstCall[2].timeoutMs).toBeGreaterThan(MAX_TIMER_TIMEOUT_MS - 60_000);
   });
 
   it("places OpenRouter image prompts in user content before images", async () => {
@@ -1138,7 +1145,12 @@ describe("describeImageWithModel", () => {
     expect(options.timeoutMs).toBe(25);
   });
 
-  it("keeps the full configured timeout for provider requests after slow setup", async () => {
+  it("shares the configured timeout across setup and the provider request after slow setup", async () => {
+    // ENG-21406: setup and the provider request now draw from one deadline
+    // instead of each independently getting the full configured budget — a
+    // slow setup leaves correspondingly less time for the request, rather
+    // than a fresh full window (previously up to ~2x the configured budget
+    // for this two-phase shape alone).
     vi.useFakeTimers();
     const slowSetupMs = 400;
     discoverModelsMock.mockReturnValue({
@@ -1191,12 +1203,22 @@ describe("describeImageWithModel", () => {
     if (!options?.signal) {
       throw new Error("Expected image completion abort signal");
     }
-    expect(options.timeoutMs).toBe(1000);
+    // The request phase gets what's left of the 1000ms budget after the
+    // 400ms slow setup (600ms), not a fresh 1000ms window.
+    const remainingMs = 1000 - slowSetupMs;
+    expect(options.timeoutMs).toBe(remainingMs);
 
+    // The message still reports the configured total (1000ms), not the
+    // smaller remaining slice that actually governs the race — an operator
+    // reading Sentry wants the configured budget, not an arithmetic
+    // remainder.
     const assertion = expect(result).rejects.toThrow(
       `image description request timed out after 1000ms (setup took ${slowSetupMs}ms before provider request started)`,
     );
-    await vi.advanceTimersByTimeAsync(1000);
+    // Advancing by exactly the remaining budget (not the full configured
+    // 1000ms) proves the request phase actually fires at 600ms; advancing
+    // further would mask a regression back to the old full-window behavior.
+    await vi.advanceTimersByTimeAsync(remainingMs);
     await assertion;
     expect(options.signal.aborted).toBe(true);
   });

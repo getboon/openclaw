@@ -434,35 +434,75 @@ function resolveImageDescriptionTimeoutMs(timeoutMs: number | undefined) {
   return clampPositiveTimerTimeoutMs(timeoutMs);
 }
 
-function buildImageDescriptionTimeoutError(params: {
+function buildImageDescriptionTimeoutMessage(params: {
   phase: "setup" | "request";
   timeoutMs: number;
   setupDurationMs?: number;
-}): Error {
+}): string {
   if (params.phase === "setup") {
-    return new Error(
-      `image description setup timed out after ${params.timeoutMs}ms before provider request started`,
-    );
+    return `image description setup timed out after ${params.timeoutMs}ms before provider request started`;
   }
   const setupDurationMs =
     typeof params.setupDurationMs === "number" && Number.isFinite(params.setupDurationMs)
       ? Math.max(0, Math.floor(params.setupDurationMs))
       : 0;
-  return new Error(
-    setupDurationMs > 0
-      ? `image description request timed out after ${params.timeoutMs}ms (setup took ${setupDurationMs}ms before provider request started)`
-      : `image description request timed out after ${params.timeoutMs}ms`,
-  );
+  return setupDurationMs > 0
+    ? `image description request timed out after ${params.timeoutMs}ms (setup took ${setupDurationMs}ms before provider request started)`
+    : `image description request timed out after ${params.timeoutMs}ms`;
+}
+
+/**
+ * Thrown when the shared describe-image deadline (see `deadlineAtMs` in
+ * `describeImagesWithModelInternal`) is exhausted. Carries a stable `name`
+ * (set below) rather than requiring callers to sniff the message text, so
+ * `image-tool.ts` can classify a timeout without statically importing this
+ * module — `image.ts` is only ever reached through the lazy
+ * `image-runtime.ts` facade (see its header comment) to keep provider code
+ * out of the cold path, and a real `instanceof` check from a static importer
+ * would defeat that.
+ */
+export class ImageDescriptionTimeoutError extends Error {
+  readonly phase: "setup" | "request";
+  readonly timeoutMs: number;
+
+  constructor(params: { phase: "setup" | "request"; timeoutMs: number; setupDurationMs?: number }) {
+    super(buildImageDescriptionTimeoutMessage(params));
+    this.name = "ImageDescriptionTimeoutError";
+    this.phase = params.phase;
+    this.timeoutMs = params.timeoutMs;
+  }
+}
+
+function buildImageDescriptionTimeoutError(params: {
+  phase: "setup" | "request";
+  timeoutMs: number;
+  setupDurationMs?: number;
+}): ImageDescriptionTimeoutError {
+  return new ImageDescriptionTimeoutError(params);
 }
 
 async function withImageDescriptionTimeout<T>(params: {
   task: Promise<T>;
   timeoutMs: number | undefined;
   controller: AbortController;
-  createTimeoutError: (timeoutMs: number) => Error;
+  createTimeoutError: () => Error;
 }): Promise<T> {
   if (params.timeoutMs === undefined) {
     return await params.task;
+  }
+  if (params.timeoutMs <= 0) {
+    // The shared deadline (see `deadlineAtMs` below) was already exhausted
+    // before this phase got a turn to run — fail fast with the same error an
+    // expired timer would produce instead of racing a same-tick timeout that
+    // would still let an unbounded task start before rejecting.
+    params.controller.abort();
+    // `params.task` was already created (and, via `controller.signal`, may
+    // now reject from the abort above) by the caller before this function
+    // ran. `Promise.race` below would normally subscribe to it and observe
+    // that rejection; skip that path entirely here, so attach a no-op
+    // catch to avoid an unhandled rejection crashing the process.
+    void params.task.catch(() => {});
+    throw params.createTimeoutError();
   }
   let timeout: NodeJS.Timeout | undefined;
   try {
@@ -471,7 +511,7 @@ async function withImageDescriptionTimeout<T>(params: {
       new Promise<never>((_, reject) => {
         timeout = setTimeout(() => {
           params.controller.abort();
-          reject(params.createTimeoutError(params.timeoutMs!));
+          reject(params.createTimeoutError());
         }, params.timeoutMs);
       }),
     ]);
@@ -482,6 +522,14 @@ async function withImageDescriptionTimeout<T>(params: {
   }
 }
 
+// Remaining ms until `deadlineAtMs`, or undefined when the call is unbounded
+// (no deadline at all). Never negative — a budget that has already elapsed
+// returns 0 so `withImageDescriptionTimeout` fails fast instead of starting
+// a fresh full-length timer for the next phase.
+function remainingTimeoutMs(deadlineAtMs: number | undefined): number | undefined {
+  return deadlineAtMs === undefined ? undefined : Math.max(0, deadlineAtMs - Date.now());
+}
+
 async function describeImagesWithModelInternal(
   params: ImagesDescriptionRequest,
   options: { onPayload?: ProviderStreamOptions["onPayload"] } = {},
@@ -490,15 +538,26 @@ async function describeImagesWithModelInternal(
   const startedAtMs = Date.now();
   const controller = new AbortController();
   const configuredTimeoutMs = resolveImageDescriptionTimeoutMs(params.timeoutMs);
+  // ENG-21406: one deadline shared by runtime/auth setup, the MiniMax setup
+  // fallback, and the provider request(s) below. Previously each phase
+  // independently raced the full configured timeout, so a slow setup
+  // followed by a reasoning-only retry could cost up to ~3x the configured
+  // budget before the call ever failed. `configuredTimeoutMs` is only
+  // undefined when the caller asked for no timeout at all, in which case
+  // `deadlineAtMs` stays undefined too and every phase below runs unbounded.
+  const deadlineAtMs =
+    configuredTimeoutMs === undefined ? undefined : startedAtMs + configuredTimeoutMs;
   let apiKey: string;
   let model: Model | undefined;
 
   try {
     const resolved = await withImageDescriptionTimeout({
       controller,
-      timeoutMs: configuredTimeoutMs,
-      createTimeoutError: (timeoutMs) =>
-        buildImageDescriptionTimeoutError({ phase: "setup", timeoutMs }),
+      timeoutMs: remainingTimeoutMs(deadlineAtMs),
+      // configuredTimeoutMs is defined whenever deadlineAtMs (and so the
+      // timeoutMs above) is defined — this only runs on that branch.
+      createTimeoutError: () =>
+        buildImageDescriptionTimeoutError({ phase: "setup", timeoutMs: configuredTimeoutMs! }),
       task: resolveImageRuntime(params),
     });
     apiKey = resolved.apiKey;
@@ -509,11 +568,19 @@ async function describeImagesWithModelInternal(
     }
     const fallback = await withImageDescriptionTimeout({
       controller,
-      timeoutMs: configuredTimeoutMs,
-      createTimeoutError: (timeoutMs) =>
-        buildImageDescriptionTimeoutError({ phase: "setup", timeoutMs }),
+      timeoutMs: remainingTimeoutMs(deadlineAtMs),
+      createTimeoutError: () =>
+        buildImageDescriptionTimeoutError({ phase: "setup", timeoutMs: configuredTimeoutMs! }),
       task: resolveMinimaxVlmFallbackRuntime(params),
     });
+    // The MiniMax VLM path calls `minimaxUnderstandImage` directly instead of
+    // racing through `withImageDescriptionTimeout`, and that helper treats a
+    // falsy `timeoutMs` (including a near-zero shared remainder) as "unset"
+    // and substitutes its own 60s default (minimax-vlm.ts's
+    // resolvePositiveTimerTimeoutMs) — so forwarding the shared remainder
+    // here could silently grant a fresh 60s budget instead of the configured
+    // one. Deliberately kept on the pre-ENG-21406 full-budget behavior rather
+    // than the shared deadline used above and below.
     return await describeImagesWithMinimax({
       apiKey: fallback.apiKey,
       provider: params.provider,
@@ -528,6 +595,8 @@ async function describeImagesWithModelInternal(
   const setupDurationMs = Date.now() - startedAtMs;
 
   if (isMinimaxVlmModel(model.provider, model.id)) {
+    // Same pre-ENG-21406 full-budget forwarding as the fallback branch above
+    // — see its comment for why the shared remainder isn't used here.
     return await describeImagesWithMinimax({
       apiKey,
       provider: model.provider,
@@ -553,7 +622,7 @@ async function describeImagesWithModelInternal(
   const maxTokens = resolveImageToolMaxTokens(model.maxTokens, params.maxTokens);
   const completeImage = async (onPayload?: ProviderStreamOptions["onPayload"]) => {
     const payloadHandler = composeImageDescriptionPayloadHandlers(onPayload, options.onPayload);
-    const timeoutMs = configuredTimeoutMs;
+    const timeoutMs = remainingTimeoutMs(deadlineAtMs);
     const headers = buildImageRequestHeaders(model);
     const streamOptions = {
       apiKey,
@@ -569,10 +638,10 @@ async function describeImagesWithModelInternal(
     return await withImageDescriptionTimeout({
       controller,
       timeoutMs,
-      createTimeoutError: (requestTimeoutMs) =>
+      createTimeoutError: () =>
         buildImageDescriptionTimeoutError({
           phase: "request",
-          timeoutMs: requestTimeoutMs,
+          timeoutMs: configuredTimeoutMs!,
           setupDurationMs,
         }),
       task,

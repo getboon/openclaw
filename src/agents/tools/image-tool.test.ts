@@ -19,6 +19,7 @@ import { withEnvAsync } from "../../test-utils/env.js";
 import { withFetchPreconnect } from "../../test-utils/fetch-mock.js";
 import { createOpenClawCodingTools } from "../agent-tools.js";
 import type { AuthProfileCredential, AuthProfileStore } from "../auth-profiles/types.js";
+import { classifyToolCallErrorKind } from "../embedded-agent-subscribe.tools.js";
 import { minimaxUnderstandImage } from "../minimax-vlm.js";
 import type { SandboxFsBridge } from "../sandbox/fs-bridge.js";
 import { createHostSandboxFsBridge } from "../test-helpers/host-sandbox-fs-bridge.js";
@@ -1448,6 +1449,39 @@ describe("image tool implicit imageModel config", () => {
     });
   });
 
+  it("falls back to the raised 150s image default when no timeout is configured", async () => {
+    // ENG-21406: DEFAULT_TIMEOUT_SECONDS.image moved from 60 to 150 so dense
+    // plan-set vision requests clear boon-llm-gateway's own 120s fallback-
+    // chain budget before OpenClaw gives up first. Guards against the fleet
+    // default and CODEX_DYNAMIC_IMAGE_TOOL_TIMEOUT_MS (dynamic-tool-
+    // execution.ts) silently drifting apart.
+    await withTempWorkspacePng(async ({ workspaceDir, imagePath }) => {
+      await withTempAgentDir(async (agentDir) => {
+        const describeImage = vi.fn(async (params: ImageDescriptionRequest) => ({
+          text: "ok",
+          model: params.model,
+        }));
+        installImageUnderstandingProviderStubs({
+          id: "ollama",
+          capabilities: ["image"],
+          describeImage,
+        });
+        const cfg: OpenClawConfig = {
+          agents: {
+            defaults: {
+              imageModel: { primary: "ollama/gemma4:26b-a4b-it-q4_K_M" },
+            },
+          },
+        };
+        const tool = createRequiredImageTool({ config: cfg, agentDir, workspaceDir });
+
+        await expectImageToolExecOk(tool, imagePath);
+
+        expect(firstImageRequest(describeImage).timeoutMs).toBe(150_000);
+      });
+    });
+  });
+
   it("passes the configured image timeout to provider calls", async () => {
     await withTempWorkspacePng(async ({ workspaceDir, imagePath }) => {
       await withTempAgentDir(async (agentDir) => {
@@ -1519,6 +1553,102 @@ describe("image tool implicit imageModel config", () => {
         await expectImageToolExecOk(tool, imagePath);
 
         expect(firstImageRequest(describeImage).timeoutMs).toBe(300_000);
+      });
+    });
+  });
+
+  // ENG-21406: media-understanding/image.ts throws an `ImageDescriptionTimeoutError`
+  // (stable `.name`, see that module) when its shared deadline is exhausted.
+  // The image tool must turn that into a graceful `status: "timeout"` result
+  // instead of letting it escape as a raw error — that status is what makes
+  // classifyToolCallErrorKind report "timeout" instead of "upstream", which
+  // is what keeps the after_tool_call Sentry capture from paging.
+  function makeImageDescriptionTimeoutError(): Error {
+    const err = new Error("image description request timed out after 150000ms");
+    err.name = "ImageDescriptionTimeoutError";
+    return err;
+  }
+
+  it("returns a graceful timeout result when the vision model doesn't respond in time", async () => {
+    await withTempWorkspacePng(async ({ workspaceDir, imagePath }) => {
+      await withTempAgentDir(async (agentDir) => {
+        const describeImage = vi.fn(async () => {
+          throw makeImageDescriptionTimeoutError();
+        });
+        installImageUnderstandingProviderStubs({
+          id: "ollama",
+          capabilities: ["image"],
+          describeImage,
+        });
+        const cfg: OpenClawConfig = {
+          agents: {
+            defaults: {
+              imageModel: { primary: "ollama/gemma4:26b-a4b-it-q4_K_M" },
+            },
+          },
+        };
+        const tool = createRequiredImageTool({ config: cfg, agentDir, workspaceDir });
+
+        const result = (await tool.execute("t1", {
+          prompt: "Describe the image.",
+          image: imagePath,
+        })) as ToolTextResult;
+
+        expect(result.details).toMatchObject({
+          error: "image_description_timeout",
+          status: "timeout",
+        });
+        expect(
+          result.content?.some(
+            (block) => block.type === "text" && /did not respond in time/.test(block.text ?? ""),
+          ),
+        ).toBe(true);
+        // Proves the full chain this fix depends on, not just the result
+        // shape: classifyToolCallErrorKind (embedded-agent-subscribe.tools.ts)
+        // must read this exact result as errorKind "timeout", or
+        // captures.ts's downgrade branch never fires and the fix is a no-op.
+        expect(
+          classifyToolCallErrorKind({ result, executionStarted: true, middlewareError: false }),
+        ).toBe("timeout");
+      });
+    });
+  });
+
+  it("still returns a graceful timeout result when every configured image-model fallback times out", async () => {
+    await withTempWorkspacePng(async ({ workspaceDir, imagePath }) => {
+      await withTempAgentDir(async (agentDir) => {
+        const describeImage = vi.fn(async () => {
+          throw makeImageDescriptionTimeoutError();
+        });
+        installImageUnderstandingProviderStubs(
+          { id: "ollama", capabilities: ["image"], describeImage },
+          { id: "anthropic", capabilities: ["image"], describeImage },
+        );
+        const cfg: OpenClawConfig = {
+          agents: {
+            defaults: {
+              imageModel: {
+                primary: "ollama/gemma4:26b-a4b-it-q4_K_M",
+                fallbacks: ["anthropic/claude-opus-4-6"],
+              },
+            },
+          },
+        };
+        const tool = createRequiredImageTool({ config: cfg, agentDir, workspaceDir });
+
+        // runWithImageModelFallback (model-fallback.ts) wraps the last
+        // attempt's error in FallbackSummaryError when more than one
+        // candidate is configured, so this proves the tool unwraps one
+        // level of `.cause` rather than only handling the single-model case.
+        const result = (await tool.execute("t1", {
+          prompt: "Describe the image.",
+          image: imagePath,
+        })) as ToolTextResult;
+
+        expect(result.details).toMatchObject({
+          error: "image_description_timeout",
+          status: "timeout",
+        });
       });
     });
   });

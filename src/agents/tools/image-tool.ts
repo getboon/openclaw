@@ -634,6 +634,39 @@ type ImageSandboxConfig = {
   bridge: SandboxFsBridge;
 };
 
+// `ImageDescriptionTimeoutError` (media-understanding/image.ts) is never
+// statically imported here: that module is only reached through the lazy
+// image-runtime.ts facade so provider/model code stays out of the cold path
+// (see its header comment), and a static import just for `instanceof` would
+// defeat that. Its stable `.name` is the closed identifier instead.
+//
+// A configured image model falls back through two wrapping layers before
+// `runImagePrompt` sees it: `runFallbackCandidate` (model-fallback.ts) first
+// coerces the raw error into a `FailoverError` carrying the original as its
+// own `.cause` (see coerceToFailoverError in failover-error.ts), and then —
+// only when more than one candidate is configured —
+// `runWithImageModelFallback` wraps that `FailoverError` again in
+// `FallbackSummaryError`. So the original timeout can sit one or two
+// `.cause` hops down; walk the chain instead of checking a fixed depth so a
+// configured fallback list never hides a genuine vision-model timeout behind
+// the generic "all image models failed" summary.
+const IMAGE_DESCRIPTION_TIMEOUT_ERROR_NAME = "ImageDescriptionTimeoutError";
+const IMAGE_DESCRIPTION_TIMEOUT_CAUSE_CHAIN_LIMIT = 5;
+
+function isImageDescriptionTimeout(err: unknown): boolean {
+  let current: unknown = err;
+  for (let depth = 0; depth < IMAGE_DESCRIPTION_TIMEOUT_CAUSE_CHAIN_LIMIT; depth += 1) {
+    if (!(current instanceof Error)) {
+      return false;
+    }
+    if (current.name === IMAGE_DESCRIPTION_TIMEOUT_ERROR_NAME) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
+
 async function runImagePrompt(params: {
   cfg?: OpenClawConfig;
   agentDir: string;
@@ -1092,16 +1125,46 @@ export function createImageTool(options?: {
       }
 
       // MARK: - Run image prompt with all loaded images
-      const result = await runImagePrompt({
-        cfg: options?.config,
-        agentDir,
-        authStore: options?.authProfileStore,
-        imageModelConfig,
-        modelOverride,
-        prompt: promptRaw,
-        images: loadedImages.map((img) => ({ buffer: img.buffer, mimeType: img.mimeType })),
-        workspaceDir: options?.workspaceDir,
-      });
+      let result: Awaited<ReturnType<typeof runImagePrompt>>;
+      try {
+        result = await runImagePrompt({
+          cfg: options?.config,
+          agentDir,
+          authStore: options?.authProfileStore,
+          imageModelConfig,
+          modelOverride,
+          prompt: promptRaw,
+          images: loadedImages.map((img) => ({ buffer: img.buffer, mimeType: img.mimeType })),
+          workspaceDir: options?.workspaceDir,
+        });
+      } catch (err) {
+        // A vision model that doesn't respond within its configured budget
+        // (which already accounts for boon-llm-gateway's own fallback-chain
+        // ceiling, ENG-21406) is a routine external latency outcome, not a
+        // host defect — return a result the model can retry or narrow
+        // instead of letting the raw "image description request timed out
+        // after Nms" error escape and end the turn (OPENCLAW-FLEET-X8).
+        // `status: "timeout"` routes this through classifyToolCallErrorKind
+        // as "timeout" so the after_tool_call Sentry capture downgrades it to
+        // a warning instead of paging.
+        if (isImageDescriptionTimeout(err)) {
+          const imageCountNote =
+            loadedImages.length > 1 ? ` for ${loadedImages.length} images` : "";
+          return {
+            content: [
+              {
+                type: "text",
+                text: `The vision model did not respond in time${imageCountNote}. Retry the request, or narrow it to a single sheet or a cropped region if the source is a large, dense plan set.`,
+              },
+            ],
+            details: {
+              error: "image_description_timeout",
+              status: "timeout",
+            },
+          };
+        }
+        throw err;
+      }
 
       const imageDetails =
         loadedImages.length === 1

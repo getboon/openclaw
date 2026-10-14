@@ -358,6 +358,42 @@ describe("buildAfterToolCallCapture", () => {
     expect(capture?.kind).toBe("exception");
   });
 
+  // ENG-21406: the image tool's vision-model request exhausting its
+  // configured timeout (which already accounts for boon-llm-gateway's own
+  // fallback-chain ceiling) is a routine external latency outcome, not a
+  // host defect — downgrade instead of paging.
+  it("downgrades the image tool's timeout to a non-paging warning", () => {
+    const capture = buildAfterToolCallCapture(
+      {
+        toolName: "image",
+        params: {},
+        error: "The vision model did not respond in time. Retry the request...",
+        errorKind: "timeout",
+        errorCode: "image_description_timeout",
+      },
+      HOST,
+    );
+    expect(capture?.kind).toBe("message");
+    expect(capture?.kind === "message" && capture.level).toBe("warning");
+    expect(capture?.tags.error_kind).toBe("timeout");
+  });
+
+  // The downgrade is scoped to the image tool only — it is the only producer
+  // of a "timeout" errorKind there today, but another tool's timeout is a
+  // different failure mode and must still page until it has its own review.
+  it("still captures a non-image tool's timeout as an exception", () => {
+    const capture = buildAfterToolCallCapture(
+      {
+        toolName: "some_other_tool",
+        params: {},
+        error: "timed out",
+        errorKind: "timeout",
+      },
+      HOST,
+    );
+    expect(capture?.kind).toBe("exception");
+  });
+
   // A model-bad-args rejection is real signal for a genuine schema/producer
   // mismatch, but the host didn't fail — downgrade instead of dropping it
   // or paging on it as an exception.

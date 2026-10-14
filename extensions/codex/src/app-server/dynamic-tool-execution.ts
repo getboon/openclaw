@@ -30,8 +30,22 @@ export const CODEX_DYNAMIC_TOOL_MAX_TIMEOUT_MS = 600_000;
 // for bounded setup RPCs and the tool's structured timeout result to complete.
 const CODEX_DYNAMIC_TOOL_TIMEOUT_SECONDS_GRACE_MS = 30_000;
 const CODEX_DYNAMIC_IMAGE_GENERATION_TOOL_TIMEOUT_MS = 120_000;
+// ENG-21406: mirrors DEFAULT_TIMEOUT_SECONDS.image in
+// media-understanding-common/src/defaults.ts (150s) — this is the inner
+// fallback used when tools.media.image.timeoutSeconds is unset.
+// readConfiguredDynamicToolTimeoutMs adds CODEX_DYNAMIC_TOOL_TIMEOUT_SECONDS_GRACE_MS
+// on top of this (and of the configured value) so the outer Codex watchdog
+// doesn't sit below a single candidate's inner media-layer deadline. This
+// does NOT scale with `agents.defaults.imageModel.fallbacks`: each fallback
+// candidate gets its own fresh inner deadline (describeImagesWithModelInternal
+// is re-entered per candidate), so with fallbacks configured the outer
+// watchdog can still fire before every candidate is exhausted. Pre-existing
+// gap, not introduced here — flagging rather than fixing, since closing it
+// means either threading the resolved candidate count into this resolver or
+// sharing one deadline across image-model fallbacks, both bigger changes
+// than this constant.
 /** Timeout for image-understanding style dynamic tool calls. */
-export const CODEX_DYNAMIC_IMAGE_TOOL_TIMEOUT_MS = 60_000;
+export const CODEX_DYNAMIC_IMAGE_TOOL_TIMEOUT_MS = 150_000;
 /** Timeout for message-delivery dynamic tool calls. */
 export const CODEX_DYNAMIC_MESSAGE_TOOL_TIMEOUT_MS = CODEX_DYNAMIC_TOOL_MAX_TIMEOUT_MS;
 const LOG_FIELD_MAX_LENGTH = 160;
@@ -480,10 +494,17 @@ function readConfiguredDynamicToolTimeoutMs(
   }
 
   if (toolName === "image") {
-    return (
+    const innerTimeoutMs =
       readTimeoutSecondsAsMs(config?.tools?.media?.image?.timeoutSeconds) ??
-      CODEX_DYNAMIC_IMAGE_TOOL_TIMEOUT_MS
-    );
+      CODEX_DYNAMIC_IMAGE_TOOL_TIMEOUT_MS;
+    // Same headroom reasoning as the explicit-argument path above: the inner
+    // media-layer deadline (describeImagesWithModelInternal's deadlineAtMs)
+    // starts only after this call's own setup/RPC overhead, so an outer
+    // watchdog equal to the inner budget can fire first and hand Codex a
+    // generic timeout instead of the image tool's graceful `status:
+    // "timeout"` result — defeating ENG-21406's Sentry downgrade on this
+    // harness path.
+    return addTimerTimeoutGraceMs(innerTimeoutMs, CODEX_DYNAMIC_TOOL_TIMEOUT_SECONDS_GRACE_MS);
   }
 
   if (toolName === "message") {

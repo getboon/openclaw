@@ -364,9 +364,11 @@ available timeout in this order:
 - For `image_generate` without a configured timeout, the 120 second
   image-generation default.
 - For the media-understanding `image` tool, `tools.media.image.timeoutSeconds`
-  converted to milliseconds, or the 60 second media default. For image
-  understanding, this applies to the request itself and is not reduced by
-  earlier preparation work.
+  converted to milliseconds, or the 150 second media default. For image
+  understanding, this is one end-to-end budget shared by model/auth setup
+  and the provider request, not a fresh window per phase (MiniMax VLM models
+  are the exception: each phase keeps the full configured budget). The outer
+  Codex watchdog for this tool adds a 30 second grace on top of that value.
 - The 90 second dynamic-tool default.
 
 This watchdog is the outer dynamic `item/tool/call` budget. Provider-specific
