@@ -2075,9 +2075,12 @@ describe("image tool implicit imageModel config", () => {
         const cfg = createMinimaxImageConfig();
 
         const withoutWorkspace = createRequiredImageTool({ config: cfg, agentDir });
-        await expect(
-          withoutWorkspace.execute("t1", { prompt: "Describe.", image: imagePath }),
-        ).rejects.toThrow(/not under an allowed directory/i);
+        const deniedResult = (await withoutWorkspace.execute("t1", {
+          prompt: "Describe.",
+          image: imagePath,
+        })) as { details?: Record<string, unknown> };
+        expect(deniedResult.details?.status).toBe("denied");
+        expect(deniedResult.details?.error).toBe("media_path_not_allowed");
 
         const withWorkspace = createRequiredImageTool({ config: cfg, agentDir, workspaceDir });
 
@@ -2110,9 +2113,12 @@ describe("image tool implicit imageModel config", () => {
         const outsideImage = path.join(outsideDir, "secret.png");
         await fs.writeFile(outsideImage, Buffer.from(ONE_PIXEL_PNG_B64, "base64"));
         try {
-          await expect(
-            tool.execute("t2", { prompt: "Describe.", image: outsideImage }),
-          ).rejects.toThrow(/not under an allowed directory/i);
+          const deniedResult = (await tool.execute("t2", {
+            prompt: "Describe.",
+            image: outsideImage,
+          })) as { details?: Record<string, unknown> };
+          expect(deniedResult.details?.status).toBe("denied");
+          expect(deniedResult.details?.error).toBe("media_path_not_allowed");
         } finally {
           await fs.rm(outsideDir, { recursive: true, force: true });
         }
@@ -2134,10 +2140,39 @@ describe("image tool implicit imageModel config", () => {
           fsPolicy: { workspaceOnly: false },
         });
 
-        await expect(
-          tool.execute("t1", { prompt: "Describe.", image: outsideImage }),
-        ).rejects.toThrow(/not under an allowed directory/i);
+        const deniedResult = (await tool.execute("t1", {
+          prompt: "Describe.",
+          image: outsideImage,
+        })) as { details?: Record<string, unknown> };
+        expect(deniedResult.details?.status).toBe("denied");
+        expect(deniedResult.details?.error).toBe("media_path_not_allowed");
         expect(fetch).not.toHaveBeenCalled();
+      } finally {
+        await fs.rm(outsideDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("allows a non-workspace image path when fsPolicy.rootExpansionAllowed is set (ENG-21228)", async () => {
+    // Mirrors an agent that already renders a page/crop under /tmp with a
+    // host tool (python, pdf2image) and then hands that path to the image
+    // tool — the same file this agent may already read outside its workspace
+    // must not be blocked here just because it is not under a default root.
+    const fetch = stubMinimaxOkFetch();
+    await withTempAgentDir(async (agentDir) => {
+      const cfg = createMinimaxImageConfig();
+      const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-image-tmp-render-"));
+      const outsideImage = path.join(outsideDir, "crop.png");
+      await fs.writeFile(outsideImage, Buffer.from(ONE_PIXEL_PNG_B64, "base64"));
+      try {
+        const tool = createRequiredImageTool({
+          config: cfg,
+          agentDir,
+          fsPolicy: { workspaceOnly: false, rootExpansionAllowed: true },
+        });
+
+        await expectImageToolExecOk(tool, outsideImage);
+        expect(fetch).toHaveBeenCalledTimes(1);
       } finally {
         await fs.rm(outsideDir, { recursive: true, force: true });
       }

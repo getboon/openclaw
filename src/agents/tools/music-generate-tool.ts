@@ -296,6 +296,7 @@ async function loadReferenceImages(params: {
   inputs: string[];
   workspaceDir?: string;
   sandboxConfig: { root: string; bridge: SandboxFsBridge; workspaceOnly: boolean } | null;
+  rootExpansionAllowed?: boolean;
   ssrfPolicy?: SsrFPolicy;
   timeoutMs?: number;
 }): Promise<
@@ -353,6 +354,7 @@ async function loadReferenceImages(params: {
       params.workspaceDir,
       {
         workspaceOnly: params.sandboxConfig?.workspaceOnly === true,
+        rootExpansionAllowed: params.rootExpansionAllowed === true,
       },
       resolvedPath ? [resolvedPath] : undefined,
     );
@@ -713,6 +715,7 @@ export function createMusicGenerateTool(options?: {
         inputs: imageInputs,
         workspaceDir: options?.workspaceDir,
         sandboxConfig,
+        rootExpansionAllowed: options?.fsPolicy?.rootExpansionAllowed === true,
         ssrfPolicy: remoteMediaSsrfPolicy,
       });
       validateMusicGenerationCapabilities({

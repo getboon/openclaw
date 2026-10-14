@@ -457,9 +457,12 @@ describe("createPdfTool", () => {
         const outsidePdf = path.join(outsideDir, "secret.pdf");
         await fs.writeFile(outsidePdf, "%PDF-1.4 fake");
 
-        await expect(tool.execute("t1", { prompt: "test", pdf: outsidePdf })).rejects.toThrow(
-          /not under an allowed directory/i,
-        );
+        const deniedResult = (await tool.execute("t1", {
+          prompt: "test",
+          pdf: outsidePdf,
+        })) as { details?: Record<string, unknown> };
+        expect(deniedResult.details?.status).toBe("denied");
+        expect(deniedResult.details?.error).toBe("media_path_not_allowed");
       } finally {
         await fs.rm(workspaceDir, { recursive: true, force: true });
         await fs.rm(outsideDir, { recursive: true, force: true });
