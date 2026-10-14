@@ -163,6 +163,20 @@ function createDuckDuckGoSearchProvider(
   });
 }
 
+function createBraveSearchProvider(
+  overrides: Partial<WebSearchTestProviderParams> = {},
+): PluginWebSearchProviderEntry {
+  return createWebSearchTestProvider({
+    pluginId: "brave",
+    id: "brave",
+    credentialPath: "plugins.entries.brave.config.webSearch.apiKey",
+    autoDetectOrder: 10,
+    getConfiguredCredentialValue: () => "configured",
+    getCredentialValue: () => "configured",
+    ...overrides,
+  });
+}
+
 describe("web search runtime", () => {
   let runWebSearch: typeof import("./runtime.js").runWebSearch;
   let activateSecretsRuntimeSnapshot: typeof import("../secrets/runtime.js").activateSecretsRuntimeSnapshot;
@@ -911,6 +925,122 @@ describe("web search runtime", () => {
         args: { query: "configured" },
       }),
     ).rejects.toThrow("google aborted");
+  });
+
+  it("recovers via Brave when the explicit DuckDuckGo primary hits a bot-detection challenge (ENG-21224)", async () => {
+    resolveRuntimeWebSearchProvidersMock.mockReturnValue([
+      createDuckDuckGoSearchProvider({
+        createTool: () => ({
+          description: "duckduckgo",
+          parameters: {},
+          execute: async () => {
+            throw new Error("DuckDuckGo returned a bot-detection challenge.");
+          },
+        }),
+      }),
+      createBraveSearchProvider({
+        createTool: () => ({
+          description: "brave",
+          parameters: {},
+          execute: async () => ({ provider: "brave", results: [{ url: "https://example.com" }] }),
+        }),
+      }),
+    ]);
+
+    const result = await runWebSearch({
+      config: {
+        tools: {
+          web: {
+            search: {
+              provider: "duckduckgo",
+              fallbackProvider: "brave",
+            },
+          },
+        },
+      },
+      args: { query: "configured-with-fallback" },
+    });
+
+    expect(result.provider).toBe("brave");
+    expect(result.result).toEqual({
+      provider: "brave",
+      results: [{ url: "https://example.com" }],
+    });
+  });
+
+  it("reports the original DuckDuckGo error when the configured Brave fallback also fails", async () => {
+    resolveRuntimeWebSearchProvidersMock.mockReturnValue([
+      createDuckDuckGoSearchProvider({
+        createTool: () => ({
+          description: "duckduckgo",
+          parameters: {},
+          execute: async () => {
+            throw new Error("DuckDuckGo returned a bot-detection challenge.");
+          },
+        }),
+      }),
+      createBraveSearchProvider({
+        createTool: () => ({
+          description: "brave",
+          parameters: {},
+          execute: async () => {
+            throw new Error("brave also unavailable");
+          },
+        }),
+      }),
+    ]);
+
+    await expect(
+      runWebSearch({
+        config: {
+          tools: {
+            web: {
+              search: {
+                provider: "duckduckgo",
+                fallbackProvider: "brave",
+              },
+            },
+          },
+        },
+        args: { query: "both-fail" },
+      }),
+    ).rejects.toThrow("DuckDuckGo returned a bot-detection challenge.");
+  });
+
+  it("does not consult fallbackProvider when it is unset (explicit-selection behavior unchanged)", async () => {
+    resolveRuntimeWebSearchProvidersMock.mockReturnValue([
+      createDuckDuckGoSearchProvider({
+        createTool: () => ({
+          description: "duckduckgo",
+          parameters: {},
+          execute: async () => {
+            throw new Error("DuckDuckGo returned a bot-detection challenge.");
+          },
+        }),
+      }),
+      createBraveSearchProvider({
+        createTool: () => ({
+          description: "brave",
+          parameters: {},
+          execute: async () => ({ provider: "brave", results: [] }),
+        }),
+      }),
+    ]);
+
+    await expect(
+      runWebSearch({
+        config: {
+          tools: {
+            web: {
+              search: {
+                provider: "duckduckgo",
+              },
+            },
+          },
+        },
+        args: { query: "no-fallback-configured" },
+      }),
+    ).rejects.toThrow("DuckDuckGo returned a bot-detection challenge.");
   });
 
   it("scopes runtime provider loading to the configured bundled web_search provider", async () => {

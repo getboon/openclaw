@@ -445,6 +445,23 @@ function isStructuredAvailabilityError(result: unknown): result is { error: stri
   return typeof error === "string" && /^missing_[a-z0-9_]*api_key$/i.test(error);
 }
 
+// ENG-21224: an explicitly-selected provider (required for any key-free
+// provider — see "Keep key-free web search providers opt-in") otherwise gets
+// zero resilience: hasExplicitWebSearchSelection disables ALL fallback, so a
+// single upstream hiccup (e.g. DuckDuckGo's bot-detection challenge) fails the
+// whole tool call with nothing else attempted, even when a second provider is
+// installed and working. This reads one new, separately-named opt-in field —
+// naming a provider here is its own explicit consent, same principle as
+// naming the primary — and gives it exactly one recovery attempt. It does NOT
+// reopen general auto-detect-style fallback: unset, behavior is unchanged.
+function resolveExplicitFallbackWebSearchProviderId(search: WebSearchConfig): string | undefined {
+  const raw = (search as Record<string, unknown> | undefined)?.fallbackProvider;
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+  return normalizeLowercaseStringOrEmpty(raw) || undefined;
+}
+
 /** Executes web_search with fallback when selection was not explicit. */
 export async function runWebSearch(params: RunWebSearchParams): Promise<RunWebSearchResult> {
   const config = resolveWebSearchRuntimeConfig({
@@ -468,6 +485,7 @@ export async function runWebSearch(params: RunWebSearchParams): Promise<RunWebSe
     providerId: params.providerId,
     providers: candidates,
   });
+  const explicitFallbackId = resolveExplicitFallbackWebSearchProviderId(search);
   let lastError: unknown;
   let sawUnavailableProvider = false;
 
@@ -498,10 +516,34 @@ export async function runWebSearch(params: RunWebSearchParams): Promise<RunWebSe
         result: executed,
       };
     } catch (error) {
-      lastError = error;
       if (!allowFallback) {
+        // One narrow recovery attempt at a separately-named, explicitly
+        // configured fallback — not a reopening of auto-detect fallback.
+        if (explicitFallbackId && explicitFallbackId !== candidate.id) {
+          const fallbackCandidate = candidates.find((entry) => entry.id === explicitFallbackId);
+          if (fallbackCandidate) {
+            try {
+              const fallbackDefinition = fallbackCandidate.createTool({
+                config,
+                agentDir: params.agentDir,
+                searchConfig: search as Record<string, unknown> | undefined,
+                runtimeMetadata: runtimeWebSearch,
+              });
+              if (fallbackDefinition) {
+                const fallbackExecuted = await fallbackDefinition.execute(params.args, {
+                  signal: params.signal,
+                });
+                return { provider: fallbackCandidate.id, result: fallbackExecuted };
+              }
+            } catch {
+              // Fallback also failed — report the ORIGINAL primary error below,
+              // not the fallback's, so operators still see the root cause.
+            }
+          }
+        }
         throw error;
       }
+      lastError = error;
     }
   }
 

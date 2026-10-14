@@ -278,6 +278,7 @@ to route them through the managed path.
       search: {
         enabled: true, // default: true
         provider: "brave", // or omit for auto-detection
+        fallbackProvider: "parallel-free", // optional, see below
         maxResults: 5,
         timeoutSeconds: 30,
         cacheTtlMinutes: 15,
@@ -286,6 +287,27 @@ to route them through the managed path.
   },
 }
 ```
+
+### `fallbackProvider`
+
+When `provider` is set explicitly, OpenClaw does not substitute a different
+provider on failure -- see "Auto-detection vs. explicit selection" above.
+`fallbackProvider` is a separate, opt-in escape hatch for exactly one case:
+the explicit primary throws (a timeout, an upstream error, a bot-detection
+challenge), and you want one additional named provider tried before the call
+fails. Naming a provider here is its own explicit choice, with the same
+opt-in requirement as `provider` itself (a key-free provider still needs to be
+named, not auto-detected).
+
+- Tried only when `provider` is explicitly set and that provider's call
+  throws or fails to produce a tool definition.
+- Exactly one recovery attempt -- if the fallback also fails, the error
+  surfaced to the caller (and to any error-reporting plugin) is the
+  **original primary's error**, not the fallback's, so operators still see
+  the root cause.
+- Has no effect when `provider` is unset (auto-detect already tries every
+  credentialed provider in order) or when `fallbackProvider` is unset
+  (behavior is unchanged from today).
 
 Provider-specific config (API keys, base URLs, modes) lives under
 `plugins.entries.<plugin>.config.webSearch.*`. Gemini can also reuse
