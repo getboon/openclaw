@@ -369,6 +369,10 @@ available timeout in this order:
   and the provider request, not a fresh window per phase (MiniMax VLM models
   are the exception: each phase keeps the full configured budget). The outer
   Codex watchdog for this tool adds a 30 second grace on top of that value.
+  It does not see a per-image-model `timeoutSeconds` override (`tools.media.image.models[].timeoutSeconds`):
+  set the capability-level `tools.media.image.timeoutSeconds` to at least
+  the longest per-model override in use, or that model's calls can still be
+  cut off by this watchdog before its own longer timeout fires.
 - The 90 second dynamic-tool default.
 
 This watchdog is the outer dynamic `item/tool/call` budget. Provider-specific

@@ -2,7 +2,11 @@
 // provider hook.
 import { clampPositiveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
 import { resolveModelAsync } from "../agents/embedded-agent-runner/model.js";
-import { isMinimaxVlmModel, minimaxUnderstandImage } from "../agents/minimax-vlm.js";
+import {
+  DEFAULT_MINIMAX_VLM_TIMEOUT_MS,
+  isMinimaxVlmModel,
+  minimaxUnderstandImage,
+} from "../agents/minimax-vlm.js";
 import {
   getApiKeyForModel,
   requireApiKey,
@@ -348,6 +352,37 @@ async function describeImagesWithMinimax(params: {
   };
 }
 
+// AbortSignal.timeout() (used internally by minimaxUnderstandImage) raises a
+// DOMException named "TimeoutError" when it fires, distinct from the
+// "AbortError" a caller-initiated abort() produces — so this reliably
+// identifies MiniMax's own internal timeout without catching unrelated
+// abort reasons.
+function isNativeFetchTimeoutError(err: unknown): boolean {
+  return err instanceof Error && err.name === "TimeoutError";
+}
+
+// The MiniMax path doesn't race through withImageDescriptionTimeout (see its
+// call sites' comments), so its own internal timeout would otherwise escape
+// as a raw, unclassified error that image-tool.ts can't recognize. Normalize
+// it into the same ImageDescriptionTimeoutError every other path produces.
+async function describeImagesWithMinimaxOrTimeout(
+  params: Parameters<typeof describeImagesWithMinimax>[0],
+  timeoutContext: { configuredTimeoutMs: number | undefined; setupDurationMs: number },
+): Promise<ImagesDescriptionResult> {
+  try {
+    return await describeImagesWithMinimax(params);
+  } catch (err) {
+    if (!isNativeFetchTimeoutError(err)) {
+      throw err;
+    }
+    throw buildImageDescriptionTimeoutError({
+      phase: "request",
+      timeoutMs: timeoutContext.configuredTimeoutMs ?? DEFAULT_MINIMAX_VLM_TIMEOUT_MS,
+      setupDurationMs: timeoutContext.setupDurationMs,
+    });
+  }
+}
+
 function isUnknownModelError(err: unknown): boolean {
   return err instanceof Error && /^Unknown model:/i.test(err.message);
 }
@@ -504,15 +539,31 @@ async function withImageDescriptionTimeout<T>(params: {
     void params.task.catch(() => {});
     throw params.createTimeoutError();
   }
+  const raceStartedAtMs = Date.now();
+  const timeoutMs = params.timeoutMs;
   let timeout: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
-      params.task,
+      params.task.catch((err) => {
+        // Some provider SDKs enforce `timeoutMs` as their own internal HTTP
+        // request timeout (ProviderStreamOptions.timeoutMs) using the same
+        // duration we race against below, and that internal clock starts
+        // before this race begins — so the SDK's own timeout error can win
+        // the race and escape unclassified as a plain error instead of
+        // ImageDescriptionTimeoutError. Normalize a rejection landing in the
+        // last stretch of the budget into our own timeout error; anything
+        // earlier is a genuine, unrelated provider error and passes through.
+        if (Date.now() - raceStartedAtMs >= timeoutMs - providerTimeoutRaceToleranceMs(timeoutMs)) {
+          params.controller.abort();
+          throw params.createTimeoutError();
+        }
+        throw err;
+      }),
       new Promise<never>((_, reject) => {
         timeout = setTimeout(() => {
           params.controller.abort();
           reject(params.createTimeoutError());
-        }, params.timeoutMs);
+        }, timeoutMs);
       }),
     ]);
   } finally {
@@ -520,6 +571,21 @@ async function withImageDescriptionTimeout<T>(params: {
       clearTimeout(timeout);
     }
   }
+}
+
+// How close to the deadline a task rejection must land to be treated as the
+// provider's own competing timeout rather than an unrelated early failure.
+// Scales with the budget (never negative even for very small budgets) and
+// caps at 5s so a large budget doesn't misclassify a failure that merely
+// happens somewhere in its last few percent.
+const PROVIDER_TIMEOUT_RACE_TOLERANCE_RATIO = 0.1;
+const PROVIDER_TIMEOUT_RACE_TOLERANCE_MAX_MS = 5_000;
+
+function providerTimeoutRaceToleranceMs(timeoutMs: number): number {
+  return Math.min(
+    PROVIDER_TIMEOUT_RACE_TOLERANCE_MAX_MS,
+    Math.ceil(timeoutMs * PROVIDER_TIMEOUT_RACE_TOLERANCE_RATIO),
+  );
 }
 
 // Remaining ms until `deadlineAtMs`, or undefined when the call is unbounded
@@ -538,13 +604,11 @@ async function describeImagesWithModelInternal(
   const startedAtMs = Date.now();
   const controller = new AbortController();
   const configuredTimeoutMs = resolveImageDescriptionTimeoutMs(params.timeoutMs);
-  // ENG-21406: one deadline shared by runtime/auth setup, the MiniMax setup
-  // fallback, and the provider request(s) below. Previously each phase
-  // independently raced the full configured timeout, so a slow setup
-  // followed by a reasoning-only retry could cost up to ~3x the configured
-  // budget before the call ever failed. `configuredTimeoutMs` is only
-  // undefined when the caller asked for no timeout at all, in which case
-  // `deadlineAtMs` stays undefined too and every phase below runs unbounded.
+  // One deadline shared by runtime/auth setup and the provider request(s)
+  // below (each phase independently racing the full budget let a slow setup
+  // plus a reasoning-only retry cost up to ~3x the configured timeout).
+  // Undefined only when the caller asked for no timeout; every phase then
+  // runs unbounded.
   const deadlineAtMs =
     configuredTimeoutMs === undefined ? undefined : startedAtMs + configuredTimeoutMs;
   let apiKey: string;
@@ -573,39 +637,41 @@ async function describeImagesWithModelInternal(
         buildImageDescriptionTimeoutError({ phase: "setup", timeoutMs: configuredTimeoutMs! }),
       task: resolveMinimaxVlmFallbackRuntime(params),
     });
-    // The MiniMax VLM path calls `minimaxUnderstandImage` directly instead of
-    // racing through `withImageDescriptionTimeout`, and that helper treats a
-    // falsy `timeoutMs` (including a near-zero shared remainder) as "unset"
-    // and substitutes its own 60s default (minimax-vlm.ts's
-    // resolvePositiveTimerTimeoutMs) — so forwarding the shared remainder
-    // here could silently grant a fresh 60s budget instead of the configured
-    // one. Deliberately kept on the pre-ENG-21406 full-budget behavior rather
-    // than the shared deadline used above and below.
-    return await describeImagesWithMinimax({
-      apiKey: fallback.apiKey,
-      provider: params.provider,
-      modelId: params.model,
-      modelBaseUrl: fallback.modelBaseUrl,
-      prompt,
-      timeoutMs: params.timeoutMs,
-      images: params.images,
-    });
+    // minimaxUnderstandImage treats a falsy timeoutMs (including a near-zero
+    // shared remainder) as "unset" and substitutes its own 60s default, so
+    // this deliberately keeps the full configured budget here rather than
+    // the shared deadline used above and below.
+    return await describeImagesWithMinimaxOrTimeout(
+      {
+        apiKey: fallback.apiKey,
+        provider: params.provider,
+        modelId: params.model,
+        modelBaseUrl: fallback.modelBaseUrl,
+        prompt,
+        timeoutMs: params.timeoutMs,
+        images: params.images,
+      },
+      { configuredTimeoutMs, setupDurationMs: Date.now() - startedAtMs },
+    );
   }
 
   const setupDurationMs = Date.now() - startedAtMs;
 
   if (isMinimaxVlmModel(model.provider, model.id)) {
-    // Same pre-ENG-21406 full-budget forwarding as the fallback branch above
-    // — see its comment for why the shared remainder isn't used here.
-    return await describeImagesWithMinimax({
-      apiKey,
-      provider: model.provider,
-      modelId: model.id,
-      modelBaseUrl: model.baseUrl,
-      prompt,
-      timeoutMs: params.timeoutMs,
-      images: params.images,
-    });
+    // Same full-budget forwarding as the fallback branch above — see its
+    // comment for why the shared remainder isn't used here.
+    return await describeImagesWithMinimaxOrTimeout(
+      {
+        apiKey,
+        provider: model.provider,
+        modelId: model.id,
+        modelBaseUrl: model.baseUrl,
+        prompt,
+        timeoutMs: params.timeoutMs,
+        images: params.images,
+      },
+      { configuredTimeoutMs, setupDurationMs },
+    );
   }
 
   const providerStreamFn = registerProviderStreamForModel({
@@ -621,8 +687,20 @@ async function describeImagesWithModelInternal(
 
   const maxTokens = resolveImageToolMaxTokens(model.maxTokens, params.maxTokens);
   const completeImage = async (onPayload?: ProviderStreamOptions["onPayload"]) => {
-    const payloadHandler = composeImageDescriptionPayloadHandlers(onPayload, options.onPayload);
     const timeoutMs = remainingTimeoutMs(deadlineAtMs);
+    if (timeoutMs !== undefined && timeoutMs <= 0) {
+      // Fail fast before dispatching the provider call at all: constructing
+      // `task` below starts the request immediately, so checking the budget
+      // only after that point (inside withImageDescriptionTimeout) would
+      // still send a request we already know is doomed.
+      controller.abort();
+      throw buildImageDescriptionTimeoutError({
+        phase: "request",
+        timeoutMs: configuredTimeoutMs!,
+        setupDurationMs,
+      });
+    }
+    const payloadHandler = composeImageDescriptionPayloadHandlers(onPayload, options.onPayload);
     const headers = buildImageRequestHeaders(model);
     const streamOptions = {
       apiKey,

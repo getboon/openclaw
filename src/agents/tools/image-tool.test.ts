@@ -1450,11 +1450,9 @@ describe("image tool implicit imageModel config", () => {
   });
 
   it("falls back to the raised 150s image default when no timeout is configured", async () => {
-    // ENG-21406: DEFAULT_TIMEOUT_SECONDS.image moved from 60 to 150 so dense
-    // plan-set vision requests clear boon-llm-gateway's own 120s fallback-
-    // chain budget before OpenClaw gives up first. Guards against the fleet
-    // default and CODEX_DYNAMIC_IMAGE_TOOL_TIMEOUT_MS (dynamic-tool-
-    // execution.ts) silently drifting apart.
+    // Guards DEFAULT_TIMEOUT_SECONDS.image and
+    // CODEX_DYNAMIC_IMAGE_TOOL_TIMEOUT_MS (dynamic-tool-execution.ts)
+    // against silently drifting apart.
     await withTempWorkspacePng(async ({ workspaceDir, imagePath }) => {
       await withTempAgentDir(async (agentDir) => {
         const describeImage = vi.fn(async (params: ImageDescriptionRequest) => ({
@@ -1557,12 +1555,11 @@ describe("image tool implicit imageModel config", () => {
     });
   });
 
-  // ENG-21406: media-understanding/image.ts throws an `ImageDescriptionTimeoutError`
-  // (stable `.name`, see that module) when its shared deadline is exhausted.
-  // The image tool must turn that into a graceful `status: "timeout"` result
-  // instead of letting it escape as a raw error — that status is what makes
-  // classifyToolCallErrorKind report "timeout" instead of "upstream", which
-  // is what keeps the after_tool_call Sentry capture from paging.
+  // media-understanding/image.ts throws an `ImageDescriptionTimeoutError`
+  // (stable `.name`) when its shared deadline is exhausted; the image tool
+  // must turn that into a graceful `status: "timeout"` result so
+  // classifyToolCallErrorKind reports "timeout" instead of "upstream" and
+  // the after_tool_call Sentry capture doesn't page.
   function makeImageDescriptionTimeoutError(): Error {
     const err = new Error("image description request timed out after 150000ms");
     err.name = "ImageDescriptionTimeoutError";
@@ -1600,7 +1597,8 @@ describe("image tool implicit imageModel config", () => {
         });
         expect(
           result.content?.some(
-            (block) => block.type === "text" && /did not respond in time/.test(block.text ?? ""),
+            (block) =>
+              block.type === "text" && (block.text ?? "").includes("did not respond in time"),
           ),
         ).toBe(true);
         // Proves the full chain this fix depends on, not just the result

@@ -623,7 +623,10 @@ understanding, that timeout is one end-to-end budget shared by model/auth
 setup and the provider request, not a fresh window per phase (MiniMax VLM
 models are the exception: each phase keeps the full configured budget). The
 outer Codex watchdog for this tool adds a 30 second grace on top of that
-inner budget. Dynamic tool budgets are
+inner budget, but not on top of a per-image-model `timeoutSeconds`
+override — raise the capability-level `tools.media.image.timeoutSeconds`
+to match a longer override in use, or this watchdog can still cut that
+model's calls off first. Dynamic tool budgets are
 capped at 600000 ms. On timeout, OpenClaw aborts the tool signal
 where supported and returns a failed dynamic-tool response to Codex so the turn
 can continue instead of leaving the session in `processing`.

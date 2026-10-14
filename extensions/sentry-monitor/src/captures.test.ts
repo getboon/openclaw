@@ -358,10 +358,9 @@ describe("buildAfterToolCallCapture", () => {
     expect(capture?.kind).toBe("exception");
   });
 
-  // ENG-21406: the image tool's vision-model request exhausting its
-  // configured timeout (which already accounts for boon-llm-gateway's own
-  // fallback-chain ceiling) is a routine external latency outcome, not a
-  // host defect — downgrade instead of paging.
+  // The image tool's vision-model request exhausting its configured
+  // timeout is a routine external latency outcome, not a host defect —
+  // downgrade instead of paging.
   it("downgrades the image tool's timeout to a non-paging warning", () => {
     const capture = buildAfterToolCallCapture(
       {

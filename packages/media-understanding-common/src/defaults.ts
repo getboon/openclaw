@@ -24,11 +24,10 @@ export const DEFAULT_MAX_BYTES: Record<MediaUnderstandingCapability, number> = {
 };
 /** Default request timeout by capability. */
 export const DEFAULT_TIMEOUT_SECONDS: Record<MediaUnderstandingCapability, number> = {
-  // ENG-21406: boon-llm-gateway bounds its whole provider fallback chain at
+  // boon-llm-gateway bounds its whole provider fallback chain at
   // MAX_FALLBACK_DURATION_SECONDS=120; 150s sits above that so the gateway
   // finishes its own fallback and returns a real error instead of being cut
-  // off mid-flight. Dense multi-sheet plan images regularly exceeded the old
-  // 60s default, hard-timing out mid-request and paging Sentry (OPENCLAW-FLEET-X8).
+  // off mid-flight.
   image: 150,
   audio: 60,
   video: 120,

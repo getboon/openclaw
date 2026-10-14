@@ -264,12 +264,11 @@ export function buildAfterToolCallCapture(
       extra,
     };
   }
-  // ENG-21406: the image tool's vision-model request exhausting its
-  // configured timeout (which already accounts for boon-llm-gateway's own
-  // fallback-chain ceiling) is a routine external latency outcome, not a
-  // host defect — downgrade instead of paging. Scoped to the image tool only
-  // (it is the only producer of a "timeout" errorKind there today), so every
-  // other tool's "timeout" still reports as a full exception.
+  // The image tool's vision-model request exhausting its configured
+  // timeout is a routine external latency outcome, not a host defect —
+  // downgrade instead of paging. Scoped to the image tool only (it is the
+  // only producer of a "timeout" errorKind there today), so every other
+  // tool's "timeout" still reports as a full exception.
   if (event.toolName === "image" && event.errorKind === "timeout") {
     return {
       kind: "message",
