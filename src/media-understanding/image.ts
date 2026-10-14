@@ -544,7 +544,7 @@ async function withImageDescriptionTimeout<T>(params: {
   let timeout: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
-      params.task.catch((err) => {
+      params.task.catch((err: unknown) => {
         // Some provider SDKs enforce `timeoutMs` as their own internal HTTP
         // request timeout (ProviderStreamOptions.timeoutMs) using the same
         // duration we race against below, and that internal clock starts
