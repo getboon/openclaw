@@ -1543,8 +1543,8 @@ describe("createImageGenerateTool", () => {
   });
 
   it("threads workspaceDir to loadWebMedia for a relative reference image", async () => {
-    // Regression test for ENG-21407: a relative reference like "inbox/style.png"
-    // must resolve against the agent workspace in the loader, not the gateway
+    // Regression test: a relative reference like "inbox/style.png" must
+    // resolve against the agent workspace in the loader, not the gateway
     // process cwd.
     vi.spyOn(imageGenerationRuntime, "generateImage").mockResolvedValue({
       provider: "fal",

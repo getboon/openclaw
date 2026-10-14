@@ -1579,8 +1579,8 @@ describe("createVideoGenerateTool", () => {
   });
 
   it("threads workspaceDir to loadWebMedia for a relative reference image", async () => {
-    // Regression test for ENG-21407: a relative reference must resolve against
-    // the agent workspace in the loader, not the gateway process cwd.
+    // Regression test: a relative reference must resolve against the agent
+    // workspace in the loader, not the gateway process cwd.
     mockVideoPluginProvider({
       imageToVideo: { enabled: true, maxInputImages: 1 },
     });

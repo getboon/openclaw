@@ -1020,7 +1020,7 @@ export function createImageTool(options?: {
                   // Lets a relative ref (e.g. "inbox/photo.png") resolve against the
                   // agent workspace instead of the gateway process cwd. Previously
                   // resolved inline here; centralized in the loader so every media
-                  // tool shares one resolution point (ENG-21407).
+                  // tool shares one resolution point.
                   ...(options?.workspaceDir ? { workspaceDir: options.workspaceDir } : {}),
                   ssrfPolicy: remoteMediaSsrfPolicy,
                   ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),

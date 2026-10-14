@@ -637,7 +637,7 @@ async function loadReferenceAssets(params: {
             maxBytes: params.maxBytes,
             localRoots,
             // Lets a relative ref resolve against the agent workspace instead of
-            // the gateway process cwd, matching the image tool (ENG-21407).
+            // the gateway process cwd, matching the image tool.
             ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
             ssrfPolicy: params.ssrfPolicy,
           });

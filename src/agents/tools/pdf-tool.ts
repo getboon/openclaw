@@ -733,9 +733,9 @@ export function createPdfTool(options?: {
             : await loadWebMediaRaw(resolvedPathInfo.resolved, {
                 maxBytes,
                 localRoots,
-                // Lets a relative ref (e.g. "ststephens/doc.pdf") resolve against the
+                // Lets a relative ref (e.g. "projects/doc.pdf") resolve against the
                 // agent workspace instead of the gateway process cwd, matching the
-                // image tool and the outbound send path (ENG-21407).
+                // image tool and the outbound send path.
                 ...(options?.workspaceDir ? { workspaceDir: options.workspaceDir } : {}),
                 ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
                 ssrfPolicy: remoteMediaSsrfPolicy,

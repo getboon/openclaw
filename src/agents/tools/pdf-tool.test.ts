@@ -471,12 +471,12 @@ describe("createPdfTool", () => {
   });
 
   it("resolves a relative pdf path against workspaceDir", async () => {
-    // Regression test for ENG-21407: a path like "ststephens/doc.pdf" must
-    // resolve against the agent workspace instead of the gateway process cwd.
+    // Regression test: a relative path like "projects/doc.pdf" must resolve
+    // against the agent workspace instead of the gateway process cwd.
     await withTempPdfAgentDir(async (agentDir) => {
       const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-pdf-ws-"));
       try {
-        const subdir = path.join(workspaceDir, "ststephens");
+        const subdir = path.join(workspaceDir, "projects");
         await fs.mkdir(subdir, { recursive: true });
         await fs.writeFile(path.join(subdir, "doc.pdf"), FAKE_PDF_MEDIA.buffer);
 
@@ -497,11 +497,11 @@ describe("createPdfTool", () => {
 
         const result = await tool.execute("t1", {
           prompt: "summarize",
-          pdf: "ststephens/doc.pdf",
+          pdf: "projects/doc.pdf",
         });
 
         const [loadRef, loadOptions] = firstMockCall(loadSpy, "loadWebMediaRaw");
-        expect(loadRef).toBe("ststephens/doc.pdf");
+        expect(loadRef).toBe("projects/doc.pdf");
         expectFields(loadOptions, { workspaceDir });
         expect(result.content).toEqual([{ type: "text", text: "native summary" }]);
       } finally {
