@@ -968,6 +968,45 @@ describe("web search runtime", () => {
     });
   });
 
+  it("reports the original DuckDuckGo error when the fallback reports its own structured availability error", async () => {
+    resolveRuntimeWebSearchProvidersMock.mockReturnValue([
+      createDuckDuckGoSearchProvider({
+        createTool: () => ({
+          description: "duckduckgo",
+          parameters: {},
+          execute: async () => {
+            throw new Error("DuckDuckGo returned a bot-detection challenge.");
+          },
+        }),
+      }),
+      createBraveSearchProvider({
+        createTool: () => ({
+          description: "brave",
+          parameters: {},
+          // A structured return, not a thrown error — must not be treated as
+          // a successful recovery (ENG-21224 review finding).
+          execute: async () => ({ error: "missing_brave_api_key" }),
+        }),
+      }),
+    ]);
+
+    await expect(
+      runWebSearch({
+        config: {
+          tools: {
+            web: {
+              search: {
+                provider: "duckduckgo",
+                fallbackProvider: "brave",
+              },
+            },
+          },
+        },
+        args: { query: "fallback-structured-error" },
+      }),
+    ).rejects.toThrow("DuckDuckGo returned a bot-detection challenge.");
+  });
+
   it("reports the original DuckDuckGo error when the configured Brave fallback also fails", async () => {
     resolveRuntimeWebSearchProvidersMock.mockReturnValue([
       createDuckDuckGoSearchProvider({
@@ -1070,6 +1109,59 @@ describe("web search runtime", () => {
     expect(mockCallParam(resolveRuntimeWebSearchProvidersMock).onlyPluginIds).toEqual([
       "duckduckgo",
     ]);
+  });
+
+  it("includes the fallbackProvider's owning plugin in the load scope, not just the primary's (ENG-21224)", async () => {
+    // Regression test for a cross-plugin fallback being silently dropped
+    // before it ever reaches `candidates`: the mock below actually filters
+    // by `onlyPluginIds`, the same as the real resolveRuntimeWebSearchProviders
+    // does via mapRegistryProviders -- unlike the other fallback tests in this
+    // file, which stub a fixed return value and so can't catch a scoping bug.
+    resolveManifestContractOwnerPluginIdMock.mockImplementation(({ value }) =>
+      value === "duckduckgo" || value === "brave" ? value : undefined,
+    );
+    const allProviders = [
+      createDuckDuckGoSearchProvider({
+        createTool: () => ({
+          description: "duckduckgo",
+          parameters: {},
+          execute: async () => {
+            throw new Error("DuckDuckGo returned a bot-detection challenge.");
+          },
+        }),
+      }),
+      createBraveSearchProvider({
+        createTool: () => ({
+          description: "brave",
+          parameters: {},
+          execute: async () => ({ provider: "brave", results: [{ url: "https://example.com" }] }),
+        }),
+      }),
+    ];
+    resolveRuntimeWebSearchProvidersMock.mockImplementation(({ onlyPluginIds } = {}) =>
+      onlyPluginIds
+        ? allProviders.filter((entry) => onlyPluginIds.includes(entry.pluginId))
+        : allProviders,
+    );
+
+    const result = await runWebSearch({
+      config: {
+        tools: {
+          web: {
+            search: {
+              provider: "duckduckgo",
+              fallbackProvider: "brave",
+            },
+          },
+        },
+      },
+      args: { query: "cross-plugin-fallback" },
+    });
+
+    expect(result.provider).toBe("brave");
+    const scopeCall = mockCallParam(resolveRuntimeWebSearchProvidersMock);
+    expect(scopeCall.onlyPluginIds).toContain("duckduckgo");
+    expect(scopeCall.onlyPluginIds).toContain("brave");
   });
 
   it("scopes runtime provider loading through manifest ownership when provider id differs from plugin id", async () => {

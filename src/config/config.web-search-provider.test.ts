@@ -539,6 +539,27 @@ describe("web search provider config", () => {
     expectAllowedValuesInclude(issue, ["acme-search", "brave", "gemini"]);
   });
 
+  it("rejects unknown fallbackProvider ids the same way as provider (ENG-21224)", () => {
+    const res = validateConfigObjectWithPlugins({
+      tools: {
+        web: {
+          search: {
+            provider: "duckduckgo",
+            fallbackProvider: "brvae",
+          },
+        },
+      },
+    });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) {
+      return;
+    }
+    const issue = findValidationMessage(res.issues, "tools.web.search.fallbackProvider");
+    expect(issue.message).toBe("unknown web_search fallback provider: brvae");
+    expectAllowedValuesInclude(issue, ["acme-search", "brave", "gemini"]);
+  });
+
   it("warns for unknown provider ids when stale plugin config is present", () => {
     const res = validateConfigObjectWithPlugins({
       tools: {
