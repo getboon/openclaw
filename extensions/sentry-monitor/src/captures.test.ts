@@ -379,13 +379,49 @@ describe("buildAfterToolCallCapture", () => {
     expect(capture?.tags.error_code).toBe("INVALID_REQUEST");
   });
 
-  it("still captures an exit-error or upstream failure as an exception", () => {
+  // An ordinary non-zero exit (a failing test, grep finding nothing, a
+  // script's own `exit 1`) is shell semantics, not a host defect — downgrade
+  // to a non-paging warning instead of an exception. "upstream" is
+  // unaffected by this branch and still pages.
+  it("downgrades an exit-error at a non-shell-lookup exit code to a non-paging warning", () => {
     const capture = buildAfterToolCallCapture(
-      { toolName: "exec", params: {}, error: "zip: command not found", errorKind: "exit-error" },
+      {
+        toolName: "exec",
+        params: {},
+        error: "Traceback (most recent call last):\nKeyError: 'total'",
+        errorKind: "exit-error",
+        exitCode: 1,
+      },
+      HOST,
+    );
+    expect(capture?.kind).toBe("message");
+    expect(capture?.kind === "message" && capture.level).toBe("warning");
+    expect(capture?.tags.error_kind).toBe("exit-error");
+    expect(capture?.tags.exit_code).toBe("1");
+  });
+
+  it("still captures an upstream failure as an exception", () => {
+    const capture = buildAfterToolCallCapture(
+      { toolName: "exec", params: {}, error: "fetch failed: ENOTFOUND example.invalid" },
+      HOST,
+    );
+    expect(capture?.kind).toBe("exception");
+  });
+
+  // 126/127 are shell command lookup/exec failure codes — 126 is "found but
+  // not executable" (a real bash diagnostic is "Permission denied"), 127 is
+  // "not found" ("command not found"). Both must keep paging as exceptions.
+  it.each([
+    [126, "/bin/bash: line 1: unzip: Permission denied"],
+    [127, "/bin/bash: line 1: unzip: command not found"],
+  ])("still captures a shell lookup failure (exit %i) as an exception", (exitCode, error) => {
+    const capture = buildAfterToolCallCapture(
+      { toolName: "exec", params: {}, error, errorKind: "exit-error", exitCode },
       HOST,
     );
     expect(capture?.kind).toBe("exception");
     expect(capture?.tags.error_kind).toBe("exit-error");
+    expect(capture?.tags.exit_code).toBe(String(exitCode));
   });
 
   it("tags the exit code and prefers it over normalized message text in the fingerprint", () => {
@@ -428,6 +464,61 @@ describe("buildAfterToolCallCapture", () => {
       HOST,
     );
     expect(exit1?.fingerprint).not.toEqual(exit127?.fingerprint);
+  });
+
+  // Two different missing binaries both exit 127 — without the message text
+  // appended for shell-lookup failures, both would fingerprint identically
+  // (same tool, same kind, same exit code) and merge into one Sentry issue,
+  // hiding that they are two distinct missing packages.
+  it("fingerprints two different missing binaries at the same exit code into different issues", () => {
+    const missingUnzip = buildAfterToolCallCapture(
+      {
+        toolName: "exec",
+        params: {},
+        error: "/bin/bash: line 1: unzip: command not found",
+        errorKind: "exit-error",
+        exitCode: 127,
+      },
+      HOST,
+    );
+    const missingConvert = buildAfterToolCallCapture(
+      {
+        toolName: "exec",
+        params: {},
+        error: "/bin/bash: line 1: convert: command not found",
+        errorKind: "exit-error",
+        exitCode: 127,
+      },
+      HOST,
+    );
+    expect(missingUnzip?.fingerprint).not.toEqual(missingConvert?.fingerprint);
+  });
+
+  // Two different missing binaries invoked by absolute path: normalizeFingerprintText's
+  // generic path scrub would erase both down to the same "<path>: command not found"
+  // text, so the fingerprint must extract just the basename instead.
+  it("fingerprints two absolute-path missing binaries into different issues", () => {
+    const missingUnzip = buildAfterToolCallCapture(
+      {
+        toolName: "exec",
+        params: {},
+        error: "/bin/bash: line 1: /opt/tools/unzip: command not found",
+        errorKind: "exit-error",
+        exitCode: 127,
+      },
+      HOST,
+    );
+    const missingConvert = buildAfterToolCallCapture(
+      {
+        toolName: "exec",
+        params: {},
+        error: "/bin/bash: line 1: /opt/tools/convert: command not found",
+        errorKind: "exit-error",
+        exitCode: 127,
+      },
+      HOST,
+    );
+    expect(missingUnzip?.fingerprint).not.toEqual(missingConvert?.fingerprint);
   });
 
   it("fingerprints different tools' failures into different issues", () => {

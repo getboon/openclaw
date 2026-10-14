@@ -166,6 +166,29 @@ export function buildAgentEndCapture(
 // failures and every other tool's real dependency failures.
 const WEB_FETCH_ROUTINE_HTTP_ERROR_CODES = new Set(["http_403", "http_404", "http_429"]);
 
+// Exec treats these two exit codes as shell command lookup/exec failures —
+// the host draws the same line at `isShellFailure` in
+// bash-tools.exec-runtime.ts's buildExecExitOutcome — so they stay exceptions
+// while every other non-zero exit downgrades to a warning below.
+const SHELL_LOOKUP_FAILURE_EXIT_CODES = new Set([126, 127]);
+
+// Shell lookup failures report the exact token the user invoked, which may be
+// an absolute path (e.g. "/opt/tools/unzip"). normalizeFingerprintText's
+// generic path scrub would erase that down to "<path>", collapsing two
+// different missing binaries into one fingerprint — so for this one case,
+// extract just the basename instead.
+const SHELL_LOOKUP_FAILURE_COMMAND_RE =
+  /:\s*([^\s:]+):\s*(?:command not found|Permission denied)\s*$/;
+
+function shellLookupFailureBinaryName(error: string): string | undefined {
+  const match = SHELL_LOOKUP_FAILURE_COMMAND_RE.exec(error);
+  if (!match) {
+    return undefined;
+  }
+  const segments = match[1].split("/");
+  return segments[segments.length - 1];
+}
+
 export function buildAfterToolCallCapture(
   event: PluginHookAfterToolCallEvent,
   host: string,
@@ -191,6 +214,18 @@ export function buildAfterToolCallCapture(
     exit_code: typeof event.exitCode === "number" ? String(event.exitCode) : undefined,
     session_id: ctx?.sessionId,
   });
+  // A shell lookup failure (126/127) is one exit code shared by every missing
+  // or non-executable binary on the host — without the normalized message
+  // appended, "unzip: command not found" and "convert: command not found"
+  // would collapse into one issue, hiding that they're different missing
+  // packages. Every other exit code stays coarse (see below): the message
+  // text for an ordinary `exit 1` is the command's own incidental output,
+  // not a stable identity, so folding it in would shatter one real bucket
+  // into one issue per occurrence instead of disambiguating anything.
+  const isShellLookupFailure =
+    event.errorKind === "exit-error" &&
+    typeof event.exitCode === "number" &&
+    SHELL_LOOKUP_FAILURE_EXIT_CODES.has(event.exitCode);
   // tool + errorKind/errorCode/exitCode (falling back to normalized message)
   // so a recurring failure with a different path/id/timestamp lands in one
   // issue, different tools/causes never share a bucket (see file header),
@@ -202,6 +237,9 @@ export function buildAfterToolCallCapture(
     event.toolName,
     event.errorKind,
     event.errorCode ?? event.exitCode ?? normalizeFingerprintText(event.error),
+    isShellLookupFailure
+      ? (shellLookupFailureBinaryName(event.error) ?? normalizeFingerprintText(event.error))
+      : undefined,
   );
   const contexts = { run: runContext(event.runId, ctx?.sessionId) };
   const extra = { tool_call_id: event.toolCallId, duration_ms: event.durationMs };
@@ -230,6 +268,25 @@ export function buildAfterToolCallCapture(
   // a host exception, but it can still signal a real schema mismatch — so
   // downgrade to a non-paging warning instead of dropping it outright.
   if (event.errorKind === "invalid-input") {
+    return {
+      kind: "message",
+      level: "warning",
+      message: event.error,
+      tags,
+      fingerprint,
+      contexts,
+      extra,
+    };
+  }
+  // An exec-family process that ran and exited non-zero for its own reasons
+  // (a failing test, `grep` finding nothing, a script's own `exit 1`) is
+  // ordinary shell semantics, not a host defect — downgrade instead of
+  // paging, but keep it visible since a real regression can still show up as
+  // a new, persistent exit-code pattern. A shell lookup failure (126/127 —
+  // see SHELL_LOOKUP_FAILURE_EXIT_CODES) is excluded: that is a
+  // missing/non-executable binary, an actual host provisioning defect, and
+  // stays a full exception.
+  if (event.errorKind === "exit-error" && !isShellLookupFailure) {
     return {
       kind: "message",
       level: "warning",
