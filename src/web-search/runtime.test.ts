@@ -1046,6 +1046,46 @@ describe("web search runtime", () => {
     ).rejects.toThrow("DuckDuckGo returned a bot-detection challenge.");
   });
 
+  it("does not consult fallbackProvider when the primary came from a direct providerId override (ENG-21224)", async () => {
+    // e.g. `openclaw capability web search --provider google` — a diagnostic
+    // command whose whole point is observing that ONE provider's real
+    // behavior. A configured fallbackProvider must not mask its failure.
+    resolveRuntimeWebSearchProvidersMock.mockReturnValue([
+      createGoogleSearchProvider({
+        createTool: () => ({
+          description: "google",
+          parameters: {},
+          execute: async () => {
+            throw new Error("google aborted");
+          },
+        }),
+      }),
+      createBraveSearchProvider({
+        createTool: () => ({
+          description: "brave",
+          parameters: {},
+          execute: async () => ({ provider: "brave", results: [] }),
+        }),
+      }),
+    ]);
+
+    await expect(
+      runWebSearch({
+        providerId: "google",
+        config: {
+          tools: {
+            web: {
+              search: {
+                fallbackProvider: "brave",
+              },
+            },
+          },
+        },
+        args: { query: "cli-diagnostic-override" },
+      }),
+    ).rejects.toThrow("google aborted");
+  });
+
   it("does not consult fallbackProvider when it is unset (explicit-selection behavior unchanged)", async () => {
     resolveRuntimeWebSearchProvidersMock.mockReturnValue([
       createDuckDuckGoSearchProvider({

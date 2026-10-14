@@ -500,7 +500,16 @@ export async function runWebSearch(params: RunWebSearchParams): Promise<RunWebSe
     providerId: params.providerId,
     providers: candidates,
   });
-  const explicitFallbackId = resolveExplicitFallbackWebSearchProviderId(search);
+  // ENG-21224 review: fallbackProvider is an operator-configured safety net
+  // for the operator-configured PRIMARY (tools.web.search.provider) — it must
+  // not also silently kick in for a caller-supplied providerId override (e.g.
+  // `openclaw capability web search --provider <id>`, a diagnostic command
+  // whose entire purpose is observing exactly that one provider's real
+  // behavior). Masking that provider's failure with a different provider's
+  // success there would defeat the command, not help it.
+  const explicitFallbackId = params.providerId
+    ? undefined
+    : resolveExplicitFallbackWebSearchProviderId(search);
   let lastError: unknown;
   let sawUnavailableProvider = false;
 

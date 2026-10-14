@@ -544,7 +544,7 @@ describe("web search provider config", () => {
       tools: {
         web: {
           search: {
-            provider: "duckduckgo",
+            provider: "brave",
             fallbackProvider: "brvae",
           },
         },
@@ -555,6 +555,10 @@ describe("web search provider config", () => {
     if (res.ok) {
       return;
     }
+    // Exactly one issue: a known-good primary ("brave") must not itself
+    // trip a second, unrelated issue here, or this test would stop being a
+    // clean, isolated check of the fallbackProvider path alone.
+    expect(res.issues).toHaveLength(1);
     const issue = findValidationMessage(res.issues, "tools.web.search.fallbackProvider");
     expect(issue.message).toBe("unknown web_search fallback provider: brvae");
     expectAllowedValuesInclude(issue, ["acme-search", "brave", "gemini"]);
