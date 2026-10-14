@@ -461,7 +461,7 @@ describe("createPdfTool", () => {
           prompt: "test",
           pdf: outsidePdf,
         })) as { details?: Record<string, unknown> };
-        expect(deniedResult.details?.denied).toBe(true);
+        expect(deniedResult.details?.status).toBe("denied");
         expect(deniedResult.details?.error).toBe("media_path_not_allowed");
       } finally {
         await fs.rm(workspaceDir, { recursive: true, force: true });

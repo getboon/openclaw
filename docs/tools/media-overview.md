@@ -155,8 +155,8 @@ catalogs returned by the Gateway.
 `image`, `pdf`, `image_generate`, `video_generate`, and `music_generate` read
 local files from a fixed set of roots: the OpenClaw temp root
 (`/tmp/openclaw`, fallback `${os.tmpdir()}/openclaw-<uid>`), the state/config
-media directories, and the active agent workspace. A path outside those roots
-is normally rejected.
+media directories, the state `canvas`/`workspace`/`sandboxes` directories, and
+the active agent workspace. A path outside those roots is normally rejected.
 
 When an agent is otherwise permitted to read host files outside its
 workspace (no `tools.fs.workspaceOnly`, and the effective tool policy allows

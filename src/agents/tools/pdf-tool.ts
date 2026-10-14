@@ -738,9 +738,11 @@ export function createPdfTool(options?: {
               });
         } catch (err) {
           // A blocked path is a policy outcome, not a host defect: return a
-          // denial result the model can act on instead of throwing. `denied`
-          // routes this through classifyToolCallErrorKind as "denied" so the
-          // after_tool_call Sentry capture drops it instead of paging.
+          // denial result the model can act on instead of throwing. `status:
+          // "denied"` routes this through classifyToolCallErrorKind as
+          // "denied" so the after_tool_call Sentry capture drops it instead
+          // of paging (details.denied is reserved for inline gateway exec
+          // approval denials, where `status` is already overloaded).
           if (isLocalMediaPathNotAllowedError(err)) {
             return {
               content: [
@@ -751,7 +753,7 @@ export function createPdfTool(options?: {
               ],
               details: {
                 error: "media_path_not_allowed",
-                denied: true,
+                status: "denied",
               },
             };
           }

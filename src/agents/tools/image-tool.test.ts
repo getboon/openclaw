@@ -2079,7 +2079,7 @@ describe("image tool implicit imageModel config", () => {
           prompt: "Describe.",
           image: imagePath,
         })) as { details?: Record<string, unknown> };
-        expect(deniedResult.details?.denied).toBe(true);
+        expect(deniedResult.details?.status).toBe("denied");
         expect(deniedResult.details?.error).toBe("media_path_not_allowed");
 
         const withWorkspace = createRequiredImageTool({ config: cfg, agentDir, workspaceDir });
@@ -2117,7 +2117,7 @@ describe("image tool implicit imageModel config", () => {
             prompt: "Describe.",
             image: outsideImage,
           })) as { details?: Record<string, unknown> };
-          expect(deniedResult.details?.denied).toBe(true);
+          expect(deniedResult.details?.status).toBe("denied");
           expect(deniedResult.details?.error).toBe("media_path_not_allowed");
         } finally {
           await fs.rm(outsideDir, { recursive: true, force: true });
@@ -2144,7 +2144,7 @@ describe("image tool implicit imageModel config", () => {
           prompt: "Describe.",
           image: outsideImage,
         })) as { details?: Record<string, unknown> };
-        expect(deniedResult.details?.denied).toBe(true);
+        expect(deniedResult.details?.status).toBe("denied");
         expect(deniedResult.details?.error).toBe("media_path_not_allowed");
         expect(fetch).not.toHaveBeenCalled();
       } finally {
