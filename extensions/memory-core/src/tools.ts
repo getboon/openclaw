@@ -153,8 +153,8 @@ function resolvePausedMemoryIndexIdentityReason(status: { custom?: unknown }): s
   // actionable pause worth surfacing to the agent. "missing" (no index built yet)
   // is the ordinary state for the first moments of a new session/workspace and
   // self-heals via the session-start background sync — pausing on it produces a
-  // misleading "different embedding provider" message and, upstream, a false
-  // Sentry exception on every cold start (ENG-21227 / OPENCLAW-FLEET-X4).
+  // misleading "different embedding provider" message and gets misclassified as
+  // a tool error upstream.
   if (indexIdentity?.status !== "mismatched") {
     return undefined;
   }
