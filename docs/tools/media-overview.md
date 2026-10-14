@@ -157,6 +157,9 @@ local files from a fixed set of roots: the OpenClaw temp root
 (`/tmp/openclaw`, fallback `${os.tmpdir()}/openclaw-<uid>`), the state/config
 media directories, the state `canvas`/`workspace`/`sandboxes` directories, and
 the active agent workspace. A path outside those roots is normally rejected.
+A relative path (for example `projects/report.pdf`) is resolved against the
+active agent workspace first, the same way `read`/`write` treat relative
+paths.
 
 When an agent is otherwise permitted to read host files outside its
 workspace (no `tools.fs.workspaceOnly`, and the effective tool policy allows

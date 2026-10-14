@@ -1542,6 +1542,53 @@ describe("createImageGenerateTool", () => {
     expect(generateArgs.inputImages).toHaveLength(1);
   });
 
+  it("threads workspaceDir to loadWebMedia for a relative reference image", async () => {
+    // Regression test: a relative reference like "inbox/style.png" must
+    // resolve against the agent workspace in the loader, not the gateway
+    // process cwd.
+    vi.spyOn(imageGenerationRuntime, "generateImage").mockResolvedValue({
+      provider: "fal",
+      model: "krea/v2/medium/text-to-image",
+      attempts: [],
+      ignoredOverrides: [],
+      images: [
+        {
+          buffer: Buffer.from("krea-style-out"),
+          mimeType: "image/png",
+          fileName: "krea-style.png",
+        },
+      ],
+    });
+    const loadWebMedia = vi.spyOn(webMedia, "loadWebMedia").mockResolvedValue({
+      kind: "image",
+      buffer: Buffer.from("style-ref"),
+      contentType: "image/png",
+    });
+    vi.spyOn(imageOps, "getImageMetadata").mockResolvedValue({
+      width: 2048,
+      height: 2048,
+    });
+    vi.spyOn(mediaStore, "saveMediaBuffer").mockResolvedValue({
+      path: "/tmp/krea-style.png",
+      id: "krea-style.png",
+      size: 14,
+      contentType: "image/png",
+    });
+
+    const workspaceDir = "/workspace/relative-ref";
+    const tool = createToolWithPrimaryImageModel("fal/krea/v2/medium/text-to-image", {
+      workspaceDir,
+    });
+    await tool.execute("call-fal-workspace-relative", {
+      prompt: "Style-directed portrait",
+      image: "inbox/style.png",
+    });
+
+    const [loadRef, loadOptions] = loadWebMedia.mock.calls.at(0) ?? [];
+    expect(loadRef).toBe("inbox/style.png");
+    expect((loadOptions as Record<string, unknown> | undefined)?.workspaceDir).toBe(workspaceDir);
+  });
+
   it.each([60.5, "60px", null])("rejects malformed OpenAI output compression %s", async (value) => {
     const generateImage = vi.spyOn(imageGenerationRuntime, "generateImage").mockResolvedValue({
       provider: "openai",

@@ -644,6 +644,9 @@ async function loadReferenceImages(params: {
           : await loadWebMedia(resolvedPath ?? resolvedImage, {
               maxBytes: params.maxBytes,
               localRoots,
+              // Lets a relative ref resolve against the agent workspace instead of
+              // the gateway process cwd, matching the image tool.
+              ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
               ssrfPolicy: params.ssrfPolicy,
               ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
             });

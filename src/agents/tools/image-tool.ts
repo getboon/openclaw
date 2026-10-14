@@ -3,7 +3,6 @@
  *
  * Describes local, staged, web, and generated media through configured media-understanding providers.
  */
-import { resolve, isAbsolute } from "node:path";
 import { Type } from "typebox";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { MediaUnderstandingModelConfig } from "../../config/types.tools.js";
@@ -933,7 +932,7 @@ export function createImageTool(options?: {
         // shared image registry here, so fail gracefully instead of attempting to
         // `fs.readFile("image:0")` and producing a noisy ENOENT.
         const refInfo = classifyMediaReferenceSource(normalizedRef);
-        const { isDataUrl, isFileUrl, isHttpUrl, isMediaStoreUrl } = refInfo;
+        const { isDataUrl, isHttpUrl } = refInfo;
         if (refInfo.hasUnsupportedScheme) {
           return {
             content: [
@@ -959,20 +958,6 @@ export function createImageTool(options?: {
           }
           if (normalizedRef.startsWith("~")) {
             return resolveUserPath(normalizedRef);
-          }
-          // Resolve relative paths against workspaceDir so agents can reference
-          // workspace-relative paths (e.g. "inbox/photo.png") without needing to
-          // know the absolute workspace location — matching the read tool behaviour.
-          if (
-            !isDataUrl &&
-            !isFileUrl &&
-            !isHttpUrl &&
-            !isMediaStoreUrl &&
-            !refInfo.looksLikeWindowsDrivePath &&
-            !isAbsolute(normalizedRef) &&
-            options?.workspaceDir
-          ) {
-            return resolve(options.workspaceDir, normalizedRef);
           }
           return normalizedRef;
         })();
@@ -1032,6 +1017,11 @@ export function createImageTool(options?: {
                   maxBytes,
                   localRoots: mediaLocalRoots,
                   inboundRoots: mediaInboundRoots,
+                  // Lets a relative ref (e.g. "inbox/photo.png") resolve against the
+                  // agent workspace instead of the gateway process cwd. Previously
+                  // resolved inline here; centralized in the loader so every media
+                  // tool shares one resolution point.
+                  ...(options?.workspaceDir ? { workspaceDir: options.workspaceDir } : {}),
                   ssrfPolicy: remoteMediaSsrfPolicy,
                   ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
                   imageCompression,
