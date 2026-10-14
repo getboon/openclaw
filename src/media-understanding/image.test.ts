@@ -1211,6 +1211,49 @@ describe("describeImageWithModel", () => {
     await assertion;
   });
 
+  it("does not normalize a late HTTP-status error into a timeout, even near the deadline", async () => {
+    vi.useFakeTimers();
+    discoverModelsMock.mockReturnValue({
+      find: vi.fn(() => ({
+        api: "openai-responses",
+        provider: "openai",
+        id: "gpt-5.4-mini",
+        input: ["text", "image"],
+        baseUrl: "https://api.openai.com/v1",
+      })),
+    });
+    completeMock.mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          // A response that actually arrived (even an error one) carries an
+          // HTTP status, unlike a request that never completed — this must
+          // stay a genuine 401, not get swallowed into "timed out", even
+          // though it lands in the race's last stretch.
+          setTimeout(() => {
+            const unauthorized = new Error("Unauthorized");
+            (unauthorized as Error & { status: number }).status = 401;
+            reject(unauthorized);
+          }, 1000);
+        }),
+    );
+
+    const result = describeImageWithModel({
+      cfg: {},
+      agentDir: "/tmp/openclaw-agent",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      buffer: Buffer.from("png-bytes"),
+      fileName: "image.png",
+      mime: "image/png",
+      prompt: "Describe the image.",
+      timeoutMs: 1000,
+    });
+
+    const assertion = expect(result).rejects.toThrow("Unauthorized");
+    await vi.advanceTimersByTimeAsync(1000);
+    await assertion;
+  });
+
   it("shares the configured timeout across setup and the provider request after slow setup", async () => {
     // Setup and the provider request now draw from one deadline instead of
     // each independently getting the full configured budget — a slow setup

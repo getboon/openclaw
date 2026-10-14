@@ -372,7 +372,10 @@ available timeout in this order:
   It does not see a per-image-model `timeoutSeconds` override (`tools.media.image.models[].timeoutSeconds`):
   set the capability-level `tools.media.image.timeoutSeconds` to at least
   the longest per-model override in use, or that model's calls can still be
-  cut off by this watchdog before its own longer timeout fires.
+  cut off by this watchdog before its own longer timeout fires. It also
+  covers only one candidate: a configured `agents.defaults.imageModel.fallbacks`
+  list gives each fallback its own fresh inner budget, so a slow first
+  candidate can still leave later fallbacks cut off by this same grace.
 - The 90 second dynamic-tool default.
 
 This watchdog is the outer dynamic `item/tool/call` budget. Provider-specific

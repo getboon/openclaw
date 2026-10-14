@@ -377,9 +377,9 @@ describe("buildAfterToolCallCapture", () => {
     expect(capture?.tags.error_kind).toBe("timeout");
   });
 
-  // The downgrade is scoped to the image tool only — it is the only producer
-  // of a "timeout" errorKind there today, but another tool's timeout is a
-  // different failure mode and must still page until it has its own review.
+  // The downgrade is scoped to the image tool only — another tool's
+  // "timeout" (e.g. sessions_send) is a different failure mode and must
+  // still page until it has its own review.
   it("still captures a non-image tool's timeout as an exception", () => {
     const capture = buildAfterToolCallCapture(
       {

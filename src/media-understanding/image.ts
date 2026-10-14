@@ -551,9 +551,13 @@ async function withImageDescriptionTimeout<T>(params: {
         // before this race begins — so the SDK's own timeout error can win
         // the race and escape unclassified as a plain error instead of
         // ImageDescriptionTimeoutError. Normalize a rejection landing in the
-        // last stretch of the budget into our own timeout error; anything
-        // earlier is a genuine, unrelated provider error and passes through.
-        if (Date.now() - raceStartedAtMs >= timeoutMs - providerTimeoutRaceToleranceMs(timeoutMs)) {
+        // last stretch of the budget into our own timeout error. An error
+        // carrying an HTTP status code is excluded even then: that means a
+        // response actually came back (auth/rate-limit/server error), which
+        // is never a timeout no matter when it lands.
+        const nearDeadline =
+          Date.now() - raceStartedAtMs >= timeoutMs - providerTimeoutRaceToleranceMs(timeoutMs);
+        if (nearDeadline && !hasHttpStatusCode(err)) {
           params.controller.abort();
           throw params.createTimeoutError();
         }
@@ -586,6 +590,21 @@ function providerTimeoutRaceToleranceMs(timeoutMs: number): number {
     PROVIDER_TIMEOUT_RACE_TOLERANCE_MAX_MS,
     Math.ceil(timeoutMs * PROVIDER_TIMEOUT_RACE_TOLERANCE_RATIO),
   );
+}
+
+// A request that never completed (timeout, abort, connection drop) carries
+// no HTTP status; a request that did get a response — even an error one,
+// like 401/429/500 — does, on every REST-style SDK this codebase targets.
+// That makes "has a status" a reliable, SDK-agnostic signal that a rejection
+// is a real response and not a timeout, without needing to enumerate every
+// provider's own timeout error class name.
+function hasHttpStatusCode(err: unknown): boolean {
+  if (!err || typeof err !== "object") {
+    return false;
+  }
+  const record = err as Record<string, unknown>;
+  const status = record.status ?? record.statusCode;
+  return typeof status === "number" && Number.isFinite(status);
 }
 
 // Remaining ms until `deadlineAtMs`, or undefined when the call is unbounded

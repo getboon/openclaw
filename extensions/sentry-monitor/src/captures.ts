@@ -266,9 +266,9 @@ export function buildAfterToolCallCapture(
   }
   // The image tool's vision-model request exhausting its configured
   // timeout is a routine external latency outcome, not a host defect —
-  // downgrade instead of paging. Scoped to the image tool only (it is the
-  // only producer of a "timeout" errorKind there today), so every other
-  // tool's "timeout" still reports as a full exception.
+  // downgrade instead of paging. Scoped to the image tool only: other
+  // producers of a "timeout" errorKind (e.g. sessions_send) are a different
+  // failure mode and still report as a full exception.
   if (event.toolName === "image" && event.errorKind === "timeout") {
     return {
       kind: "message",

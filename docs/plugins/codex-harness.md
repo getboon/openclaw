@@ -626,7 +626,11 @@ outer Codex watchdog for this tool adds a 30 second grace on top of that
 inner budget, but not on top of a per-image-model `timeoutSeconds`
 override — raise the capability-level `tools.media.image.timeoutSeconds`
 to match a longer override in use, or this watchdog can still cut that
-model's calls off first. Dynamic tool budgets are
+model's calls off first. The watchdog also covers only one candidate: a
+configured `agents.defaults.imageModel.fallbacks` list gives each
+fallback its own fresh inner budget, so a slow first candidate can still
+leave later fallbacks cut off by this same outer grace. Dynamic tool
+budgets are
 capped at 600000 ms. On timeout, OpenClaw aborts the tool signal
 where supported and returns a failed dynamic-tool response to Codex so the turn
 can continue instead of leaving the session in `processing`.
