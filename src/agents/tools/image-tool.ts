@@ -19,6 +19,7 @@ import {
   getMediaUnderstandingProvider,
 } from "../../media-understanding/provider-registry.js";
 import { resolveTimeoutMs } from "../../media-understanding/resolve.js";
+import { isLocalMediaPathNotAllowedError } from "../../media/local-media-access.js";
 import {
   classifyMediaReferenceSource,
   normalizeMediaReferenceSource,
@@ -993,6 +994,7 @@ export function createImageTool(options?: {
           options?.workspaceDir,
           {
             workspaceOnly: options?.fsPolicy?.workspaceOnly === true,
+            rootExpansionAllowed: options?.fsPolicy?.rootExpansionAllowed === true,
             cfg: options?.config,
             channelId: options?.agentChannel ?? options?.currentChannelId,
             accountId: options?.agentAccountId,
@@ -1052,6 +1054,25 @@ export function createImageTool(options?: {
               details: {
                 error: "image_too_large",
                 image: imageReference,
+              },
+            };
+          }
+          // A blocked path is a policy outcome, not a host defect: return a
+          // denial result the model can act on instead of throwing. `denied`
+          // routes this through classifyToolCallErrorKind as "denied" so the
+          // after_tool_call Sentry capture drops it instead of paging.
+          if (isLocalMediaPathNotAllowedError(err)) {
+            const imageReference = isDataUrl ? "the provided data URL image" : imageRawInput;
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Cannot read ${imageReference}: that path is outside the directories this agent may read media from. Write the file under the workspace and reference it again.`,
+                },
+              ],
+              details: {
+                error: "media_path_not_allowed",
+                denied: true,
               },
             };
           }

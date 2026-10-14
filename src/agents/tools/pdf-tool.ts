@@ -12,6 +12,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { complete } from "../../llm/stream.js";
 import type { Context } from "../../llm/types.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
+import { isLocalMediaPathNotAllowedError } from "../../media/local-media-access.js";
 import {
   classifyMediaReferenceSource,
   normalizeMediaReferenceSource,
@@ -716,22 +717,46 @@ export function createPdfTool(options?: {
           options?.workspaceDir,
           {
             workspaceOnly: options?.fsPolicy?.workspaceOnly === true,
+            rootExpansionAllowed: options?.fsPolicy?.rootExpansionAllowed === true,
           },
           [resolvedPathInfo.resolved],
         );
 
-        const media = sandboxConfig
-          ? await loadWebMediaRaw(resolvedPathInfo.resolved, {
-              maxBytes,
-              sandboxValidated: true,
-              readFile: createSandboxBridgeReadFile({ sandbox: sandboxConfig, maxBytes }),
-            })
-          : await loadWebMediaRaw(resolvedPathInfo.resolved, {
-              maxBytes,
-              localRoots,
-              ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
-              ssrfPolicy: remoteMediaSsrfPolicy,
-            });
+        let media: Awaited<ReturnType<typeof loadWebMediaRaw>>;
+        try {
+          media = sandboxConfig
+            ? await loadWebMediaRaw(resolvedPathInfo.resolved, {
+                maxBytes,
+                sandboxValidated: true,
+                readFile: createSandboxBridgeReadFile({ sandbox: sandboxConfig, maxBytes }),
+              })
+            : await loadWebMediaRaw(resolvedPathInfo.resolved, {
+                maxBytes,
+                localRoots,
+                ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
+                ssrfPolicy: remoteMediaSsrfPolicy,
+              });
+        } catch (err) {
+          // A blocked path is a policy outcome, not a host defect: return a
+          // denial result the model can act on instead of throwing. `denied`
+          // routes this through classifyToolCallErrorKind as "denied" so the
+          // after_tool_call Sentry capture drops it instead of paging.
+          if (isLocalMediaPathNotAllowedError(err)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Cannot read ${pdfRaw}: that path is outside the directories this agent may read media from. Write the file under the workspace and reference it again.`,
+                },
+              ],
+              details: {
+                error: "media_path_not_allowed",
+                denied: true,
+              },
+            };
+          }
+          throw err;
+        }
 
         if (media.kind !== "document") {
           // Check MIME type more specifically

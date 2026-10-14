@@ -60,7 +60,7 @@ function createModelRegistryStub(resolve: (provider: string, modelId: string) =>
 }
 
 describe("resolveMediaToolLocalRoots", () => {
-  it("does not widen default local roots from media sources", () => {
+  it("does not widen default local roots from media sources without rootExpansionAllowed", () => {
     const stateDir = path.join("/tmp", "openclaw-media-tool-roots-state");
     const picturesDir =
       process.platform === "win32" ? "C:\\Users\\peter\\Pictures" : "/Users/peter/Pictures";
@@ -81,6 +81,43 @@ describe("resolveMediaToolLocalRoots", () => {
     expect(normalizedRoots).not.toContain(normalizeHostPath(picturesDir));
     expect(normalizedRoots).not.toContain(normalizeHostPath(moviesDir));
     expect(normalizedRoots).not.toContain(normalizeHostPath("/"));
+  });
+
+  it("widens to a media source's own directory when rootExpansionAllowed is true", () => {
+    // Mirrors the outbound send path: an agent already permitted to read host
+    // files outside its workspace must be able to open a file it just wrote
+    // (e.g. a /tmp page render) through a media tool, not just through MEDIA:.
+    const stateDir = path.join("/tmp", "openclaw-media-tool-roots-state-expansion");
+    const picturesDir =
+      process.platform === "win32" ? "C:\\Users\\peter\\Pictures" : "/Users/peter/Pictures";
+
+    const roots = withEnv({ OPENCLAW_STATE_DIR: stateDir }, () =>
+      resolveMediaToolLocalRoots(
+        path.join(stateDir, "workspace-agent"),
+        { rootExpansionAllowed: true },
+        [path.join(picturesDir, "photo.png")],
+      ),
+    );
+
+    const normalizedRoots = roots.map(normalizeHostPath);
+    expect(normalizedRoots).toContain(normalizeHostPath(picturesDir));
+  });
+
+  it("keeps workspaceOnly authoritative over rootExpansionAllowed", () => {
+    const stateDir = path.join("/tmp", "openclaw-media-tool-roots-state-workspace-only");
+    const workspaceDir = path.join(stateDir, "workspace-agent");
+    const picturesDir =
+      process.platform === "win32" ? "C:\\Users\\peter\\Pictures" : "/Users/peter/Pictures";
+
+    const roots = withEnv({ OPENCLAW_STATE_DIR: stateDir }, () =>
+      resolveMediaToolLocalRoots(
+        workspaceDir,
+        { workspaceOnly: true, rootExpansionAllowed: true },
+        [path.join(picturesDir, "photo.png")],
+      ),
+    );
+
+    expect(roots.map(normalizeHostPath)).toEqual([normalizeHostPath(workspaceDir)]);
   });
 
   it("keeps channel inbound attachment roots separate from local roots", () => {

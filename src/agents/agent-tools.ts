@@ -86,7 +86,11 @@ import {
   EXEC_TOOL_DISPLAY_SUMMARY,
   PROCESS_TOOL_DISPLAY_SUMMARY,
 } from "./tool-description-presets.js";
-import { createToolFsPolicy, resolveToolFsConfig } from "./tool-fs-policy.js";
+import {
+  createToolFsPolicy,
+  resolveEffectiveToolFsRootExpansionAllowed,
+  resolveToolFsConfig,
+} from "./tool-fs-policy.js";
 import { resolveToolLoopDetectionConfig } from "./tool-loop-detection-config.js";
 import { buildDeclaredToolAllowlistContext } from "./tool-policy-declared-context.js";
 import { isToolAllowedByPolicies } from "./tool-policy-match.js";
@@ -694,8 +698,16 @@ export function createOpenClawCodingTools(options?: {
   options?.recordToolPrepStage?.("tool-policy");
   const execConfig = resolveExecConfig({ cfg: options?.config, agentId });
   const fsConfig = resolveToolFsConfig({ cfg: options?.config, agentId });
+  const fsWorkspaceOnly = isMemoryFlushRun || fsConfig.workspaceOnly === true;
   const fsPolicy = createToolFsPolicy({
-    workspaceOnly: isMemoryFlushRun || fsConfig.workspaceOnly,
+    workspaceOnly: fsWorkspaceOnly,
+    // Media tools reuse this to decide whether they may widen their read
+    // allowlist to a referenced file's own directory (e.g. an agent-rendered
+    // /tmp crop) instead of failing closed — mirrors the outbound send path's
+    // getAgentScopedMediaLocalRootsForSources gate.
+    rootExpansionAllowed:
+      !fsWorkspaceOnly &&
+      resolveEffectiveToolFsRootExpansionAllowed({ cfg: options?.config, agentId }),
   });
   const sandboxRoot = sandbox?.workspaceDir;
   const sandboxFsBridge = sandbox?.fsBridge;
