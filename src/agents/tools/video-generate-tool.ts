@@ -636,6 +636,9 @@ async function loadReferenceAssets(params: {
         : await loadWebMedia(resolvedPath ?? resolvedInput, {
             maxBytes: params.maxBytes,
             localRoots,
+            // Lets a relative ref resolve against the agent workspace instead of
+            // the gateway process cwd, matching the image tool (ENG-21407).
+            ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
             ssrfPolicy: params.ssrfPolicy,
           });
     if (media.kind !== params.expectedKind) {
