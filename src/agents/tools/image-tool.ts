@@ -634,6 +634,30 @@ type ImageSandboxConfig = {
   bridge: SandboxFsBridge;
 };
 
+// `ImageDescriptionTimeoutError` is checked by stable `.name`, not
+// `instanceof`: media-understanding/image.ts is only ever reached through
+// the lazy image-runtime.ts facade, so importing its class here would defeat
+// that. A configured fallback list also wraps the original error one or two
+// `.cause` hops down (FailoverError, then FallbackSummaryError when more
+// than one candidate is configured) before it reaches `runImagePrompt`, so
+// this walks the chain instead of checking a fixed depth.
+const IMAGE_DESCRIPTION_TIMEOUT_ERROR_NAME = "ImageDescriptionTimeoutError";
+const IMAGE_DESCRIPTION_TIMEOUT_CAUSE_CHAIN_LIMIT = 5;
+
+function isImageDescriptionTimeout(err: unknown): boolean {
+  let current: unknown = err;
+  for (let depth = 0; depth < IMAGE_DESCRIPTION_TIMEOUT_CAUSE_CHAIN_LIMIT; depth += 1) {
+    if (!(current instanceof Error)) {
+      return false;
+    }
+    if (current.name === IMAGE_DESCRIPTION_TIMEOUT_ERROR_NAME) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
+
 async function runImagePrompt(params: {
   cfg?: OpenClawConfig;
   agentDir: string;
@@ -1092,16 +1116,44 @@ export function createImageTool(options?: {
       }
 
       // MARK: - Run image prompt with all loaded images
-      const result = await runImagePrompt({
-        cfg: options?.config,
-        agentDir,
-        authStore: options?.authProfileStore,
-        imageModelConfig,
-        modelOverride,
-        prompt: promptRaw,
-        images: loadedImages.map((img) => ({ buffer: img.buffer, mimeType: img.mimeType })),
-        workspaceDir: options?.workspaceDir,
-      });
+      let result: Awaited<ReturnType<typeof runImagePrompt>>;
+      try {
+        result = await runImagePrompt({
+          cfg: options?.config,
+          agentDir,
+          authStore: options?.authProfileStore,
+          imageModelConfig,
+          modelOverride,
+          prompt: promptRaw,
+          images: loadedImages.map((img) => ({ buffer: img.buffer, mimeType: img.mimeType })),
+          workspaceDir: options?.workspaceDir,
+        });
+      } catch (err) {
+        // A vision model that doesn't respond within its configured budget
+        // is a routine external latency outcome, not a host defect — return
+        // a result the model can retry or narrow instead of letting the raw
+        // timeout error end the turn. `status: "timeout"` routes this
+        // through classifyToolCallErrorKind as "timeout" so the
+        // after_tool_call Sentry capture downgrades it to a warning instead
+        // of paging.
+        if (isImageDescriptionTimeout(err)) {
+          const imageCountNote =
+            loadedImages.length > 1 ? ` for ${loadedImages.length} images` : "";
+          return {
+            content: [
+              {
+                type: "text",
+                text: `The vision model did not respond in time${imageCountNote}. Retry the request, or narrow it to a single sheet or a cropped region if the source is a large, dense plan set.`,
+              },
+            ],
+            details: {
+              error: "image_description_timeout",
+              status: "timeout",
+            },
+          };
+        }
+        throw err;
+      }
 
       const imageDetails =
         loadedImages.length === 1

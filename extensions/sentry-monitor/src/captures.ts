@@ -264,6 +264,22 @@ export function buildAfterToolCallCapture(
       extra,
     };
   }
+  // The image tool's vision-model request exhausting its configured
+  // timeout is a routine external latency outcome, not a host defect —
+  // downgrade instead of paging. Scoped to the image tool only: other
+  // producers of a "timeout" errorKind (e.g. sessions_send) are a different
+  // failure mode and still report as a full exception.
+  if (event.toolName === "image" && event.errorKind === "timeout") {
+    return {
+      kind: "message",
+      level: "warning",
+      message: event.error,
+      tags,
+      fingerprint,
+      contexts,
+      extra,
+    };
+  }
   // A validation/argument-preparation rejection is a model-input problem, not
   // a host exception, but it can still signal a real schema mismatch — so
   // downgrade to a non-paging warning instead of dropping it outright.
