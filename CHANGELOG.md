@@ -2,6 +2,18 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.34-boon.8
+
+Media tools now find the files agents just wrote, and routine tool failures stop paging Sentry.
+
+- **#292:** relative media/PDF paths (e.g. a file the agent saved into a workspace subfolder) now resolve against the agent workspace in `pdf`, `image_generate`, `video_generate`, and `music_generate`, instead of the gateway process cwd, so they are no longer rejected as "not under an allowed directory". The image tool's duplicate inline resolution was removed in favor of the loader's. The `message` tool's channel plugins still drop `workspaceDir` and are tracked separately.
+- **#289:** `image`, `pdf`, `image_generate`, `video_generate`, and `music_generate` can now read agent-rendered files outside the default roots (e.g. `/tmp` crops) when the agent is permitted host reads outside its workspace, matching the outbound `MEDIA:` path; `workspaceOnly` or read-denied agents are unchanged. A blocked path now returns a `denied` tool result the model can act on instead of a raw error that paged Sentry.
+- **#293:** the image tool's default vision timeout is raised 60s → 150s (above the LLM gateway's 120s fallback-chain budget), with one shared deadline across setup and the provider request. A timeout now returns a graceful `status: "timeout"` result with retry guidance, and sentry-monitor downgrades it to a warning for the image tool. The Codex dynamic-tool watchdog mirrors the raise.
+- **#291:** sentry-monitor no longer pages on ordinary non-zero `exec` exit codes (a `grep` finding nothing, a failing test); only shell lookup failures (126/127) remain exceptions, now fingerprinted per missing binary. The runtime Docker image also installs `unzip`.
+- **#288:** `memory_search` no longer pauses and pages Sentry while the index is still being built (a "missing" index identity); only a real "mismatched" embedding provider pauses it.
+- **#294:** test-only regression coverage that the cron delivery-target guard rejects a directory-less channel's unknown target end to end.
+- Base = `2026.6.34-boon.7`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.34-boon.8` in lockstep. No source or dependency change in those three plugins; bundled-plugin source changes (codex, memory-core, sentry-monitor) ship inside the gateway.
+
 ## 2026.6.34-boon.7
 
 Large images are no longer rejected outright; a decode budget separate from the output budget lets big sources downscale instead of failing.
