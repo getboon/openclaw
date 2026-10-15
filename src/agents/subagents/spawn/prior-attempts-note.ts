@@ -1,4 +1,4 @@
-import type { SubagentRunRecord } from "../registry/subagent-registry.types";
+import type { SubagentRunRecord } from "../registry/subagent-registry.types.js";
 
 /**
  * ENG-21265 — Component A (checkpoint awareness). Builds the factual note injected
@@ -13,6 +13,25 @@ import type { SubagentRunRecord } from "../registry/subagent-registry.types";
 
 const DEFAULT_MAX = 5;
 
+/**
+ * Formats the most-recent runs as `'name' (status), ...`. Shared by the resume note
+ * (Component A) and the consecutive-failure-cap message (Component B) so the two stay
+ * consistent.
+ */
+export function formatRunEntries(
+  runs: readonly SubagentRunRecord[],
+  max: number = DEFAULT_MAX,
+): string {
+  return runs
+    .slice(-max)
+    .map((r) => {
+      const name = r.taskName?.trim() ? r.taskName : "(unlabeled)";
+      const status = r.execution?.outcome?.status ?? "unknown";
+      return `'${name}' (${status})`;
+    })
+    .join(", ");
+}
+
 export function buildPriorAttemptsNote(
   runs: readonly SubagentRunRecord[],
   opts: { inherited: boolean; max?: number },
@@ -26,15 +45,12 @@ export function buildPriorAttemptsNote(
 
   const max = opts.max ?? DEFAULT_MAX;
   const recent = runs.slice(-max);
-  const parts = recent.map((r) => {
-    const name = r.taskName?.trim() ? r.taskName : "(unlabeled)";
-    const status = r.execution?.outcome?.status ?? "unknown";
-    return `'${name}' (${status})`;
-  });
+  const count = recent.length;
+  const noun = count === 1 ? "prior spawn" : "prior spawns";
 
   return (
-    `This workspace has output from ${recent.length} prior spawn(s) this session: ` +
-    `${parts.join(", ")}. Check for reusable output before redoing work; a run marked ` +
-    `'ok' is a finished deliverable, while 'error'/'timeout' may have left partial output.`
+    `This workspace has output from ${count} ${noun} this session: ` +
+    `${formatRunEntries(recent, max)}. Check for reusable output before redoing work; a run ` +
+    `marked 'ok' is a finished deliverable, while 'error'/'timeout' may have left partial output.`
   );
 }

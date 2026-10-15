@@ -1,9 +1,15 @@
 import { describe, expect, test } from "vitest";
-import type { SubagentRunRecord } from "../registry/subagent-registry.types";
-import { shouldBlockSpawn, trailingFailureStreak } from "./consecutive-failure-cap";
+import type { SubagentRunRecord } from "../registry/subagent-registry.types.js";
+import {
+  evaluateConsecutiveFailureCap,
+  shouldBlockSpawn,
+  trailingFailureStreak,
+} from "./consecutive-failure-cap.js";
 
 const r = (status: string): SubagentRunRecord =>
   ({ execution: { outcome: { status } } }) as unknown as SubagentRunRecord;
+const named = (taskName: string, status: string): SubagentRunRecord =>
+  ({ taskName, execution: { outcome: { status } } }) as unknown as SubagentRunRecord;
 const noOutcome = (): SubagentRunRecord => ({ execution: {} }) as unknown as SubagentRunRecord;
 
 describe("trailingFailureStreak", () => {
@@ -48,5 +54,42 @@ describe("shouldBlockSpawn", () => {
 
   test("does not block below the cap", () => {
     expect(shouldBlockSpawn(2, 3)).toBe(false);
+  });
+});
+
+describe("evaluateConsecutiveFailureCap", () => {
+  test("returns null when under the cap", () => {
+    expect(evaluateConsecutiveFailureCap({ runs: [r("timeout"), r("ok")], cap: 3 })).toBeNull();
+  });
+
+  test("returns null when cap is unset", () => {
+    expect(
+      evaluateConsecutiveFailureCap({
+        runs: [r("timeout"), r("timeout"), r("timeout")],
+        cap: undefined,
+      }),
+    ).toBeNull();
+  });
+
+  test("returns a user-facing message naming the attempts when blocked", () => {
+    const msg = evaluateConsecutiveFailureCap({
+      runs: [named("pass3", "timeout"), named("pass3_retry", "error")],
+      cap: 2,
+    });
+    expect(msg).not.toBeNull();
+    expect(msg!).toContain("pass3");
+    expect(msg!).toContain("timeout");
+    expect(msg!).toContain("pass3_retry");
+    expect(msg!).toContain("error");
+    // Must instruct the agent to check in with the user rather than retry.
+    expect(msg!.toLowerCase()).toMatch(/ask the user|check in with the user/);
+    expect(msg!.toLowerCase()).toMatch(/do not .*(spawn|retry)|stop/);
+  });
+
+  test("lists at most the 5 most recent attempts in the message", () => {
+    const runs = Array.from({ length: 7 }, (_, i) => named(`r${i}`, "timeout"));
+    const msg = evaluateConsecutiveFailureCap({ runs, cap: 3 })!;
+    expect(msg).toContain("r6");
+    expect(msg).not.toContain("r1");
   });
 });

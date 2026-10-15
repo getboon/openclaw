@@ -26,12 +26,14 @@ import {
   summarizeSpawnError,
 } from "../../spawn-pipeline.js";
 import { getGatewayToolCallerIdentity } from "../../tools/gateway-caller-context.js";
+import { listSubagentRunsForRequester } from "../registry/subagent-registry-read.js";
 import {
   completeCollectorLaunchCleanup,
   settleFailedQueuedSubagentLaunch,
   startQueuedSubagentRun,
 } from "../registry/subagent-registry.js";
 import { activateSwarmRun, removeQueuedSwarmRun } from "../swarm/swarm-scheduler.js";
+import { evaluateConsecutiveFailureCap } from "./consecutive-failure-cap.js";
 import { readParentExecutionIdentity } from "./execution-identity-spawn-context.js";
 import {
   materializeSubagentAttachments,
@@ -143,6 +145,19 @@ export async function spawnSubagentDirect(
     },
     childIdem,
   } = requestResolution.resolved;
+  // ENG-21265 — Component B: once this parent session has hit the consecutive-failure cap,
+  // refuse the spawn before any side effect so the agent checks in with the user instead of
+  // silently re-spawning across completion-wake turns. Keyed on the parent session (not the
+  // turn), reusing the live registry read that already backs settle-wake. Unset cap = no-op.
+  const capError = requesterSessionKey
+    ? evaluateConsecutiveFailureCap({
+        runs: listSubagentRunsForRequester(requesterSessionKey, { requesterAgentId }),
+        cap: cfg.agents?.defaults?.subagents?.maxConsecutiveFailures,
+      })
+    : null;
+  if (capError) {
+    return { status: "error", error: capError };
+  }
   let modelApplied = false;
   let threadBindingReady = false;
   let hasBoundThreadDeliveryOrigin = false;

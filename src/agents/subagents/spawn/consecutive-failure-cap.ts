@@ -1,4 +1,5 @@
-import type { SubagentRunRecord } from "../registry/subagent-registry.types";
+import type { SubagentRunRecord } from "../registry/subagent-registry.types.js";
+import { formatRunEntries } from "./prior-attempts-note.js";
 
 /**
  * ENG-21265 — Component B (bounded retries). Pure decision helpers for the
@@ -36,4 +37,29 @@ export function shouldBlockSpawn(streak: number, cap: number | undefined): boole
     return false;
   }
   return streak >= cap;
+}
+
+/**
+ * Admission decision for a sub-agent spawn. Returns a user-facing error message when the
+ * parent session has hit the consecutive-failure cap (so the caller refuses the spawn and
+ * the agent surfaces the message to the user), or `null` when the spawn may proceed.
+ *
+ * `runs` is the parent session's prior child runs (oldest→newest), as returned by
+ * `listSubagentRunsForRequester(requesterSessionKey)`.
+ */
+export function evaluateConsecutiveFailureCap(params: {
+  runs: readonly SubagentRunRecord[];
+  cap: number | undefined;
+  max?: number;
+}): string | null {
+  const streak = trailingFailureStreak(params.runs);
+  if (!shouldBlockSpawn(streak, params.cap)) {
+    return null;
+  }
+  const attempts = formatRunEntries(params.runs, params.max ?? 5);
+  return (
+    `Sub-agent spawn blocked: ${streak} attempts in a row failed this session ` +
+    `(${attempts}). Stop here — tell the user what was attempted and how each ended, then ` +
+    `ask the user whether to keep trying or review it together. Do not spawn again automatically.`
+  );
 }

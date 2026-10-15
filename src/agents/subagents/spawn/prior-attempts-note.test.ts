@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import type { SubagentRunRecord } from "../registry/subagent-registry.types";
-import { buildPriorAttemptsNote } from "./prior-attempts-note";
+import type { SubagentRunRecord } from "../registry/subagent-registry.types.js";
+import { buildPriorAttemptsNote } from "./prior-attempts-note.js";
 
 // Minimal record builder: outcome is nested under `execution` on the real type.
 const run = (taskName: string | undefined, status: string): SubagentRunRecord =>
