@@ -432,6 +432,9 @@ See [Configuration reference](/gateway/configuration-reference) and
 <ParamField path="agents.defaults.subagents.announceTimeoutMs" type="number" default="120000">
   Per-call timeout for gateway `agent` announce delivery attempts. Values are positive integer milliseconds and are clamped to the platform-safe timer maximum. Transient retries can make the total announce wait longer than one configured timeout.
 </ParamField>
+<ParamField path="agents.defaults.subagents.maxConsecutiveFailures" type="integer">
+  Backstop for autonomous re-spawn loops. After this many consecutive failed (error, timeout, or unknown) child runs for one requester session, the next `sessions_spawn` is refused with a message telling the agent to report what was attempted and ask the user before continuing. A successful child run or a new user message restarts the count; completion wakes and parallel collector/swarm children do not. Unset or `0` disables the cap (default).
+</ParamField>
 
 If the requester session is sandboxed, `sessions_spawn` rejects targets
 that would run unsandboxed.
@@ -476,6 +479,7 @@ worker sub-sub-agents.
         maxChildrenPerAgent: 5, // max active children per agent session (default: 5, range 1-20)
         maxConcurrent: 8, // global concurrency lane cap (default: 8)
         runTimeoutSeconds: 900, // default timeout for sessions_spawn (0 = no timeout)
+        maxConsecutiveFailures: 3, // refuse further spawns after 3 failed children in a row (default: off)
         announceTimeoutMs: 120000, // per-call gateway announce timeout
       },
     },

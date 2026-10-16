@@ -1,3 +1,4 @@
+import type { InputProvenance } from "../../../sessions/input-provenance.js";
 import type { FastMode } from "../../../shared/fast-mode.js";
 import type {
   SpawnSubagentContextMode,
@@ -60,6 +61,13 @@ export type SpawnSubagentContext = {
   inheritedToolAllowlist?: string[];
   inheritedToolDenylist?: string[];
   requesterRunId?: string;
+  /**
+   * Origin of the requester turn that called sessions_spawn. A user turn — unset (ordinary
+   * channel/chat messages carry no marker) or `external_user` — restarts the
+   * consecutive-failure streak; completion wakes (`inter_session`) and internal handoffs
+   * (`internal_system`) keep counting.
+   */
+  requesterInputProvenanceKind?: InputProvenance["kind"];
 };
 
 export type SpawnSubagentResult = {

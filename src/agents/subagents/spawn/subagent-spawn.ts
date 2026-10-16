@@ -38,6 +38,7 @@ import {
   type SubagentAttachmentReceiptFile,
 } from "./subagent-attachments.js";
 import { resolveSubagentSpawnAcceptedNote } from "./subagent-spawn-accepted-note.js";
+import { resolveSpawnFailureBackstop } from "./subagent-spawn-backstop.js";
 import { resolveSubagentChildPlan } from "./subagent-spawn-child-plan.js";
 import {
   cleanupFailedSpawnBeforeAgentStart,
@@ -149,6 +150,11 @@ export async function spawnSubagentDirect(
   let childRunId: string = childIdem;
   let swarmReservationPending = reservationPending;
   try {
+    // Consecutive-failure backstop, inside `try` so `finally` releases the reservations.
+    const backstopError = resolveSpawnFailureBackstop({ cfg, ctx, requesterAgentId });
+    if (backstopError) {
+      return { status: "error", error: backstopError };
+    }
     const childPlan = await resolveSubagentChildPlan({
       request: params,
       ctx,

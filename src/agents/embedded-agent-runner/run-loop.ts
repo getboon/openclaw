@@ -505,7 +505,7 @@ export async function runPreparedEmbeddedLoop(
         advanceRateLimitAuthProfile: failoverRetryController.advanceRateLimitAuthProfile,
         traceAttempts,
         suspendForFailure,
-        suspensionSessionId: sessionPromptState.sessionId ?? params.sessionId,
+        sessionPromptState,
         agentDir,
         isProbeSession,
       });

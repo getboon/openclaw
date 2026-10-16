@@ -13,6 +13,7 @@ import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolveSnakeCaseParamKey } from "../../param-key.js";
 import { parseAgentSessionKey } from "../../routing/session-key.js";
+import type { InputProvenance } from "../../sessions/input-provenance.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import {
   findAcpUnsupportedInheritedToolAllow,
@@ -289,6 +290,8 @@ export function createSessionsSpawnTool(
     /** Explicit agent ID override for cron/hook sessions where session key parsing may not work. */
     requesterAgentIdOverride?: string;
     requesterRunId?: string;
+    /** Origin of the requester turn; a new user message restarts the failure backstop. */
+    requesterInputProvenanceKind?: InputProvenance["kind"];
     swarmCollector?: boolean;
     /** Backend-derived parent incarnation; never sourced from model arguments. */
     expectedParentSessionId?: string;
@@ -613,6 +616,7 @@ export function createSessionsSpawnTool(
             inheritedToolAllowlist: opts?.inheritedToolAllowlist,
             inheritedToolDenylist: opts?.inheritedToolDenylist,
             requesterRunId: opts?.requesterRunId,
+            requesterInputProvenanceKind: opts?.requesterInputProvenanceKind,
           },
           parentExecutionIdentityToken,
         ),
