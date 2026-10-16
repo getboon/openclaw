@@ -30,9 +30,6 @@ import type { EmbeddedRunAttemptResult } from "./types.js";
 // Allow one immediate continuation plus one follow-up continuation before
 // surfacing the existing incomplete-turn error path.
 export const DEFAULT_REASONING_ONLY_RETRY_LIMIT = 2;
-// ENG-21265 — max continuations of a length-truncated turn. 0 = OFF (today's behavior:
-// deliver the partial with a truncation notice).
-export const DEFAULT_LENGTH_CONTINUATION_LIMIT = 0;
 export const DEFAULT_EMPTY_RESPONSE_RETRY_LIMIT = 1;
 const REASONING_ONLY_RETRY_INSTRUCTION =
   "The previous assistant turn recorded reasoning but did not produce a user-visible answer. Continue from that partial turn and produce the visible answer now. Do not restate the reasoning or restart from scratch.";

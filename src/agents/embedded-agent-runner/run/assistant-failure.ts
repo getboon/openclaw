@@ -31,6 +31,7 @@ import { createFailoverDecisionLogger } from "./failover-observation.js";
 import { resolveRunFailoverDecision } from "./failover-policy.js";
 import { shouldRetrySilentErrorAssistantTurn } from "./incomplete-turn-recovery.js";
 import type { RunEmbeddedAgentParams } from "./params.js";
+import type { createEmbeddedRunSessionPromptState } from "./session-prompt-state.js";
 import {
   isEmbeddedRunTerminalInterrupted,
   type EmbeddedRunTerminalState,
@@ -39,13 +40,14 @@ import type { EmbeddedRunAttemptResult } from "./types.js";
 
 const MAX_EMPTY_ERROR_RETRIES = 3;
 const MAX_SAME_MODEL_IDLE_TIMEOUT_RETRIES = 1;
-// ENG-21265 — how many times one run may retry a generation that was cut off mid-stream.
-export const MAX_STREAM_DROP_RESUMES = 3;
+// Autonomous retries of a generation cut off mid-stream, per run. One retry, then the existing
+// failure handling (and the sub-agent backstop) takes over so the user is asked before more work.
+const MAX_STREAM_DROP_RESUMES = 1;
 // A cut-off generation cannot be continued: a half-written tool call is unusable, and the
 // failed partial is not replayed to the provider. Very long single generations are the ones
 // providers drop, so ask for the same step again in smaller pieces rather than re-sending the
 // same giant call.
-export const STREAM_DROP_RETRY_INSTRUCTION =
+const STREAM_DROP_RETRY_INSTRUCTION =
   "Your previous step was cut off before it finished, most likely because it was very long. Nothing from that step was applied; everything before it is still in place. Redo that step, but split large output into several smaller tool calls (for example create a file, then add the rest in sections, or build a workbook part by part) so each call finishes quickly. If you were writing a long reply, put the bulk into a file and reply with a short summary.";
 
 // Generations cut off after the request was accepted but before the model finished: the
@@ -54,12 +56,29 @@ export const STREAM_DROP_RETRY_INSTRUCTION =
 const MID_STREAM_DROP_PATTERN =
   /stream ended before message_?stop|upstream error during stream|completed stream with an incomplete tool call/i;
 
+// Failure classes a cut-off retry may cover. A gateway "upstream error during stream" can wrap a
+// rate limit, overload, or auth failure; those keep their own handling.
+const STREAM_DROP_RETRYABLE_REASONS: ReadonlySet<FailoverReason | null> = new Set([
+  null,
+  "timeout",
+  "server_error",
+  "empty_response",
+  "no_error_details",
+  "unclassified",
+  "unknown",
+]);
+
+// The run's trace records every cut-off retry, so it doubles as the per-run retry count.
+function countStreamDropRetries(traceAttempts: readonly TraceAttempt[]): number {
+  return traceAttempts.filter((trace) => trace.result === "stream_drop_resume").length;
+}
+
 /**
  * True when the assistant turn failed because its generation was cut off mid-stream. The
  * cut-off turn never completed, so none of its tool calls ran; the transcript still holds the
  * completed work before it. Retrying on the same model therefore redoes only the cut-off step.
  */
-export function isMidStreamDropAssistantError(
+function isMidStreamDropAssistantError(
   message: Pick<AssistantMessage, "stopReason" | "errorMessage"> | null | undefined,
 ): boolean {
   return (
@@ -76,7 +95,6 @@ type EmbeddedRunAssistantFailureOutcome = {
   emptyErrorRetries: number;
   overloadProfileRotations: number;
   sameModelIdleTimeoutRetries: number;
-  streamDropResumes: number;
   lastRetryFailoverReason: FailoverReason | null;
   preserveSameModelRateLimitRetryCount: boolean;
   assistantProfileFailureReason: AuthProfileFailureReason | null;
@@ -126,11 +144,13 @@ export async function handleEmbeddedAssistantFailure(input: {
   >[0]["advanceRateLimitAuthProfile"];
   traceAttempts: TraceAttempt[];
   suspendForFailure: (params: SessionSuspensionParams) => void;
-  suspensionSessionId: string;
+  // Current session identity (for suspension) and the hook to set the next attempt's prompt.
+  sessionPromptState: Pick<
+    ReturnType<typeof createEmbeddedRunSessionPromptState>,
+    "sessionId" | "activateInternalPrompt"
+  >;
   agentDir: string;
   isProbeSession: boolean;
-  streamDropResumes: number;
-  activateInternalPrompt: (prompt: string) => void;
 }): Promise<EmbeddedRunAssistantFailureOutcome> {
   const { aborted, idleTimedOut, promptError, timedOut, timedOutDuringCompaction } =
     projectAgentRunAttemptTerminal(input.attempt.terminal);
@@ -163,15 +183,19 @@ export async function handleEmbeddedAssistantFailure(input: {
     },
   );
   const replayUnsafeAssistantError = isReplayUnsafeAssistantError(input.attemptAssistant);
-  // ENG-21265 — a generation cut off mid-stream used to fall through to "proceed" whenever the
-  // attempt had run tools (not replay-safe), so the run failed and an outer fallback / parent
-  // re-spawn restarted the whole job — and re-sent the same giant call, which kept dropping.
-  // Retry on the same model instead, from the existing transcript (completed tool results are
-  // kept; the original prompt is not replayed), asking for the cut-off step in smaller pieces.
-  // Skipped when the attempt left delivery/media/async evidence that a fresh attempt would not
-  // carry over (hasAttemptTerminalState); today's handling applies then.
+  // A generation cut off mid-stream used to fall through to "proceed" whenever the attempt had
+  // run tools (not replay-safe), so the run failed and an outer fallback / parent re-spawn
+  // restarted the whole job — re-sending the same giant call, which kept dropping. Retry on the
+  // same model instead, from the existing transcript (completed tool results are kept; the
+  // original prompt is not replayed), asking for the cut-off step in smaller pieces. Skipped
+  // when the attempt left delivery/media/async evidence a fresh attempt would not carry over
+  // (hasAttemptTerminalState), and for rate-limit / overload / auth failures.
   if (
     !replayUnsafeAssistantError &&
+    !authFailure &&
+    !rateLimitFailure &&
+    !billingFailure &&
+    STREAM_DROP_RETRYABLE_REASONS.has(assistantFailoverReason) &&
     !hasAttemptTerminalState(input.attempt) &&
     !terminalInterrupted &&
     !signalOwnedInterruption &&
@@ -180,13 +204,13 @@ export async function handleEmbeddedAssistantFailure(input: {
     !idleTimedOut &&
     !promptError &&
     isMidStreamDropAssistantError(input.attemptAssistant) &&
-    input.streamDropResumes < MAX_STREAM_DROP_RESUMES
+    countStreamDropRetries(input.traceAttempts) < MAX_STREAM_DROP_RESUMES
   ) {
-    const streamDropResumes = input.streamDropResumes + 1;
-    input.activateInternalPrompt(STREAM_DROP_RETRY_INSTRUCTION);
+    const streamDropRetry = countStreamDropRetries(input.traceAttempts) + 1;
+    input.sessionPromptState.activateInternalPrompt(STREAM_DROP_RETRY_INSTRUCTION);
     log.warn(
       `[stream-drop-retry] generation cut off mid-stream; retrying same model in smaller steps ` +
-        `attempt=${streamDropResumes}/${MAX_STREAM_DROP_RESUMES} ` +
+        `attempt=${streamDropRetry}/${MAX_STREAM_DROP_RESUMES} ` +
         `provider=${input.attemptAssistant?.provider ?? input.provider} ` +
         `model=${input.attemptAssistant?.model ?? input.model} ` +
         `sessionKey=${input.runParams.sessionKey ?? input.runParams.sessionId}`,
@@ -199,7 +223,6 @@ export async function handleEmbeddedAssistantFailure(input: {
     });
     return buildOutcome(input, {
       action: "retry",
-      streamDropResumes,
       preserveSameModelRateLimitRetryCount: true,
       assistantProfileFailureReason: null,
     });
@@ -429,7 +452,7 @@ export async function handleEmbeddedAssistantFailure(input: {
       input.suspendForFailure({
         cfg: input.runParams.config,
         agentDir: input.agentDir,
-        sessionId: input.suspensionSessionId,
+        sessionId: input.sessionPromptState.sessionId ?? input.runParams.sessionId,
         reason: resolveSessionSuspensionReason(outcome.error.reason),
         failedProvider: outcome.error.provider ?? input.provider,
         failedModel: outcome.error.model ?? input.modelId,
@@ -457,7 +480,6 @@ function buildOutcome(
     overloadProfileRotations: override.overloadProfileRotations ?? input.overloadProfileRotations,
     sameModelIdleTimeoutRetries:
       override.sameModelIdleTimeoutRetries ?? input.sameModelIdleTimeoutRetries,
-    streamDropResumes: override.streamDropResumes ?? input.streamDropResumes,
     lastRetryFailoverReason: override.lastRetryFailoverReason ?? input.previousRetryFailoverReason,
     preserveSameModelRateLimitRetryCount: override.preserveSameModelRateLimitRetryCount ?? false,
     assistantProfileFailureReason: override.assistantProfileFailureReason,

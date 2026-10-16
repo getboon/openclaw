@@ -1,4 +1,4 @@
-// ENG-21265 — the consecutive-failure backstop wired into spawnSubagentDirect.
+// The consecutive-failure backstop wired into spawnSubagentDirect.
 import os from "node:os";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -21,7 +21,7 @@ function failedRun(requesterSessionKey: string, createdAt: number) {
   };
 }
 
-describe("sessions_spawn consecutive-failure backstop (ENG-21265)", () => {
+describe("sessions_spawn consecutive-failure backstop", () => {
   const callGatewayMock = vi.fn();
   const loadSessionStoreMock = vi.fn();
   const updateSessionStoreMock = vi.fn();
@@ -31,10 +31,12 @@ describe("sessions_spawn consecutive-failure backstop (ENG-21265)", () => {
   >["spawnSubagentDirect"];
 
   beforeAll(async () => {
-    vi.doMock("../registry/subagent-registry-read.js", async (importOriginal) => ({
-      ...(await importOriginal<typeof import("../registry/subagent-registry-read.js")>()),
+    // Only the registry reads the spawn graph uses: listSubagentRunsForRequester (the backstop)
+    // and getSubagentRunByChildSessionKey (ACP spawn admission).
+    vi.doMock("../registry/subagent-registry-read.js", () => ({
       listSubagentRunsForRequester: (key: string, opts?: unknown) =>
         listRunsForRequester(key, opts),
+      getSubagentRunByChildSessionKey: () => null,
     }));
     ({ spawnSubagentDirect } = await loadSubagentSpawnModuleForTest({
       callGatewayMock,
@@ -97,6 +99,29 @@ describe("sessions_spawn consecutive-failure backstop (ENG-21265)", () => {
       expect(result.status).toBe("accepted");
     },
   );
+
+  it("keeps counting failures across spawns within one user turn, and resets on the next", async () => {
+    const key = "agent:main:cap-same-turn";
+    const now = vi.spyOn(Date, "now");
+    try {
+      // Turn A starts its streak at t=1000.
+      now.mockReturnValue(1_000);
+      const turnA = { agentSessionKey: key, requesterTurnRunId: "turn-a" };
+      expect((await spawnSubagentDirect({ task: "pass 3" }, turnA)).status).toBe("accepted");
+
+      // Two children fail at t=2000/2001; a later spawn in the same turn is blocked.
+      listRunsForRequester.mockReturnValue([failedRun(key, 2_000), failedRun(key, 2_001)]);
+      now.mockReturnValue(3_000);
+      expect((await spawnSubagentDirect({ task: "pass 3 again" }, turnA)).status).toBe("error");
+
+      // A new user turn at t=4000 starts a fresh streak; the earlier failures no longer count.
+      now.mockReturnValue(4_000);
+      const turnB = { agentSessionKey: key, requesterTurnRunId: "turn-b" };
+      expect((await spawnSubagentDirect({ task: "new request" }, turnB)).status).toBe("accepted");
+    } finally {
+      now.mockRestore();
+    }
+  });
 
   it("does not reset the streak for an internal system re-dispatch", async () => {
     const key = "agent:main:cap-internal";

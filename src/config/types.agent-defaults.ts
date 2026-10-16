@@ -353,7 +353,7 @@ export type AgentDefaultsConfig = {
     /** Default run timeout in seconds for spawned sub-agents (0 = no timeout). */
     runTimeoutSeconds?: number;
     /**
-     * ENG-21265 — cap on consecutive failed sub-agent spawns per parent session before the
+     * Cap on consecutive failed sub-agent spawns per parent session before the
      * next spawn is blocked and the agent must check in with the user. Unset/0 = no cap.
      */
     maxConsecutiveFailures?: number;

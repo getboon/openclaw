@@ -4,85 +4,70 @@ import {
   evaluateConsecutiveFailureCap,
   getConsecutiveFailureStreakResetAt,
   markConsecutiveFailureStreakReset,
-  shouldBlockSpawn,
-  trailingFailureStreak,
 } from "./consecutive-failure-cap.js";
 
 const rec = (
-  status: string,
+  status: string | undefined,
   createdAt: number,
-  extra: Partial<Pick<SubagentRunRecord, "collect" | "swarmRunId">> = {},
+  extra: Partial<Pick<SubagentRunRecord, "collect" | "swarmRunId" | "taskName">> = {},
 ): SubagentRunRecord =>
-  ({ createdAt, execution: { outcome: { status } }, ...extra }) as unknown as SubagentRunRecord;
+  ({
+    createdAt,
+    execution: status === undefined ? {} : { outcome: { status } },
+    ...extra,
+  }) as unknown as SubagentRunRecord;
 
-const r = (status: string): SubagentRunRecord =>
-  ({ execution: { outcome: { status } } }) as unknown as SubagentRunRecord;
-const named = (taskName: string, status: string): SubagentRunRecord =>
-  ({ taskName, execution: { outcome: { status } } }) as unknown as SubagentRunRecord;
-const noOutcome = (): SubagentRunRecord => ({ execution: {} }) as unknown as SubagentRunRecord;
+// Runs in creation order: statuses[i] is created at time i + 1.
+const chain = (...statuses: (string | undefined)[]) => statuses.map((s, i) => rec(s, i + 1));
 
-describe("trailingFailureStreak", () => {
+const blocks = (runs: SubagentRunRecord[], cap: number | undefined, sinceMs?: number) =>
+  evaluateConsecutiveFailureCap({ runs, cap, sinceMs }) !== null;
+
+describe("evaluateConsecutiveFailureCap — streak", () => {
   test("counts trailing consecutive failures, stopping at a success", () => {
-    expect(trailingFailureStreak([r("ok"), r("timeout"), r("error")])).toBe(2);
+    expect(blocks(chain("ok", "timeout", "error"), 2)).toBe(true);
+    expect(blocks(chain("ok", "timeout", "error"), 3)).toBe(false);
   });
 
-  test("a trailing success means streak zero", () => {
-    expect(trailingFailureStreak([r("timeout"), r("ok")])).toBe(0);
+  test("a trailing success means no streak", () => {
+    expect(blocks(chain("timeout", "ok"), 1)).toBe(false);
   });
 
   test("unknown counts as a failure", () => {
-    expect(trailingFailureStreak([r("unknown"), r("timeout")])).toBe(2);
+    expect(blocks(chain("unknown", "timeout"), 2)).toBe(true);
   });
 
   test("a success in the middle breaks the streak", () => {
-    expect(trailingFailureStreak([r("timeout"), r("ok"), r("timeout")])).toBe(1);
+    expect(blocks(chain("timeout", "ok", "timeout"), 2)).toBe(false);
   });
 
-  test("empty list is zero", () => {
-    expect(trailingFailureStreak([])).toBe(0);
+  test("no runs never blocks", () => {
+    expect(blocks([], 1)).toBe(false);
   });
 
   test("a run without a terminal outcome does not extend the streak (in-flight safety)", () => {
-    expect(trailingFailureStreak([r("timeout"), noOutcome()])).toBe(0);
+    expect(blocks(chain("timeout", undefined), 1)).toBe(false);
   });
 });
 
-describe("shouldBlockSpawn", () => {
-  test("cap unset never blocks", () => {
-    expect(shouldBlockSpawn(99, undefined)).toBe(false);
+describe("evaluateConsecutiveFailureCap — cap", () => {
+  test("cap unset or zero never blocks", () => {
+    expect(blocks(chain("timeout", "timeout", "timeout"), undefined)).toBe(false);
+    expect(blocks(chain("timeout", "timeout", "timeout"), 0)).toBe(false);
   });
 
-  test("cap of zero never blocks (disabled)", () => {
-    expect(shouldBlockSpawn(99, 0)).toBe(false);
-  });
-
-  test("blocks at or above the cap", () => {
-    expect(shouldBlockSpawn(3, 3)).toBe(true);
-    expect(shouldBlockSpawn(4, 3)).toBe(true);
-  });
-
-  test("does not block below the cap", () => {
-    expect(shouldBlockSpawn(2, 3)).toBe(false);
-  });
-});
-
-describe("evaluateConsecutiveFailureCap", () => {
-  test("returns null when under the cap", () => {
-    expect(evaluateConsecutiveFailureCap({ runs: [r("timeout"), r("ok")], cap: 3 })).toBeNull();
-  });
-
-  test("returns null when cap is unset", () => {
-    expect(
-      evaluateConsecutiveFailureCap({
-        runs: [r("timeout"), r("timeout"), r("timeout")],
-        cap: undefined,
-      }),
-    ).toBeNull();
+  test("blocks at or above the cap, not below", () => {
+    expect(blocks(chain("timeout", "timeout", "timeout"), 3)).toBe(true);
+    expect(blocks(chain("timeout", "timeout", "timeout", "timeout"), 3)).toBe(true);
+    expect(blocks(chain("timeout", "timeout"), 3)).toBe(false);
   });
 
   test("returns a user-facing message naming the attempts when blocked", () => {
     const msg = evaluateConsecutiveFailureCap({
-      runs: [named("pass3", "timeout"), named("pass3_retry", "error")],
+      runs: [
+        rec("timeout", 1, { taskName: "pass3" }),
+        rec("error", 2, { taskName: "pass3_retry" }),
+      ],
       cap: 2,
     });
     expect(msg).not.toBeNull();
@@ -98,7 +83,7 @@ describe("evaluateConsecutiveFailureCap", () => {
   test("counts in creation order, not registry iteration order", () => {
     // Chronological: ok@1, timeout@2, timeout@3 → trailing streak 2.
     const runs = [rec("timeout", 3), rec("ok", 1), rec("timeout", 2)];
-    expect(evaluateConsecutiveFailureCap({ runs, cap: 2 })).not.toBeNull();
+    expect(blocks(runs, 2)).toBe(true);
   });
 
   test("ignores collector and swarm runs (independent parallel children)", () => {
@@ -107,20 +92,25 @@ describe("evaluateConsecutiveFailureCap", () => {
       rec("timeout", 2, { collect: true }),
       rec("timeout", 3, { swarmRunId: "swarm-1" }),
     ];
-    expect(evaluateConsecutiveFailureCap({ runs, cap: 2 })).toBeNull();
+    expect(blocks(runs, 2)).toBe(false);
   });
 
-  test("only counts failures since the last user-originated spawn", () => {
+  test("only counts failures since the current streak started", () => {
     const runs = [rec("timeout", 1_000), rec("timeout", 2_000)];
-    expect(evaluateConsecutiveFailureCap({ runs, cap: 2, sinceMs: 1_500 })).toBeNull();
-    expect(evaluateConsecutiveFailureCap({ runs, cap: 2, sinceMs: 500 })).not.toBeNull();
+    expect(blocks(runs, 2, 1_500)).toBe(false);
+    expect(blocks(runs, 2, 500)).toBe(true);
   });
 
-  test("lists at most the 5 most recent attempts in the message", () => {
-    const runs = Array.from({ length: 7 }, (_, i) => named(`r${i}`, "timeout"));
+  test("lists the 5 most recent attempts by creation time", () => {
+    // Supplied newest-first so the assertion fails if chronological sorting is removed.
+    const runs = Array.from({ length: 7 }, (_, i) =>
+      rec("timeout", i + 1, { taskName: `r${i}` }),
+    ).toReversed();
     const msg = evaluateConsecutiveFailureCap({ runs, cap: 3 })!;
     expect(msg).toContain("r6");
+    expect(msg).toContain("r2");
     expect(msg).not.toContain("r1");
+    expect(msg).not.toContain("r0");
   });
 });
 
@@ -129,5 +119,14 @@ describe("consecutive-failure streak reset marker", () => {
     markConsecutiveFailureStreakReset("agent:main:a", 1_234);
     expect(getConsecutiveFailureStreakResetAt("agent:main:a")).toBe(1_234);
     expect(getConsecutiveFailureStreakResetAt("agent:main:other")).toBeUndefined();
+  });
+
+  test("resets once per requester turn: later spawns in the same turn keep the start", () => {
+    markConsecutiveFailureStreakReset("agent:main:turns", 1_000, "turn-1");
+    markConsecutiveFailureStreakReset("agent:main:turns", 5_000, "turn-1");
+    expect(getConsecutiveFailureStreakResetAt("agent:main:turns")).toBe(1_000);
+
+    markConsecutiveFailureStreakReset("agent:main:turns", 9_000, "turn-2");
+    expect(getConsecutiveFailureStreakResetAt("agent:main:turns")).toBe(9_000);
   });
 });

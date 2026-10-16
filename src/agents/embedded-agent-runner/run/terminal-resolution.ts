@@ -57,9 +57,6 @@ const COMPACTION_CONTINUATION_RETRY_INSTRUCTION =
   "The previous attempt compacted the conversation context before producing a final user-visible answer. Continue from the compacted transcript and produce the final answer now. Do not restart from scratch, do not repeat completed work, and do not rerun tools unless the transcript clearly lacks required evidence.";
 const BEFORE_AGENT_FINALIZE_RETRY_PROMPT_PREFIX =
   "Before accepting the previous final answer, apply this revision request and produce the revised final answer. Do not repeat completed work or rerun tools unless the request explicitly requires it.";
-// ENG-21265 — injected when a turn is continued after hitting the output-length limit.
-const LENGTH_CONTINUATION_INSTRUCTION =
-  "Your previous reply was cut off at the output-length limit. Continue exactly where you left off; do not repeat what you already wrote or restart from scratch.";
 
 type TerminalPresentationObservation = {
   terminalPresentation?: string;
@@ -196,8 +193,6 @@ export async function resolveEmbeddedRunTerminal(input: {
   failureSignal?: EmbeddedRunFailureSignal;
   maxReasoningOnlyRetryAttempts: number;
   maxEmptyResponseRetryAttempts: number;
-  // ENG-21265 — max times a length-truncated turn may be continued (0 = off).
-  maxLengthContinuationAttempts: number;
   attemptCompactionCount: number;
   replayState: EmbeddedRunReplayState;
   activePromptPersisted: boolean;
@@ -423,42 +418,6 @@ export async function resolveEmbeddedRunTerminal(input: {
         `provider=${input.activeErrorContext.provider}/${input.activeErrorContext.model} attempts=${retryState.emptyResponseAttempts}/${input.maxEmptyResponseRetryAttempts} — surfacing incomplete-turn error`,
     );
   }
-  // ENG-21265 — a turn truncated at the output-length limit with partial prose is, by
-  // default, either surfaced as an incomplete turn (below) or delivered half-done with a
-  // truncation notice (completeEmbeddedRun). When length-continuation is enabled
-  // (maxLengthContinuationAttempts > 0), instead retry with a continuation prompt so the
-  // model finishes the work in short, drop-resistant turns. The length-stopped partial is
-  // already persisted to the transcript and replayed, so the continuation resumes from it.
-  // Prose only: a turn with pending tool calls / yield / structured output is left on the
-  // existing path to avoid corrupting a partial structured block.
-  const lengthStopReason =
-    input.attemptAssistant?.stopReason ?? attempt.currentAttemptAssistant?.stopReason;
-  const partialAssistantTextForContinuation =
-    attempt.assistantTexts.find((text) => text.trim().length > 0) ??
-    input.finalAssistantVisibleText;
-  if (
-    lengthStopReason === "length" &&
-    input.maxLengthContinuationAttempts > 0 &&
-    partialAssistantTextForContinuation !== undefined &&
-    !settledTurnFinalizationAttempted &&
-    !terminalInterrupted &&
-    !promptError &&
-    !attempt.clientToolCalls &&
-    !attempt.yieldDetected &&
-    !emptyAssistantReplyIsSilent &&
-    retryState.lengthContinuationAttempts < input.maxLengthContinuationAttempts
-  ) {
-    retryState.lengthContinuationAttempts += 1;
-    input.activateInternalPrompt(LENGTH_CONTINUATION_INSTRUCTION);
-    retryState.compactionContinuationInstruction = null;
-    log.warn(
-      `length-truncated turn continuation: runId=${runParams.runId} sessionId=${runParams.sessionId} ` +
-        `provider=${input.activeErrorContext.provider}/${input.activeErrorContext.model} — ` +
-        `continuing ${retryState.lengthContinuationAttempts}/${input.maxLengthContinuationAttempts}`,
-    );
-    return { action: "retry" };
-  }
-
   if (incompleteTurnText) {
     const incompleteStopReason =
       attempt.currentAttemptAssistant?.stopReason ?? attempt.lastAssistant?.stopReason;

@@ -73,7 +73,6 @@ function makeTerminalInput(overrides: TerminalInputOverrides = {}): TerminalInpu
     failureSignal: undefined,
     maxReasoningOnlyRetryAttempts: 2,
     maxEmptyResponseRetryAttempts: 1,
-    maxLengthContinuationAttempts: 0,
     attemptCompactionCount: 0,
     replayState: { ...attempt.replayMetadata, replayInvalid: false },
     activePromptPersisted: true,
@@ -799,57 +798,5 @@ describe("terminal resolution", () => {
     expect(resolved.result.payloads?.[0]).toMatchObject({ isError: true });
     expect(resolved.result.meta.error?.kind).toBe("incomplete_turn");
     expect(resolved.result.meta.livenessState).toBe("abandoned");
-  });
-});
-
-const LENGTH_CONTINUATION_INSTRUCTION =
-  "Your previous reply was cut off at the output-length limit. Continue exactly where you left off; do not repeat what you already wrote or restart from scratch.";
-
-describe("length-truncation continuation (ENG-21265)", () => {
-  function makeLengthStopInput(overrides: TerminalInputOverrides = {}): TerminalInput {
-    const assistant = buildEmbeddedRunnerAssistant({
-      content: [{ type: "text", text: "partial workbook so far" }],
-      stopReason: "length",
-    });
-    const attempt = makeEmbeddedRunnerAttempt({
-      assistantTexts: ["partial workbook so far"],
-      lastAssistant: assistant,
-      currentAttemptAssistant: assistant,
-      currentAttemptReplayMetadata: { hadPotentialSideEffects: false, replaySafe: true },
-    });
-    return makeTerminalInput({
-      attempt,
-      attemptAssistant: assistant,
-      maxLengthContinuationAttempts: 2,
-      ...overrides,
-    });
-  }
-
-  // The length-stopped partial is already persisted to the transcript (a completed assistant
-  // message) and replayed, so continuing only needs the internal continuation prompt.
-  it("continues a length-truncated prose turn with a continuation prompt", async () => {
-    const activateInternalPrompt = vi.fn();
-    const input = makeLengthStopInput({ activateInternalPrompt });
-    await expect(resolveEmbeddedRunTerminal(input)).resolves.toEqual({ action: "retry" });
-    expect(activateInternalPrompt).toHaveBeenCalledWith(LENGTH_CONTINUATION_INSTRUCTION);
-  });
-
-  it("is off by default (maxLengthContinuationAttempts = 0): delivers, does not continue", async () => {
-    const activateInternalPrompt = vi.fn();
-    const input = makeLengthStopInput({ maxLengthContinuationAttempts: 0, activateInternalPrompt });
-    const resolved = await resolveEmbeddedRunTerminal(input);
-    expect(resolved.action).toBe("complete");
-    expect(activateInternalPrompt).not.toHaveBeenCalledWith(LENGTH_CONTINUATION_INSTRUCTION);
-  });
-
-  it("stops at the ceiling instead of looping", async () => {
-    const activateInternalPrompt = vi.fn();
-    const input = makeLengthStopInput({
-      retryState: { ...createEmbeddedRunTerminalRetryState(), lengthContinuationAttempts: 2 },
-      activateInternalPrompt,
-    });
-    const resolved = await resolveEmbeddedRunTerminal(input);
-    expect(resolved.action).toBe("complete");
-    expect(activateInternalPrompt).not.toHaveBeenCalledWith(LENGTH_CONTINUATION_INSTRUCTION);
   });
 });

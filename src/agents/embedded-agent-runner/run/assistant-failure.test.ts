@@ -98,11 +98,9 @@ function makeExhaustedCredentialFailureInput(options?: { replaySafe?: boolean })
     advanceRateLimitAuthProfile: vi.fn(async () => true),
     traceAttempts,
     suspendForFailure: vi.fn(),
-    suspensionSessionId: "session:credential-enoent",
+    sessionPromptState: { sessionId: "session:credential-enoent", activateInternalPrompt: vi.fn() },
     agentDir: "/tmp/openclaw-assistant-failure-test",
     isProbeSession: false,
-    streamDropResumes: 0,
-    activateInternalPrompt: vi.fn(),
   };
   return {
     advanceAuthProfile,
@@ -143,10 +141,10 @@ function makeIdleTimeoutFailureInput(options?: { replaySafe?: boolean }) {
   return fixture;
 }
 
-// ENG-21265 — a provider stream that drops mid-generation after the agent already ran tools.
+// A provider stream that drops mid-generation after the agent already ran tools.
 function makeStreamDropFailureInput(options?: {
   errorMessage?: string;
-  streamDropResumes?: number;
+  priorStreamDropRetries?: number;
   timedOut?: boolean;
   deliveredReply?: boolean;
 }) {
@@ -175,19 +173,27 @@ function makeStreamDropFailureInput(options?: {
   fixture.input.currentAttemptAssistant = assistant;
   fixture.input.terminalState = resolveEmbeddedRunAttemptTerminalState({ attempt, assistant });
   fixture.input.emptyErrorRetries = 0;
-  fixture.input.streamDropResumes = options?.streamDropResumes ?? 0;
+  for (let i = 0; i < (options?.priorStreamDropRetries ?? 0); i += 1) {
+    fixture.traceAttempts.push({
+      provider: "anthropic",
+      model: "mock-1",
+      result: "stream_drop_resume",
+      stage: "assistant",
+    });
+  }
   return fixture;
 }
 
-describe("handleEmbeddedAssistantFailure — retry a cut-off generation in smaller steps (ENG-21265)", () => {
+describe("handleEmbeddedAssistantFailure — retry a cut-off generation in smaller steps", () => {
   it("retries the same model, telling it to redo the step in smaller parts, even after tool activity", async () => {
     const fixture = makeStreamDropFailureInput();
 
     const outcome = await handleEmbeddedAssistantFailure(fixture.input);
 
-    expect(outcome).toMatchObject({ action: "retry", streamDropResumes: 1 });
-    expect(fixture.input.activateInternalPrompt).toHaveBeenCalledOnce();
-    const instruction = vi.mocked(fixture.input.activateInternalPrompt).mock.calls[0]?.[0] ?? "";
+    expect(outcome).toMatchObject({ action: "retry" });
+    expect(fixture.input.sessionPromptState.activateInternalPrompt).toHaveBeenCalledOnce();
+    const instruction =
+      vi.mocked(fixture.input.sessionPromptState.activateInternalPrompt).mock.calls[0]?.[0] ?? "";
     expect(instruction).toMatch(/smaller/i);
     expect(instruction).toMatch(/nothing from (that|the interrupted) step was applied/i);
     // Same model, same profile: no rotation, no model fallback.
@@ -206,19 +212,22 @@ describe("handleEmbeddedAssistantFailure — retry a cut-off generation in small
 
     const outcome = await handleEmbeddedAssistantFailure(fixture.input);
 
-    expect(outcome).toMatchObject({ action: "retry", streamDropResumes: 1 });
+    expect(outcome).toMatchObject({ action: "retry" });
   });
 
-  it.each(["HTTP 429 Too Many Requests", "Overloaded", "Invalid API key"])(
-    "does not treat %j as a cut-off generation",
-    async (errorMessage) => {
-      const fixture = makeStreamDropFailureInput({ errorMessage });
+  it.each([
+    "HTTP 429 Too Many Requests",
+    "Overloaded",
+    "Invalid API key",
+    "upstream error during stream: 429 Too Many Requests",
+    "upstream error during stream: overloaded_error: Overloaded",
+  ])("does not treat %j as a cut-off generation", async (errorMessage) => {
+    const fixture = makeStreamDropFailureInput({ errorMessage });
 
-      await handleEmbeddedAssistantFailure(fixture.input).catch(() => undefined);
+    await handleEmbeddedAssistantFailure(fixture.input).catch(() => undefined);
 
-      expect(fixture.input.activateInternalPrompt).not.toHaveBeenCalled();
-    },
-  );
+    expect(fixture.input.sessionPromptState.activateInternalPrompt).not.toHaveBeenCalled();
+  });
 
   it("does not retry when the dropped attempt already delivered a reply", async () => {
     const fixture = makeStreamDropFailureInput({ deliveredReply: true });
@@ -226,16 +235,16 @@ describe("handleEmbeddedAssistantFailure — retry a cut-off generation in small
     const outcome = await handleEmbeddedAssistantFailure(fixture.input);
 
     expect(outcome.action).toBe("proceed");
-    expect(fixture.input.activateInternalPrompt).not.toHaveBeenCalled();
+    expect(fixture.input.sessionPromptState.activateInternalPrompt).not.toHaveBeenCalled();
   });
 
   it("stops resuming at the ceiling and keeps today's behavior", async () => {
-    const fixture = makeStreamDropFailureInput({ streamDropResumes: 3 });
+    const fixture = makeStreamDropFailureInput({ priorStreamDropRetries: 1 });
 
     const outcome = await handleEmbeddedAssistantFailure(fixture.input);
 
     expect(outcome.action).toBe("proceed");
-    expect(fixture.input.activateInternalPrompt).not.toHaveBeenCalled();
+    expect(fixture.input.sessionPromptState.activateInternalPrompt).not.toHaveBeenCalled();
   });
 
   it("does not resume a non-drop error after tool activity", async () => {
@@ -244,7 +253,7 @@ describe("handleEmbeddedAssistantFailure — retry a cut-off generation in small
     const outcome = await handleEmbeddedAssistantFailure(fixture.input);
 
     expect(outcome.action).toBe("proceed");
-    expect(fixture.input.activateInternalPrompt).not.toHaveBeenCalled();
+    expect(fixture.input.sessionPromptState.activateInternalPrompt).not.toHaveBeenCalled();
   });
 
   it("does not resume when the run timed out", async () => {
@@ -253,7 +262,7 @@ describe("handleEmbeddedAssistantFailure — retry a cut-off generation in small
     const outcome = await handleEmbeddedAssistantFailure(fixture.input);
 
     expect(outcome.action).not.toBe("retry");
-    expect(fixture.input.activateInternalPrompt).not.toHaveBeenCalled();
+    expect(fixture.input.sessionPromptState.activateInternalPrompt).not.toHaveBeenCalled();
   });
 });
 

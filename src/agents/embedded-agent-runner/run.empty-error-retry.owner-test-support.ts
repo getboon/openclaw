@@ -80,11 +80,9 @@ function makeInput(
     advanceRateLimitAuthProfile: vi.fn(async () => false),
     traceAttempts: [],
     suspendForFailure: vi.fn(),
-    suspensionSessionId: "session:empty-error",
+    sessionPromptState: { sessionId: "session:empty-error", activateInternalPrompt: vi.fn() },
     agentDir: "/tmp/openclaw-empty-error-test",
     isProbeSession: false,
-    streamDropResumes: 0,
-    activateInternalPrompt: vi.fn(),
   };
 }
 

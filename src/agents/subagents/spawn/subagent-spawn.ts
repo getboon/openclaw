@@ -26,24 +26,19 @@ import {
   summarizeSpawnError,
 } from "../../spawn-pipeline.js";
 import { getGatewayToolCallerIdentity } from "../../tools/gateway-caller-context.js";
-import { listSubagentRunsForRequester } from "../registry/subagent-registry-read.js";
 import {
   completeCollectorLaunchCleanup,
   settleFailedQueuedSubagentLaunch,
   startQueuedSubagentRun,
 } from "../registry/subagent-registry.js";
 import { activateSwarmRun, removeQueuedSwarmRun } from "../swarm/swarm-scheduler.js";
-import {
-  evaluateConsecutiveFailureCap,
-  getConsecutiveFailureStreakResetAt,
-  markConsecutiveFailureStreakReset,
-} from "./consecutive-failure-cap.js";
 import { readParentExecutionIdentity } from "./execution-identity-spawn-context.js";
 import {
   materializeSubagentAttachments,
   type SubagentAttachmentReceiptFile,
 } from "./subagent-attachments.js";
 import { resolveSubagentSpawnAcceptedNote } from "./subagent-spawn-accepted-note.js";
+import { resolveSpawnFailureBackstop } from "./subagent-spawn-backstop.js";
 import { resolveSubagentChildPlan } from "./subagent-spawn-child-plan.js";
 import {
   cleanupFailedSpawnBeforeAgentStart,
@@ -155,26 +150,10 @@ export async function spawnSubagentDirect(
   let childRunId: string = childIdem;
   let swarmReservationPending = reservationPending;
   try {
-    // ENG-21265 — backstop: once this parent session has hit the consecutive-failure cap,
-    // refuse the spawn before any side effect so the agent checks in with the user instead of
-    // silently re-spawning across completion-wake turns. Inside `try` so `finally` releases the
-    // admission / swarm reservations taken while resolving the request. A spawn from a new
-    // user message restarts the streak: ordinary messages carry no provenance marker, while
-    // completion wakes and handoffs are marked inter_session / internal_system and keep
-    // counting. Unset cap = no-op.
-    if (requesterSessionKey) {
-      const kind = ctx.requesterInputProvenanceKind;
-      if (kind === undefined || kind === "external_user") {
-        markConsecutiveFailureStreakReset(requesterSessionKey, Date.now());
-      }
-      const capError = evaluateConsecutiveFailureCap({
-        runs: listSubagentRunsForRequester(requesterSessionKey, { requesterAgentId }),
-        cap: cfg.agents?.defaults?.subagents?.maxConsecutiveFailures,
-        sinceMs: getConsecutiveFailureStreakResetAt(requesterSessionKey),
-      });
-      if (capError) {
-        return { status: "error", error: capError };
-      }
+    // Consecutive-failure backstop, inside `try` so `finally` releases the reservations.
+    const backstopError = resolveSpawnFailureBackstop({ cfg, ctx, requesterAgentId });
+    if (backstopError) {
+      return { status: "error", error: backstopError };
     }
     const childPlan = await resolveSubagentChildPlan({
       request: params,

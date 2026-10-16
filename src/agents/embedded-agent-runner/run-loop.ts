@@ -43,7 +43,6 @@ import { buildErrorAgentMeta, resolveMaxRunRetryIterations } from "./run/helpers
 import { createIdleTimeoutBreakerState } from "./run/idle-timeout-breaker.js";
 import {
   DEFAULT_EMPTY_RESPONSE_RETRY_LIMIT,
-  DEFAULT_LENGTH_CONTINUATION_LIMIT,
   DEFAULT_REASONING_ONLY_RETRY_LIMIT,
 } from "./run/incomplete-turn-recovery.js";
 import { measureEmbeddedAgentPreparation } from "./run/preparation-timing.js";
@@ -189,7 +188,6 @@ export async function runPreparedEmbeddedLoop(
   const executionContract = strictAgenticActive ? "strict-agentic" : "default";
   const maxReasoningOnlyRetryAttempts = DEFAULT_REASONING_ONLY_RETRY_LIMIT;
   const maxEmptyResponseRetryAttempts = DEFAULT_EMPTY_RESPONSE_RETRY_LIMIT;
-  const maxLengthContinuationAttempts = DEFAULT_LENGTH_CONTINUATION_LIMIT;
 
   const MAX_RUN_RETRY_ATTEMPTS = resolveMaxRunRetryIterations(profileCandidates.length);
   const runRetryBudget: RunRetryBudget = createRunRetryBudget(MAX_RUN_RETRY_ATTEMPTS);
@@ -202,8 +200,6 @@ export async function runPreparedEmbeddedLoop(
   let overloadProfileRotations = 0;
   const terminalRetryState = createEmbeddedRunTerminalRetryState();
   let sameModelIdleTimeoutRetries = 0;
-  // ENG-21265 — resumes of a provider stream that dropped mid-generation (bounded per run).
-  let streamDropResumes = 0;
   // Cost-runaway breaker for #76293. State lives at the run-loop level
   // on purpose so it survives across attempt boundaries and across
   // profile/auth retries within this embedded run (a wrapper-local
@@ -509,11 +505,9 @@ export async function runPreparedEmbeddedLoop(
         advanceRateLimitAuthProfile: failoverRetryController.advanceRateLimitAuthProfile,
         traceAttempts,
         suspendForFailure,
-        suspensionSessionId: sessionPromptState.sessionId ?? params.sessionId,
+        sessionPromptState,
         agentDir,
         isProbeSession,
-        streamDropResumes,
-        activateInternalPrompt: sessionPromptState.activateInternalPrompt,
       });
       thinkLevel = assistantFailureOutcome.thinkLevel;
       preparedRuntime.setThinkLevel(thinkLevel);
@@ -521,7 +515,6 @@ export async function runPreparedEmbeddedLoop(
       emptyErrorRetries = assistantFailureOutcome.emptyErrorRetries;
       overloadProfileRotations = assistantFailureOutcome.overloadProfileRotations;
       sameModelIdleTimeoutRetries = assistantFailureOutcome.sameModelIdleTimeoutRetries;
-      streamDropResumes = assistantFailureOutcome.streamDropResumes;
       lastRetryFailoverReason = assistantFailureOutcome.lastRetryFailoverReason;
       if (!assistantFailureOutcome.preserveSameModelRateLimitRetryCount) {
         failoverRetryController.resetSameModelRateLimitRetries();
@@ -640,7 +633,6 @@ export async function runPreparedEmbeddedLoop(
         failureSignal,
         maxReasoningOnlyRetryAttempts,
         maxEmptyResponseRetryAttempts,
-        maxLengthContinuationAttempts,
         attemptCompactionCount: terminalAttemptCompactionCount,
         replayState: accumulatedReplayState,
         activePromptPersisted: sessionPromptState.activePrompt.persisted,

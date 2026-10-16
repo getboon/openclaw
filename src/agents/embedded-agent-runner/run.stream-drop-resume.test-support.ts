@@ -1,5 +1,5 @@
-// ENG-21265 — full-entry replay of thread 15003: a long generation whose provider stream drops
-// mid-output after the agent already ran tools. Before the fix the first drop ended the run
+// Full-entry coverage for a long generation whose provider stream is cut off mid-output after
+// the agent already ran tools. Without the same-model retry the first cut-off ended the run
 // (replay-unsafe ⇒ "proceed"), so the outer fallback / parent re-spawn restarted from zero.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { makeAttemptResult } from "./run.overflow-compaction.fixture.js";
@@ -56,7 +56,7 @@ function completedAttempt(text: string): EmbeddedRunAttemptResult {
   });
 }
 
-describe("runEmbeddedAgent resume on mid-stream drop (ENG-21265)", () => {
+describe("runEmbeddedAgent retry of a cut-off generation", () => {
   beforeAll(async () => {
     runEmbeddedAgent = await loadSharedRunIntegrationHarness();
   });
@@ -67,13 +67,10 @@ describe("runEmbeddedAgent resume on mid-stream drop (ENG-21265)", () => {
     mockedClassifyFailoverReason.mockReturnValue(null);
   });
 
-  it("resumes the same model after two mid-output drops and completes the work", async () => {
+  it("retries the same model in smaller steps after a mid-output cut-off and completes", async () => {
     mockedRunEmbeddedAttempt
       .mockResolvedValueOnce(droppedAttempt("upstream error during stream", "| 26-0500 | 12.5 |"))
-      .mockResolvedValueOnce(
-        droppedAttempt("Anthropic stream ended before message_stop", "\n| 26-0510 | 8.0 |"),
-      )
-      .mockResolvedValueOnce(completedAttempt("\n| 26-0520 | 4.0 |\nWorkbook complete."));
+      .mockResolvedValueOnce(completedAttempt("Workbook complete."));
 
     const result = await runEmbeddedAgent({
       ...overflowBaseRunParams,
@@ -82,11 +79,10 @@ describe("runEmbeddedAgent resume on mid-stream drop (ENG-21265)", () => {
       runId: "run-stream-drop-resume",
     });
 
-    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(3);
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
     expect(mockedRunEmbeddedAttempt.mock.calls[1]?.[0]?.prompt).toMatch(/smaller/i);
-    expect(mockedRunEmbeddedAttempt.mock.calls[2]?.[0]?.prompt).toMatch(/smaller/i);
     // Same model throughout (no outer model fallback, which used to restart from zero) and the
-    // run completes on the resumed attempt instead of failing.
+    // run completes on the retried attempt instead of failing.
     for (const [attemptParams] of mockedRunEmbeddedAttempt.mock.calls) {
       expect(attemptParams).toMatchObject({ provider: PROVIDER, modelId: MODEL });
     }
@@ -94,7 +90,7 @@ describe("runEmbeddedAgent resume on mid-stream drop (ENG-21265)", () => {
     expect(result.meta.error).toBeUndefined();
   });
 
-  it("stops after the resume ceiling instead of looping forever", async () => {
+  it("stops after one autonomous retry instead of looping", async () => {
     for (let i = 0; i < 6; i += 1) {
       mockedRunEmbeddedAttempt.mockResolvedValueOnce(
         droppedAttempt("Anthropic stream ended before message_stop", `partial ${i}`),
@@ -108,7 +104,7 @@ describe("runEmbeddedAgent resume on mid-stream drop (ENG-21265)", () => {
       runId: "run-stream-drop-resume-ceiling",
     }).catch(() => undefined);
 
-    // 1 original attempt + 3 bounded resumes, then today's failure handling.
-    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(4);
+    // 1 original attempt + 1 retry, then today's failure handling.
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
   });
 });
