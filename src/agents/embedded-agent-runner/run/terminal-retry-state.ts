@@ -7,6 +7,8 @@ export type EmbeddedRunTerminalRetryState = {
   compactionContinuationAttempts: number;
   compactionContinuationInstruction: string | null;
   beforeFinalizeRevisionAttempts: number;
+  // ENG-21265 — how many times this run has continued a length-truncated turn.
+  lengthContinuationAttempts: number;
 };
 
 export function createEmbeddedRunTerminalRetryState(): EmbeddedRunTerminalRetryState {
@@ -17,5 +19,6 @@ export function createEmbeddedRunTerminalRetryState(): EmbeddedRunTerminalRetryS
     compactionContinuationAttempts: 0,
     compactionContinuationInstruction: null,
     beforeFinalizeRevisionAttempts: 0,
+    lengthContinuationAttempts: 0,
   };
 }

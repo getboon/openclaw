@@ -73,6 +73,8 @@ function makeTerminalInput(overrides: TerminalInputOverrides = {}): TerminalInpu
     failureSignal: undefined,
     maxReasoningOnlyRetryAttempts: 2,
     maxEmptyResponseRetryAttempts: 1,
+    maxLengthContinuationAttempts: 0,
+    commitPartialAssistantTurn: vi.fn(),
     attemptCompactionCount: 0,
     replayState: { ...attempt.replayMetadata, replayInvalid: false },
     activePromptPersisted: true,
@@ -798,5 +800,60 @@ describe("terminal resolution", () => {
     expect(resolved.result.payloads?.[0]).toMatchObject({ isError: true });
     expect(resolved.result.meta.error?.kind).toBe("incomplete_turn");
     expect(resolved.result.meta.livenessState).toBe("abandoned");
+  });
+});
+
+const LENGTH_CONTINUATION_INSTRUCTION =
+  "Your previous reply was cut off at the output-length limit. Continue exactly where you left off; do not repeat what you already wrote or restart from scratch.";
+
+describe("length-truncation continuation (ENG-21265)", () => {
+  function makeLengthStopInput(overrides: TerminalInputOverrides = {}): TerminalInput {
+    const assistant = buildEmbeddedRunnerAssistant({
+      content: [{ type: "text", text: "partial workbook so far" }],
+      stopReason: "length",
+    });
+    const attempt = makeEmbeddedRunnerAttempt({
+      assistantTexts: ["partial workbook so far"],
+      lastAssistant: assistant,
+      currentAttemptAssistant: assistant,
+      currentAttemptReplayMetadata: { hadPotentialSideEffects: false, replaySafe: true },
+    });
+    return makeTerminalInput({
+      attempt,
+      attemptAssistant: assistant,
+      maxLengthContinuationAttempts: 2,
+      ...overrides,
+    });
+  }
+
+  it("continues a length-truncated prose turn: commits the partial and retries", async () => {
+    const activateInternalPrompt = vi.fn();
+    const commitPartialAssistantTurn = vi.fn();
+    const input = makeLengthStopInput({ activateInternalPrompt, commitPartialAssistantTurn });
+    await expect(resolveEmbeddedRunTerminal(input)).resolves.toEqual({ action: "retry" });
+    expect(commitPartialAssistantTurn).toHaveBeenCalledWith("partial workbook so far");
+    expect(activateInternalPrompt).toHaveBeenCalledWith(LENGTH_CONTINUATION_INSTRUCTION);
+  });
+
+  it("is off by default (maxLengthContinuationAttempts = 0): delivers, does not continue", async () => {
+    const commitPartialAssistantTurn = vi.fn();
+    const input = makeLengthStopInput({
+      maxLengthContinuationAttempts: 0,
+      commitPartialAssistantTurn,
+    });
+    const resolved = await resolveEmbeddedRunTerminal(input);
+    expect(resolved.action).toBe("complete");
+    expect(commitPartialAssistantTurn).not.toHaveBeenCalled();
+  });
+
+  it("stops at the ceiling instead of looping", async () => {
+    const commitPartialAssistantTurn = vi.fn();
+    const input = makeLengthStopInput({
+      retryState: { ...createEmbeddedRunTerminalRetryState(), lengthContinuationAttempts: 2 },
+      commitPartialAssistantTurn,
+    });
+    const resolved = await resolveEmbeddedRunTerminal(input);
+    expect(resolved.action).toBe("complete");
+    expect(commitPartialAssistantTurn).not.toHaveBeenCalled();
   });
 });

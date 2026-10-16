@@ -43,6 +43,7 @@ import { buildErrorAgentMeta, resolveMaxRunRetryIterations } from "./run/helpers
 import { createIdleTimeoutBreakerState } from "./run/idle-timeout-breaker.js";
 import {
   DEFAULT_EMPTY_RESPONSE_RETRY_LIMIT,
+  DEFAULT_LENGTH_CONTINUATION_LIMIT,
   DEFAULT_REASONING_ONLY_RETRY_LIMIT,
 } from "./run/incomplete-turn-recovery.js";
 import { measureEmbeddedAgentPreparation } from "./run/preparation-timing.js";
@@ -188,6 +189,7 @@ export async function runPreparedEmbeddedLoop(
   const executionContract = strictAgenticActive ? "strict-agentic" : "default";
   const maxReasoningOnlyRetryAttempts = DEFAULT_REASONING_ONLY_RETRY_LIMIT;
   const maxEmptyResponseRetryAttempts = DEFAULT_EMPTY_RESPONSE_RETRY_LIMIT;
+  const maxLengthContinuationAttempts = DEFAULT_LENGTH_CONTINUATION_LIMIT;
 
   const MAX_RUN_RETRY_ATTEMPTS = resolveMaxRunRetryIterations(profileCandidates.length);
   const runRetryBudget: RunRetryBudget = createRunRetryBudget(MAX_RUN_RETRY_ATTEMPTS);
@@ -633,6 +635,14 @@ export async function runPreparedEmbeddedLoop(
         failureSignal,
         maxReasoningOnlyRetryAttempts,
         maxEmptyResponseRetryAttempts,
+        maxLengthContinuationAttempts,
+        // ENG-21265 — placeholder while length-continuation is OFF
+        // (DEFAULT_LENGTH_CONTINUATION_LIMIT = 0 ⇒ the length-continuation branch never
+        // fires, so this is never called). BEFORE enabling (limit > 0), implement the real
+        // append: commit the partial assistant turn to the transcript via the session
+        // manager (mirror attempt-settle.ts's SessionManager.appendMessageToTranscript),
+        // or continuations will restart from scratch (the ENG-21265 make-or-break).
+        commitPartialAssistantTurn: () => {},
         attemptCompactionCount: terminalAttemptCompactionCount,
         replayState: accumulatedReplayState,
         activePromptPersisted: sessionPromptState.activePrompt.persisted,
