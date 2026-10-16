@@ -33,7 +33,11 @@ import {
   startQueuedSubagentRun,
 } from "../registry/subagent-registry.js";
 import { activateSwarmRun, removeQueuedSwarmRun } from "../swarm/swarm-scheduler.js";
-import { evaluateConsecutiveFailureCap } from "./consecutive-failure-cap.js";
+import {
+  evaluateConsecutiveFailureCap,
+  getConsecutiveFailureStreakResetAt,
+  markConsecutiveFailureStreakReset,
+} from "./consecutive-failure-cap.js";
 import { readParentExecutionIdentity } from "./execution-identity-spawn-context.js";
 import {
   materializeSubagentAttachments,
@@ -145,25 +149,30 @@ export async function spawnSubagentDirect(
     },
     childIdem,
   } = requestResolution.resolved;
-  // ENG-21265 — Component B: once this parent session has hit the consecutive-failure cap,
-  // refuse the spawn before any side effect so the agent checks in with the user instead of
-  // silently re-spawning across completion-wake turns. Keyed on the parent session (not the
-  // turn), reusing the live registry read that already backs settle-wake. Unset cap = no-op.
-  const capError = requesterSessionKey
-    ? evaluateConsecutiveFailureCap({
-        runs: listSubagentRunsForRequester(requesterSessionKey, { requesterAgentId }),
-        cap: cfg.agents?.defaults?.subagents?.maxConsecutiveFailures,
-      })
-    : null;
-  if (capError) {
-    return { status: "error", error: capError };
-  }
   let modelApplied = false;
   let threadBindingReady = false;
   let hasBoundThreadDeliveryOrigin = false;
   let childRunId: string = childIdem;
   let swarmReservationPending = reservationPending;
   try {
+    // ENG-21265 — backstop: once this parent session has hit the consecutive-failure cap,
+    // refuse the spawn before any side effect so the agent checks in with the user instead of
+    // silently re-spawning across completion-wake turns. Inside `try` so `finally` releases the
+    // admission / swarm reservations taken while resolving the request. A spawn from a new
+    // user message restarts the streak. Unset cap = no-op.
+    if (requesterSessionKey) {
+      if (ctx.requesterInputProvenanceKind === "external_user") {
+        markConsecutiveFailureStreakReset(requesterSessionKey, Date.now());
+      }
+      const capError = evaluateConsecutiveFailureCap({
+        runs: listSubagentRunsForRequester(requesterSessionKey, { requesterAgentId }),
+        cap: cfg.agents?.defaults?.subagents?.maxConsecutiveFailures,
+        sinceMs: getConsecutiveFailureStreakResetAt(requesterSessionKey),
+      });
+      if (capError) {
+        return { status: "error", error: capError };
+      }
+    }
     const childPlan = await resolveSubagentChildPlan({
       request: params,
       ctx,

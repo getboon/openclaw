@@ -6,6 +6,7 @@ import type { ChatType } from "../channels/chat-type.js";
 import type { InboundEventKind } from "../channels/inbound-event/kind.js";
 import type { ConversationReadInvocationOrigin } from "../channels/plugins/conversation-read-origin.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { InputProvenance } from "../sessions/input-provenance.js";
 import type { SkillWorkshopRunOptions } from "../skills/workshop/types.js";
 import type { HookContext } from "./agent-tools.before-tool-call.js";
 import type { ConversationRecallContext } from "./conversation-recall.types.js";
@@ -24,6 +25,8 @@ export type OpenClawToolsOptions = {
   runSessionKey?: string;
   agentChannel?: string;
   runId?: string;
+  /** Origin of the current turn (`external_user` = a new user message); see sessions_spawn. */
+  inputProvenanceKind?: InputProvenance["kind"];
   agentAccountId?: string;
   /** Trusted account used for authorization; delivery keeps agentAccountId. */
   gatewayCallerAccountId?: string;
