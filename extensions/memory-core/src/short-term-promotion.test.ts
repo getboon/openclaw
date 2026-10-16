@@ -3339,4 +3339,141 @@ describe("short-term promotion", () => {
       });
     });
   });
+
+  describe("MEMORY.md atomic promotion write", () => {
+    it("preserves the existing MEMORY.md when the promotion write fails", async () => {
+      await withTempWorkspace(async (workspaceDir) => {
+        await writeDailyMemoryNote(workspaceDir, "2026-04-29", [
+          "Notes",
+          "",
+          "Rotate the staging Postgres credentials before next deploy.",
+        ]);
+
+        const memoryPath = path.join(workspaceDir, "MEMORY.md");
+        const sentinel = "FINAL-USER-MEMORY-SENTINEL-do-not-lose";
+        const seeded = `# Long-Term Memory\n\n${"pad line filler content ".repeat(9_000)}\n- ${sentinel}\n`;
+        await fs.writeFile(memoryPath, seeded, "utf-8");
+        await recordShortTermRecalls({
+          workspaceDir,
+          query: "rotate creds",
+          nowMs: Date.parse("2026-04-29T10:00:00.000Z"),
+          results: [
+            {
+              path: "memory/2026-04-29.md",
+              startLine: 3,
+              endLine: 3,
+              score: 0.96,
+              snippet: "Rotate the staging Postgres credentials before next deploy.",
+              source: "memory",
+            },
+          ],
+        });
+        const ranked = await rankShortTermPromotionCandidates({
+          workspaceDir,
+          minScore: 0,
+          minRecallCount: 0,
+          minUniqueQueries: 0,
+        });
+
+        const originalWriteFile = fs.writeFile.bind(fs);
+        vi.spyOn(fs, "writeFile").mockImplementation((async (target, data, options) => {
+          const targetPath =
+            typeof target === "string" ? target : target instanceof URL ? target.pathname : "";
+          if (targetPath && path.basename(targetPath).startsWith("MEMORY.md")) {
+            const text =
+              typeof data === "string" ? data : Buffer.from(data as Uint8Array).toString();
+            await originalWriteFile(target, text.slice(0, 51_200), options);
+            throw Object.assign(new Error("EFBIG: file too large, write"), { code: "EFBIG" });
+          }
+          return await originalWriteFile(target, data, options);
+        }) as typeof fs.writeFile);
+
+        await expect(
+          applyShortTermPromotions({
+            workspaceDir,
+            candidates: ranked,
+            minScore: 0,
+            minRecallCount: 0,
+            minUniqueQueries: 0,
+            nowMs: Date.parse("2026-04-29T10:00:00.000Z"),
+            memoryFileMaxChars: 5_000_000,
+          }),
+        ).rejects.toMatchObject({ code: "EFBIG" });
+
+        expect(await fs.readFile(memoryPath, "utf-8")).toBe(seeded);
+        expect(
+          (await fs.readdir(workspaceDir)).filter((entry) =>
+            entry.startsWith("MEMORY.md.promotion"),
+          ),
+        ).toEqual([]);
+      });
+    });
+  });
+
+  describe("symlinked MEMORY.md", () => {
+    it.runIf(process.platform !== "win32")(
+      "writes through a symlinked MEMORY.md to its real target",
+      async () => {
+        await withTempWorkspace(async (workspaceDir) => {
+          await writeDailyMemoryNote(workspaceDir, "2026-04-29", [
+            "Notes",
+            "",
+            "Rotate the staging Postgres credentials before next deploy.",
+          ]);
+
+          // MEMORY.md is a symlink into a canonical location outside the
+          // workspace (e.g. a synced dotfiles-style setup).
+          const canonicalDir = await fs.mkdtemp(path.join(os.tmpdir(), "memory-canonical-"));
+          const canonicalPath = path.join(canonicalDir, "MEMORY.md");
+          await fs.writeFile(canonicalPath, "# Long-Term Memory\n\n", "utf-8");
+          const memoryPath = path.join(workspaceDir, "MEMORY.md");
+          await fs.symlink(canonicalPath, memoryPath);
+
+          await recordShortTermRecalls({
+            workspaceDir,
+            query: "rotate creds",
+            nowMs: Date.parse("2026-04-29T10:00:00.000Z"),
+            results: [
+              {
+                path: "memory/2026-04-29.md",
+                startLine: 3,
+                endLine: 3,
+                score: 0.96,
+                snippet: "Rotate the staging Postgres credentials before next deploy.",
+                source: "memory",
+              },
+            ],
+          });
+
+          const ranked = await rankShortTermPromotionCandidates({
+            workspaceDir,
+            minScore: 0,
+            minRecallCount: 0,
+            minUniqueQueries: 0,
+          });
+
+          const applied = await applyShortTermPromotions({
+            workspaceDir,
+            candidates: ranked,
+            minScore: 0,
+            minRecallCount: 0,
+            minUniqueQueries: 0,
+            nowMs: Date.parse("2026-04-29T10:00:00.000Z"),
+          });
+
+          expect(applied.applied).toBe(1);
+
+          // The symlink itself must survive (rename-over-dest would otherwise
+          // replace it with a plain file, leaving the canonical file stale).
+          const linkStat = await fs.lstat(memoryPath);
+          expect(linkStat.isSymbolicLink()).toBe(true);
+
+          const canonicalText = await fs.readFile(canonicalPath, "utf-8");
+          expect(canonicalText).toContain("Rotate the staging Postgres credentials");
+
+          await fs.rm(canonicalDir, { recursive: true, force: true });
+        });
+      },
+    );
+  });
 });

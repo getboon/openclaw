@@ -118,6 +118,13 @@ type GuardedMediaResponse = {
   finalUrl: string;
   release: (() => Promise<void>) | null;
   sourceUrl: string;
+  /**
+   * Resets the guarded fetch's timeoutMs deadline. Without calling this per
+   * body chunk, a continuously-progressing download is still aborted once
+   * the flat timeoutMs elapses, even though nothing has stalled — the same
+   * class of bug fixed in provider-transport-fetch.ts/mcp-http-fetch.ts.
+   */
+  refreshTimeout?: () => void;
 };
 
 function stripQuotes(value: string): string {
@@ -257,6 +264,7 @@ async function fetchGuardedMediaResponse(
       finalUrl: result.finalUrl,
       release: result.release,
       sourceUrl,
+      refreshTimeout: result.refreshTimeout,
     };
   } catch (err) {
     throw new MediaFetchError(
@@ -435,6 +443,7 @@ async function readChunkWithIdleTimeout(
 async function* responseBodyChunks(
   body: ReadableStream<Uint8Array>,
   readIdleTimeoutMs?: number,
+  refreshTimeout?: () => void,
 ): AsyncIterable<Uint8Array> {
   const reader = body.getReader();
   let completed = false;
@@ -448,6 +457,10 @@ async function* responseBodyChunks(
         return;
       }
       if (value?.byteLength) {
+        // Reset the guarded fetch's outer timeoutMs deadline on every chunk
+        // received so a continuously-progressing download is bounded by the
+        // (shorter) idle timer above, not a flat ceiling from request start.
+        refreshTimeout?.();
         yield value;
       }
     }
@@ -475,6 +488,7 @@ async function saveOkMediaResponse(params: {
   fallbackContentType?: string;
   subdir?: string;
   originalFilename?: string;
+  refreshTimeout?: () => void;
 }): Promise<SavedRemoteMedia> {
   await assertMediaContentLength({
     res: params.res,
@@ -496,7 +510,7 @@ async function saveOkMediaResponse(params: {
   try {
     const saved = params.res.body
       ? await saveMediaStream(
-          responseBodyChunks(params.res.body, params.readIdleTimeoutMs),
+          responseBodyChunks(params.res.body, params.readIdleTimeoutMs, params.refreshTimeout),
           contentType ?? undefined,
           params.subdir ?? "inbound",
           params.maxBytes,
@@ -600,7 +614,13 @@ export async function saveRemoteMedia(options: SaveRemoteMediaOptions): Promise<
 }
 
 async function saveRemoteMediaOnce(options: SaveRemoteMediaOptions): Promise<SavedRemoteMedia> {
-  const { response: res, finalUrl, release, sourceUrl } = await fetchGuardedMediaResponse(options);
+  const {
+    response: res,
+    finalUrl,
+    release,
+    sourceUrl,
+    refreshTimeout,
+  } = await fetchGuardedMediaResponse(options);
   try {
     await assertMediaResponseOk({
       res,
@@ -619,6 +639,7 @@ async function saveRemoteMediaOnce(options: SaveRemoteMediaOptions): Promise<Sav
       fallbackContentType: options.fallbackContentType,
       subdir: options.subdir,
       originalFilename: options.originalFilename,
+      refreshTimeout,
     });
   } finally {
     if (release) {

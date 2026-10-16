@@ -6,6 +6,7 @@ import { resolveApiKeyForProvider } from "openclaw/plugin-sdk/provider-auth-runt
 import {
   assertOkOrThrowHttpError,
   postJsonRequest,
+  readProviderJsonResponse,
   resolveProviderHttpRequestConfig,
 } from "openclaw/plugin-sdk/provider-http";
 import {
@@ -270,12 +271,14 @@ export function buildDeepInfraVideoGenerationProvider(options?: {
       });
       try {
         await assertOkOrThrowHttpError(response, "DeepInfra video generation failed");
-        let payload: DeepInfraVideoResponse;
-        try {
-          payload = (await response.json()) as DeepInfraVideoResponse;
-        } catch (cause) {
-          throw new Error("DeepInfra video generation failed: malformed JSON response", { cause });
-        }
+        const payload = await readProviderJsonResponse<DeepInfraVideoResponse>(
+          response,
+          "DeepInfra video generation failed",
+          // Base64-inline video payloads inflate ~4/3x over the binary size, so
+          // the default 16 MiB JSON cap rejects a valid 16 MiB video before it
+          // can be decoded. Give headroom for the encoding overhead.
+          { maxBytes: 24 * 1024 * 1024 },
+        );
         const failed = failureMessage(payload);
         if (failed) {
           throw new Error(failed);

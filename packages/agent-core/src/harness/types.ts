@@ -569,6 +569,13 @@ export interface ToolResultEvent {
   content: Array<TextContent | ImageContent>;
   details: unknown;
   isError: boolean;
+  /**
+   * False for a call rejected before `tool.execute` ran (schema validation
+   * failure, unresolvable tool name, policy block). `input` is the raw,
+   * unvalidated args in that case -- hook consumers must not treat it as a
+   * normal executed-and-failed result.
+   */
+  executionStarted: boolean;
 }
 
 export interface SessionBeforeCompactEvent {

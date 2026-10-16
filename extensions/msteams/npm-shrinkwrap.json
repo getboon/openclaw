@@ -1,12 +1,12 @@
 {
   "name": "@openclaw/msteams",
-  "version": "2026.6.34-boon.8",
+  "version": "2026.6.35-boon.1",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/msteams",
-      "version": "2026.6.34-boon.8",
+      "version": "2026.6.35-boon.1",
       "dependencies": {
         "@azure/identity": "4.13.1",
         "@microsoft/teams.api": "2.0.12",
@@ -15,7 +15,7 @@
         "typebox": "1.1.39"
       },
       "peerDependencies": {
-        "openclaw": ">=2026.6.34-boon.8"
+        "openclaw": ">=2026.6.35-boon.1"
       },
       "peerDependenciesMeta": {
         "openclaw": {
@@ -1382,6 +1382,10 @@
       },
       "engines": {
         "node": ">= 0.10"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
       }
     },
     "node_modules/proxy-from-env": {

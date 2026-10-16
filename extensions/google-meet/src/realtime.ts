@@ -52,8 +52,14 @@ type BridgeProcess = {
   pid?: number;
   killed?: boolean;
   stdin?: Writable | null;
-  stdout?: { on(event: "data", listener: (chunk: Buffer | string) => void): unknown } | null;
-  stderr?: { on(event: "data", listener: (chunk: Buffer | string) => void): unknown } | null;
+  stdout?: {
+    on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
+    on(event: "error", listener: (error: Error) => void): unknown;
+  } | null;
+  stderr?: {
+    on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
+    on(event: "error", listener: (error: Error) => void): unknown;
+  } | null;
   kill(signal?: NodeJS.Signals): boolean;
   on(
     event: "exit",
@@ -613,6 +619,8 @@ export async function startCommandAgentAudioBridge(params: {
   inputProcess.stderr?.on("data", (chunk) => {
     params.logger.debug?.(`[google-meet] audio input: ${String(chunk).trim()}`);
   });
+  inputProcess.stdout?.on("error", fail("audio input command stdout"));
+  inputProcess.stderr?.on("error", fail("audio input command stderr"));
   outputProcess.on("error", fail("audio output command"));
   outputProcess.stdin?.on?.("error", fail("audio output command"));
   outputProcess.on("exit", (code, signal) => {
@@ -624,6 +632,7 @@ export async function startCommandAgentAudioBridge(params: {
   outputProcess.stderr?.on("data", (chunk) => {
     params.logger.debug?.(`[google-meet] audio output: ${String(chunk).trim()}`);
   });
+  outputProcess.stderr?.on("error", fail("audio output command stderr"));
 
   const writeOutputAudio = (audio: Buffer) => {
     const suppression = recordGoogleMeetOutputActivity({
@@ -927,6 +936,12 @@ export async function startCommandRealtimeAudioBridge(params: {
     proc.stderr?.on("data", (chunk) => {
       params.logger.debug?.(`[google-meet] audio output: ${String(chunk).trim()}`);
     });
+    proc.stderr?.on("error", (error: Error) => {
+      if (proc !== outputProcess) {
+        return;
+      }
+      fail("audio output command stderr")(error);
+    });
   };
   const clearOutputPlayback = () => {
     if (stopped) {
@@ -961,7 +976,22 @@ export async function startCommandRealtimeAudioBridge(params: {
     bargeInInputProcess = spawnFn(command.command, command.args, {
       stdio: ["ignore", "pipe", "pipe"],
     });
-    bargeInInputProcess.stdout?.on("data", (chunk) => {
+    const proc = bargeInInputProcess;
+    // A failed stream only disabled interruption detection here before,
+    // while the (possibly still-running) monitor child kept consuming no
+    // audio. Restart the whole monitor so detection recovers instead of
+    // silently staying off for the rest of the call. Guard on `proc`
+    // matching the live `bargeInInputProcess` so a stale handler from an
+    // already-replaced process can't restart on top of a newer one.
+    const restartBargeInMonitor = (reason: string) => {
+      if (stopped || proc !== bargeInInputProcess) {
+        return;
+      }
+      params.logger.warn(`[google-meet] restarting human barge-in monitor: ${reason}`);
+      terminateBridgeProcess(proc);
+      startHumanBargeInMonitor();
+    };
+    proc.stdout?.on("data", (chunk) => {
       if (stopped || !outputActivity.isInterruptible()) {
         return;
       }
@@ -995,17 +1025,21 @@ export async function startCommandRealtimeAudioBridge(params: {
         )}, peak=${stats.peak})`,
       );
     });
-    bargeInInputProcess.stderr?.on("data", (chunk) => {
+    proc.stdout?.on("error", (error: Error) => {
+      restartBargeInMonitor(`stdout failed: ${formatErrorMessage(error)}`);
+    });
+    proc.stderr?.on("data", (chunk) => {
       params.logger.debug?.(`[google-meet] barge-in input: ${String(chunk).trim()}`);
     });
-    bargeInInputProcess.on("error", (error) => {
-      params.logger.warn(`[google-meet] human barge-in input failed: ${formatErrorMessage(error)}`);
+    proc.stderr?.on("error", (error: Error) => {
+      restartBargeInMonitor(`stderr failed: ${formatErrorMessage(error)}`);
     });
-    bargeInInputProcess.on("exit", (code, signal) => {
+    proc.on("error", (error) => {
+      restartBargeInMonitor(`process failed: ${formatErrorMessage(error)}`);
+    });
+    proc.on("exit", (code, signal) => {
       if (!stopped) {
-        params.logger.debug?.(
-          `[google-meet] human barge-in input exited (${code ?? signal ?? "done"})`,
-        );
+        restartBargeInMonitor(`process exited (${code ?? signal ?? "done"})`);
       }
     });
   };
@@ -1020,6 +1054,8 @@ export async function startCommandRealtimeAudioBridge(params: {
   inputProcess.stderr?.on("data", (chunk) => {
     params.logger.debug?.(`[google-meet] audio input: ${String(chunk).trim()}`);
   });
+  inputProcess.stdout?.on("error", fail("audio input command stdout"));
+  inputProcess.stderr?.on("error", fail("audio input command stderr"));
 
   const resolved = resolveGoogleMeetRealtimeProvider({
     config: params.config,

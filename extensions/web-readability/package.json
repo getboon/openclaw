@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/web-readability-plugin",
-  "version": "2026.6.34-boon.8",
+  "version": "2026.6.35-boon.1",
   "private": true,
   "description": "OpenClaw local Readability web extraction plugin",
   "type": "module",

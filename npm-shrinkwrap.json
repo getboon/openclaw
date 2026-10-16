@@ -1,12 +1,12 @@
 {
   "name": "openclaw",
-  "version": "2026.6.34-boon.8",
+  "version": "2026.6.35-boon.1",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "openclaw",
-      "version": "2026.6.34-boon.8",
+      "version": "2026.6.35-boon.1",
       "hasInstallScript": true,
       "license": "MIT",
       "dependencies": {
@@ -64,7 +64,7 @@
         "qrcode": "1.5.4",
         "quickjs-wasi": "3.0.0",
         "rastermill": "0.3.1",
-        "tar": "7.5.21",
+        "tar": "7.5.22",
         "tree-sitter-bash": "0.25.1",
         "tslog": "4.10.2",
         "typebox": "1.1.39",
@@ -3055,6 +3055,10 @@
       },
       "engines": {
         "node": ">= 0.10"
+      },
+      "funding": {
+        "type": "opencollective",
+        "url": "https://opencollective.com/express"
       }
     },
     "node_modules/qrcode": {
@@ -3662,9 +3666,9 @@
       }
     },
     "node_modules/tar": {
-      "version": "7.5.21",
-      "resolved": "https://registry.npmjs.org/tar/-/tar-7.5.21.tgz",
-      "integrity": "sha512-XdhtCvlMywwxpCW8YEq3lOXBJpUPTR2OHHcwLPO3HwsJqOHa2Ok/oJ7ruGzp+JrKoRPVCzJwAdEjqLW/vNRPHA==",
+      "version": "7.5.22",
+      "resolved": "https://registry.npmjs.org/tar/-/tar-7.5.22.tgz",
+      "integrity": "sha512-MFO/QzvtAOmJbkhOaCTvbGcFN9L9b+JunIsDwaKljSOdcLMea3NJ1k9Usz/rjdfSXTq4dfzfeS7W4p4YOAAHeA==",
       "license": "BlueOak-1.0.0",
       "dependencies": {
         "@isaacs/fs-minipass": "^4.0.0",
