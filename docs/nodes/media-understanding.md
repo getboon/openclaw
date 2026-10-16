@@ -102,7 +102,7 @@ Each `models[]` entry can be **provider** or **CLI**:
       prompt: "Describe the image in <= 500 chars.",
       maxChars: 500,
       maxBytes: 10485760,
-      timeoutSeconds: 60,
+      timeoutSeconds: 150,
       capabilities: ["image"], // optional, used for multi-modal entries
       profile: "vision-profile",
       preferredProfile: "vision-fallback",

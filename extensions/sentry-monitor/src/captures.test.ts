@@ -169,10 +169,18 @@ describe("buildAgentEndCapture", () => {
     });
   });
 
-  it("falls back to a generic message when no error string is present", () => {
-    expect(buildAgentEndCapture({ messages: [], success: false }, HOST)?.message).toBe(
-      "agent_end success=false",
-    );
+  it("reports a no-error abort as a low-severity message, not an exception", () => {
+    // A caller-driven abort (e.g. a channel plugin's own wall-clock turn
+    // budget) that the embedded runner classifies as a clean interruption
+    // carries no error text. That must not page as an exception.
+    const capture = buildAgentEndCapture({ messages: [], success: false }, HOST);
+    expect(capture?.kind).toBe("message");
+    if (capture?.kind !== "message") {
+      throw new Error("expected a message-kind capture");
+    }
+    expect(capture.level).toBe("warning");
+    expect(capture.message).toBe("agent_end aborted (no error)");
+    expect(capture.fingerprint).toEqual(["agent_end", "aborted-no-error"]);
   });
 
   // run_id is boon-core's `dispatch_ref`: minted per turn, sent to the box as
@@ -350,6 +358,41 @@ describe("buildAfterToolCallCapture", () => {
     expect(capture?.kind).toBe("exception");
   });
 
+  // The image tool's vision-model request exhausting its configured
+  // timeout is a routine external latency outcome, not a host defect —
+  // downgrade instead of paging.
+  it("downgrades the image tool's timeout to a non-paging warning", () => {
+    const capture = buildAfterToolCallCapture(
+      {
+        toolName: "image",
+        params: {},
+        error: "The vision model did not respond in time. Retry the request...",
+        errorKind: "timeout",
+        errorCode: "image_description_timeout",
+      },
+      HOST,
+    );
+    expect(capture?.kind).toBe("message");
+    expect(capture?.kind === "message" && capture.level).toBe("warning");
+    expect(capture?.tags.error_kind).toBe("timeout");
+  });
+
+  // The downgrade is scoped to the image tool only — another tool's
+  // "timeout" (e.g. sessions_send) is a different failure mode and must
+  // still page until it has its own review.
+  it("still captures a non-image tool's timeout as an exception", () => {
+    const capture = buildAfterToolCallCapture(
+      {
+        toolName: "some_other_tool",
+        params: {},
+        error: "timed out",
+        errorKind: "timeout",
+      },
+      HOST,
+    );
+    expect(capture?.kind).toBe("exception");
+  });
+
   // A model-bad-args rejection is real signal for a genuine schema/producer
   // mismatch, but the host didn't fail — downgrade instead of dropping it
   // or paging on it as an exception.
@@ -371,13 +414,49 @@ describe("buildAfterToolCallCapture", () => {
     expect(capture?.tags.error_code).toBe("INVALID_REQUEST");
   });
 
-  it("still captures an exit-error or upstream failure as an exception", () => {
+  // An ordinary non-zero exit (a failing test, grep finding nothing, a
+  // script's own `exit 1`) is shell semantics, not a host defect — downgrade
+  // to a non-paging warning instead of an exception. "upstream" is
+  // unaffected by this branch and still pages.
+  it("downgrades an exit-error at a non-shell-lookup exit code to a non-paging warning", () => {
     const capture = buildAfterToolCallCapture(
-      { toolName: "exec", params: {}, error: "zip: command not found", errorKind: "exit-error" },
+      {
+        toolName: "exec",
+        params: {},
+        error: "Traceback (most recent call last):\nKeyError: 'total'",
+        errorKind: "exit-error",
+        exitCode: 1,
+      },
+      HOST,
+    );
+    expect(capture?.kind).toBe("message");
+    expect(capture?.kind === "message" && capture.level).toBe("warning");
+    expect(capture?.tags.error_kind).toBe("exit-error");
+    expect(capture?.tags.exit_code).toBe("1");
+  });
+
+  it("still captures an upstream failure as an exception", () => {
+    const capture = buildAfterToolCallCapture(
+      { toolName: "exec", params: {}, error: "fetch failed: ENOTFOUND example.invalid" },
+      HOST,
+    );
+    expect(capture?.kind).toBe("exception");
+  });
+
+  // 126/127 are shell command lookup/exec failure codes — 126 is "found but
+  // not executable" (a real bash diagnostic is "Permission denied"), 127 is
+  // "not found" ("command not found"). Both must keep paging as exceptions.
+  it.each([
+    [126, "/bin/bash: line 1: unzip: Permission denied"],
+    [127, "/bin/bash: line 1: unzip: command not found"],
+  ])("still captures a shell lookup failure (exit %i) as an exception", (exitCode, error) => {
+    const capture = buildAfterToolCallCapture(
+      { toolName: "exec", params: {}, error, errorKind: "exit-error", exitCode },
       HOST,
     );
     expect(capture?.kind).toBe("exception");
     expect(capture?.tags.error_kind).toBe("exit-error");
+    expect(capture?.tags.exit_code).toBe(String(exitCode));
   });
 
   it("tags the exit code and prefers it over normalized message text in the fingerprint", () => {
@@ -420,6 +499,61 @@ describe("buildAfterToolCallCapture", () => {
       HOST,
     );
     expect(exit1?.fingerprint).not.toEqual(exit127?.fingerprint);
+  });
+
+  // Two different missing binaries both exit 127 — without the message text
+  // appended for shell-lookup failures, both would fingerprint identically
+  // (same tool, same kind, same exit code) and merge into one Sentry issue,
+  // hiding that they are two distinct missing packages.
+  it("fingerprints two different missing binaries at the same exit code into different issues", () => {
+    const missingUnzip = buildAfterToolCallCapture(
+      {
+        toolName: "exec",
+        params: {},
+        error: "/bin/bash: line 1: unzip: command not found",
+        errorKind: "exit-error",
+        exitCode: 127,
+      },
+      HOST,
+    );
+    const missingConvert = buildAfterToolCallCapture(
+      {
+        toolName: "exec",
+        params: {},
+        error: "/bin/bash: line 1: convert: command not found",
+        errorKind: "exit-error",
+        exitCode: 127,
+      },
+      HOST,
+    );
+    expect(missingUnzip?.fingerprint).not.toEqual(missingConvert?.fingerprint);
+  });
+
+  // Two different missing binaries invoked by absolute path: normalizeFingerprintText's
+  // generic path scrub would erase both down to the same "<path>: command not found"
+  // text, so the fingerprint must extract just the basename instead.
+  it("fingerprints two absolute-path missing binaries into different issues", () => {
+    const missingUnzip = buildAfterToolCallCapture(
+      {
+        toolName: "exec",
+        params: {},
+        error: "/bin/bash: line 1: /opt/tools/unzip: command not found",
+        errorKind: "exit-error",
+        exitCode: 127,
+      },
+      HOST,
+    );
+    const missingConvert = buildAfterToolCallCapture(
+      {
+        toolName: "exec",
+        params: {},
+        error: "/bin/bash: line 1: /opt/tools/convert: command not found",
+        errorKind: "exit-error",
+        exitCode: 127,
+      },
+      HOST,
+    );
+    expect(missingUnzip?.fingerprint).not.toEqual(missingConvert?.fingerprint);
   });
 
   it("fingerprints different tools' failures into different issues", () => {

@@ -8,7 +8,7 @@ import type { MsgContext } from "../auto-reply/templating.js";
 import type { OpenClawConfig } from "../config/types.js";
 import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
 import { withEnvAsync } from "../test-utils/env.js";
-import { CLI_OUTPUT_MAX_BUFFER } from "./defaults.constants.js";
+import { CLI_OUTPUT_MAX_BUFFER, DEFAULT_TIMEOUT_SECONDS } from "./defaults.constants.js";
 import { createSafeAudioFixtureBuffer } from "./runner.test-utils.js";
 import type { MediaUnderstandingProvider } from "./types.js";
 
@@ -298,6 +298,8 @@ describe("applyMediaUnderstanding", () => {
     vi.doMock("../media/media-services.js", () => ({
       runFfmpeg: runFfmpegMock,
       convertHeicToJpeg: convertHeicToJpegMock,
+      MAX_IMAGE_INPUT_PIXELS: 25_000_000,
+      readImageMetadataFromHeader: () => null,
     }));
     vi.doMock("../process/exec.js", () => ({
       runExec: runExecMock,
@@ -1041,7 +1043,7 @@ describe("applyMediaUnderstanding", () => {
       expect.stringContaining(realImagePath),
     ]);
     expect(options).toEqual({
-      timeoutMs: 60_000,
+      timeoutMs: DEFAULT_TIMEOUT_SECONDS.image * 1000,
       maxBuffer: CLI_OUTPUT_MAX_BUFFER,
       cwd: path.dirname(realImagePath),
     });

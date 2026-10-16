@@ -678,7 +678,12 @@ export function createOpenClawCodingTools(options?: {
   const sandboxToolPolicyWithToolSearchControls =
     mergeToolSearchControlAllowlist(sandboxToolPolicy);
   const subagentPolicyWithToolSearchControls = mergeToolSearchControlAllowlist(subagentPolicy);
-  const allowBackground = isToolAllowedByPolicies("process", [
+  // The complete set of layered policies that decide whether a tool name
+  // actually survives into the effective tool list (see applyToolPolicyPipeline
+  // below). Any gate that needs to know "would this tool be allowed" — not
+  // just the narrower profile/global/agent subset — must check against all of
+  // these, not a partial list.
+  const layeredToolPolicies = [
     profilePolicyWithAlsoAllow,
     providerProfilePolicyWithAlsoAllow,
     globalPolicyWithToolSearchControls,
@@ -690,12 +695,23 @@ export function createOpenClawCodingTools(options?: {
     sandboxToolPolicyWithToolSearchControls,
     subagentPolicyWithToolSearchControls,
     inheritedToolPolicy,
-  ]);
+  ];
+  const allowBackground = isToolAllowedByPolicies("process", layeredToolPolicies);
   options?.recordToolPrepStage?.("tool-policy");
   const execConfig = resolveExecConfig({ cfg: options?.config, agentId });
   const fsConfig = resolveToolFsConfig({ cfg: options?.config, agentId });
+  const fsWorkspaceOnly = isMemoryFlushRun || fsConfig.workspaceOnly === true;
   const fsPolicy = createToolFsPolicy({
-    workspaceOnly: isMemoryFlushRun || fsConfig.workspaceOnly,
+    workspaceOnly: fsWorkspaceOnly,
+    // Media tools reuse this to decide whether they may widen their read
+    // allowlist to a referenced file's own directory (e.g. an agent-rendered
+    // /tmp crop) instead of failing closed — mirrors the outbound send path's
+    // getAgentScopedMediaLocalRootsForSources gate. Must check the full
+    // layered policy set (group/sender/sandbox/subagent/inherited included),
+    // not just resolveEffectiveToolFsRootExpansionAllowed's narrower
+    // profile/global/agent subset — otherwise a policy layer that denies
+    // `read` would still leave media tools able to widen past the workspace.
+    rootExpansionAllowed: !fsWorkspaceOnly && isToolAllowedByPolicies("read", layeredToolPolicies),
   });
   const sandboxRoot = sandbox?.workspaceDir;
   const sandboxFsBridge = sandbox?.fsBridge;

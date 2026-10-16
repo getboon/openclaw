@@ -11,6 +11,30 @@ Advances the fork's upstream base from `2026.6.34` to `2026.6.35` — a 30-commi
 - Validation: all touched JSON manifests re-verified as valid JSON; `pnpm-lock.yaml` re-verified as valid YAML with no leftover conflict markers. Full `pnpm check`, the Vitest suite, and `pnpm plugin-sdk:surface` (to re-measure the two speculative budget placeholders in `scripts/plugin-sdk-surface-report.mjs`) deferred to CI/Crabbox per repo policy.
 - Base = `2026.6.34-boon.6` → upstream base reset to `2026.6.35`. Fork gateway and every bundled plugin bumped to `2026.6.35-boon.1` in lockstep; no fork plugin source changed beyond the upstream merge itself.
 
+## 2026.6.34-boon.8
+
+Media tools now find the files agents just wrote, and routine tool failures stop paging Sentry.
+
+- **#292:** relative media/PDF paths (e.g. a file the agent saved into a workspace subfolder) now resolve against the agent workspace in `pdf`, `image_generate`, `video_generate`, and `music_generate`, instead of the gateway process cwd, so they are no longer rejected as "not under an allowed directory". The image tool's duplicate inline resolution was removed in favor of the loader's. The `message` tool's channel plugins still drop `workspaceDir` and are tracked separately.
+- **#289:** `image`, `pdf`, `image_generate`, `video_generate`, and `music_generate` can now read agent-rendered files outside the default roots (e.g. `/tmp` crops) when the agent is permitted host reads outside its workspace, matching the outbound `MEDIA:` path; `workspaceOnly` or read-denied agents are unchanged. A blocked path now returns a `denied` tool result the model can act on instead of a raw error that paged Sentry.
+- **#293:** the image tool's default vision timeout is raised 60s → 150s (above the LLM gateway's 120s fallback-chain budget), with one shared deadline across setup and the provider request. A timeout now returns a graceful `status: "timeout"` result with retry guidance, and sentry-monitor downgrades it to a warning for the image tool. The Codex dynamic-tool watchdog mirrors the raise.
+- **#291:** sentry-monitor no longer pages on ordinary non-zero `exec` exit codes (a `grep` finding nothing, a failing test); only shell lookup failures (126/127) remain exceptions, now fingerprinted per missing binary. The runtime Docker image also installs `unzip`.
+- **#288:** `memory_search` no longer pauses and pages Sentry while the index is still being built (a "missing" index identity); only a real "mismatched" embedding provider pauses it.
+- **#294:** test-only regression coverage that the cron delivery-target guard rejects a directory-less channel's unknown target end to end.
+- Base = `2026.6.34-boon.7`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.34-boon.8` in lockstep. No source or dependency change in those three plugins; bundled-plugin source changes (codex, memory-core, sentry-monitor) ship inside the gateway.
+
+## 2026.6.34-boon.7
+
+Large images are no longer rejected outright; a decode budget separate from the output budget lets big sources downscale instead of failing.
+
+- **#286:** Rastermill's shared image processor used the same pixel budget for input decode and final output, so any source above 25 megapixels was rejected before any resize could run. The two budgets are now separate, so a large source decodes and then downscales. Also fixes a missing pixel guard on `image_generate`'s `data:` URL reference path and on HEIC conversion, stops echoing a `data:` URL's base64 payload into tool error details for the too-large case, and restores the managed-image-attachments gateway path's fail-fast behavior for sources still too large under the raised ceiling.
+- **#283 (ENG-21233):** an external caller's timeout abort (a channel plugin's own `abortSignal` firing as a `TimeoutError`) now classifies as a clean interruption instead of leaking `DOMException`'s `TimeoutError` code as `Error: Turn budget exceeded | 23` on `agent_end` — there is no turn-count ceiling. Fleet telemetry stops paging on this expected, policy-driven abort.
+- **#284 (ENG-21229):** the memory-flush append-only write guard now re-resolves its allowed date-stamped path at execute time instead of when the tool set was built, so a flush that crosses midnight (provider fallback/retry backoff, a long-running turn) no longer rejects the correct current-date path.
+- **#282 (ENG-21225):** `web_fetch` responses with HTTP 403/404/429 no longer page Sentry as unhandled exceptions; 429 now retries with bounded backoff honoring `Retry-After` before giving up.
+- **#285:** removed a duplicate `simple-git`/`proxy-addr`/`source-map-js` overrides block in `pnpm-workspace.yaml`/`pnpm-lock.yaml` that crashed `pnpm store path` on every PR against boon.
+- **#275:** bumped `music-metadata` 11.12.3 → 11.16.0 and regenerated the matrix/whatsapp shrinkwraps.
+- Base = `2026.6.34-boon.6`. Fork gateway + `@openclaw/slack` + `@openclaw/msteams` + `@openclaw/diagnostics-prometheus` bumped to `2026.6.34-boon.7` in lockstep. No source or dependency change in those three plugins.
+
 ## 2026.6.34-boon.6
 
 Claude 5 models now use the configured thinking level.

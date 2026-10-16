@@ -1157,4 +1157,70 @@ describe("createMusicGenerateTool", () => {
       url: "http://198.18.0.153/reference.png",
     });
   });
+
+  it("threads workspaceDir to loadWebMedia for a relative reference image", async () => {
+    // Regression test: a relative reference must resolve against the agent
+    // workspace in the loader, not the gateway process cwd.
+    vi.spyOn(musicGenerationRuntime, "listRuntimeMusicGenerationProviders").mockReturnValue([
+      {
+        id: "minimax",
+        defaultModel: "music-2.6",
+        models: ["music-2.6"],
+        capabilities: {
+          edit: { enabled: true, maxInputImages: 1 },
+        },
+        generateMusic: vi.fn(async () => {
+          throw new Error("not used");
+        }),
+      },
+    ]);
+    vi.spyOn(webMedia, "loadWebMedia").mockResolvedValue({
+      kind: "image",
+      buffer: Buffer.from("image"),
+      contentType: "image/png",
+    });
+    vi.spyOn(musicGenerationRuntime, "generateMusic").mockResolvedValue({
+      provider: "minimax",
+      model: "music-2.6",
+      attempts: [],
+      ignoredOverrides: [],
+      tracks: [{ buffer: Buffer.from("music"), mimeType: "audio/mpeg" }],
+    });
+    vi.spyOn(mediaStore, "saveMediaBuffer").mockResolvedValueOnce({
+      path: "/tmp/generated-night-drive.mp3",
+      id: "generated-night-drive.mp3",
+      size: 11,
+      contentType: "audio/mpeg",
+    });
+    const workspaceDir = "/workspace/relative-ref";
+    const tool = createMusicGenerateTool({
+      config: asConfig({
+        agents: {
+          defaults: {
+            musicGenerationModel: { primary: "minimax/music-2.6" },
+          },
+        },
+      }),
+      workspaceDir,
+    });
+    if (!tool) {
+      throw new Error("expected music_generate tool");
+    }
+
+    await tool.execute("call-1", {
+      prompt: "night-drive synthwave",
+      image: "inbox/reference.png",
+    });
+
+    // Find by ref rather than assuming call index: a prior test's detached
+    // background job can still flush a stray call into this fresh spy.
+    const loadCall = vi
+      .mocked(webMedia.loadWebMedia)
+      .mock.calls.find((call) => call[0] === "inbox/reference.png");
+    if (!loadCall) {
+      throw new Error("expected web media load call for inbox/reference.png");
+    }
+    const loadOptions = loadCall[1] as { workspaceDir?: string };
+    expect(loadOptions.workspaceDir).toBe(workspaceDir);
+  });
 });

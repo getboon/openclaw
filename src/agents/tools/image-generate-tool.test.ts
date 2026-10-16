@@ -1,5 +1,6 @@
 // image_generate tool tests cover provider/model selection, edit inputs,
 // background task handling, media saving, and duplicate-generation guards.
+import { RastermillError } from "rastermill";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 
@@ -1541,6 +1542,53 @@ describe("createImageGenerateTool", () => {
     expect(generateArgs.inputImages).toHaveLength(1);
   });
 
+  it("threads workspaceDir to loadWebMedia for a relative reference image", async () => {
+    // Regression test: a relative reference like "inbox/style.png" must
+    // resolve against the agent workspace in the loader, not the gateway
+    // process cwd.
+    vi.spyOn(imageGenerationRuntime, "generateImage").mockResolvedValue({
+      provider: "fal",
+      model: "krea/v2/medium/text-to-image",
+      attempts: [],
+      ignoredOverrides: [],
+      images: [
+        {
+          buffer: Buffer.from("krea-style-out"),
+          mimeType: "image/png",
+          fileName: "krea-style.png",
+        },
+      ],
+    });
+    const loadWebMedia = vi.spyOn(webMedia, "loadWebMedia").mockResolvedValue({
+      kind: "image",
+      buffer: Buffer.from("style-ref"),
+      contentType: "image/png",
+    });
+    vi.spyOn(imageOps, "getImageMetadata").mockResolvedValue({
+      width: 2048,
+      height: 2048,
+    });
+    vi.spyOn(mediaStore, "saveMediaBuffer").mockResolvedValue({
+      path: "/tmp/krea-style.png",
+      id: "krea-style.png",
+      size: 14,
+      contentType: "image/png",
+    });
+
+    const workspaceDir = "/workspace/relative-ref";
+    const tool = createToolWithPrimaryImageModel("fal/krea/v2/medium/text-to-image", {
+      workspaceDir,
+    });
+    await tool.execute("call-fal-workspace-relative", {
+      prompt: "Style-directed portrait",
+      image: "inbox/style.png",
+    });
+
+    const [loadRef, loadOptions] = loadWebMedia.mock.calls.at(0) ?? [];
+    expect(loadRef).toBe("inbox/style.png");
+    expect((loadOptions as Record<string, unknown> | undefined)?.workspaceDir).toBe(workspaceDir);
+  });
+
   it.each([60.5, "60px", null])("rejects malformed OpenAI output compression %s", async (value) => {
     const generateImage = vi.spyOn(imageGenerationRuntime, "generateImage").mockResolvedValue({
       provider: "openai",
@@ -1813,6 +1861,77 @@ describe("createImageGenerateTool", () => {
     if (!loadArgs || typeof loadArgs !== "object") {
       throw new Error("expected loadWebMedia options");
     }
+  });
+
+  it("returns a graceful error instead of throwing when a reference image is too large to decode even under the raised ceiling", async () => {
+    vi.spyOn(webMedia, "loadWebMedia").mockRejectedValue(
+      new RastermillError(
+        "RASTERMILL_INPUT_TOO_LARGE",
+        "Image dimensions exceed the 100,000,000 pixel input limit: 20000x20000 (400000000 pixels)",
+      ),
+    );
+    const tool = createToolWithPrimaryImageModel("google/gemini-3-pro-image-preview", {
+      workspaceDir: process.cwd(),
+    });
+
+    await expect(
+      tool.execute("call-edit-too-large", {
+        prompt: "Use this reference.",
+        image: "./fixtures/reference.png",
+      }),
+    ).rejects.toThrow(
+      "Image too large to process: ./fixtures/reference.png exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.",
+    );
+  });
+
+  it("downscales a data: URL reference image through the same optimization path as other references", async () => {
+    const generateImage = stubEditedImageFlow({ width: 1024, height: 1024 });
+    const optimizeImageBufferForWebMedia = vi
+      .spyOn(webMedia, "optimizeImageBufferForWebMedia")
+      .mockResolvedValue({
+        kind: "image",
+        buffer: Buffer.from("optimized-reference"),
+        contentType: "image/jpeg",
+      });
+    const tool = createToolWithPrimaryImageModel("google/gemini-3-pro-image-preview", {
+      workspaceDir: process.cwd(),
+    });
+
+    await tool.execute("call-edit-data-url", {
+      prompt: "Use this reference.",
+      image: `data:image/png;base64,${Buffer.from("raw-reference").toString("base64")}`,
+    });
+
+    expect(optimizeImageBufferForWebMedia).toHaveBeenCalledTimes(1);
+    const generateArgs = mockCallArg(generateImage, 0, "generateImage");
+    expect(generateArgs.inputImages).toEqual([
+      {
+        buffer: Buffer.from("optimized-reference"),
+        mimeType: "image/jpeg",
+      },
+    ]);
+  });
+
+  it("returns a graceful error without echoing the payload when a data: URL reference is too large to decode", async () => {
+    vi.spyOn(webMedia, "optimizeImageBufferForWebMedia").mockRejectedValue(
+      new RastermillError(
+        "RASTERMILL_INPUT_TOO_LARGE",
+        "Image dimensions exceed the 100,000,000 pixel input limit: 20000x20000 (400000000 pixels)",
+      ),
+    );
+    const tool = createToolWithPrimaryImageModel("google/gemini-3-pro-image-preview", {
+      workspaceDir: process.cwd(),
+    });
+    const image = `data:image/png;base64,${Buffer.from("raw-reference").toString("base64")}`;
+
+    await expect(
+      tool.execute("call-edit-data-url-too-large", {
+        prompt: "Use this reference.",
+        image,
+      }),
+    ).rejects.toThrow(
+      "Image too large to process: the provided data URL image exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.",
+    );
   });
 
   it("passes web_fetch SSRF policy to remote reference images", async () => {

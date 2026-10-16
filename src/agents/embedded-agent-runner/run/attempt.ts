@@ -267,7 +267,11 @@ import {
   isWorkspaceBootstrapPending,
   type WorkspaceBootstrapFile,
 } from "../../workspace.js";
-import { isRunnerAbortError } from "../abort.js";
+import {
+  classifyAsyncTaskWaitTimeout,
+  isExternalTimeoutAbortRejection,
+  isRunnerAbortError,
+} from "../abort.js";
 import { isCacheTtlEligibleProvider, readLastCacheTtlTimestamp } from "../cache-ttl.js";
 import { resolveCompactionTimeoutMs } from "../compaction-safety-timeout.js";
 import {
@@ -974,6 +978,13 @@ export async function runEmbeddedAttempt(
   let idleTimedOut = false;
   let timedOutDuringCompaction = false;
   let timedOutDuringToolExecution = false;
+  // Set once the prompt catch classifies a rejection as a clean external
+  // timeout abort. Guards the completion-required async-task wait below:
+  // that wait's own deadline collapses to ~now once the run is already
+  // aborted, so a still-pending async task would otherwise re-populate
+  // promptError with a second, unrelated-looking error and silently undo
+  // this classification.
+  let externalTimeoutAbortClassified = false;
   let promptError: unknown = null;
   let emitDiagnosticRunCompleted:
     | ((
@@ -4928,6 +4939,13 @@ export async function runEmbeddedAttempt(
             await withOwnedSessionWriteLock(() => {
               handleMidTurnPrecheckRequest(err.request);
             });
+          } else if (isExternalTimeoutAbortRejection({ err, externalAbort, timedOut })) {
+            // Caller's own abort reason, not a run failure: clear both fields
+            // (not just skip setting them — onExternalAbortSignal's early-exit
+            // path can set promptError directly before this runs).
+            promptError = null;
+            promptErrorSource = null;
+            externalTimeoutAbortClassified = true;
           } else {
             promptError = err;
             promptErrorSource = "prompt";
@@ -5003,17 +5021,30 @@ export async function runEmbeddedAttempt(
             if (!timedOut || !isRunnerAbortError(err)) {
               throw err;
             }
+            // A caller timeout can also fire here, after the main prompt
+            // already resolved cleanly (so the classification branch above
+            // never ran). Classify it the same way so the outcome below
+            // doesn't repopulate promptError for this same external abort.
+            if (isExternalTimeoutAbortRejection({ err, externalAbort, timedOut })) {
+              externalTimeoutAbortClassified = true;
+            }
             asyncTaskWait = await waitForCompletionRequiredAsyncTasks({
               getToolMetas: getAsyncStartedToolMetas,
               sessionKey: params.sessionKey,
               deadlineAtMs: Date.now(),
             });
           }
-          if (asyncTaskWait.timedOutRunIds.length > 0) {
-            promptError = new Error(
-              `Timed out waiting for async task completion: ${asyncTaskWait.timedOutRunIds.join(", ")}`,
-            );
+          const asyncTaskTimeoutOutcome = classifyAsyncTaskWaitTimeout({
+            timedOutRunIds: asyncTaskWait.timedOutRunIds,
+            externalTimeoutAbortClassified,
+          });
+          if (asyncTaskTimeoutOutcome.kind === "error") {
+            promptError = new Error(asyncTaskTimeoutOutcome.message);
             promptErrorSource = "prompt";
+          } else if (asyncTaskTimeoutOutcome.kind === "log") {
+            log.warn(
+              `${asyncTaskTimeoutOutcome.message} runId=${params.runId} sessionId=${params.sessionId}`,
+            );
           } else if (asyncTaskWait.waitedRunIds.length > 0) {
             await sessionLockController.waitForSessionEvents(activeSession);
           }

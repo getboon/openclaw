@@ -152,12 +152,18 @@ const PAUSED_MEMORY_INDEX_ACTION =
 
 function resolvePausedMemoryIndexIdentityReason(status: { custom?: unknown }): string | undefined {
   const indexIdentity = asRecord(asRecord(status.custom)?.indexIdentity);
-  if (indexIdentity?.status !== "mismatched" && indexIdentity?.status !== "missing") {
+  // Only "mismatched" (an index built for a different provider/model/scope) is an
+  // actionable pause worth surfacing to the agent. "missing" (no index built yet)
+  // is the ordinary state for the first moments of a new session/workspace and
+  // self-heals via the session-start background sync — pausing on it produces a
+  // misleading "different embedding provider" message and gets misclassified as
+  // a tool error upstream.
+  if (indexIdentity?.status !== "mismatched") {
     return undefined;
   }
   return typeof indexIdentity.reason === "string" && indexIdentity.reason.trim()
     ? indexIdentity.reason.trim()
-    : "memory index identity is missing or mismatched";
+    : "memory index identity is mismatched";
 }
 
 function buildPausedMemoryIndexUnavailableResult(reason: string) {

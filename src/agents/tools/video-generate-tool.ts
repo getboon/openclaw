@@ -543,6 +543,7 @@ async function loadReferenceAssets(params: {
   maxBytes?: number;
   workspaceDir?: string;
   sandboxConfig: { root: string; bridge: SandboxFsBridge; workspaceOnly: boolean } | null;
+  rootExpansionAllowed?: boolean;
   ssrfPolicy?: SsrFPolicy;
 }): Promise<
   Array<{
@@ -614,6 +615,7 @@ async function loadReferenceAssets(params: {
       params.workspaceDir,
       {
         workspaceOnly: params.sandboxConfig?.workspaceOnly === true,
+        rootExpansionAllowed: params.rootExpansionAllowed === true,
       },
       resolvedPath ? [resolvedPath] : undefined,
     );
@@ -634,6 +636,9 @@ async function loadReferenceAssets(params: {
         : await loadWebMedia(resolvedPath ?? resolvedInput, {
             maxBytes: params.maxBytes,
             localRoots,
+            // Lets a relative ref resolve against the agent workspace instead of
+            // the gateway process cwd, matching the image tool.
+            ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
             ssrfPolicy: params.ssrfPolicy,
           });
     if (media.kind !== params.expectedKind) {
@@ -1123,6 +1128,7 @@ export function createVideoGenerateTool(options?: {
         expectedKind: "image",
         workspaceDir: options?.workspaceDir,
         sandboxConfig,
+        rootExpansionAllowed: options?.fsPolicy?.rootExpansionAllowed === true,
         ssrfPolicy: remoteMediaSsrfPolicy,
       });
       // Attach roles to the loaded image assets (positional, by index into images[]).
@@ -1137,6 +1143,7 @@ export function createVideoGenerateTool(options?: {
         expectedKind: "video",
         workspaceDir: options?.workspaceDir,
         sandboxConfig,
+        rootExpansionAllowed: options?.fsPolicy?.rootExpansionAllowed === true,
         ssrfPolicy: remoteMediaSsrfPolicy,
       });
       for (let i = 0; i < loadedReferenceVideos.length; i++) {
@@ -1150,6 +1157,7 @@ export function createVideoGenerateTool(options?: {
         expectedKind: "audio",
         workspaceDir: options?.workspaceDir,
         sandboxConfig,
+        rootExpansionAllowed: options?.fsPolicy?.rootExpansionAllowed === true,
         ssrfPolicy: remoteMediaSsrfPolicy,
       });
       for (let i = 0; i < loadedReferenceAudios.length; i++) {

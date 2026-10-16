@@ -48,15 +48,21 @@ export type ResizeToPngParams = {
 
 /** Ordered JPEG quality ladder used when shrinking generated or attached images. */
 export const IMAGE_REDUCE_QUALITY_STEPS = [85, 75, 65, 55, 45, 35] as const;
-/** Shared input/output pixel cap for Rastermill-backed image operations. */
+/** Output pixel cap: the largest final image any consumer accepts. Public SDK contract — fixed name/value. */
 export const MAX_IMAGE_INPUT_PIXELS = 25_000_000;
+/**
+ * Input/decode cap, kept apart from MAX_IMAGE_INPUT_PIXELS so a large source
+ * can be decoded, then downscaled — one shared value for both rejects the
+ * image before any resize is attempted.
+ */
+export const MAX_IMAGE_DECODE_PIXELS = 100_000_000;
 
 /** Creates a Rastermill processor with OpenClaw temp-dir, pixel-limit, and command trust policy. */
 export function createImageProcessor() {
   return createRastermill({
     execution: "auto",
     limits: {
-      inputPixels: MAX_IMAGE_INPUT_PIXELS,
+      inputPixels: MAX_IMAGE_DECODE_PIXELS,
       outputPixels: MAX_IMAGE_INPUT_PIXELS,
     },
     temp: {
@@ -71,6 +77,14 @@ export function createImageProcessor() {
 /** Detects either OpenClaw's wrapper error or Rastermill's native unavailable error. */
 export function isImageProcessorUnavailableError(err: unknown): boolean {
   return err instanceof ImageProcessorUnavailableError || isRastermillUnavailableError(err);
+}
+
+/**
+ * True when a source exceeds even the raised decode ceiling above. Lets
+ * callers return a clear message instead of an unhandled dependency error.
+ */
+export function isImageTooLargeToDecodeError(err: unknown): boolean {
+  return err instanceof RastermillError && err.code === "RASTERMILL_INPUT_TOO_LARGE";
 }
 
 /** Builds a descending, de-duplicated max-side search grid for iterative image resizing. */

@@ -183,11 +183,16 @@ WORKDIR /app
 # so it must be installed explicitly here. Without it `/etc/ssl/certs/`
 # stays empty and every HTTPS outbound dies at TLS handshake with
 # `error setting certificate file`.
+# `unzip`: the agent's `exec` tool runs arbitrary shell commands in this
+# image, so a self-hosted user's agent asked to extract an uploaded .zip
+# archive needs it on PATH. Appended after `tini` (not inserted
+# alphabetically) so both substring assertions in src/dockerfile.test.ts
+# stay intact.
 RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=openclaw-bookworm-apt-lists,target=/var/lib/apt,sharing=locked \
     apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      ca-certificates curl git hostname lsof openssl procps python3 tini && \
+      ca-certificates curl git hostname lsof openssl procps python3 tini unzip && \
     update-ca-certificates
 
 RUN chown node:node /app
