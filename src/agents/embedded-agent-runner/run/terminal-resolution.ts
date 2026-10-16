@@ -202,9 +202,6 @@ export async function resolveEmbeddedRunTerminal(input: {
   replayState: EmbeddedRunReplayState;
   activePromptPersisted: boolean;
   activateInternalPrompt: (prompt: string) => void;
-  // ENG-21265 — commit the partial assistant text to the transcript before a
-  // length-continuation retry, so the continuation resumes instead of restarting.
-  commitPartialAssistantTurn: (partialText: string) => void;
   setSuppressNextUserMessagePersistence: (value: boolean) => void;
   armPostCompactionGuard: () => void;
   readTerminalToolPresentation: () => string | undefined;
@@ -429,10 +426,11 @@ export async function resolveEmbeddedRunTerminal(input: {
   // ENG-21265 — a turn truncated at the output-length limit with partial prose is, by
   // default, either surfaced as an incomplete turn (below) or delivered half-done with a
   // truncation notice (completeEmbeddedRun). When length-continuation is enabled
-  // (maxLengthContinuationAttempts > 0), instead commit the partial text to the transcript
-  // and retry with a continuation prompt so the model finishes the work in short,
-  // drop-resistant turns. Prose only: a turn with pending tool calls / yield / structured
-  // output is left on the existing path to avoid corrupting a partial structured block.
+  // (maxLengthContinuationAttempts > 0), instead retry with a continuation prompt so the
+  // model finishes the work in short, drop-resistant turns. The length-stopped partial is
+  // already persisted to the transcript and replayed, so the continuation resumes from it.
+  // Prose only: a turn with pending tool calls / yield / structured output is left on the
+  // existing path to avoid corrupting a partial structured block.
   const lengthStopReason =
     input.attemptAssistant?.stopReason ?? attempt.currentAttemptAssistant?.stopReason;
   const partialAssistantTextForContinuation =
@@ -451,7 +449,6 @@ export async function resolveEmbeddedRunTerminal(input: {
     retryState.lengthContinuationAttempts < input.maxLengthContinuationAttempts
   ) {
     retryState.lengthContinuationAttempts += 1;
-    input.commitPartialAssistantTurn(partialAssistantTextForContinuation);
     input.activateInternalPrompt(LENGTH_CONTINUATION_INSTRUCTION);
     retryState.compactionContinuationInstruction = null;
     log.warn(

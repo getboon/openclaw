@@ -31,10 +31,7 @@ import type { EmbeddedRunAttemptResult } from "./types.js";
 // surfacing the existing incomplete-turn error path.
 export const DEFAULT_REASONING_ONLY_RETRY_LIMIT = 2;
 // ENG-21265 — max continuations of a length-truncated turn. 0 = OFF (today's behavior:
-// deliver the partial with a truncation notice). Do NOT raise above 0 until (a) the real
-// commitPartialAssistantTurn transcript append is implemented in run-loop.ts and (b) the
-// production data confirms long streams are output-bound — otherwise continuations either
-// restart from scratch (no partial persisted) or truncate mid-thought (thinking-bound).
+// deliver the partial with a truncation notice).
 export const DEFAULT_LENGTH_CONTINUATION_LIMIT = 0;
 export const DEFAULT_EMPTY_RESPONSE_RETRY_LIMIT = 1;
 const REASONING_ONLY_RETRY_INSTRUCTION =

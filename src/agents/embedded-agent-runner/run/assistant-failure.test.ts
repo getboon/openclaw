@@ -101,6 +101,8 @@ function makeExhaustedCredentialFailureInput(options?: { replaySafe?: boolean })
     suspensionSessionId: "session:credential-enoent",
     agentDir: "/tmp/openclaw-assistant-failure-test",
     isProbeSession: false,
+    streamDropResumes: 0,
+    activateInternalPrompt: vi.fn(),
   };
   return {
     advanceAuthProfile,
@@ -140,6 +142,94 @@ function makeIdleTimeoutFailureInput(options?: { replaySafe?: boolean }) {
   fixture.input.advanceRateLimitAuthProfile = vi.fn(async () => true);
   return fixture;
 }
+
+// ENG-21265 — a provider stream that drops mid-generation after the agent already ran tools.
+function makeStreamDropFailureInput(options?: {
+  errorMessage?: string;
+  streamDropResumes?: number;
+  timedOut?: boolean;
+}) {
+  const fixture = makeExhaustedCredentialFailureInput({ replaySafe: false });
+  const assistant = buildEmbeddedRunnerAssistant({
+    provider: "anthropic",
+    model: "mock-1",
+    stopReason: "error",
+    errorMessage: options?.errorMessage ?? "Anthropic stream ended before message_stop",
+    content: [{ type: "text", text: "| Cost code | Labor | Material |\n| 26-0500 | 12.5 |" }],
+  });
+  const replayMetadata = { hadPotentialSideEffects: true, replaySafe: false };
+  const attempt = makeEmbeddedRunnerAttempt({
+    ...(options?.timedOut
+      ? { terminal: { kind: "timeout", phase: "prompt", source: "idle" } }
+      : {}),
+    lastAssistant: assistant,
+    currentAttemptAssistant: assistant,
+    toolMetas: [{ toolName: "exec", replaySafe: false }],
+    replayMetadata,
+    currentAttemptReplayMetadata: replayMetadata,
+  });
+  fixture.input.attempt = attempt;
+  fixture.input.attemptAssistant = assistant;
+  fixture.input.currentAttemptAssistant = assistant;
+  fixture.input.terminalState = resolveEmbeddedRunAttemptTerminalState({ attempt, assistant });
+  fixture.input.emptyErrorRetries = 0;
+  fixture.input.streamDropResumes = options?.streamDropResumes ?? 0;
+  return fixture;
+}
+
+describe("handleEmbeddedAssistantFailure — resume on mid-stream drop (ENG-21265)", () => {
+  it("resumes the same model with a continuation prompt even after tool activity", async () => {
+    const fixture = makeStreamDropFailureInput();
+
+    const outcome = await handleEmbeddedAssistantFailure(fixture.input);
+
+    expect(outcome).toMatchObject({ action: "retry", streamDropResumes: 1 });
+    expect(fixture.input.activateInternalPrompt).toHaveBeenCalledOnce();
+    expect(vi.mocked(fixture.input.activateInternalPrompt).mock.calls[0]?.[0]).toMatch(
+      /continue exactly where/i,
+    );
+    // Same model, same profile: no rotation, no model fallback.
+    expect(fixture.advanceAuthProfile).not.toHaveBeenCalled();
+    expect(fixture.traceAttempts).toEqual([
+      { provider: "anthropic", model: "mock-1", result: "stream_drop_resume", stage: "assistant" },
+    ]);
+  });
+
+  it("treats the gateway's upstream stream error as a mid-stream drop", async () => {
+    const fixture = makeStreamDropFailureInput({ errorMessage: "upstream error during stream" });
+
+    const outcome = await handleEmbeddedAssistantFailure(fixture.input);
+
+    expect(outcome).toMatchObject({ action: "retry", streamDropResumes: 1 });
+  });
+
+  it("stops resuming at the ceiling and keeps today's behavior", async () => {
+    const fixture = makeStreamDropFailureInput({ streamDropResumes: 3 });
+
+    const outcome = await handleEmbeddedAssistantFailure(fixture.input);
+
+    expect(outcome.action).toBe("proceed");
+    expect(fixture.input.activateInternalPrompt).not.toHaveBeenCalled();
+  });
+
+  it("does not resume a non-drop error after tool activity", async () => {
+    const fixture = makeExhaustedCredentialFailureInput({ replaySafe: false });
+
+    const outcome = await handleEmbeddedAssistantFailure(fixture.input);
+
+    expect(outcome.action).toBe("proceed");
+    expect(fixture.input.activateInternalPrompt).not.toHaveBeenCalled();
+  });
+
+  it("does not resume when the run timed out", async () => {
+    const fixture = makeStreamDropFailureInput({ timedOut: true });
+
+    const outcome = await handleEmbeddedAssistantFailure(fixture.input);
+
+    expect(outcome.action).not.toBe("retry");
+    expect(fixture.input.activateInternalPrompt).not.toHaveBeenCalled();
+  });
+});
 
 describe("handleEmbeddedAssistantFailure", () => {
   it("uses prepared OpenRouter ownership for custom-provider billing failures", async () => {

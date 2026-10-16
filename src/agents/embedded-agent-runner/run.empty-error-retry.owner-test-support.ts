@@ -83,6 +83,8 @@ function makeInput(
     suspensionSessionId: "session:empty-error",
     agentDir: "/tmp/openclaw-empty-error-test",
     isProbeSession: false,
+    streamDropResumes: 0,
+    activateInternalPrompt: vi.fn(),
   };
 }
 

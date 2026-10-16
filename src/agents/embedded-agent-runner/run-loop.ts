@@ -202,6 +202,8 @@ export async function runPreparedEmbeddedLoop(
   let overloadProfileRotations = 0;
   const terminalRetryState = createEmbeddedRunTerminalRetryState();
   let sameModelIdleTimeoutRetries = 0;
+  // ENG-21265 — resumes of a provider stream that dropped mid-generation (bounded per run).
+  let streamDropResumes = 0;
   // Cost-runaway breaker for #76293. State lives at the run-loop level
   // on purpose so it survives across attempt boundaries and across
   // profile/auth retries within this embedded run (a wrapper-local
@@ -510,6 +512,8 @@ export async function runPreparedEmbeddedLoop(
         suspensionSessionId: sessionPromptState.sessionId ?? params.sessionId,
         agentDir,
         isProbeSession,
+        streamDropResumes,
+        activateInternalPrompt: sessionPromptState.activateInternalPrompt,
       });
       thinkLevel = assistantFailureOutcome.thinkLevel;
       preparedRuntime.setThinkLevel(thinkLevel);
@@ -517,6 +521,7 @@ export async function runPreparedEmbeddedLoop(
       emptyErrorRetries = assistantFailureOutcome.emptyErrorRetries;
       overloadProfileRotations = assistantFailureOutcome.overloadProfileRotations;
       sameModelIdleTimeoutRetries = assistantFailureOutcome.sameModelIdleTimeoutRetries;
+      streamDropResumes = assistantFailureOutcome.streamDropResumes;
       lastRetryFailoverReason = assistantFailureOutcome.lastRetryFailoverReason;
       if (!assistantFailureOutcome.preserveSameModelRateLimitRetryCount) {
         failoverRetryController.resetSameModelRateLimitRetries();
@@ -636,13 +641,6 @@ export async function runPreparedEmbeddedLoop(
         maxReasoningOnlyRetryAttempts,
         maxEmptyResponseRetryAttempts,
         maxLengthContinuationAttempts,
-        // ENG-21265 — placeholder while length-continuation is OFF
-        // (DEFAULT_LENGTH_CONTINUATION_LIMIT = 0 ⇒ the length-continuation branch never
-        // fires, so this is never called). BEFORE enabling (limit > 0), implement the real
-        // append: commit the partial assistant turn to the transcript via the session
-        // manager (mirror attempt-settle.ts's SessionManager.appendMessageToTranscript),
-        // or continuations will restart from scratch (the ENG-21265 make-or-break).
-        commitPartialAssistantTurn: () => {},
         attemptCompactionCount: terminalAttemptCompactionCount,
         replayState: accumulatedReplayState,
         activePromptPersisted: sessionPromptState.activePrompt.persisted,

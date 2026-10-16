@@ -406,6 +406,33 @@ export function normalizeAssistantReplayContent(messages: AgentMessage[]): Agent
       touched = true;
       continue;
     }
+    // ENG-21265 — a turn resumed after a mid-generation stream drop is persisted as the
+    // interrupted partial followed directly by the assistant turn that continued it; the
+    // internal "continue" prompt between them is model-only and never persisted. Merge them
+    // so the provider sees one coherent assistant turn instead of consecutive assistant roles.
+    // The continuation's leading thinking blocks stay first (Anthropic requires thinking to
+    // open an assistant turn); the partial text goes right after them.
+    const previous = out[out.length - 1];
+    if (isInterruptedStreamPartialAssistant(previous) && Array.isArray(assistantMessage.content)) {
+      const partialText = (previous as { content: { type?: unknown }[] }).content.filter(
+        (block) => block?.type === "text",
+      );
+      const continuation = assistantMessage.content as { type?: unknown }[];
+      const leadingThinkingCount = continuation.findIndex(
+        (block) => block?.type !== "thinking" && block?.type !== "redacted_thinking",
+      );
+      const splitAt = leadingThinkingCount === -1 ? continuation.length : leadingThinkingCount;
+      out[out.length - 1] = {
+        ...assistantMessage,
+        content: [
+          ...continuation.slice(0, splitAt),
+          ...partialText,
+          ...continuation.slice(splitAt),
+        ],
+      } as AgentMessage;
+      touched = true;
+      continue;
+    }
     out.push(assistantMessage);
   }
 
@@ -429,6 +456,34 @@ export function normalizeAssistantReplayContent(messages: AgentMessage[]): Agent
     touched = true;
   }
   return touched ? out : messages;
+}
+
+/**
+ * An assistant turn cut off by a stream failure ("error") that still carries real text and
+ * no tool call: the shape a stream-drop resume continues from.
+ */
+function isInterruptedStreamPartialAssistant(message: AgentMessage | undefined): boolean {
+  if (!message || message.role !== "assistant") {
+    return false;
+  }
+  if ((message as { stopReason?: unknown }).stopReason !== "error") {
+    return false;
+  }
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content) || content.length === 0 || isStreamErrorSentinelContent(content)) {
+    return false;
+  }
+  if (content.some((block) => (block as { type?: unknown })?.type === "toolCall")) {
+    return false;
+  }
+  return content.some((block) => {
+    const candidate = block as { type?: unknown; text?: unknown };
+    return (
+      candidate?.type === "text" &&
+      typeof candidate.text === "string" &&
+      candidate.text.trim().length > 0
+    );
+  });
 }
 
 function isReplayDroppableTrailingAssistant(message: AgentMessage | undefined): boolean {

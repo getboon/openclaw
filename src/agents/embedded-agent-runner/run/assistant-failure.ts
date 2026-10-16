@@ -36,6 +36,30 @@ import type { EmbeddedRunAttemptResult } from "./types.js";
 
 const MAX_EMPTY_ERROR_RETRIES = 3;
 const MAX_SAME_MODEL_IDLE_TIMEOUT_RETRIES = 1;
+// ENG-21265 — how many times one run may resume a provider stream that dropped mid-generation.
+export const MAX_STREAM_DROP_RESUMES = 3;
+export const STREAM_DROP_CONTINUATION_INSTRUCTION =
+  "Your previous reply was interrupted by a connection drop before it finished. Continue exactly where it stopped: do not repeat text you already wrote, and do not redo tool calls that already completed.";
+
+// Provider streams that ended after the request was accepted but before the model finished:
+// the Anthropic SDK's missing message_stop, and the LLM gateway's upstream stream failure.
+const MID_STREAM_DROP_PATTERN = /stream ended before message_stop|upstream error during stream/i;
+
+/**
+ * True when the assistant turn failed because the provider stream dropped mid-generation.
+ * The dropped turn never completed, so none of its tool calls ran; the transcript already
+ * holds the completed work before it (and the partial text, which replay keeps). Resuming
+ * it on the same model therefore continues the work instead of replaying side effects.
+ */
+export function isMidStreamDropAssistantError(
+  message: Pick<AssistantMessage, "stopReason" | "errorMessage"> | null | undefined,
+): boolean {
+  return (
+    message?.stopReason === "error" &&
+    typeof message.errorMessage === "string" &&
+    MID_STREAM_DROP_PATTERN.test(message.errorMessage)
+  );
+}
 
 type EmbeddedRunAssistantFailureOutcome = {
   action: "retry" | "proceed";
@@ -44,6 +68,7 @@ type EmbeddedRunAssistantFailureOutcome = {
   emptyErrorRetries: number;
   overloadProfileRotations: number;
   sameModelIdleTimeoutRetries: number;
+  streamDropResumes: number;
   lastRetryFailoverReason: FailoverReason | null;
   preserveSameModelRateLimitRetryCount: boolean;
   assistantProfileFailureReason: AuthProfileFailureReason | null;
@@ -96,6 +121,8 @@ export async function handleEmbeddedAssistantFailure(input: {
   suspensionSessionId: string;
   agentDir: string;
   isProbeSession: boolean;
+  streamDropResumes: number;
+  activateInternalPrompt: (prompt: string) => void;
 }): Promise<EmbeddedRunAssistantFailureOutcome> {
   const { aborted, idleTimedOut, promptError, timedOut, timedOutDuringCompaction } =
     projectAgentRunAttemptTerminal(input.attempt.terminal);
@@ -128,6 +155,43 @@ export async function handleEmbeddedAssistantFailure(input: {
     },
   );
   const replayUnsafeAssistantError = isReplayUnsafeAssistantError(input.attemptAssistant);
+  // ENG-21265 — a stream that drops mid-generation used to fall through to "proceed" whenever
+  // the attempt had run tools (not replay-safe), so the run failed and an outer fallback / parent
+  // re-spawn restarted the whole generation from zero. Resume it on the same model instead: this
+  // continues from the transcript rather than replaying the prompt, so it is safe after tools ran.
+  if (
+    !replayUnsafeAssistantError &&
+    !terminalInterrupted &&
+    !signalOwnedInterruption &&
+    !aborted &&
+    !timedOut &&
+    !idleTimedOut &&
+    !promptError &&
+    isMidStreamDropAssistantError(input.attemptAssistant) &&
+    input.streamDropResumes < MAX_STREAM_DROP_RESUMES
+  ) {
+    const streamDropResumes = input.streamDropResumes + 1;
+    input.activateInternalPrompt(STREAM_DROP_CONTINUATION_INSTRUCTION);
+    log.warn(
+      `[stream-drop-resume] provider stream dropped mid-generation; resuming same model ` +
+        `attempt=${streamDropResumes}/${MAX_STREAM_DROP_RESUMES} ` +
+        `provider=${input.attemptAssistant?.provider ?? input.provider} ` +
+        `model=${input.attemptAssistant?.model ?? input.model} ` +
+        `sessionKey=${input.runParams.sessionKey ?? input.runParams.sessionId}`,
+    );
+    input.traceAttempts.push({
+      provider: input.activeErrorContext.provider,
+      model: input.activeErrorContext.model,
+      result: "stream_drop_resume",
+      stage: "assistant",
+    });
+    return buildOutcome(input, {
+      action: "retry",
+      streamDropResumes,
+      preserveSameModelRateLimitRetryCount: true,
+      assistantProfileFailureReason: null,
+    });
+  }
   if (replayUnsafeAssistantError || !isCurrentAttemptReplaySafe(input.attempt)) {
     return buildOutcome(input, {
       action: "proceed",
@@ -381,6 +445,7 @@ function buildOutcome(
     overloadProfileRotations: override.overloadProfileRotations ?? input.overloadProfileRotations,
     sameModelIdleTimeoutRetries:
       override.sameModelIdleTimeoutRetries ?? input.sameModelIdleTimeoutRetries,
+    streamDropResumes: override.streamDropResumes ?? input.streamDropResumes,
     lastRetryFailoverReason: override.lastRetryFailoverReason ?? input.previousRetryFailoverReason,
     preserveSameModelRateLimitRetryCount: override.preserveSameModelRateLimitRetryCount ?? false,
     assistantProfileFailureReason: override.assistantProfileFailureReason,
