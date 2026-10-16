@@ -148,6 +148,7 @@ function makeStreamDropFailureInput(options?: {
   errorMessage?: string;
   streamDropResumes?: number;
   timedOut?: boolean;
+  deliveredReply?: boolean;
 }) {
   const fixture = makeExhaustedCredentialFailureInput({ replaySafe: false });
   const assistant = buildEmbeddedRunnerAssistant({
@@ -167,6 +168,7 @@ function makeStreamDropFailureInput(options?: {
     toolMetas: [{ toolName: "exec", replaySafe: false }],
     replayMetadata,
     currentAttemptReplayMetadata: replayMetadata,
+    ...(options?.deliveredReply ? { didDeliverSourceReplyViaMessageTool: true } : {}),
   });
   fixture.input.attempt = attempt;
   fixture.input.attemptAssistant = assistant;
@@ -177,17 +179,17 @@ function makeStreamDropFailureInput(options?: {
   return fixture;
 }
 
-describe("handleEmbeddedAssistantFailure — resume on mid-stream drop (ENG-21265)", () => {
-  it("resumes the same model with a continuation prompt even after tool activity", async () => {
+describe("handleEmbeddedAssistantFailure — retry a cut-off generation in smaller steps (ENG-21265)", () => {
+  it("retries the same model, telling it to redo the step in smaller parts, even after tool activity", async () => {
     const fixture = makeStreamDropFailureInput();
 
     const outcome = await handleEmbeddedAssistantFailure(fixture.input);
 
     expect(outcome).toMatchObject({ action: "retry", streamDropResumes: 1 });
     expect(fixture.input.activateInternalPrompt).toHaveBeenCalledOnce();
-    expect(vi.mocked(fixture.input.activateInternalPrompt).mock.calls[0]?.[0]).toMatch(
-      /continue exactly where/i,
-    );
+    const instruction = vi.mocked(fixture.input.activateInternalPrompt).mock.calls[0]?.[0] ?? "";
+    expect(instruction).toMatch(/smaller/i);
+    expect(instruction).toMatch(/nothing from (that|the interrupted) step was applied/i);
     // Same model, same profile: no rotation, no model fallback.
     expect(fixture.advanceAuthProfile).not.toHaveBeenCalled();
     expect(fixture.traceAttempts).toEqual([
@@ -195,12 +197,36 @@ describe("handleEmbeddedAssistantFailure — resume on mid-stream drop (ENG-2126
     ]);
   });
 
-  it("treats the gateway's upstream stream error as a mid-stream drop", async () => {
-    const fixture = makeStreamDropFailureInput({ errorMessage: "upstream error during stream" });
+  it.each([
+    "upstream error during stream",
+    "Bedrock stream ended before messageStop",
+    "Provider completed stream with an incomplete tool call",
+  ])("treats %j as a cut-off generation", async (errorMessage) => {
+    const fixture = makeStreamDropFailureInput({ errorMessage });
 
     const outcome = await handleEmbeddedAssistantFailure(fixture.input);
 
     expect(outcome).toMatchObject({ action: "retry", streamDropResumes: 1 });
+  });
+
+  it.each(["HTTP 429 Too Many Requests", "Overloaded", "Invalid API key"])(
+    "does not treat %j as a cut-off generation",
+    async (errorMessage) => {
+      const fixture = makeStreamDropFailureInput({ errorMessage });
+
+      await handleEmbeddedAssistantFailure(fixture.input).catch(() => undefined);
+
+      expect(fixture.input.activateInternalPrompt).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not retry when the dropped attempt already delivered a reply", async () => {
+    const fixture = makeStreamDropFailureInput({ deliveredReply: true });
+
+    const outcome = await handleEmbeddedAssistantFailure(fixture.input);
+
+    expect(outcome.action).toBe("proceed");
+    expect(fixture.input.activateInternalPrompt).not.toHaveBeenCalled();
   });
 
   it("stops resuming at the ceiling and keeps today's behavior", async () => {

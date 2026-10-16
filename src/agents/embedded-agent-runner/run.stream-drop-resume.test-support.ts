@@ -83,8 +83,8 @@ describe("runEmbeddedAgent resume on mid-stream drop (ENG-21265)", () => {
     });
 
     expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(3);
-    expect(mockedRunEmbeddedAttempt.mock.calls[1]?.[0]?.prompt).toMatch(/continue exactly where/i);
-    expect(mockedRunEmbeddedAttempt.mock.calls[2]?.[0]?.prompt).toMatch(/continue exactly where/i);
+    expect(mockedRunEmbeddedAttempt.mock.calls[1]?.[0]?.prompt).toMatch(/smaller/i);
+    expect(mockedRunEmbeddedAttempt.mock.calls[2]?.[0]?.prompt).toMatch(/smaller/i);
     // Same model throughout (no outer model fallback, which used to restart from zero) and the
     // run completes on the resumed attempt instead of failing.
     for (const [attemptParams] of mockedRunEmbeddedAttempt.mock.calls) {

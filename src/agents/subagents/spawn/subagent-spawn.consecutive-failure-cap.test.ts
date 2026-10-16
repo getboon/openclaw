@@ -69,26 +69,44 @@ describe("sessions_spawn consecutive-failure backstop (ENG-21265)", () => {
     const key = "agent:main:cap-leak";
     listRunsForRequester.mockReturnValue([failedRun(key, 1), failedRun(key, 2)]);
 
-    const blocked = await spawnSubagentDirect({ task: "pass 3" }, { agentSessionKey: key });
+    // Automatic re-spawn after a child failed: the completion wake is marked inter_session.
+    const wake = { agentSessionKey: key, requesterInputProvenanceKind: "inter_session" } as const;
+    const blocked = await spawnSubagentDirect({ task: "pass 3" }, wake);
     expect(blocked.status).toBe("error");
     expect(blocked.error).toMatch(/spawn blocked/i);
 
     // maxChildrenPerAgent = 1: a leaked reservation from the blocked call would make this
     // next spawn "forbidden". With the slot released it is accepted.
     listRunsForRequester.mockReturnValue([]);
-    const next = await spawnSubagentDirect({ task: "pass 3" }, { agentSessionKey: key });
+    const next = await spawnSubagentDirect({ task: "pass 3" }, wake);
     expect(next.status).toBe("accepted");
   });
 
-  it("does not block a spawn triggered by a new user message", async () => {
-    const key = "agent:main:cap-user";
+  // Ordinary channel / chat messages carry no provenance marker; only internal re-dispatches
+  // (completion wakes, tool handoffs) are marked inter_session / internal_system.
+  it.each([undefined, "external_user"] as const)(
+    "does not block a spawn triggered by a new user message (provenance %s)",
+    async (kind) => {
+      const key = `agent:main:cap-user-${kind ?? "unmarked"}`;
+      listRunsForRequester.mockReturnValue([failedRun(key, 1), failedRun(key, 2)]);
+
+      const result = await spawnSubagentDirect(
+        { task: "new request" },
+        { agentSessionKey: key, ...(kind ? { requesterInputProvenanceKind: kind } : {}) },
+      );
+      expect(result.status).toBe("accepted");
+    },
+  );
+
+  it("does not reset the streak for an internal system re-dispatch", async () => {
+    const key = "agent:main:cap-internal";
     listRunsForRequester.mockReturnValue([failedRun(key, 1), failedRun(key, 2)]);
 
     const result = await spawnSubagentDirect(
-      { task: "new request" },
-      { agentSessionKey: key, requesterInputProvenanceKind: "external_user" },
+      { task: "pass 3 retry" },
+      { agentSessionKey: key, requesterInputProvenanceKind: "internal_system" },
     );
-    expect(result.status).toBe("accepted");
+    expect(result.status).toBe("error");
   });
 
   it("still blocks automatic re-spawns (completion wakes) after the user's request", async () => {

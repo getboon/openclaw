@@ -159,9 +159,12 @@ export async function spawnSubagentDirect(
     // refuse the spawn before any side effect so the agent checks in with the user instead of
     // silently re-spawning across completion-wake turns. Inside `try` so `finally` releases the
     // admission / swarm reservations taken while resolving the request. A spawn from a new
-    // user message restarts the streak. Unset cap = no-op.
+    // user message restarts the streak: ordinary messages carry no provenance marker, while
+    // completion wakes and handoffs are marked inter_session / internal_system and keep
+    // counting. Unset cap = no-op.
     if (requesterSessionKey) {
-      if (ctx.requesterInputProvenanceKind === "external_user") {
+      const kind = ctx.requesterInputProvenanceKind;
+      if (kind === undefined || kind === "external_user") {
         markConsecutiveFailureStreakReset(requesterSessionKey, Date.now());
       }
       const capError = evaluateConsecutiveFailureCap({

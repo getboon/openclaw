@@ -23,7 +23,10 @@ import {
 import { log } from "../logger.js";
 import type { TraceAttempt } from "../types.js";
 import { handleAssistantFailover, isShortWindowRateLimitMessage } from "./assistant-failover.js";
-import { isCurrentAttemptReplaySafe } from "./attempt-terminal-evidence.js";
+import {
+  hasAttemptTerminalState,
+  isCurrentAttemptReplaySafe,
+} from "./attempt-terminal-evidence.js";
 import { createFailoverDecisionLogger } from "./failover-observation.js";
 import { resolveRunFailoverDecision } from "./failover-policy.js";
 import { shouldRetrySilentErrorAssistantTurn } from "./incomplete-turn-recovery.js";
@@ -36,20 +39,25 @@ import type { EmbeddedRunAttemptResult } from "./types.js";
 
 const MAX_EMPTY_ERROR_RETRIES = 3;
 const MAX_SAME_MODEL_IDLE_TIMEOUT_RETRIES = 1;
-// ENG-21265 — how many times one run may resume a provider stream that dropped mid-generation.
+// ENG-21265 — how many times one run may retry a generation that was cut off mid-stream.
 export const MAX_STREAM_DROP_RESUMES = 3;
-export const STREAM_DROP_CONTINUATION_INSTRUCTION =
-  "Your previous reply was interrupted by a connection drop before it finished. Continue exactly where it stopped: do not repeat text you already wrote, and do not redo tool calls that already completed.";
+// A cut-off generation cannot be continued: a half-written tool call is unusable, and the
+// failed partial is not replayed to the provider. Very long single generations are the ones
+// providers drop, so ask for the same step again in smaller pieces rather than re-sending the
+// same giant call.
+export const STREAM_DROP_RETRY_INSTRUCTION =
+  "Your previous step was cut off before it finished, most likely because it was very long. Nothing from that step was applied; everything before it is still in place. Redo that step, but split large output into several smaller tool calls (for example create a file, then add the rest in sections, or build a workbook part by part) so each call finishes quickly. If you were writing a long reply, put the bulk into a file and reply with a short summary.";
 
-// Provider streams that ended after the request was accepted but before the model finished:
-// the Anthropic SDK's missing message_stop, and the LLM gateway's upstream stream failure.
-const MID_STREAM_DROP_PATTERN = /stream ended before message_stop|upstream error during stream/i;
+// Generations cut off after the request was accepted but before the model finished: the
+// Anthropic SDK's missing message_stop, Bedrock's missing messageStop, the LLM gateway's
+// upstream stream failure, and a stream that closed in the middle of a tool call.
+const MID_STREAM_DROP_PATTERN =
+  /stream ended before message_?stop|upstream error during stream|completed stream with an incomplete tool call/i;
 
 /**
- * True when the assistant turn failed because the provider stream dropped mid-generation.
- * The dropped turn never completed, so none of its tool calls ran; the transcript already
- * holds the completed work before it (and the partial text, which replay keeps). Resuming
- * it on the same model therefore continues the work instead of replaying side effects.
+ * True when the assistant turn failed because its generation was cut off mid-stream. The
+ * cut-off turn never completed, so none of its tool calls ran; the transcript still holds the
+ * completed work before it. Retrying on the same model therefore redoes only the cut-off step.
  */
 export function isMidStreamDropAssistantError(
   message: Pick<AssistantMessage, "stopReason" | "errorMessage"> | null | undefined,
@@ -155,12 +163,16 @@ export async function handleEmbeddedAssistantFailure(input: {
     },
   );
   const replayUnsafeAssistantError = isReplayUnsafeAssistantError(input.attemptAssistant);
-  // ENG-21265 — a stream that drops mid-generation used to fall through to "proceed" whenever
-  // the attempt had run tools (not replay-safe), so the run failed and an outer fallback / parent
-  // re-spawn restarted the whole generation from zero. Resume it on the same model instead: this
-  // continues from the transcript rather than replaying the prompt, so it is safe after tools ran.
+  // ENG-21265 — a generation cut off mid-stream used to fall through to "proceed" whenever the
+  // attempt had run tools (not replay-safe), so the run failed and an outer fallback / parent
+  // re-spawn restarted the whole job — and re-sent the same giant call, which kept dropping.
+  // Retry on the same model instead, from the existing transcript (completed tool results are
+  // kept; the original prompt is not replayed), asking for the cut-off step in smaller pieces.
+  // Skipped when the attempt left delivery/media/async evidence that a fresh attempt would not
+  // carry over (hasAttemptTerminalState); today's handling applies then.
   if (
     !replayUnsafeAssistantError &&
+    !hasAttemptTerminalState(input.attempt) &&
     !terminalInterrupted &&
     !signalOwnedInterruption &&
     !aborted &&
@@ -171,9 +183,9 @@ export async function handleEmbeddedAssistantFailure(input: {
     input.streamDropResumes < MAX_STREAM_DROP_RESUMES
   ) {
     const streamDropResumes = input.streamDropResumes + 1;
-    input.activateInternalPrompt(STREAM_DROP_CONTINUATION_INSTRUCTION);
+    input.activateInternalPrompt(STREAM_DROP_RETRY_INSTRUCTION);
     log.warn(
-      `[stream-drop-resume] provider stream dropped mid-generation; resuming same model ` +
+      `[stream-drop-retry] generation cut off mid-stream; retrying same model in smaller steps ` +
         `attempt=${streamDropResumes}/${MAX_STREAM_DROP_RESUMES} ` +
         `provider=${input.attemptAssistant?.provider ?? input.provider} ` +
         `model=${input.attemptAssistant?.model ?? input.model} ` +

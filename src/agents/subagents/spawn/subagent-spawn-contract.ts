@@ -62,9 +62,10 @@ export type SpawnSubagentContext = {
   inheritedToolDenylist?: string[];
   requesterRunId?: string;
   /**
-   * Origin of the requester turn that called sessions_spawn. `external_user` (a new user
-   * message) restarts the consecutive-failure streak; completion wakes arrive as
-   * `inter_session` and keep counting. Unset = unknown (no reset).
+   * Origin of the requester turn that called sessions_spawn. A user turn — unset (ordinary
+   * channel/chat messages carry no marker) or `external_user` — restarts the
+   * consecutive-failure streak; completion wakes (`inter_session`) and internal handoffs
+   * (`internal_system`) keep counting.
    */
   requesterInputProvenanceKind?: InputProvenance["kind"];
 };
