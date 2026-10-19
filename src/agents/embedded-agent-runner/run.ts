@@ -240,12 +240,11 @@ import {
   resolveEffectiveRuntimeModel,
   resolveHookModelSelection,
 } from "./run/setup.js";
+import { resolveStreamCutoffRetryBudget } from "./run/stream-cutoff-retry-budget.js";
 import {
   MAX_STREAM_CUTOFF_RETRIES,
-  recordStreamCutoffRetry,
   shouldRetryCutOffGeneration,
   STREAM_CUTOFF_RETRY_INSTRUCTION,
-  streamCutoffRetriesUsed,
 } from "./run/stream-cutoff-retry.js";
 import { mergeAttemptToolMediaPayloads } from "./run/tool-media-payloads.js";
 import type { EmbeddedRunFastModeParam } from "./run/types.js";
@@ -702,17 +701,23 @@ export function runEmbeddedAgent(
     (needsConfiguredDefault ? (getRuntimeConfigSnapshot() ?? undefined) : undefined);
   const lifecycleGeneration =
     paramsInput.lifecycleGeneration ?? captureAgentRunLifecycleGeneration(paramsInput.runId);
+  // Read in the caller's context, before any lane queueing can switch async context.
+  const streamCutoffRetryBudget = resolveStreamCutoffRetryBudget();
   return withAgentRunLifecycleGeneration(lifecycleGeneration, () =>
-    runEmbeddedAgentInternal({
-      ...paramsInput,
-      config,
-      lifecycleGeneration,
-    }),
+    runEmbeddedAgentInternal(
+      {
+        ...paramsInput,
+        config,
+        lifecycleGeneration,
+      },
+      streamCutoffRetryBudget,
+    ),
   );
 }
 
 async function runEmbeddedAgentInternal(
   paramsInput: RunEmbeddedAgentParams,
+  streamCutoffRetryBudget: ReturnType<typeof resolveStreamCutoffRetryBudget>,
 ): Promise<EmbeddedAgentRunResult> {
   const paramsBase = applyAgentRunSessionTargetIdentity(paramsInput);
   let lifecycleGeneration = paramsBase.lifecycleGeneration!;
@@ -3491,10 +3496,10 @@ async function runEmbeddedAgentInternal(
               rateLimitFailure,
               billingFailure,
               failoverReason: assistantFailoverReason,
-              priorRetries: streamCutoffRetriesUsed(params.runId),
+              priorRetries: streamCutoffRetryBudget.used,
             })
           ) {
-            const streamCutoffRetries = recordStreamCutoffRetry(params.runId);
+            const streamCutoffRetries = ++streamCutoffRetryBudget.used;
             nextAttemptPromptOverride = STREAM_CUTOFF_RETRY_INSTRUCTION;
             suppressNextUserMessagePersistence = true;
             traceAttempts.push({

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  resolveStreamCutoffRetryBudget,
+  withStreamCutoffRetryBudget,
+} from "./stream-cutoff-retry-budget.js";
+import {
   MAX_STREAM_CUTOFF_RETRIES,
-  recordStreamCutoffRetry,
   shouldRetryCutOffGeneration,
   STREAM_CUTOFF_RETRY_INSTRUCTION,
-  streamCutoffRetriesUsed,
 } from "./stream-cutoff-retry.js";
 
 type Params = Parameters<typeof shouldRetryCutOffGeneration>[0];
@@ -108,20 +110,26 @@ describe("shouldRetryCutOffGeneration", () => {
   });
 });
 
-describe("per-run retry budget", () => {
-  it("counts retries per runId", () => {
-    expect(streamCutoffRetriesUsed("budget-run-a")).toBe(0);
-    expect(recordStreamCutoffRetry("budget-run-a")).toBe(1);
-    expect(streamCutoffRetriesUsed("budget-run-a")).toBe(1);
-    expect(streamCutoffRetriesUsed("budget-run-b")).toBe(0);
+describe("per-execution retry budget", () => {
+  it("is shared by everything inside one scope", async () => {
+    await withStreamCutoffRetryBudget(async () => {
+      resolveStreamCutoffRetryBudget().used += 1;
+      await Promise.resolve();
+      expect(resolveStreamCutoffRetryBudget().used).toBe(1);
+    });
   });
 
-  it("stays bounded by dropping the oldest runs", () => {
-    recordStreamCutoffRetry("budget-oldest");
-    for (let i = 0; i < 1000; i += 1) {
-      recordStreamCutoffRetry(`budget-filler-${i}`);
-    }
-    expect(streamCutoffRetriesUsed("budget-oldest")).toBe(0);
-    expect(streamCutoffRetriesUsed("budget-filler-999")).toBe(1);
+  it("starts fresh for every scope", async () => {
+    await withStreamCutoffRetryBudget(async () => {
+      resolveStreamCutoffRetryBudget().used += 1;
+    });
+    await withStreamCutoffRetryBudget(async () => {
+      expect(resolveStreamCutoffRetryBudget().used).toBe(0);
+    });
+  });
+
+  it("gives an unscoped caller a fresh budget each time", () => {
+    resolveStreamCutoffRetryBudget().used += 1;
+    expect(resolveStreamCutoffRetryBudget().used).toBe(0);
   });
 });
