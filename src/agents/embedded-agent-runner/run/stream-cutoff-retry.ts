@@ -19,10 +19,11 @@ export const MAX_STREAM_CUTOFF_RETRIES = 1;
 export const STREAM_CUTOFF_RETRY_INSTRUCTION =
   "Your previous step was cut off before it finished, most likely because it was very long. Nothing from that step was applied; everything before it is still in place. Redo that step, but split large output into several smaller tool calls (for example create a file, then add the rest in sections, or build a workbook part by part) so each call finishes quickly. If you were writing a long reply, put the bulk into a file and reply with a short summary.";
 
-// The Anthropic SDK's missing message_stop, Bedrock's missing messageStop, the LLM gateway's
-// upstream stream failure, and a stream that closed in the middle of a tool call.
+// Anthropic/Bedrock streams missing message_stop/messageStop or ending with a content block still
+// open, the gateway proxy ending before its terminal event, the LLM gateway's upstream stream
+// failure, and a stream that closed in the middle of a tool call.
 const CUT_OFF_PATTERN =
-  /stream ended before message_?stop|upstream error during stream|completed stream with an incomplete tool call/i;
+  /stream ended before message_?stop|stream ended with an unclosed content block|proxy stream ended before terminal event|upstream error during stream|completed stream with an incomplete tool call/i;
 
 // Failure classes a cut-off retry may cover. A gateway "upstream error during stream" can wrap a
 // rate limit, overload, auth, or edge block; those keep their own handling.

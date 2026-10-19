@@ -42,7 +42,20 @@ describe("evaluateConsecutiveFailureCap — streak", () => {
   });
 
   test("a run without a terminal outcome does not extend the streak (in-flight safety)", () => {
-    expect(blocks(chain("timeout", undefined), 1)).toBe(false);
+    expect(blocks(chain("timeout", undefined), 2)).toBe(false);
+  });
+
+  test("an in-flight run does not break the streak either", () => {
+    expect(blocks(chain("timeout", undefined), 1)).toBe(true);
+    expect(blocks(chain("timeout", undefined, "error"), 2)).toBe(true);
+    expect(blocks(chain("ok", undefined, "error"), 2)).toBe(false);
+  });
+
+  test("the message lists only the failed attempts", () => {
+    const runs = [rec("timeout", 1, "pass-3"), rec(undefined, 2, "still-running")];
+    const message = evaluateConsecutiveFailureCap({ runs, cap: 1 }) ?? "";
+    expect(message).toContain("'pass-3' (timeout)");
+    expect(message).not.toContain("still-running");
   });
 });
 

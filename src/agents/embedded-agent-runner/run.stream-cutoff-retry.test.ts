@@ -96,14 +96,16 @@ describe("runEmbeddedAgent retry of a cut-off generation", () => {
       );
     }
 
-    await runEmbeddedAgent({
+    const result = await runEmbeddedAgent({
       ...overflowBaseRunParams,
       provider: PROVIDER,
       model: MODEL,
       runId: "run-stream-cutoff-retry-ceiling",
-    }).catch(() => undefined);
+    });
 
     // 1 original attempt + 1 retry, then the existing failure handling.
     expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
+    expect(result.meta.error?.kind).toBe("incomplete_turn");
+    expect(result.payloads?.[0]?.isError).toBe(true);
   });
 });

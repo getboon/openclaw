@@ -2,24 +2,28 @@ import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
 /**
  * Backstop for repeated sub-agent failures within one requester session.
- * Block further spawns after consecutive terminal failures; successes and in-flight runs do not
- * count. The streak restarts once per new user turn.
+ * Block further spawns after consecutive terminal failures; a success breaks the streak and
+ * in-flight runs are skipped. The streak restarts once per new user turn.
  */
 
 const FAILURE_STATUSES = new Set(["error", "timeout", "unknown"]);
 const DEFAULT_MAX_LISTED_ATTEMPTS = 5;
 
-function trailingFailureStreak(runs: readonly SubagentRunRecord[]): number {
-  let streak = 0;
+// Trailing failed runs, oldest first. In-flight runs (no outcome yet) are skipped: they neither
+// extend nor break the streak, so a still-running child cannot mask earlier failures.
+function trailingFailures(runs: readonly SubagentRunRecord[]): SubagentRunRecord[] {
+  const failures: SubagentRunRecord[] = [];
   for (let i = runs.length - 1; i >= 0; i--) {
     const status = runs[i]?.outcome?.status;
-    if (status && FAILURE_STATUSES.has(status)) {
-      streak++;
-    } else {
+    if (!status) {
+      continue;
+    }
+    if (!FAILURE_STATUSES.has(status)) {
       break;
     }
+    failures.unshift(runs[i]);
   }
-  return streak;
+  return failures;
 }
 
 function formatRunEntries(runs: readonly SubagentRunRecord[], max: number): string {
@@ -52,11 +56,12 @@ export function evaluateConsecutiveFailureCap(params: {
   const chain = params.runs
     .filter((run) => params.sinceMs === undefined || run.createdAt >= params.sinceMs)
     .toSorted((a, b) => a.createdAt - b.createdAt);
-  const streak = trailingFailureStreak(chain);
+  const failures = trailingFailures(chain);
+  const streak = failures.length;
   if (streak < params.cap) {
     return null;
   }
-  const attempts = formatRunEntries(chain, params.max ?? DEFAULT_MAX_LISTED_ATTEMPTS);
+  const attempts = formatRunEntries(failures, params.max ?? DEFAULT_MAX_LISTED_ATTEMPTS);
   return (
     `Sub-agent spawn blocked: ${streak} attempts in a row failed this session ` +
     `(${attempts}). Stop here — tell the user what was attempted and how each ended, then ` +

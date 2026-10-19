@@ -352,7 +352,7 @@ See [Configuration reference](/gateway/configuration-reference) and
   Per-call timeout for gateway `agent` announce delivery attempts. Values are positive integer milliseconds and are clamped to the platform-safe timer maximum. Transient retries can make the total announce wait longer than one configured timeout.
 </ParamField>
 <ParamField path="agents.defaults.subagents.maxConsecutiveFailures" type="integer">
-  Backstop for autonomous re-spawn loops. After this many consecutive failed (error, timeout, or unknown) child runs for one requester session, the next `sessions_spawn` is refused with a message telling the agent to report what was attempted and ask the user before continuing. A successful child run or a new user message restarts the count; completion wakes do not. Unset or `0` disables the cap (default).
+  Backstop for autonomous re-spawn loops. After this many consecutive failed (error, timeout, or unknown) child runs for one requester session, the next sub-agent `sessions_spawn` (`runtime: "subagent"`) is refused with a message telling the agent to report what was attempted and ask the user before continuing. A successful child run or a new user message restarts the count; completion wakes do not. Unset or `0` disables the cap (default).
 </ParamField>
 
 If the requester session is sandboxed, `sessions_spawn` rejects targets

@@ -31,6 +31,9 @@ describe("shouldRetryCutOffGeneration", () => {
     "Bedrock stream ended before messageStop",
     "upstream error during stream",
     "Provider completed stream with an incomplete tool call",
+    "Anthropic stream ended with an unclosed content block",
+    "Bedrock stream ended with an unclosed content block",
+    "Proxy stream ended before terminal event",
   ])("retries a generation cut off mid-stream: %j", (errorMessage) => {
     expect(
       shouldRetryCutOffGeneration(params({ assistant: { stopReason: "error", errorMessage } })),
@@ -80,11 +83,14 @@ describe("shouldRetryCutOffGeneration", () => {
     expect(shouldRetryCutOffGeneration(params({ promptError: new Error("x") }))).toBe(false);
   });
 
-  it("does not retry when the attempt left terminal evidence (e.g. a pending client tool call)", () => {
+  it.each([
+    ["a pending client tool call", { clientToolCalls: [{ name: "pick_file" }] }],
+    ["a yield", { yieldDetected: true }],
+    ["a reply delivered via the message tool", { didDeliverSourceReplyViaMessageTool: true }],
+    ["tool media", { toolMediaUrls: ["https://example.com/a.png"] }],
+  ])("does not retry when the attempt left terminal evidence: %s", (_label, attempt) => {
     expect(
-      shouldRetryCutOffGeneration(
-        params({ attempt: { yieldDetected: true } as Params["attempt"] }),
-      ),
+      shouldRetryCutOffGeneration(params({ attempt: attempt as unknown as Params["attempt"] })),
     ).toBe(false);
   });
 
