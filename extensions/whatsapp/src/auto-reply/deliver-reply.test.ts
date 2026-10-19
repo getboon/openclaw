@@ -479,6 +479,7 @@ describe("deliverWebReply", () => {
     expect(loadWebMedia).toHaveBeenCalledWith("http://example.com/img.jpg", {
       maxBytes: 1024 * 1024,
       localRoots: mediaLocalRoots,
+      hostReadCapability: false,
     });
 
     const mediaPayload = requireRecord(
@@ -515,6 +516,35 @@ describe("deliverWebReply", () => {
       maxBytes: 1024 * 1024,
       localRoots: ["/tmp/agent-root"],
       workspaceDir: "/tmp/agent-root/workspace",
+      hostReadCapability: false,
+    });
+  });
+
+  it("forwards mediaAccess.readFile as a host reader instead of silently dropping it", async () => {
+    const msg = makeMsg();
+    mockLoadedImageMedia();
+    const readFile = vi.fn(async () => Buffer.from("fake-image-bytes"));
+
+    await deliverWebReply({
+      replyResult: { text: "pic", mediaUrl: "projects/lazo-lodge/estimate.pdf" },
+      msg,
+      mediaAccess: {
+        localRoots: ["/tmp/agent-root"],
+        workspaceDir: "/tmp/agent-root/workspace",
+        readFile,
+      },
+      maxMediaBytes: 1024 * 1024,
+      textLimit: 200,
+      replyLogger,
+      skipLog: true,
+    });
+
+    expect(loadWebMedia).toHaveBeenCalledWith("projects/lazo-lodge/estimate.pdf", {
+      maxBytes: 1024 * 1024,
+      localRoots: ["/tmp/agent-root"],
+      workspaceDir: "/tmp/agent-root/workspace",
+      readFile,
+      hostReadCapability: true,
     });
   });
 
@@ -712,10 +742,12 @@ describe("deliverWebReply", () => {
     expect(loadWebMedia).toHaveBeenNthCalledWith(1, "http://example.com/bad.jpg", {
       maxBytes: 1024 * 1024,
       localRoots: undefined,
+      hostReadCapability: false,
     });
     expect(loadWebMedia).toHaveBeenNthCalledWith(2, "http://example.com/good.pdf", {
       maxBytes: 1024 * 1024,
       localRoots: undefined,
+      hostReadCapability: false,
     });
     expect(msg.platform.sendMedia).toHaveBeenCalledTimes(2);
     const secondPayload = requireRecord(
@@ -846,6 +878,7 @@ describe("deliverWebReply", () => {
     expect(loadWebMedia).toHaveBeenCalledWith("/tmp/voice.ogg", {
       maxBytes: 1024 * 1024,
       localRoots: undefined,
+      hostReadCapability: false,
     });
     expect(msg.platform.sendMedia).toHaveBeenCalledTimes(1);
     const mediaPayload = requireRecord(

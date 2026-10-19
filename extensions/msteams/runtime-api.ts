@@ -62,7 +62,6 @@ export {
   loadOutboundMediaFromUrl,
   type OutboundMediaAccess,
 } from "openclaw/plugin-sdk/outbound-media";
-export { resolveAgentScopedOutboundMediaAccess } from "openclaw/plugin-sdk/agent-media-payload";
 export { buildMediaPayload } from "openclaw/plugin-sdk/reply-payload";
 export type { ReplyPayload } from "openclaw/plugin-sdk/reply-payload";
 export type { PluginRuntime } from "openclaw/plugin-sdk/runtime-store";

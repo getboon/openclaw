@@ -7,12 +7,21 @@ const getMSTeamsRuntimeMock = vi.hoisted(() => vi.fn());
 const enqueueSystemEventMock = vi.hoisted(() => vi.fn());
 const renderReplyPayloadsToMessagesMock = vi.hoisted(() => vi.fn(() => []));
 const sendMSTeamsMessagesMock = vi.hoisted(() => vi.fn(async () => []));
+const resolveAgentScopedOutboundMediaAccessMock = vi.hoisted(() =>
+  vi.fn((params: { agentId?: string }) => ({
+    localRoots: [`/tmp/.openclaw/workspace-${params.agentId}`],
+    workspaceDir: `/tmp/.openclaw/workspace-${params.agentId}`,
+  })),
+);
 
 vi.mock("../runtime-api.js", () => ({
   createChannelMessageReplyPipeline: createChannelMessageReplyPipelineMock,
   logTypingFailure: vi.fn(),
-  resolveAgentScopedOutboundMediaAccess: vi.fn(() => ({})),
   resolveChannelMediaMaxBytes: vi.fn(() => 8 * 1024 * 1024),
+}));
+
+vi.mock("openclaw/plugin-sdk/agent-media-payload", () => ({
+  resolveAgentScopedOutboundMediaAccess: resolveAgentScopedOutboundMediaAccessMock,
 }));
 
 vi.mock("./runtime.js", () => ({
@@ -584,6 +593,27 @@ describe("createMSTeamsReplyDispatcher", () => {
     await options.deliver({ text: "block content" });
 
     expect(sendMSTeamsMessagesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves mediaAccess from agentId/sessionKey and forwards it to sendMSTeamsMessages", async () => {
+    renderReplyPayloadsToMessagesMock.mockReturnValue([{ content: "hello" }] as never);
+    sendMSTeamsMessagesMock.mockResolvedValue(["id-1"] as never);
+
+    createDispatcher("personal", { blockStreaming: true });
+    const options = dispatcherOptions();
+    await options.deliver({ text: "block content" });
+
+    expect(resolveAgentScopedOutboundMediaAccessMock).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: "agent", sessionKey: "agent:main:main" }),
+    );
+    expect(sendMSTeamsMessagesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaAccess: {
+          localRoots: ["/tmp/.openclaw/workspace-agent"],
+          workspaceDir: "/tmp/.openclaw/workspace-agent",
+        },
+      }),
+    );
   });
 
   it("does not flush messages on deliver when blockStreaming is disabled", async () => {

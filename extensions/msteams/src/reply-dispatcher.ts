@@ -1,4 +1,5 @@
 // Msteams plugin module implements reply dispatcher behavior.
+import { resolveAgentScopedOutboundMediaAccess } from "openclaw/plugin-sdk/agent-media-payload";
 import {
   buildChannelProgressDraftLine,
   buildChannelProgressDraftLineForEntry,
@@ -11,7 +12,6 @@ import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coe
 import {
   createChannelMessageReplyPipeline,
   logTypingFailure,
-  resolveAgentScopedOutboundMediaAccess,
   resolveChannelMediaMaxBytes,
   type OpenClawConfig,
   type MSTeamsReplyStyle,

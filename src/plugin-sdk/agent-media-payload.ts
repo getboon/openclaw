@@ -1,10 +1,7 @@
 // Agent media payload exports expose media roots and loaders for plugin-facing agent payloads.
 export { getAgentScopedMediaLocalRoots } from "../media/local-roots.js";
-// Canonical agent-scoped media access (roots + workspaceDir + host reader),
-// not just roots. Reply-delivery paths that resolve local attachment paths
-// should use this instead of getAgentScopedMediaLocalRoots alone, or a
-// relative media path will resolve against the gateway cwd and fail the
-// allowed-directory check instead of the agent workspace.
+// Canonical agent-scoped media access (roots, workspaceDir, host reader). Use it instead of
+// getAgentScopedMediaLocalRoots so relative paths resolve against the agent workspace.
 export { resolveAgentScopedOutboundMediaAccess } from "../media/read-capability.js";
 
 /** Legacy agent media payload layout consumed by older agent adapters. */

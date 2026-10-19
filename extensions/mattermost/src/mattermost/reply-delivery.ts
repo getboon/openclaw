@@ -26,6 +26,7 @@ type SendMattermostMessage = (
     accountId?: string;
     mediaUrl?: string;
     mediaLocalRoots?: readonly string[];
+    mediaReadFile?: (filePath: string) => Promise<Buffer>;
     workspaceDir?: string;
     replyToId?: string;
     onDmChannelResolution?: (resolution: PromiseLike<unknown>) => void;
@@ -148,6 +149,7 @@ export async function deliverMattermostReplyPayload(params: {
         accountId: params.accountId,
         mediaUrl,
         mediaLocalRoots: mediaAccess.localRoots,
+        mediaReadFile: mediaAccess.readFile,
         workspaceDir: mediaAccess.workspaceDir,
         replyToId: params.replyToId,
         ...(params.onDmChannelResolution

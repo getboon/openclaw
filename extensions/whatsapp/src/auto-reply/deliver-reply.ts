@@ -226,6 +226,13 @@ export async function deliverWebReply(params: {
           maxBytes: maxMediaBytes,
           localRoots: params.mediaAccess?.localRoots,
           workspaceDir: params.mediaAccess?.workspaceDir,
+          readFile: params.mediaAccess?.readFile,
+          // A host reader is a distinct, policy-gated capability from plain
+          // root-contained reads (see resolveAgentScopedOutboundMediaAccess);
+          // mirror buildOutboundMediaLoadOptions's own readFile pairing so
+          // this manual call stays consistent with every other media-access
+          // call site.
+          hostReadCapability: Boolean(params.mediaAccess?.readFile),
         }),
         mediaUrl,
       );

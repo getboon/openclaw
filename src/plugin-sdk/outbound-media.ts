@@ -29,7 +29,7 @@ export type OutboundMediaLoadOptions = {
   requestInit?: RequestInit;
   /** Allows explicit proxy DNS behavior to be trusted by the media fetch guard. */
   trustExplicitProxyDns?: boolean;
-  /** Disables image re-optimization, e.g. when a caller forces document delivery. */
+  /** Whether image re-optimization runs (default `true`); pass `false` to skip it, e.g. when a caller forces document delivery. */
   optimizeImages?: boolean;
 };
 
