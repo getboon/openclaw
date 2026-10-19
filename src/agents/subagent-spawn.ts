@@ -35,6 +35,7 @@ import { stringifyRouteThreadId } from "../plugin-sdk/channel-route.js";
 import { listRegisteredPluginAgentPromptGuidance } from "../plugins/command-registry-state.js";
 import type { SubagentLifecycleHookRunner } from "../plugins/hooks.js";
 import { isValidAgentId, normalizeAgentId, parseAgentSessionKey } from "../routing/session-key.js";
+import type { InputProvenance } from "../sessions/input-provenance.js";
 import { resolveUserPath } from "../utils.js";
 import type { DeliveryContext } from "../utils/delivery-context.types.js";
 import { listAgentIds, resolveAgentDir } from "./agent-scope-config.js";
@@ -66,6 +67,7 @@ import { buildSubagentInitialUserMessage } from "./subagent-initial-user-message
 import { countActiveRunsForSession, registerSubagentRun } from "./subagent-registry.js";
 import { resolveSubagentRunTimerDelayMs } from "./subagent-run-timeout.js";
 import { resolveSubagentSpawnAcceptedNote } from "./subagent-spawn-accepted-note.js";
+import { resolveSpawnFailureBackstop } from "./subagent-spawn-backstop.js";
 import { resolveSubagentSpawnOwnership } from "./subagent-spawn-ownership.js";
 import { resolveSubagentTargetPolicy } from "./subagent-target-policy.js";
 import { normalizeSubagentTaskName } from "./subagent-task-name.js";
@@ -201,6 +203,14 @@ export type SpawnSubagentContext = {
   workspaceDir?: string;
   inheritedToolAllowlist?: string[];
   inheritedToolDenylist?: string[];
+  /**
+   * Origin of the requester turn. A user turn — unset (ordinary messages carry no marker) or
+   * `external_user` — restarts the consecutive-failure backstop; completion wakes
+   * (`inter_session`) and internal handoffs (`internal_system`) keep counting.
+   */
+  requesterInputProvenanceKind?: InputProvenance["kind"];
+  /** Requester run id; the backstop restarts at most once per requester turn. */
+  requesterTurnRunId?: string;
 };
 
 export type SpawnSubagentResult = {
@@ -1178,6 +1188,17 @@ export async function spawnSubagentDirect(
       status: "forbidden",
       error: `sessions_spawn has reached max active children for this session (${activeChildren}/${maxChildren})`,
     };
+  }
+  // Refuse an autonomous re-spawn loop before any side effect; child runs are registered under
+  // the completion owner, so that is the history to read.
+  const backstopError = resolveSpawnFailureBackstop({
+    cfg,
+    requesterSessionKey: ownership.completionRequesterSessionKey,
+    provenanceKind: ctx.requesterInputProvenanceKind,
+    requesterTurnRunId: ctx.requesterTurnRunId,
+  });
+  if (backstopError) {
+    return { status: "error", error: backstopError };
   }
 
   const requesterAgentId = normalizeAgentId(

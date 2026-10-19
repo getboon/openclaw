@@ -75,6 +75,7 @@ export type TraceAttempt = {
     | "candidate_failed"
     | "rotate_profile"
     | "same_model_rate_limit"
+    | "stream_cutoff_retry"
     | "fallback_model"
     | "aborted"
     | "error";

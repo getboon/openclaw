@@ -240,6 +240,12 @@ import {
   resolveEffectiveRuntimeModel,
   resolveHookModelSelection,
 } from "./run/setup.js";
+import { resolveStreamCutoffRetryBudget } from "./run/stream-cutoff-retry-budget.js";
+import {
+  MAX_STREAM_CUTOFF_RETRIES,
+  shouldRetryCutOffGeneration,
+  STREAM_CUTOFF_RETRY_INSTRUCTION,
+} from "./run/stream-cutoff-retry.js";
 import { mergeAttemptToolMediaPayloads } from "./run/tool-media-payloads.js";
 import type { EmbeddedRunFastModeParam } from "./run/types.js";
 import {
@@ -695,17 +701,23 @@ export function runEmbeddedAgent(
     (needsConfiguredDefault ? (getRuntimeConfigSnapshot() ?? undefined) : undefined);
   const lifecycleGeneration =
     paramsInput.lifecycleGeneration ?? captureAgentRunLifecycleGeneration(paramsInput.runId);
+  // Read in the caller's context, before any lane queueing can switch async context.
+  const streamCutoffRetryBudget = resolveStreamCutoffRetryBudget();
   return withAgentRunLifecycleGeneration(lifecycleGeneration, () =>
-    runEmbeddedAgentInternal({
-      ...paramsInput,
-      config,
-      lifecycleGeneration,
-    }),
+    runEmbeddedAgentInternal(
+      {
+        ...paramsInput,
+        config,
+        lifecycleGeneration,
+      },
+      streamCutoffRetryBudget,
+    ),
   );
 }
 
 async function runEmbeddedAgentInternal(
   paramsInput: RunEmbeddedAgentParams,
+  streamCutoffRetryBudget: ReturnType<typeof resolveStreamCutoffRetryBudget>,
 ): Promise<EmbeddedAgentRunResult> {
   const paramsBase = applyAgentRunSessionTargetIdentity(paramsInput);
   let lifecycleGeneration = paramsBase.lifecycleGeneration!;
@@ -3463,6 +3475,42 @@ async function runEmbeddedAgentInternal(
             log.warn(
               `[empty-error-retry] stopReason=error non-visible-output; resubmitting ` +
                 `attempt=${emptyErrorRetries}/${MAX_EMPTY_ERROR_RETRIES} ` +
+                `provider=${assistantForFailover?.provider ?? provider} ` +
+                `model=${assistantForFailover?.model ?? model.id} ` +
+                `sessionKey=${params.sessionKey ?? params.sessionId}`,
+            );
+            continue;
+          }
+          // A generation cut off mid-stream (typically one oversized call) would otherwise go to
+          // model fallback and, when every model fails, a sub-agent re-spawn — each re-sending the
+          // same giant call. Retry once on the same model, asking for the step in smaller pieces.
+          if (
+            shouldRetryCutOffGeneration({
+              assistant: assistantForFailover,
+              attempt,
+              aborted,
+              timedOut,
+              idleTimedOut,
+              promptError,
+              authFailure,
+              rateLimitFailure,
+              billingFailure,
+              failoverReason: assistantFailoverReason,
+              priorRetries: streamCutoffRetryBudget.used,
+            })
+          ) {
+            const streamCutoffRetries = ++streamCutoffRetryBudget.used;
+            nextAttemptPromptOverride = STREAM_CUTOFF_RETRY_INSTRUCTION;
+            suppressNextUserMessagePersistence = true;
+            traceAttempts.push({
+              provider: activeErrorContext.provider,
+              model: activeErrorContext.model,
+              result: "stream_cutoff_retry",
+              stage: "assistant",
+            });
+            log.warn(
+              `[stream-cutoff-retry] generation cut off mid-stream; retrying same model in smaller steps ` +
+                `attempt=${streamCutoffRetries}/${MAX_STREAM_CUTOFF_RETRIES} ` +
                 `provider=${assistantForFailover?.provider ?? provider} ` +
                 `model=${assistantForFailover?.model ?? model.id} ` +
                 `sessionKey=${params.sessionKey ?? params.sessionId}`,
