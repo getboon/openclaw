@@ -11,6 +11,7 @@ const sendMSTeamsMessagesMock = vi.hoisted(() => vi.fn(async () => []));
 vi.mock("../runtime-api.js", () => ({
   createChannelMessageReplyPipeline: createChannelMessageReplyPipelineMock,
   logTypingFailure: vi.fn(),
+  resolveAgentScopedOutboundMediaAccess: vi.fn(() => ({})),
   resolveChannelMediaMaxBytes: vi.fn(() => 8 * 1024 * 1024),
 }));
 

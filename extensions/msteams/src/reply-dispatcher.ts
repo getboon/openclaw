@@ -11,6 +11,7 @@ import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coe
 import {
   createChannelMessageReplyPipeline,
   logTypingFailure,
+  resolveAgentScopedOutboundMediaAccess,
   resolveChannelMediaMaxBytes,
   type OpenClawConfig,
   type MSTeamsReplyStyle,
@@ -164,6 +165,16 @@ export function createMSTeamsReplyDispatcher(params: {
     cfg: params.cfg,
     resolveChannelLimitMb: ({ cfg }) => cfg.channels?.msteams?.mediaMaxMb,
   });
+  // Roots alone are not enough here: a relative attachment path (e.g. from the
+  // message tool) must resolve against the agent workspace before the
+  // allowed-directory check runs, or it falls through to the gateway cwd and
+  // is rejected even though the workspace is an allowed root.
+  const mediaAccess = resolveAgentScopedOutboundMediaAccess({
+    cfg: params.cfg,
+    agentId: params.agentId,
+    sessionKey: params.sessionKey,
+    accountId: params.accountId,
+  });
   const feedbackLoopEnabled = params.cfg.channels?.msteams?.feedbackEnabled !== false;
   const streamController = createTeamsReplyStreamController({
     conversationType,
@@ -210,6 +221,7 @@ export function createMSTeamsReplyDispatcher(params: {
       tokenProvider: params.tokenProvider,
       sharePointSiteId: params.sharePointSiteId,
       mediaMaxBytes,
+      mediaAccess,
       feedbackLoopEnabled,
       serviceUrlBoundary: resolveMSTeamsSdkCloudOptions(msteamsCfg),
     });

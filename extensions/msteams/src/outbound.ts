@@ -16,6 +16,7 @@ import {
   chunkTextForOutbound,
   normalizeStringEntries,
   type ChannelOutboundAdapter,
+  type OutboundMediaAccess,
 } from "../runtime-api.js";
 import { createMSTeamsPollStoreState } from "./polls.js";
 import { buildMSTeamsPresentationCard, MSTEAMS_PRESENTATION_CAPABILITIES } from "./presentation.js";
@@ -37,6 +38,7 @@ type MSTeamsTextSendOptions = {
 };
 type MSTeamsMediaSendOptions = {
   mediaUrl?: string;
+  mediaAccess?: OutboundMediaAccess;
   mediaLocalRoots?: readonly string[];
   mediaReadFile?: (filePath: string) => Promise<Buffer>;
   replyStyleOverride?: MSTeamsReplyStyleOverride;
@@ -96,6 +98,7 @@ function resolveMSTeamsMediaSend(params: {
         to,
         text,
         mediaUrl: opts?.mediaUrl,
+        mediaAccess: opts?.mediaAccess,
         mediaLocalRoots: opts?.mediaLocalRoots,
         mediaReadFile: opts?.mediaReadFile,
         ...(opts?.replyStyleOverride ? { replyStyleOverride: opts.replyStyleOverride } : {}),
@@ -143,6 +146,7 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
     to,
     text,
     mediaUrl,
+    mediaAccess,
     mediaLocalRoots,
     mediaReadFile,
     payload,
@@ -179,6 +183,7 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
         send: async ({ text: textLocal, mediaUrl: mediaUrlLocal }) =>
           await send(to, textLocal, {
             mediaUrl: mediaUrlLocal,
+            mediaAccess,
             mediaLocalRoots,
             mediaReadFile,
             replyStyleOverride,
@@ -215,6 +220,7 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
       to,
       text,
       mediaUrl,
+      mediaAccess,
       mediaLocalRoots,
       mediaReadFile,
       deps,
@@ -223,6 +229,7 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
       const send = resolveMSTeamsMediaSend({ cfg, deps });
       return await send(to, text, {
         mediaUrl,
+        mediaAccess,
         mediaLocalRoots,
         mediaReadFile,
         replyStyleOverride: resolveReplyStyleOverride(threadSuppressed),

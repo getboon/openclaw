@@ -896,6 +896,63 @@ describe("msteams messenger", () => {
       expect(channelData.feedbackLoopEnabled).toBe(true);
     });
 
+    it("resolves a relative mediaUrl against mediaAccess.workspaceDir instead of the process cwd", async () => {
+      const tmpDir = await mkdtemp(
+        path.join(resolvePreferredOpenClawTmpDir(), "msteams-workspace-"),
+      );
+      // A non-image extension avoids the image-decode/optimize branch so this
+      // test isolates path resolution from unrelated image-processing
+      // behavior.
+      const localFile = path.join(tmpDir, "notes.txt");
+      await writeFile(localFile, "plain text");
+
+      try {
+        // The relative path only resolves (rather than throwing "not under an
+        // allowed directory") when workspaceDir reaches the loader — this is
+        // the regression this test guards, independent of which delivery
+        // plan (inline/consent/upload) the resolved file ends up taking.
+        await expect(
+          buildActivity(
+            { mediaUrl: "notes.txt" },
+            baseRef,
+            undefined,
+            undefined,
+            undefined,
+            { mediaAccess: { localRoots: [tmpDir], workspaceDir: tmpDir } },
+          ),
+        ).resolves.toBeTruthy();
+      } finally {
+        await rm(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects a relative mediaUrl that escapes the workspace root", async () => {
+      const workspaceDir = await mkdtemp(
+        path.join(resolvePreferredOpenClawTmpDir(), "msteams-workspace-"),
+      );
+      const outsideDir = await mkdtemp(
+        path.join(resolvePreferredOpenClawTmpDir(), "msteams-outside-"),
+      );
+      const outsideFile = path.join(outsideDir, "secret.png");
+      await writeFile(outsideFile, "fake-image-bytes");
+
+      try {
+        await expect(
+          buildActivity(
+            { mediaUrl: path.relative(workspaceDir, outsideFile) },
+            baseRef,
+            undefined,
+            undefined,
+            undefined,
+            { mediaAccess: { localRoots: [workspaceDir], workspaceDir } },
+          ),
+        ).rejects.toThrow(/not under an allowed directory/);
+      } finally {
+        await rm(workspaceDir, { recursive: true, force: true });
+        await rm(outsideDir, { recursive: true, force: true });
+      }
+    });
+
     it("defaults feedbackLoopEnabled to false", async () => {
       const activity = await buildActivity({ text: "hello" }, baseRef);
       const channelData = activity.channelData as Record<string, unknown>;

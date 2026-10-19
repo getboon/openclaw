@@ -131,7 +131,7 @@ function resolveDiscordDeliveryOptions(params: {
   tableMode?: MarkdownTableMode;
   chunkMode?: ChunkMode;
   replyToMode?: ReplyToMode;
-  mediaLocalRoots?: readonly string[];
+  mediaAccess?: OutboundMediaAccess;
 }): DiscordDeliveryOptions {
   const binding = resolveBoundThreadBinding({
     threadBindings: params.threadBindings,
@@ -143,9 +143,10 @@ function resolveDiscordDeliveryOptions(params: {
     threadId: binding?.threadId,
     agentId: binding?.agentId,
     identity: resolveBindingIdentity(params.cfg, binding),
-    mediaAccess: params.mediaLocalRoots?.length
-      ? { localRoots: params.mediaLocalRoots }
-      : undefined,
+    // Callers resolve mediaAccess (roots + workspaceDir) upstream via
+    // resolveAgentScopedOutboundMediaAccess; forward it whole rather than
+    // re-wrapping a roots-only shape that would silently drop workspaceDir.
+    mediaAccess: params.mediaAccess,
     replyToMode: params.replyToMode ?? "all",
     formatting: {
       textLimit: params.textLimit,
@@ -185,7 +186,7 @@ export async function deliverDiscordReply(params: {
   chunkMode?: ChunkMode;
   sessionKey?: string;
   threadBindings?: DiscordThreadBindingLookup;
-  mediaLocalRoots?: readonly string[];
+  mediaAccess?: OutboundMediaAccess;
   kind: "tool" | "block" | "final";
 }) {
   void params.runtime;

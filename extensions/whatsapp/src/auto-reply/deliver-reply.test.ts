@@ -469,7 +469,7 @@ describe("deliverWebReply", () => {
     await deliverWebReply({
       replyResult: { text: "aaaaaa", mediaUrl: "http://example.com/img.jpg" },
       msg,
-      mediaLocalRoots,
+      mediaAccess: { localRoots: mediaLocalRoots },
       maxMediaBytes: 1024 * 1024,
       textLimit: 3,
       replyLogger,
@@ -492,6 +492,30 @@ describe("deliverWebReply", () => {
     expect(msg.platform.reply).toHaveBeenCalledWith("aaa", undefined);
     findLoggerContext(replyLogger.info, "auto-reply sent (media)", "replyLogger.info");
     expect(logVerbose).toHaveBeenCalled();
+  });
+
+  it("forwards mediaAccess workspaceDir to the media loader for relative paths", async () => {
+    const msg = makeMsg();
+    mockLoadedImageMedia();
+
+    await deliverWebReply({
+      replyResult: { text: "pic", mediaUrl: "projects/lazo-lodge/estimate.pdf" },
+      msg,
+      mediaAccess: {
+        localRoots: ["/tmp/agent-root"],
+        workspaceDir: "/tmp/agent-root/workspace",
+      },
+      maxMediaBytes: 1024 * 1024,
+      textLimit: 200,
+      replyLogger,
+      skipLog: true,
+    });
+
+    expect(loadWebMedia).toHaveBeenCalledWith("projects/lazo-lodge/estimate.pdf", {
+      maxBytes: 1024 * 1024,
+      localRoots: ["/tmp/agent-root"],
+      workspaceDir: "/tmp/agent-root/workspace",
+    });
   });
 
   it("marks errors visible after accepted media delivery", async () => {

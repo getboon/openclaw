@@ -5,6 +5,7 @@ import {
   type MessageReceiptSourceResult,
 } from "openclaw/plugin-sdk/channel-outbound";
 import type { MarkdownTableMode } from "openclaw/plugin-sdk/config-contracts";
+import type { OutboundMediaAccess } from "openclaw/plugin-sdk/outbound-media";
 import { chunkMarkdownTextWithMode, type ChunkMode } from "openclaw/plugin-sdk/reply-chunking";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-chunking";
 import {
@@ -89,7 +90,7 @@ export async function deliverWebReply(params: {
   replyResult: ReplyPayload;
   normalizedReplyResult?: DeliverableWhatsAppOutboundPayload<ReplyPayload>;
   msg: AdmittedWebInboundMessage;
-  mediaLocalRoots?: readonly string[];
+  mediaAccess?: OutboundMediaAccess;
   maxMediaBytes: number;
   textLimit: number;
   chunkMode?: ChunkMode;
@@ -223,7 +224,8 @@ export async function deliverWebReply(params: {
       const media = await prepareWhatsAppOutboundMedia(
         await loadWebMedia(mediaUrl, {
           maxBytes: maxMediaBytes,
-          localRoots: params.mediaLocalRoots,
+          localRoots: params.mediaAccess?.localRoots,
+          workspaceDir: params.mediaAccess?.workspaceDir,
         }),
         mediaUrl,
       );

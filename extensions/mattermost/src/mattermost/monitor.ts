@@ -812,6 +812,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                 to,
                 accountId: account.accountId,
                 agentId: route.agentId,
+                sessionKey: route.sessionKey,
                 replyToId: resolveMattermostReplyRootId({
                   kind,
                   threadRootId: threadContext.effectiveReplyToId,
@@ -1028,6 +1029,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             to,
             accountId: account.accountId,
             agentId: params.route.agentId,
+            sessionKey: params.route.sessionKey,
             replyToId: resolveMattermostReplyRootId({
               kind: params.kind,
               threadRootId: params.effectiveReplyToId,
@@ -1834,6 +1836,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                     to,
                     accountId: account.accountId,
                     agentId: route.agentId,
+                    sessionKey: route.sessionKey,
                     replyToId: resolveMattermostReplyRootId({
                       kind,
                       threadRootId: effectiveReplyToId,

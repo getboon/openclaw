@@ -1,6 +1,6 @@
 // Mattermost plugin module implements reply delivery behavior.
 import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk/core";
-import { getAgentScopedMediaLocalRoots } from "openclaw/plugin-sdk/media-runtime";
+import { resolveAgentScopedOutboundMediaAccess } from "openclaw/plugin-sdk/media-runtime";
 import {
   deliverTextOrMediaReply,
   isReasoningReplyPayload,
@@ -26,6 +26,7 @@ type SendMattermostMessage = (
     accountId?: string;
     mediaUrl?: string;
     mediaLocalRoots?: readonly string[];
+    workspaceDir?: string;
     replyToId?: string;
     onDmChannelResolution?: (resolution: PromiseLike<unknown>) => void;
   },
@@ -95,6 +96,7 @@ export async function deliverMattermostReplyPayload(params: {
   to: string;
   accountId: string;
   agentId?: string;
+  sessionKey?: string;
   replyToId?: string;
   textLimit: number;
   tableMode: MarkdownTableMode;
@@ -110,7 +112,16 @@ export async function deliverMattermostReplyPayload(params: {
       params.tableMode,
     ),
   });
-  const mediaLocalRoots = getAgentScopedMediaLocalRoots(params.cfg, params.agentId);
+  // Roots alone are not enough: a relative attachment path (e.g. from the
+  // message tool) must resolve against the agent workspace before the
+  // allowed-directory check runs, or it falls through to the gateway cwd and
+  // is rejected even though the workspace is an allowed root.
+  const mediaAccess = resolveAgentScopedOutboundMediaAccess({
+    cfg: params.cfg,
+    agentId: params.agentId,
+    sessionKey: params.sessionKey,
+    accountId: params.accountId,
+  });
   const chunkMode = params.core.channel.text.resolveChunkMode(
     params.cfg,
     "mattermost",
@@ -136,7 +147,8 @@ export async function deliverMattermostReplyPayload(params: {
         cfg: params.cfg,
         accountId: params.accountId,
         mediaUrl,
-        mediaLocalRoots,
+        mediaLocalRoots: mediaAccess.localRoots,
+        workspaceDir: mediaAccess.workspaceDir,
         replyToId: params.replyToId,
         ...(params.onDmChannelResolution
           ? { onDmChannelResolution: params.onDmChannelResolution }

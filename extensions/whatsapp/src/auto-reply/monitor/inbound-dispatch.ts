@@ -28,9 +28,9 @@ import {
   createChannelMessageReplyPipeline,
   dispatchReplyWithBufferedBlockDispatcher,
   finalizeInboundContext,
-  getAgentScopedMediaLocalRoots,
   jidToE164,
   logVerbose,
+  resolveAgentScopedOutboundMediaAccess,
   resolveChannelMessageSourceReplyDeliveryMode,
   resolveChunkMode,
   resolveIdentityNamePrefix,
@@ -539,7 +539,7 @@ export async function dispatchWhatsAppBufferedReply(params: {
     replyResult: ReplyPayload;
     normalizedReplyResult?: DeliverableWhatsAppOutboundPayload<ReplyPayload>;
     msg: AdmittedWebInboundMessage;
-    mediaLocalRoots: readonly string[];
+    mediaAccess: ReturnType<typeof resolveAgentScopedOutboundMediaAccess>;
     maxMediaBytes: number;
     textLimit: number;
     chunkMode?: ReturnType<typeof resolveChunkMode>;
@@ -585,7 +585,16 @@ export async function dispatchWhatsAppBufferedReply(params: {
     channel: "whatsapp",
     accountId: params.route.accountId,
   });
-  const mediaLocalRoots = getAgentScopedMediaLocalRoots(params.cfg, params.route.agentId);
+  // Roots alone are not enough: a relative attachment path (e.g. from the
+  // message tool) must resolve against the agent workspace before the
+  // allowed-directory check runs, or it falls through to the gateway cwd and
+  // is rejected even though the workspace is an allowed root.
+  const mediaAccess = resolveAgentScopedOutboundMediaAccess({
+    cfg: params.cfg,
+    agentId: params.route.agentId,
+    sessionKey: params.route.sessionKey,
+    accountId: params.route.accountId,
+  });
   const sourceReplyChatType =
     typeof params.context.ChatType === "string" ? params.context.ChatType : conversationKind;
   const sourceReplyCommandSource =
@@ -628,7 +637,7 @@ export async function dispatchWhatsAppBufferedReply(params: {
       replyResult: normalizedDeliveryPayload,
       normalizedReplyResult: normalizedDeliveryPayload,
       msg: params.msg,
-      mediaLocalRoots,
+      mediaAccess,
       maxMediaBytes: params.maxMediaBytes,
       textLimit,
       chunkMode,
