@@ -204,10 +204,9 @@ try {
     // Budgets re-measured post-merge (upstream v2026.6.35): the merged surface
     // exceeds both parents', so neither side's value alone is correct — set to
     // the exact `pnpm plugin-sdk:surface` output measured on the merged tree.
-    // ENG-21421 adds 2 legitimate public exports (OutboundMediaAccess type,
-    // resolveAgentScopedOutboundMediaAccess) that are each counted once per
-    // reachable entrypoint subpath (direct + the media-runtime re-export),
-    // for a measured +3 total / +2 callable — bumped to match.
+    // A new outbound-media type plus its resolver function are each counted
+    // once per reachable entrypoint subpath (direct + the media-runtime
+    // re-export), for a measured +3 total / +2 callable — bumped to match.
     publicEntrypoints: readBudgetEnv("OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_ENTRYPOINTS", 324),
     publicExports: readBudgetEnv("OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_EXPORTS", 10418),
     publicFunctionExports: readBudgetEnv("OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_FUNCTION_EXPORTS", 5222),
