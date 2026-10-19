@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_STREAM_CUTOFF_RETRIES,
+  recordStreamCutoffRetry,
   shouldRetryCutOffGeneration,
   STREAM_CUTOFF_RETRY_INSTRUCTION,
+  streamCutoffRetriesUsed,
 } from "./stream-cutoff-retry.js";
 
 type Params = Parameters<typeof shouldRetryCutOffGeneration>[0];
@@ -103,5 +105,23 @@ describe("shouldRetryCutOffGeneration", () => {
   it("asks for the cut-off step again in smaller pieces", () => {
     expect(STREAM_CUTOFF_RETRY_INSTRUCTION).toMatch(/smaller/i);
     expect(STREAM_CUTOFF_RETRY_INSTRUCTION).toMatch(/nothing from that step was applied/i);
+  });
+});
+
+describe("per-run retry budget", () => {
+  it("counts retries per runId", () => {
+    expect(streamCutoffRetriesUsed("budget-run-a")).toBe(0);
+    expect(recordStreamCutoffRetry("budget-run-a")).toBe(1);
+    expect(streamCutoffRetriesUsed("budget-run-a")).toBe(1);
+    expect(streamCutoffRetriesUsed("budget-run-b")).toBe(0);
+  });
+
+  it("stays bounded by dropping the oldest runs", () => {
+    recordStreamCutoffRetry("budget-oldest");
+    for (let i = 0; i < 1000; i += 1) {
+      recordStreamCutoffRetry(`budget-filler-${i}`);
+    }
+    expect(streamCutoffRetriesUsed("budget-oldest")).toBe(0);
+    expect(streamCutoffRetriesUsed("budget-filler-999")).toBe(1);
   });
 });

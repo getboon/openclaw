@@ -1,3 +1,4 @@
+import { truncateUtf16Safe } from "../utils.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
 /**
@@ -30,8 +31,11 @@ function formatRunEntries(runs: readonly SubagentRunRecord[], max: number): stri
   return runs
     .slice(-max)
     .map((run) => {
-      const name = run.taskName?.trim() ? run.taskName : "(unlabeled)";
-      return `'${name}' (${run.outcome?.status ?? "unknown"})`;
+      // sessions_spawn records the agent-given name as `label`; fall back to the task text.
+      const name =
+        [run.taskName, run.label, run.task].map((value) => value?.trim()).find(Boolean) ??
+        "(unlabeled)";
+      return `'${truncateUtf16Safe(name, 60)}' (${run.outcome?.status ?? "unknown"})`;
     })
     .join(", ");
 }

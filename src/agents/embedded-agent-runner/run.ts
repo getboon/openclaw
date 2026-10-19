@@ -242,8 +242,10 @@ import {
 } from "./run/setup.js";
 import {
   MAX_STREAM_CUTOFF_RETRIES,
+  recordStreamCutoffRetry,
   shouldRetryCutOffGeneration,
   STREAM_CUTOFF_RETRY_INSTRUCTION,
+  streamCutoffRetriesUsed,
 } from "./run/stream-cutoff-retry.js";
 import { mergeAttemptToolMediaPayloads } from "./run/tool-media-payloads.js";
 import type { EmbeddedRunFastModeParam } from "./run/types.js";
@@ -1739,8 +1741,6 @@ async function runEmbeddedAgentInternal(
       // visible-answer retry instruction instead.
       const MAX_EMPTY_ERROR_RETRIES = 3;
       let emptyErrorRetries = 0;
-      // Same-model retries of a generation cut off mid-stream (see stream-cutoff-retry.ts).
-      let streamCutoffRetries = 0;
       const MAX_MISSING_ASSISTANT_RETRIES = 1;
       let missingAssistantRetryAttempts = 0;
       const overloadFailoverBackoffMs = resolveOverloadFailoverBackoffMs(params.config);
@@ -3491,10 +3491,10 @@ async function runEmbeddedAgentInternal(
               rateLimitFailure,
               billingFailure,
               failoverReason: assistantFailoverReason,
-              priorRetries: streamCutoffRetries,
+              priorRetries: streamCutoffRetriesUsed(params.runId),
             })
           ) {
-            streamCutoffRetries += 1;
+            const streamCutoffRetries = recordStreamCutoffRetry(params.runId);
             nextAttemptPromptOverride = STREAM_CUTOFF_RETRY_INSTRUCTION;
             suppressNextUserMessagePersistence = true;
             traceAttempts.push({

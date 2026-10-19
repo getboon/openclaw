@@ -51,6 +51,17 @@ describe("evaluateConsecutiveFailureCap — streak", () => {
     expect(blocks(chain("ok", undefined, "error"), 2)).toBe(false);
   });
 
+  test("names attempts by spawn label, falling back to the task text", () => {
+    const runs = [
+      { createdAt: 1, outcome: { status: "error" }, label: "pass-3-try-1", task: "x" },
+      { createdAt: 2, outcome: { status: "timeout" }, task: "Build the full estimate workbook" },
+    ] as unknown as SubagentRunRecord[];
+    const message = evaluateConsecutiveFailureCap({ runs, cap: 2 }) ?? "";
+    expect(message).toContain("'pass-3-try-1' (error)");
+    expect(message).toContain("'Build the full estimate workbook' (timeout)");
+    expect(message).not.toContain("(unlabeled)");
+  });
+
   test("the message lists only the failed attempts", () => {
     const runs = [rec("timeout", 1, "pass-3"), rec(undefined, 2, "still-running")];
     const message = evaluateConsecutiveFailureCap({ runs, cap: 1 }) ?? "";

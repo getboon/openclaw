@@ -68,3 +68,26 @@ export function shouldRetryCutOffGeneration(params: {
     !hasAttemptTerminalState(params.attempt)
   );
 }
+
+// Retries spent per run. Model fallback re-enters the runner once per candidate model with the
+// same runId, so the budget is keyed by runId: one retry per user turn, not one per model.
+// In-process only; the oldest entries are dropped once the map grows past a bound.
+const MAX_TRACKED_RUNS = 1000;
+const retriesByRunId = new Map<string, number>();
+
+export function streamCutoffRetriesUsed(runId: string): number {
+  return retriesByRunId.get(runId) ?? 0;
+}
+
+export function recordStreamCutoffRetry(runId: string): number {
+  const used = streamCutoffRetriesUsed(runId) + 1;
+  retriesByRunId.delete(runId);
+  retriesByRunId.set(runId, used);
+  for (const oldest of retriesByRunId.keys()) {
+    if (retriesByRunId.size <= MAX_TRACKED_RUNS) {
+      break;
+    }
+    retriesByRunId.delete(oldest);
+  }
+  return used;
+}

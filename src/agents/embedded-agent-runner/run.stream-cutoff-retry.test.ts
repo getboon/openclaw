@@ -108,4 +108,41 @@ describe("runEmbeddedAgent retry of a cut-off generation", () => {
     expect(result.meta.error?.kind).toBe("incomplete_turn");
     expect(result.payloads?.[0]?.isError).toBe(true);
   });
+
+  it("shares the one retry across model-fallback candidates of the same run", async () => {
+    for (let i = 0; i < 6; i += 1) {
+      mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+        cutOffAttempt("Anthropic stream ended before message_stop", `partial ${i}`),
+      );
+    }
+    // Model fallback re-enters the runner once per candidate model with the same runId.
+    for (const model of [MODEL, "claude-sonnet-4-6"]) {
+      await runEmbeddedAgent({
+        ...overflowBaseRunParams,
+        provider: PROVIDER,
+        model,
+        runId: "run-stream-cutoff-retry-fallback-chain",
+      });
+    }
+
+    const retryPrompts = mockedRunEmbeddedAttempt.mock.calls.filter(([attemptParams]) =>
+      /smaller/i.test(String((attemptParams as { prompt?: string }).prompt ?? "")),
+    );
+    expect(retryPrompts).toHaveLength(1);
+    // primary: original + retry; fallback candidate: its own attempt only.
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(3);
+  });
+
+  it("gives a different run its own retry", async () => {
+    for (let i = 0; i < 4; i += 1) {
+      mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+        cutOffAttempt("Anthropic stream ended before message_stop", `partial ${i}`),
+      );
+    }
+    for (const runId of ["run-stream-cutoff-retry-turn-a", "run-stream-cutoff-retry-turn-b"]) {
+      await runEmbeddedAgent({ ...overflowBaseRunParams, provider: PROVIDER, model: MODEL, runId });
+    }
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(4);
+  });
 });
