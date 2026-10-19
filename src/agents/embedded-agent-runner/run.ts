@@ -240,6 +240,11 @@ import {
   resolveEffectiveRuntimeModel,
   resolveHookModelSelection,
 } from "./run/setup.js";
+import {
+  MAX_STREAM_CUTOFF_RETRIES,
+  shouldRetryCutOffGeneration,
+  STREAM_CUTOFF_RETRY_INSTRUCTION,
+} from "./run/stream-cutoff-retry.js";
 import { mergeAttemptToolMediaPayloads } from "./run/tool-media-payloads.js";
 import type { EmbeddedRunFastModeParam } from "./run/types.js";
 import {
@@ -1734,6 +1739,8 @@ async function runEmbeddedAgentInternal(
       // visible-answer retry instruction instead.
       const MAX_EMPTY_ERROR_RETRIES = 3;
       let emptyErrorRetries = 0;
+      // Same-model retries of a generation cut off mid-stream (see stream-cutoff-retry.ts).
+      let streamCutoffRetries = 0;
       const MAX_MISSING_ASSISTANT_RETRIES = 1;
       let missingAssistantRetryAttempts = 0;
       const overloadFailoverBackoffMs = resolveOverloadFailoverBackoffMs(params.config);
@@ -3463,6 +3470,42 @@ async function runEmbeddedAgentInternal(
             log.warn(
               `[empty-error-retry] stopReason=error non-visible-output; resubmitting ` +
                 `attempt=${emptyErrorRetries}/${MAX_EMPTY_ERROR_RETRIES} ` +
+                `provider=${assistantForFailover?.provider ?? provider} ` +
+                `model=${assistantForFailover?.model ?? model.id} ` +
+                `sessionKey=${params.sessionKey ?? params.sessionId}`,
+            );
+            continue;
+          }
+          // A generation cut off mid-stream (typically one oversized call) would otherwise go to
+          // model fallback and, when every model fails, a sub-agent re-spawn — each re-sending the
+          // same giant call. Retry once on the same model, asking for the step in smaller pieces.
+          if (
+            shouldRetryCutOffGeneration({
+              assistant: assistantForFailover,
+              attempt,
+              aborted,
+              timedOut,
+              idleTimedOut,
+              promptError,
+              authFailure,
+              rateLimitFailure,
+              billingFailure,
+              failoverReason: assistantFailoverReason,
+              priorRetries: streamCutoffRetries,
+            })
+          ) {
+            streamCutoffRetries += 1;
+            nextAttemptPromptOverride = STREAM_CUTOFF_RETRY_INSTRUCTION;
+            suppressNextUserMessagePersistence = true;
+            traceAttempts.push({
+              provider: activeErrorContext.provider,
+              model: activeErrorContext.model,
+              result: "stream_cutoff_retry",
+              stage: "assistant",
+            });
+            log.warn(
+              `[stream-cutoff-retry] generation cut off mid-stream; retrying same model in smaller steps ` +
+                `attempt=${streamCutoffRetries}/${MAX_STREAM_CUTOFF_RETRIES} ` +
                 `provider=${assistantForFailover?.provider ?? provider} ` +
                 `model=${assistantForFailover?.model ?? model.id} ` +
                 `sessionKey=${params.sessionKey ?? params.sessionId}`,
