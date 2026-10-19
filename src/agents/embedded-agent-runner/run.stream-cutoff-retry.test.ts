@@ -159,7 +159,7 @@ describe("runEmbeddedAgent retry of a cut-off generation", () => {
 
 function retryPromptCount(): number {
   return mockedRunEmbeddedAttempt.mock.calls.filter(([attemptParams]) =>
-    /smaller/i.test(String((attemptParams as { prompt?: string }).prompt ?? "")),
+    /smaller/i.test((attemptParams as { prompt?: string }).prompt ?? ""),
   ).length;
 }
 
