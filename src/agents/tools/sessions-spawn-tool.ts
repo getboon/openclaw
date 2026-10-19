@@ -35,6 +35,7 @@ import {
   SUBAGENT_SPAWN_CONTEXT_MODES,
   SUBAGENT_SPAWN_MODES,
   spawnSubagentDirect,
+  type SpawnSubagentContext,
 } from "../subagent-spawn.js";
 import { normalizeSubagentTaskName } from "../subagent-task-name.js";
 import {
@@ -289,6 +290,10 @@ export function createSessionsSpawnTool(
     config?: OpenClawConfig;
     /** Explicit agent ID override for cron/hook sessions where session key parsing may not work. */
     requesterAgentIdOverride?: string;
+    /** Origin of the requester turn; a new user turn restarts the spawn failure backstop. */
+    requesterInputProvenanceKind?: SpawnSubagentContext["requesterInputProvenanceKind"];
+    /** Requester run id; the spawn failure backstop restarts at most once per run. */
+    requesterTurnRunId?: string;
   } & SpawnedToolContext,
 ): AnyAgentTool {
   const acpAvailable = isAcpRuntimeSpawnAvailable({
@@ -534,6 +539,8 @@ export function createSessionsSpawnTool(
           workspaceDir: opts?.workspaceDir,
           inheritedToolAllowlist: opts?.inheritedToolAllowlist,
           inheritedToolDenylist: opts?.inheritedToolDenylist,
+          requesterInputProvenanceKind: opts?.requesterInputProvenanceKind,
+          requesterTurnRunId: opts?.requesterTurnRunId,
         },
       );
 

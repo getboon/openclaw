@@ -78,7 +78,10 @@ describe("runEmbeddedAgent retry of a cut-off generation", () => {
     });
 
     expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
-    expect(mockedRunEmbeddedAttempt.mock.calls[1]?.[0]?.prompt).toMatch(/smaller/i);
+    const retryParams = mockedRunEmbeddedAttempt.mock.calls[1]?.[0] as
+      | { prompt?: string }
+      | undefined;
+    expect(retryParams?.prompt).toMatch(/smaller/i);
     for (const [attemptParams] of mockedRunEmbeddedAttempt.mock.calls) {
       expect(attemptParams).toMatchObject({ provider: PROVIDER, modelId: MODEL });
     }

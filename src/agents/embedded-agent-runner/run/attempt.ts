@@ -1292,6 +1292,7 @@ export async function runEmbeddedAttempt(
           const allTools = createOpenClawCodingTools({
             agentId: sessionAgentId,
             ...buildEmbeddedAttemptToolRunContext({ ...params, trace: runTrace }),
+            inputProvenanceKind: params.inputProvenance?.kind,
             messageChannel: params.messageChannel,
             exec: {
               ...params.execOverrides,
