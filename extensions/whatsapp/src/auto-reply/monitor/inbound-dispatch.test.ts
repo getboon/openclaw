@@ -59,7 +59,7 @@ vi.mock("./runtime-api.js", async () => {
   return {
     dispatchReplyWithBufferedBlockDispatcher: dispatchReplyWithBufferedBlockDispatcherMock,
     finalizeInboundContext,
-    getAgentScopedMediaLocalRoots: () => [],
+    resolveAgentScopedOutboundMediaAccess: () => ({}),
     jidToE164: (value: string) => {
       const phone = value.split("@")[0]?.replace(/[^\d]/g, "");
       return phone ? `+${phone}` : null;

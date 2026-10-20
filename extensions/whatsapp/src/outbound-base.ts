@@ -11,6 +11,7 @@ import {
   type ChannelOutboundAdapter,
 } from "openclaw/plugin-sdk/channel-send-result";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import type { OutboundMediaAccess } from "openclaw/plugin-sdk/outbound-media";
 import { sendTextMediaPayload } from "openclaw/plugin-sdk/reply-payload";
 import {
   normalizeWhatsAppOutboundPayload,
@@ -25,10 +26,7 @@ type WhatsAppSendTextOptions = {
   verbose: boolean;
   cfg: OpenClawConfig;
   mediaUrl?: string;
-  mediaAccess?: {
-    localRoots?: readonly string[];
-    readFile?: (filePath: string) => Promise<Buffer>;
-  };
+  mediaAccess?: OutboundMediaAccess;
   mediaLocalRoots?: readonly string[];
   mediaReadFile?: (filePath: string) => Promise<Buffer>;
   gifPlayback?: boolean;

@@ -263,6 +263,14 @@ describe("deliverMattermostReplyPayload", () => {
           path.join(stateDir, "sandboxes"),
           path.join(stateDir, `workspace-${agentId}`),
         ]),
+        // Regression: a relative attachment path only resolves against the
+        // agent workspace (instead of the gateway process cwd) when
+        // workspaceDir reaches the send call alongside the roots allowlist.
+        workspaceDir: path.join(stateDir, `workspace-${agentId}`),
+        // Host reads are policy-gated separately (no explicit restriction
+        // here), so the real resolver also hands back a bound host reader —
+        // forwarding it instead of dropping it is this test's other guard.
+        mediaReadFile: expect.any(Function),
       });
     } finally {
       if (previousStateDir === undefined) {

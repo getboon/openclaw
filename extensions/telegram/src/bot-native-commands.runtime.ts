@@ -3,7 +3,7 @@ export {
   ensureConfiguredBindingRouteReady,
   recordInboundSessionMetaSafe,
 } from "openclaw/plugin-sdk/conversation-runtime";
-export { getAgentScopedMediaLocalRoots } from "openclaw/plugin-sdk/media-runtime";
+export { resolveAgentScopedOutboundMediaAccess } from "openclaw/plugin-sdk/media-runtime";
 export {
   executePluginCommand,
   getPluginCommandSpecs,

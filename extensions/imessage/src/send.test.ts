@@ -255,6 +255,39 @@ describe("sendMessageIMessage receipts", () => {
     expect(result.receipt.sentAt).toBeGreaterThan(0);
   });
 
+  it("forwards mediaAccess workspaceDir to the attachment resolver for relative paths", async () => {
+    const client = createClient({ message_id: 12345 });
+    const runCliJson = vi
+      .fn()
+      .mockResolvedValueOnce({ messageId: "p:0/media-guid", transferGuid: "transfer-1" });
+    const resolveAttachmentImpl = vi
+      .fn()
+      .mockResolvedValue({ path: "/tmp/image.png", contentType: "image/png" });
+
+    await sendMessageIMessage("chat_guid:chat-1", "", {
+      config: IMESSAGE_TEST_CFG,
+      client,
+      mediaUrl: "projects/lazo-lodge/estimate.pdf",
+      mediaAccess: {
+        localRoots: ["/tmp/agent-root"],
+        workspaceDir: "/tmp/agent-root/workspace",
+      },
+      resolveAttachmentImpl,
+      runCliJson,
+    });
+
+    expect(resolveAttachmentImpl).toHaveBeenCalledWith(
+      "projects/lazo-lodge/estimate.pdf",
+      expect.any(Number),
+      expect.objectContaining({
+        mediaAccess: {
+          localRoots: ["/tmp/agent-root"],
+          workspaceDir: "/tmp/agent-root/workspace",
+        },
+      }),
+    );
+  });
+
   it("sends audioAsVoice media through send-attachment audio transport", async () => {
     const client = createClient({ message_id: 12345 });
     const runCliJson = vi.fn().mockResolvedValueOnce({ messageId: "p:0/voice-guid" });

@@ -5,6 +5,7 @@ import {
   type MessageReceiptSourceResult,
 } from "openclaw/plugin-sdk/channel-outbound";
 import type { MarkdownTableMode } from "openclaw/plugin-sdk/config-contracts";
+import type { OutboundMediaAccess } from "openclaw/plugin-sdk/outbound-media";
 import { chunkMarkdownTextWithMode, type ChunkMode } from "openclaw/plugin-sdk/reply-chunking";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-chunking";
 import {
@@ -89,7 +90,7 @@ export async function deliverWebReply(params: {
   replyResult: ReplyPayload;
   normalizedReplyResult?: DeliverableWhatsAppOutboundPayload<ReplyPayload>;
   msg: AdmittedWebInboundMessage;
-  mediaLocalRoots?: readonly string[];
+  mediaAccess?: OutboundMediaAccess;
   maxMediaBytes: number;
   textLimit: number;
   chunkMode?: ChunkMode;
@@ -223,7 +224,15 @@ export async function deliverWebReply(params: {
       const media = await prepareWhatsAppOutboundMedia(
         await loadWebMedia(mediaUrl, {
           maxBytes: maxMediaBytes,
-          localRoots: params.mediaLocalRoots,
+          localRoots: params.mediaAccess?.localRoots,
+          workspaceDir: params.mediaAccess?.workspaceDir,
+          readFile: params.mediaAccess?.readFile,
+          // A host reader is a distinct, policy-gated capability from plain
+          // root-contained reads (see resolveAgentScopedOutboundMediaAccess);
+          // mirror buildOutboundMediaLoadOptions's own readFile pairing so
+          // this manual call stays consistent with every other media-access
+          // call site.
+          hostReadCapability: Boolean(params.mediaAccess?.readFile),
         }),
         mediaUrl,
       );

@@ -5,7 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { redactIdentifier } from "openclaw/plugin-sdk/logging-core";
-import { MEDIA_FFMPEG_MAX_AUDIO_DURATION_SECS } from "openclaw/plugin-sdk/media-runtime";
+import {
+  buildOutboundMediaLoadOptions,
+  MEDIA_FFMPEG_MAX_AUDIO_DURATION_SECS,
+} from "openclaw/plugin-sdk/media-runtime";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAcceptedWhatsAppSendResult } from "./inbound/send-result.test-helper.js";
 import type { ActiveWebListener } from "./inbound/types.js";
@@ -43,15 +46,12 @@ vi.mock("./connection-controller-registry.js", async () => {
   };
 });
 
-vi.mock("./outbound-media.runtime.js", async () => {
-  const actual = await vi.importActual<typeof import("./outbound-media.runtime.js")>(
-    "./outbound-media.runtime.js",
-  );
-  return {
-    ...actual,
-    loadOutboundMediaFromUrl: hoisted.loadOutboundMediaFromUrl,
-  };
-});
+// `loadOutboundMediaFromUrl` is imported from the canonical SDK subpath
+// (post-migration off the plugin's own hand-rolled duplicate). Mock that
+// source directly so the stub reaches send.ts.
+vi.mock("openclaw/plugin-sdk/outbound-media", () => ({
+  loadOutboundMediaFromUrl: hoisted.loadOutboundMediaFromUrl,
+}));
 
 vi.mock("openclaw/plugin-sdk/media-runtime", async () => {
   const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/media-runtime")>(
@@ -90,26 +90,12 @@ describe("web outbound", () => {
       fsSync.writeFileSync(args.at(-1) ?? "", Buffer.from("opus-output"));
       return "";
     });
+    // Delegate to the real buildOutboundMediaLoadOptions rather than
+    // reimplementing its flattening here — a hand-rolled copy previously
+    // masked exactly the workspaceDir-dropping bug class this plugin shipped.
     hoisted.loadOutboundMediaFromUrl.mockReset().mockImplementation(
-      async (
-        mediaUrl: string,
-        options?: {
-          maxBytes?: number;
-          mediaAccess?: {
-            localRoots?: readonly string[];
-            readFile?: (filePath: string) => Promise<Buffer>;
-          };
-          mediaLocalRoots?: readonly string[];
-          mediaReadFile?: (filePath: string) => Promise<Buffer>;
-          optimizeImages?: boolean;
-        },
-      ) =>
-        await loadWebMediaMock(mediaUrl, {
-          maxBytes: options?.maxBytes,
-          localRoots: options?.mediaAccess?.localRoots ?? options?.mediaLocalRoots,
-          readFile: options?.mediaAccess?.readFile ?? options?.mediaReadFile,
-          hostReadCapability: Boolean(options?.mediaAccess?.readFile ?? options?.mediaReadFile),
-        }),
+      async (mediaUrl: string, options?: Parameters<typeof buildOutboundMediaLoadOptions>[0]) =>
+        await loadWebMediaMock(mediaUrl, buildOutboundMediaLoadOptions(options)),
     );
     hoisted.controllerListeners.clear();
     hoisted.controllerListeners.set("default", {
@@ -470,9 +456,32 @@ describe("web outbound", () => {
 
     expect(loadWebMediaMock).toHaveBeenCalledWith("/tmp/primary.jpg", {
       maxBytes: 50 * 1024 * 1024,
-      localRoots: undefined,
-      readFile: undefined,
-      hostReadCapability: false,
+    });
+    expect(sendMessage).toHaveBeenLastCalledWith("+1555", "pic", buf, "image/jpeg");
+  });
+
+  it("forwards mediaAccess workspaceDir to the media loader for relative paths", async () => {
+    const buf = Buffer.from("img");
+    loadWebMediaMock.mockResolvedValueOnce({
+      buffer: buf,
+      contentType: "image/jpeg",
+      kind: "image",
+    });
+
+    await sendMessageWhatsApp("+1555", "pic", {
+      verbose: false,
+      cfg: WHATSAPP_TEST_CFG,
+      mediaUrl: "projects/lazo-lodge/estimate.pdf",
+      mediaAccess: {
+        localRoots: ["/tmp/agent-root"],
+        workspaceDir: "/tmp/agent-root/workspace",
+      },
+    });
+
+    expect(loadWebMediaMock).toHaveBeenCalledWith("projects/lazo-lodge/estimate.pdf", {
+      maxBytes: 50 * 1024 * 1024,
+      localRoots: ["/tmp/agent-root"],
+      workspaceDir: "/tmp/agent-root/workspace",
     });
     expect(sendMessage).toHaveBeenLastCalledWith("+1555", "pic", buf, "image/jpeg");
   });
@@ -491,9 +500,6 @@ describe("web outbound", () => {
     });
     expect(loadWebMediaMock).toHaveBeenCalledWith("/tmp/pic.jpg", {
       maxBytes: 50 * 1024 * 1024,
-      localRoots: undefined,
-      readFile: undefined,
-      hostReadCapability: false,
     });
     expect(sendMessage).toHaveBeenLastCalledWith("+1555", "pic", buf, "image/jpeg");
   });
@@ -672,8 +678,6 @@ describe("web outbound", () => {
     expect(loadWebMediaMock).toHaveBeenCalledWith("/tmp/pic.jpg", {
       maxBytes: 100 * 1024 * 1024,
       localRoots: ["/tmp/workspace"],
-      readFile: undefined,
-      hostReadCapability: false,
     });
   });
 
