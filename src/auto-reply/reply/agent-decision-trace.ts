@@ -13,6 +13,12 @@ type ToolSummary = {
     name: string;
     status: "ok" | "partial" | "error" | "blocked";
     detail?: string;
+    /**
+     * Set when this invocation's evidence came from a subagent the current
+     * turn delegated to, not from a tool the current attempt ran directly.
+     * Additive — absent for every direct invocation, as today.
+     */
+    viaSubagent?: boolean;
   }>;
   /**
    * Errored calls still unresolved when the turn ended — every failure the
@@ -129,7 +135,14 @@ export function buildAgentDecisionTrace(params: {
         status === "blocked" || status === "error"
           ? normalizeTraceDetail(invocation.detail)
           : undefined;
-      return [{ name, status, ...(detail ? { detail } : {}) }];
+      return [
+        {
+          name,
+          status,
+          ...(detail ? { detail } : {}),
+          ...(invocation.viaSubagent ? { viaSubagent: true } : {}),
+        },
+      ];
     }) ?? [];
   const toolInvocations = allInvocations.slice(0, MAX_TRACE_ITEMS);
   const successfulCalls = allInvocations.filter((entry) => entry.status === "ok").length;
@@ -139,7 +152,12 @@ export function buildAgentDecisionTrace(params: {
   const permissionRequired =
     params.failureSignal?.kind === "execution_denied" ||
     params.failureSignal?.code === "SYSTEM_RUN_DENIED";
-  const terminalInvocation = allInvocations.at(-1);
+  // Delegated (viaSubagent) invocations are appended after the current
+  // attempt's own, so the literal last array entry can be a subagent's tool
+  // call even when this attempt's own terminal action was a successful
+  // "message" send. "Terminal" here means this attempt's own last action,
+  // so exclude delegated entries before taking it.
+  const terminalInvocation = allInvocations.findLast((entry) => !entry.viaSubagent);
   const hasSuccessfulTerminalMessage =
     terminalInvocation?.name === "message" && terminalInvocation.status === "ok";
   const hasUsableAnswer = params.payloads?.some(isUsableAnswerPayload) === true;
@@ -221,6 +239,9 @@ export function buildAgentDecisionTrace(params: {
       };
       if ("detail" in invocation && invocation.detail) {
         entry.detail = invocation.detail;
+      }
+      if ("viaSubagent" in invocation && invocation.viaSubagent) {
+        entry.viaSubagent = true;
       }
       return entry;
     }),
