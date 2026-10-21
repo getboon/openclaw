@@ -120,7 +120,10 @@ overrides:
   # authority-injection bug via unvalidated port and host-confusion via an
   # unclosed bracket in serialize(). Fixed at 4.1.4.
   fast-uri: 4.1.4
-  follow-redirects: 1.16.0
+  # GHSA-q3jh-wrc6-jgq8 / GHSA-8r9p-f939-6h3c: follow-redirects <1.16.1 allows
+  # array-form headers to bypass cross-origin credential stripping and has a
+  # sensitiveHeaders regex that can expose credential headers. Fixed at 1.16.1.
+  follow-redirects: 1.16.1
   defu: 6.1.5
   fast-xml-parser: 5.7.0
   request: "npm:@cypress/request@3.0.10"
@@ -194,7 +197,14 @@ overrides:
   # (GHSA-2v37-7h3g-55p8's fixed range is >=3.3.18); 3.3.18 is the real fix.
   "nanoid@3": 3.3.18
   "nanoid@5": 5.1.16
-  vite: 8.0.16
+  # GHSA-587h-7wmj-h5pm: vite's bundled launch-editor <=8.1.5 has an
+  # fs.existsSync() check that can be bypassed on Windows. Fixed at 8.1.6.
+  vite: 8.1.6
+  # GHSA-gfr2-rv44-r23c / GHSA-r7fv-28h4-cvq7: markdown-it has quadratic-time
+  # rendering of multi-line link reference definitions (regression since
+  # 14.1.0) and quadratic complexity in smartquotes with unmatched closing
+  # quotes. Both fixed at 14.3.3; staying on the 14.x line (no major bump).
+  markdown-it: 14.3.3
   ws: 8.21.0
   "@vitest/browser": 4.1.11
 
