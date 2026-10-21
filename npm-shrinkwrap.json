@@ -880,12 +880,12 @@
       }
     },
     "node_modules/@sentry/node/node_modules/@opentelemetry/resources": {
-      "version": "2.12.0",
-      "resolved": "https://registry.npmjs.org/@opentelemetry/resources/-/resources-2.12.0.tgz",
-      "integrity": "sha512-+rSRoOdln6NhXTVcBdHSlZxJDNzwxadeweK2ltZO3tVtfp6aklABc06xclDk6ovRR+EiGgIcSbh/6NgjFhnb3A==",
+      "version": "2.11.0",
+      "resolved": "https://registry.npmjs.org/@opentelemetry/resources/-/resources-2.11.0.tgz",
+      "integrity": "sha512-Ie7+8q8MDF4FAEQCKVMTx3ReUvxiIAgIiiW3c9JdmP8+HMcDy20puT+AHjexnExgnbvBxjQ9fjkFDWrikJ2jQA==",
       "license": "Apache-2.0",
       "dependencies": {
-        "@opentelemetry/core": "2.12.0",
+        "@opentelemetry/core": "2.11.0",
         "@opentelemetry/semantic-conventions": "^1.29.0"
       },
       "engines": {
@@ -896,15 +896,14 @@
       }
     },
     "node_modules/@sentry/node/node_modules/@opentelemetry/sdk-trace-base": {
-      "version": "2.12.0",
-      "resolved": "https://registry.npmjs.org/@opentelemetry/sdk-trace-base/-/sdk-trace-base-2.12.0.tgz",
-      "integrity": "sha512-JOERgZCxRM06FEJ5kEWxlSRChah6MmXDx3KwCruqEv/iEyLkTokCSemf2y1w8oIHtfrr8EVTpzebq/31vn2Cpg==",
-      "deprecated": "Use @opentelemetry/sdk-trace package",
+      "version": "2.11.0",
+      "resolved": "https://registry.npmjs.org/@opentelemetry/sdk-trace-base/-/sdk-trace-base-2.11.0.tgz",
+      "integrity": "sha512-H19x/TX/LZdqiYOjM7fqtSxwlplC5pgelavqbQdHbhdq0q/AI/TGkM2dfGuuynTXmJPeF2HoZVoPDu+TGoW78A==",
       "license": "Apache-2.0",
       "dependencies": {
-        "@opentelemetry/core": "2.12.0",
-        "@opentelemetry/resources": "2.12.0",
-        "@opentelemetry/sdk-trace": "2.12.0",
+        "@opentelemetry/core": "2.11.0",
+        "@opentelemetry/resources": "2.11.0",
+        "@opentelemetry/sdk-trace": "2.11.0",
         "@opentelemetry/semantic-conventions": "^1.29.0"
       },
       "engines": {
