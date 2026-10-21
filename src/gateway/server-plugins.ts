@@ -308,6 +308,19 @@ function mergeGatewayClientInternal(
   };
 }
 
+// Request scopes flow through AsyncLocalStorage into the runs a handler starts, so a
+// nested dispatch would otherwise inherit an outer core-built request's trust flag.
+// The flag must describe only the params of the dispatch that sets it.
+function withoutInheritedInProcessDispatch(
+  client: GatewayRequestOptions["client"] | undefined,
+): GatewayRequestOptions["client"] | undefined {
+  if (!client?.internal?.inProcessDispatch) {
+    return client;
+  }
+  const { inProcessDispatch: _inherited, ...internal } = client.internal;
+  return { ...client, internal };
+}
+
 type DispatchGatewayMethodInProcessOptions = {
   allowSyntheticModelOverride?: boolean;
   agentRunTracking?: "plugin_subagent";
@@ -430,7 +443,7 @@ export async function dispatchGatewayMethodInProcessRaw(
     scopes: options?.syntheticScopes,
   });
   const scopedClient = mergeGatewayClientInternal(
-    scope?.client,
+    withoutInheritedInProcessDispatch(scope?.client),
     pluginRuntimeOwnerId || options?.agentRunTracking || options?.inProcessDispatch
       ? {
           ...(options?.agentRunTracking ? { agentRunTracking: options.agentRunTracking } : {}),
