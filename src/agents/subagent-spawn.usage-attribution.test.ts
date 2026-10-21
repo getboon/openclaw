@@ -233,7 +233,8 @@ describe("subagent spawn usage attribution", () => {
     const nullToken = buildEmbeddedAttemptToolRunContext({ senderId: "U-ALICE", oboToken: null });
     expect(nullToken).not.toHaveProperty("requesterOboToken");
 
-    const child = await spawnFrom("agent:main:main", blank.requesterUsageAttribution);
+    // A blank token that reaches spawn directly is normalized away there too.
+    const child = await spawnFrom("agent:main:main", blank.requesterUsageAttribution, "  ");
 
     expect(child.agentParams).not.toHaveProperty("oboToken");
   });

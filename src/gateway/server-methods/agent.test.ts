@@ -1457,7 +1457,8 @@ describe("gateway agent handler", () => {
 
     const call = await waitForAgentCommandCall();
     expect(call.oboToken).toBe(token);
-    // Per-turn bearer: it must never reach the session store.
+    // Per-turn bearer: it must never reach the session store (which was written).
+    expect(persisted.length).toBeGreaterThan(0);
     expect(persisted.join("\n")).not.toContain(token);
   });
 

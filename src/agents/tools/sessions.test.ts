@@ -38,6 +38,12 @@ vi.mock("../../config/config.js", async () => {
 vi.mock("./sessions-send-tool.a2a.js", () => ({
   runSessionsSendA2AFlow: vi.fn(),
 }));
+// Attributed sends dispatch in-process; tests inject that seam, so keep the plugin
+// loader/registry behind the real server-plugins module out of this unit test.
+vi.mock("../../gateway/server-plugins.js", () => ({
+  dispatchGatewayMethodInProcess: vi.fn(),
+  hasInProcessGatewayContext: () => false,
+}));
 
 let createSessionsListTool: typeof import("./sessions-list-tool.js").createSessionsListTool;
 let createSessionsSendTool: typeof import("./sessions-send-tool.js").createSessionsSendTool;
