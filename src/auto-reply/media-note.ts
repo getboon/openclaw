@@ -16,7 +16,12 @@ function normalizeManagedInboundMediaRef(value: string): string {
   const candidate = stripDarwinPrivatePrefix(path.resolve(value));
   const inboundDir = path.join(mediaDir, "inbound");
   const relativeToInbound = path.relative(inboundDir, candidate);
-  // Managed inbound media gets a stable URI so prompts do not leak host-specific temp paths.
+  // Rewrites to a stable, compact media://inbound/<id> ref: per-turn note text
+  // stays short and deterministic across hosts/uploads, and consumers such as
+  // boon-pdf-prep's parsePdfRefs match on this exact scheme. The real directory
+  // this resolves to is no longer secret — it is named once, statically, in
+  // system-prompt.ts's buildAttachmentsSection (ENG-19208) so an exec-run CLI
+  // can be given a real path instead of this opaque ref.
   if (
     !relativeToInbound ||
     relativeToInbound.startsWith("..") ||

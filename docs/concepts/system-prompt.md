@@ -61,6 +61,9 @@ The prompt is intentionally compact and uses fixed sections:
   aliases that normalize to those protected exec paths.
 - **Workspace**: working directory (`agents.defaults.workspace`).
 - **Documentation**: local path to OpenClaw docs/source and when to read them.
+- **Attachments**: what a `media://inbound/<id>` ref (shown for an uploaded
+  file) resolves to on disk, so the model can pass a real path to an
+  external CLI run through `exec` instead of the opaque ref.
 - **Workspace Files (injected)**: indicates bootstrap files are included below.
 - **Sandbox** (when enabled): indicates sandboxed runtime, sandbox paths, and whether elevated exec is available.
 - **Current Date & Time**: time zone only (cache-stable; the live clock comes from `session_status`).
@@ -118,8 +121,9 @@ OpenClaw can render smaller system prompts for sub-agents. The runtime sets a
 
 - `full` (default): includes all sections above.
 - `minimal`: used for sub-agents; omits **Memory Recall**, **OpenClaw
-  Self-Update**, **Model Aliases**, **User Identity**, **Assistant Output Directives**,
-  **Messaging**, **Silent Replies**, and **Heartbeats**. Tooling, **Safety**,
+  Self-Update**, **Model Aliases**, **User Identity**, **Attachments**,
+  **Assistant Output Directives**, **Messaging**, **Silent Replies**, and
+  **Heartbeats**. Tooling, **Safety**,
   **Skills** when supplied, Workspace, Sandbox, Current Date & Time (when
   known), Runtime, and injected context stay available.
 - `none`: returns only the base identity line.

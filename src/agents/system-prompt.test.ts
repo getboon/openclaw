@@ -1,7 +1,9 @@
 // System prompt tests cover the main prompt facade, prompt-surface routing, and
 // user-visible sections for owners, tools, safety, skills, and subagents.
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
+import { withEnv } from "../test-utils/env.js";
 import { typedCases } from "../test-utils/typed-cases.js";
 import { listDeliverableMessageChannels } from "../utils/message-channel.js";
 import { resolveAgentPromptSurfaceForSessionKey } from "./prompt-surface.js";
@@ -143,6 +145,7 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("## Skills");
     expect(prompt).not.toContain("## Memory Recall");
     expect(prompt).not.toContain("## Documentation");
+    expect(prompt).not.toContain("## Attachments");
     expect(prompt).not.toContain("## Reply Tags");
     expect(prompt).not.toContain("## Messaging");
     expect(prompt).not.toContain("## Voice (TTS)");
@@ -559,6 +562,62 @@ describe("buildAgentSystemPrompt", () => {
       "Docs are authoritative for OpenClaw self-knowledge: before understanding how OpenClaw works (memory/daily notes, sessions, tools, Gateway, config, commands, project context), use the docs mirror first when web tooling is available; treat AGENTS.md/project context, workspace/profile/memory notes, and `memory_search` as instruction context or user memory, not OpenClaw design/implementation knowledge.",
     );
     expect(prompt).toContain("If docs are silent/stale, say so and inspect GitHub source.");
+  });
+
+  it("states the real inbound media directory and the media:// mapping (ENG-19208)", () => {
+    const stateDir = "/tmp/openclaw-system-prompt-attachments-test-state";
+    const inboundDir = path.join(stateDir, "media", "inbound");
+    const prompt = withEnv({ OPENCLAW_STATE_DIR: stateDir }, () =>
+      buildAgentSystemPrompt({
+        workspaceDir: "/tmp/openclaw",
+        toolNames: ["read", "exec", "pdf"],
+      }),
+    );
+
+    expect(prompt).toContain("## Attachments");
+    expect(prompt).toContain(
+      `A \`media://inbound/<name>\` ref in a \`[media attached: ...]\` line means \`${inboundDir}/<name>\`.`,
+    );
+    expect(prompt).toContain(
+      `Example: \`media://inbound/plans.pdf\` is \`${inboundDir}/plans.pdf\`.`,
+    );
+    expect(prompt).toContain(
+      "The `read` and `pdf` tools accept either form; `exec` and other shell commands need the real path, not the `media://` ref.",
+    );
+  });
+
+  it("omits the pdf-tool clause from the Attachments section when pdf is unavailable", () => {
+    const stateDir = "/tmp/openclaw-system-prompt-attachments-no-doc-reader-state";
+    const prompt = withEnv({ OPENCLAW_STATE_DIR: stateDir }, () =>
+      buildAgentSystemPrompt({
+        workspaceDir: "/tmp/openclaw",
+        toolNames: ["read", "exec"],
+      }),
+    );
+
+    expect(prompt).toContain(
+      "The `read` tool accepts either form; `exec` and other shell commands need the real path, not the `media://` ref.",
+    );
+    expect(prompt).not.toContain("and `pdf` tools accept either form");
+  });
+
+  it("points the Attachments section at the sandbox-relative inbound path when sandboxed", () => {
+    const stateDir = "/tmp/openclaw-system-prompt-sandbox-attachments-state";
+    const prompt = withEnv({ OPENCLAW_STATE_DIR: stateDir }, () =>
+      buildAgentSystemPrompt({
+        workspaceDir: "/tmp/openclaw",
+        toolNames: ["read", "exec"],
+        sandboxInfo: { enabled: true, containerWorkspaceDir: "/container/workspace" },
+      }),
+    );
+
+    expect(prompt).toContain(
+      "A `media://inbound/<name>` ref in a `[media attached: ...]` line means `media/inbound/<name>`.",
+    );
+    expect(prompt).toContain("This path is relative to your sandbox working directory.");
+    // The absolute host directory does not resolve inside the sandboxed container,
+    // so it must not leak into sandboxed guidance (ENG-19208 follow-through).
+    expect(prompt).not.toContain(path.join(stateDir, "media", "inbound"));
   });
 
   it("includes workspace notes when provided", () => {

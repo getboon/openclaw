@@ -4,6 +4,7 @@
  * Assembles runtime, workspace, tooling, memory, delegation, channel, and cache-boundary prompt sections.
  */
 import { createHmac, createHash } from "node:crypto";
+import path from "node:path";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalLowercaseString,
@@ -25,6 +26,7 @@ import type { SubagentDelegationMode } from "../config/types.agent-defaults.js";
 import type { MemoryCitationsMode } from "../config/types.memory.js";
 import { buildMemoryPromptSection } from "../plugins/memory-state.js";
 import type { AgentPromptSurfaceKind } from "../plugins/types.js";
+import { resolveConfigDir } from "../utils.js";
 import { listDeliverableMessageChannels } from "../utils/message-channel.js";
 import type { ActiveProcessSessionReference } from "./bash-process-references.js";
 import type { BootstrapMode } from "./bootstrap-mode.js";
@@ -622,6 +624,48 @@ function buildDocsSection(params: {
   return lines.filter((line): line is string => line !== undefined);
 }
 
+/**
+ * Builds the Attachments section naming what `media://inbound/<id>` resolves to.
+ *
+ * Prompt text otherwise only ever shows that opaque ref (`auto-reply/media-note.ts`'s
+ * normalizeManagedInboundMediaRef masks the real path there, see its own comment
+ * for why that masking still stands). That left the model with no way to turn
+ * the ref into a path an external CLI invoked through exec can open, so it
+ * would guess an empty/placeholder path, fail, then `ls` the inbound dir to
+ * recover (ENG-19208). Stating the mapping here removes that wasted step.
+ * Deliberately phrased as a ref->path mapping, not a claim about where every
+ * attachment lands on disk: remote-host attachments stage into a separate
+ * media/remote-cache/ dir that media-note.ts does NOT mask, so they already
+ * reach the model as a real absolute path and are out of scope here.
+ */
+function buildAttachmentsSection(params: {
+  isMinimal: boolean;
+  inboundMediaDir: string;
+  inboundMediaDirIsSandboxRelative: boolean;
+  readToolName: string;
+  execToolName: string;
+  hasPdfTool: boolean;
+  pdfToolName: string;
+}) {
+  if (params.isMinimal) {
+    return [];
+  }
+  const dirPrefix = `${params.inboundMediaDir}/`;
+  const toolsLine = params.hasPdfTool
+    ? `The \`${params.readToolName}\` and \`${params.pdfToolName}\` tools accept either form; \`${params.execToolName}\` and other shell commands need the real path, not the \`media://\` ref.`
+    : `The \`${params.readToolName}\` tool accepts either form; \`${params.execToolName}\` and other shell commands need the real path, not the \`media://\` ref.`;
+  return [
+    "## Attachments",
+    `A \`media://inbound/<name>\` ref in a \`[media attached: ...]\` line means \`${dirPrefix}<name>\`.`,
+    `Example: \`media://inbound/plans.pdf\` is \`${dirPrefix}plans.pdf\`.`,
+    params.inboundMediaDirIsSandboxRelative
+      ? "This path is relative to your sandbox working directory."
+      : undefined,
+    toolsLine,
+    "",
+  ].filter((line): line is string => line !== undefined);
+}
+
 function formatFullAccessBlockedReason(reason?: EmbeddedFullAccessBlockedReason): string {
   if (reason === "host-policy") {
     return "host policy";
@@ -882,6 +926,8 @@ export function buildAgentSystemPrompt(params: {
   const readToolName = resolveToolName("read");
   const execToolName = resolveToolName("exec");
   const processToolName = resolveToolName("process");
+  const hasPdfTool = availableTools.has("pdf");
+  const pdfToolName = resolveToolName("pdf");
   const extraSystemPrompt = params.extraSystemPrompt?.trim();
   const promptContribution = params.promptContribution;
   const providerStablePrefix = normalizeProviderPromptBlock(promptContribution?.stablePrefix);
@@ -956,6 +1002,21 @@ export function buildAgentSystemPrompt(params: {
     params.fsWorkspaceOnly === true
       ? "tools.fs.workspaceOnly is enabled: scratch/temp/meta files that file tools must later read/write/edit must stay inside the workspace, preferably as relative paths under `.openclaw/tmp/`. Do not write files to `/tmp/...` with exec if a later read/write/edit/apply_patch tool needs them; use `.openclaw/tmp/...` instead."
       : "";
+  // Sandboxed exec gets the sandbox-relative form (stage-sandbox-media.ts already
+  // rewrites MediaPaths to relative `media/inbound/<file>` there, so the absolute
+  // host directory below would not resolve inside the container). Outside a
+  // sandbox, exec runs on the host, so the real absolute directory is the one
+  // `media://inbound/<id>` refs actually resolve to (ENG-19208).
+  // Uses resolveConfigDir() + "media/inbound" directly (matching media/store.ts's
+  // own resolveMediaDir) instead of importing media/store.js's getMediaDir, which
+  // would pull its http(s)/ssrf/file-store fetch machinery into every system-prompt
+  // build just for a path join.
+  const inboundMediaDirIsSandboxRelative = Boolean(
+    params.sandboxInfo?.enabled && sanitizedSandboxContainerWorkspace,
+  );
+  const inboundMediaDir = inboundMediaDirIsSandboxRelative
+    ? "media/inbound"
+    : sanitizeForPromptLiteral(path.join(resolveConfigDir(), "media", "inbound"));
   // ENG-16318: keep filesystem searches scoped to the workspace, and never
   // report benign bookkeeping steps as task failures. A `find /` is slow and
   // hits permission-denied noise; a scratch mkdir/ls that fails is not the
@@ -989,6 +1050,15 @@ export function buildAgentSystemPrompt(params: {
     isMinimal,
     readToolName,
   });
+  const attachmentsSection = buildAttachmentsSection({
+    isMinimal,
+    inboundMediaDir,
+    inboundMediaDirIsSandboxRelative,
+    readToolName,
+    execToolName,
+    hasPdfTool,
+    pdfToolName,
+  });
   const workspaceNotes = normalizeStringEntries(params.workspaceNotes);
 
   // For "none" mode, return just the basic identity line
@@ -1016,6 +1086,9 @@ export function buildAgentSystemPrompt(params: {
     readToolName,
     execToolName,
     processToolName,
+    pdfToolName,
+    inboundMediaDir,
+    inboundMediaDirIsSandboxRelative,
     nativeCommandGuidanceLines,
     providerSectionOverrides,
     providerStablePrefix,
@@ -1179,6 +1252,7 @@ export function buildAgentSystemPrompt(params: {
       ...workspaceNotes,
       "",
       ...docsSection,
+      ...attachmentsSection,
       params.sandboxInfo?.enabled ? "## Sandbox" : "",
       params.sandboxInfo?.enabled
         ? [
