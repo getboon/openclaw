@@ -564,7 +564,7 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("If docs are silent/stale, say so and inspect GitHub source.");
   });
 
-  it("states the real inbound media directory and the media:// mapping (ENG-19208)", () => {
+  it("states the real inbound media directory and the media:// mapping", () => {
     const stateDir = "/tmp/openclaw-system-prompt-attachments-test-state";
     const inboundDir = path.join(stateDir, "media", "inbound");
     const prompt = withEnv({ OPENCLAW_STATE_DIR: stateDir }, () =>
@@ -580,6 +580,9 @@ describe("buildAgentSystemPrompt", () => {
     );
     expect(prompt).toContain(
       `Example: \`media://inbound/plans.pdf\` is \`${inboundDir}/plans.pdf\`.`,
+    );
+    expect(prompt).toContain(
+      "Chat-history/reply-chain refs URL-encode `<name>`; decode it before using the path.",
     );
     expect(prompt).toContain(
       "The `read` and `pdf` tools accept either form; `exec` and other shell commands need the real path, not the `media://` ref.",
@@ -616,7 +619,7 @@ describe("buildAgentSystemPrompt", () => {
     );
     expect(prompt).toContain("This path is relative to your sandbox working directory.");
     // The absolute host directory does not resolve inside the sandboxed container,
-    // so it must not leak into sandboxed guidance (ENG-19208 follow-through).
+    // so it must not leak into sandboxed guidance.
     expect(prompt).not.toContain(path.join(stateDir, "media", "inbound"));
   });
 

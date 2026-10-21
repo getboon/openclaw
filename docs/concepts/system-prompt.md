@@ -63,7 +63,9 @@ The prompt is intentionally compact and uses fixed sections:
 - **Documentation**: local path to OpenClaw docs/source and when to read them.
 - **Attachments**: what a `media://inbound/<id>` ref (shown for an uploaded
   file) resolves to on disk, so the model can pass a real path to an
-  external CLI run through `exec` instead of the opaque ref.
+  external CLI run through `exec` instead of the opaque ref. In a sandboxed
+  run, the stated path is relative to the sandbox working directory instead
+  of an absolute host path.
 - **Workspace Files (injected)**: indicates bootstrap files are included below.
 - **Sandbox** (when enabled): indicates sandboxed runtime, sandbox paths, and whether elevated exec is available.
 - **Current Date & Time**: time zone only (cache-stable; the live clock comes from `session_status`).

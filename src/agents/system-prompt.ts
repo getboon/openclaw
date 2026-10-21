@@ -626,17 +626,11 @@ function buildDocsSection(params: {
 
 /**
  * Builds the Attachments section naming what `media://inbound/<id>` resolves to.
- *
- * Prompt text otherwise only ever shows that opaque ref (`auto-reply/media-note.ts`'s
- * normalizeManagedInboundMediaRef masks the real path there, see its own comment
- * for why that masking still stands). That left the model with no way to turn
- * the ref into a path an external CLI invoked through exec can open, so it
- * would guess an empty/placeholder path, fail, then `ls` the inbound dir to
- * recover (ENG-19208). Stating the mapping here removes that wasted step.
- * Deliberately phrased as a ref->path mapping, not a claim about where every
- * attachment lands on disk: remote-host attachments stage into a separate
- * media/remote-cache/ dir that media-note.ts does NOT mask, so they already
- * reach the model as a real absolute path and are out of scope here.
+ * media-note.ts masks the real path behind that ref; this states the mapping
+ * so exec-run CLIs can get a real path instead of the opaque ref. A ref->path
+ * mapping, not a claim about where every attachment lands: remote-host
+ * attachments stage into media/remote-cache/, which media-note.ts does not
+ * mask, so they already reach the model as a real path.
  */
 function buildAttachmentsSection(params: {
   isMinimal: boolean;
@@ -658,6 +652,7 @@ function buildAttachmentsSection(params: {
     "## Attachments",
     `A \`media://inbound/<name>\` ref in a \`[media attached: ...]\` line means \`${dirPrefix}<name>\`.`,
     `Example: \`media://inbound/plans.pdf\` is \`${dirPrefix}plans.pdf\`.`,
+    "Chat-history/reply-chain refs URL-encode `<name>`; decode it before using the path.",
     params.inboundMediaDirIsSandboxRelative
       ? "This path is relative to your sandbox working directory."
       : undefined,
@@ -1006,7 +1001,7 @@ export function buildAgentSystemPrompt(params: {
   // rewrites MediaPaths to relative `media/inbound/<file>` there, so the absolute
   // host directory below would not resolve inside the container). Outside a
   // sandbox, exec runs on the host, so the real absolute directory is the one
-  // `media://inbound/<id>` refs actually resolve to (ENG-19208).
+  // `media://inbound/<id>` refs actually resolve to.
   // Uses resolveConfigDir() + "media/inbound" directly (matching media/store.ts's
   // own resolveMediaDir) instead of importing media/store.js's getMediaDir, which
   // would pull its http(s)/ssrf/file-store fetch machinery into every system-prompt
