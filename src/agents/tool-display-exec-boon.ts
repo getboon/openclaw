@@ -112,9 +112,9 @@ export function summarizeBoonExecCommand(words: string[]): string | undefined {
     const subcommand = positional[0];
     switch (subcommand) {
       case "line-items":
-        // `--fee-loaded` opts into the backend's per-line fee allocation (ENG-21205);
-        // distinct from a plain line-items read so a regression eval can require the
-        // flag was actually used, not just that the estimate was read (ENG-21588).
+        // Keep fee-loaded reads distinct from plain line-item reads so a regression
+        // eval can require the flag was actually used, not just that the estimate
+        // was read.
         return words.includes("--fee-loaded")
           ? "reading fee-loaded line prices"
           : "reading the estimate lines";
