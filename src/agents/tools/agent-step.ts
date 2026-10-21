@@ -10,6 +10,8 @@ import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel.js";
 import { retireSessionMcpRuntimeForSessionKey } from "../agent-bundle-mcp-tools.js";
 import { resolveNestedAgentLaneForSession } from "../lanes.js";
 import { waitForAgentRunAndReadUpdatedAssistantReply } from "../run-wait.js";
+import { callAgentWithUsageAttribution } from "../usage-attribution-dispatch.js";
+import type { UsageAttribution } from "../usage-attribution.js";
 
 type GatewayCaller = typeof callGateway;
 type AgentCommandRunner = typeof import("../../commands/agent.js").agentCommandFromIngress;
@@ -56,6 +58,8 @@ export async function runAgentStep(params: {
   sourceSessionKey?: string;
   sourceChannel?: string;
   sourceTool?: string;
+  /** Billing-only user of the turn that started this step (never sender identity). */
+  usageAttribution?: UsageAttribution;
 }): Promise<string | undefined> {
   const stepIdem = crypto.randomUUID();
   const inputProvenance = {
@@ -82,6 +86,7 @@ export async function runAgentStep(params: {
       extraSystemPrompt: params.extraSystemPrompt,
       inputProvenance,
       allowModelOverride: false,
+      ...(params.usageAttribution ? { usageAttribution: params.usageAttribution } : {}),
     });
     await retireSessionMcpRuntimeForSessionKey({
       sessionKey: params.sessionKey,
@@ -89,20 +94,23 @@ export async function runAgentStep(params: {
     });
     return extractAgentCommandReply(result);
   }
-  const response = await agentStepDeps.callGateway({
-    method: "agent",
-    params: {
-      message,
-      sessionKey: params.sessionKey,
-      idempotencyKey: stepIdem,
-      deliver: false,
-      sourceReplyDeliveryMode: "message_tool_only",
-      channel,
-      lane,
-      extraSystemPrompt: params.extraSystemPrompt,
-      inputProvenance,
+  const response = await callAgentWithUsageAttribution({
+    callGateway: agentStepDeps.callGateway,
+    request: {
+      params: {
+        message,
+        sessionKey: params.sessionKey,
+        idempotencyKey: stepIdem,
+        deliver: false,
+        sourceReplyDeliveryMode: "message_tool_only",
+        channel,
+        lane,
+        extraSystemPrompt: params.extraSystemPrompt,
+        inputProvenance,
+      },
+      timeoutMs: 10_000,
     },
-    timeoutMs: 10_000,
+    usageAttribution: params.usageAttribution,
   });
 
   const stepRunId = typeof response?.runId === "string" && response.runId ? response.runId : "";

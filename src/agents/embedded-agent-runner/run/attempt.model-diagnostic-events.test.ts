@@ -900,6 +900,29 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(threadOnly).not.toHaveProperty("x-boon-user-id");
   });
 
+  it("falls back to usageAttribution for the user headers when the run has no sender", async () => {
+    // Subagent children and plugin-started runs have no inbound sender of their own.
+    const headers = await boonHeadersFor({
+      sessionId: "child-session",
+      usageAttribution: { userId: "U-ALICE", userName: "Alice", userSource: "slack" },
+    });
+    expect(headers["x-boon-user-id"]).toBe("U-ALICE");
+    expect(headers["x-boon-user-name"]).toBe("Alice");
+    expect(headers["x-boon-user-source"]).toBe("slack");
+    expect(headers["x-boon-session-id"]).toBe("child-session");
+  });
+
+  it("prefers the turn sender over usageAttribution without mixing identities", async () => {
+    const headers = await boonHeadersFor({
+      senderId: "U-BOB",
+      usageAttribution: { userId: "U-ALICE", userName: "Alice", userSource: "slack" },
+    });
+    expect(headers["x-boon-user-id"]).toBe("U-BOB");
+    // Bob has no name/source on this turn; Alice's must not be attached to Bob's id.
+    expect(headers).not.toHaveProperty("x-boon-user-name");
+    expect(headers).not.toHaveProperty("x-boon-user-source");
+  });
+
   it("emits x-boon-gateway-obo-token from oboToken and omits it when absent", async () => {
     // ENG-19115 — the gateway-audience OBO (set on MsgContext.OboToken by
     // anychat-boon-web, ENG-19116) rides to x-boon-gateway-obo-token so the

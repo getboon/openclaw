@@ -2175,6 +2175,7 @@ async function runEmbeddedAgentInternal(
             // The attempt params are an explicit copy of the run params; omitting the
             // field here is why attempt.ts's params.oboToken was always undefined.
             oboToken: params.oboToken,
+            usageAttribution: params.usageAttribution,
             approvalReviewerDeviceId: params.approvalReviewerDeviceId,
             currentChannelId: params.currentChannelId,
             chatId: params.chatId,

@@ -465,6 +465,50 @@ describe("runAgentHarnessAttempt", () => {
     expect(attempt?.extraSystemPrompt).toContain("this sender is not allowed by policy");
   });
 
+  it("keeps a subagent child's tool policy independent of the parent sender's usage attribution", async () => {
+    // usageAttribution is billing-only: a child run that inherits the parent's user
+    // must resolve the same effective tool policy as a child with no parent user,
+    // not the parent sender's sender-scoped policy.
+    const runAttempt = vi.fn<AgentHarness["runAttempt"]>(async () => createAttemptResult("codex"));
+    registerAgentHarness(
+      {
+        id: "codex",
+        label: "Codex",
+        supports: (ctx) =>
+          ctx.provider === "codex" ? { supported: true, priority: 100 } : { supported: false },
+        runAttempt,
+      },
+      { ownerPluginId: "codex" },
+    );
+    const childParams = {
+      ...createAttemptParams(groupSenderDenyAllConfig()),
+      sessionKey: "agent:main:telegram:group:test-deny-room",
+      messageProvider: "telegram",
+      groupId: "test-deny-room",
+    };
+    const effectivePolicy = async (extra: Partial<EmbeddedRunAttemptParams>) => {
+      runAttempt.mockClear();
+      await runAgentHarnessAttempt({ ...childParams, ...extra });
+      const attempt = runAttempt.mock.calls[0]?.[0];
+      return { toolsAllow: attempt?.toolsAllow, extraSystemPrompt: attempt?.extraSystemPrompt };
+    };
+
+    const withoutParentUser = await effectivePolicy({});
+    const withParentUser = await effectivePolicy({
+      usageAttribution: {
+        userId: "test-denied-sender",
+        userName: "Denied",
+        userSource: "telegram",
+      },
+    });
+    const asParentSender = await effectivePolicy({ senderId: "test-denied-sender" });
+
+    expect(withParentUser).toEqual(withoutParentUser);
+    // Sanity: the config is sender-sensitive, so a leaked senderId would have changed it.
+    expect(asParentSender).not.toEqual(withoutParentUser);
+    expect(asParentSender.toolsAllow).toEqual([]);
+  });
+
   it("adds chat policy wording for plugin harness group deny-all", async () => {
     const runAttempt = vi.fn<AgentHarness["runAttempt"]>(async () => createAttemptResult("codex"));
     registerAgentHarness(

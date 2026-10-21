@@ -780,6 +780,9 @@ export function runAgentAttempt(params: {
     hasRepliedRef: params.runContext.hasRepliedRef,
     senderId: params.runContext.senderId,
     senderIsOwner: params.opts.senderIsOwner,
+    // Spawned sessions persist the originating user on the entry, so later turns
+    // (sessions_send, steer, announce) stay attributed without a per-call param.
+    usageAttribution: params.opts.usageAttribution ?? params.sessionEntry?.usageAttribution,
     sessionFile: params.sessionFile,
     workspaceDir: params.workspaceDir,
     cwd: params.cwd,

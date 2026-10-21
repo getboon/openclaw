@@ -48,6 +48,8 @@ export type GatewayClient = {
     approvalRuntime?: boolean;
     pluginRuntimeOwnerId?: string;
     agentRunTracking?: "plugin_subagent";
+    /** Set only by in-process gateway dispatch; never by a socket connection. */
+    inProcessDispatch?: boolean;
   };
 };
 

@@ -1356,6 +1356,57 @@ describe("gateway agent handler", () => {
     expect(capturedEntry?.pluginOwnerId).toBe("other-plugin");
   });
 
+  it.each([
+    { name: "an unauthenticated caller", client: null },
+    // The subagent lane is caller-supplied, so it must not unlock attribution.
+    { name: "a socket backend client on the subagent lane", client: backendGatewayClient() },
+  ])("drops usageAttribution from $name", async ({ client }) => {
+    primeMainAgentRun();
+
+    await invokeAgent(
+      {
+        message: "spoofed attribution",
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        lane: "subagent",
+        usageAttribution: { userId: "U-SPOOF", userName: "Mallory", userSource: "slack" },
+        idempotencyKey: "test-idem-usage-attribution-dropped",
+      },
+      { reqId: "test-idem-usage-attribution-dropped", client },
+    );
+
+    const call = await waitForAgentCommandCall();
+    expect(call).not.toHaveProperty("usageAttribution");
+  });
+
+  it("forwards usageAttribution from in-process dispatch callers", async () => {
+    primeMainAgentRun();
+
+    await invokeAgent(
+      {
+        message: "subagent task",
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        lane: "subagent",
+        usageAttribution: { userId: " U-ALICE ", userName: "Alice", userSource: "slack" },
+        idempotencyKey: "test-idem-usage-attribution-in-process",
+      },
+      {
+        reqId: "test-idem-usage-attribution-in-process",
+        client: { internal: { inProcessDispatch: true } } as AgentHandlerArgs["client"],
+      },
+    );
+
+    const call = await waitForAgentCommandCall();
+    expect(call.usageAttribution).toEqual({
+      userId: "U-ALICE",
+      userName: "Alice",
+      userSource: "slack",
+    });
+    // Billing identity only: it must never become the run's sender identity.
+    expect((call.runContext as Record<string, unknown> | undefined)?.senderId).toBeUndefined();
+  });
+
   it("forwards provider and model overrides for admin-scoped callers", async () => {
     primeMainAgentRun();
 

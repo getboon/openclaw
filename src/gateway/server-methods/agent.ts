@@ -54,6 +54,10 @@ import {
   resolveIngressWorkspaceOverrideForSpawnedRun,
 } from "../../agents/spawned-context.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
+import {
+  normalizeUsageAttribution,
+  type UsageAttribution,
+} from "../../agents/usage-attribution.js";
 import { agentCommandFromIngress } from "../../commands/agent.js";
 import {
   evaluateSessionFreshness,
@@ -219,6 +223,19 @@ function resolveAllowModelOverrideFromClient(
   client: GatewayRequestHandlerOptions["client"],
 ): boolean {
   return clientHasAdminScope(client) || client?.internal?.allowModelOverride === true;
+}
+
+// Usage attribution only changes billing headers, but it is still caller-supplied
+// identity: accept it only from in-process dispatch (subagent spawn, plugin
+// runtime), never from a socket client. The request lane is caller-controlled and
+// is not a trust signal on its own.
+function resolveTrustedUsageAttribution(
+  client: GatewayRequestHandlerOptions["client"],
+  value: unknown,
+): UsageAttribution | undefined {
+  return client?.internal?.inProcessDispatch === true
+    ? normalizeUsageAttribution(value)
+    : undefined;
 }
 
 function resolveCanUseInternalRuntimeHandoff(
@@ -1041,8 +1058,10 @@ export const agentHandlers: GatewayRequestHandlers = {
       inputProvenance?: InputProvenance;
       workspaceDir?: string;
       voiceWakeTrigger?: string;
+      usageAttribution?: unknown;
     };
     const allowModelOverride = resolveAllowModelOverrideFromClient(client);
+    const usageAttribution = resolveTrustedUsageAttribution(client, request.usageAttribution);
     const canUseInternalRuntimeHandoff = resolveCanUseInternalRuntimeHandoff(client);
     const requestedModelOverride = Boolean(request.provider || request.model);
     const requestedInternalSessionEffects = request.sessionEffects === "internal";
@@ -2723,6 +2742,7 @@ export const agentHandlers: GatewayRequestHandlers = {
                 sessionEntry,
               }),
               allowModelOverride,
+              ...(usageAttribution ? { usageAttribution } : {}),
             },
             runId,
             dedupeKeys: agentDedupeKeys,
