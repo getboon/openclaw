@@ -2169,6 +2169,8 @@ async function runEmbeddedAgentInternal(
             isCanonicalWorkspace,
             senderId: params.senderId,
             senderName: params.senderName,
+            // Feeds the user-source usage header and the attribution children inherit.
+            senderSource: params.senderSource,
             senderUsername: params.senderUsername,
             senderE164: params.senderE164,
             // Gateway-audience OBO (ENG-19115) → attempt.ts → x-boon-gateway-obo-token.
