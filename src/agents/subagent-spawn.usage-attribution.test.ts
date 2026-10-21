@@ -23,13 +23,20 @@ let persistedStore: Record<string, Record<string, unknown>> | undefined;
 
 const ALICE: UsageAttribution = { userId: "U-ALICE", userName: "Alice", userSource: "slack" };
 
-async function spawnFrom(sessionKey: string, requesterUsageAttribution?: UsageAttribution) {
+const OBO = "eyJ.gateway-aud.parent-obo";
+
+async function spawnFrom(
+  sessionKey: string,
+  requesterUsageAttribution?: UsageAttribution,
+  requesterOboToken?: string,
+) {
   const result = await spawnSubagentDirect(
     { task: "hello" },
     {
       agentSessionKey: sessionKey,
       workspaceDir: "/tmp/workspace-main",
       ...(requesterUsageAttribution ? { requesterUsageAttribution } : {}),
+      ...(requesterOboToken ? { requesterOboToken } : {}),
     },
   );
   expect(result.status).toBe("accepted");
@@ -39,6 +46,7 @@ async function spawnFrom(sessionKey: string, requesterUsageAttribution?: UsageAt
   const childSessionKey = result.childSessionKey ?? "";
   return {
     agentParams: agentCall?.params,
+    persistedJson: JSON.stringify(persistedStore ?? {}),
     childSessionKey,
     childEntry: persistedStore?.[childSessionKey],
   };
@@ -131,5 +139,57 @@ describe("subagent spawn usage attribution", () => {
 
     expect(child.agentParams).not.toHaveProperty("usageAttribution");
     expect(child.childEntry).not.toHaveProperty("usageAttribution");
+  });
+
+  it("passes the parent's OBO token to the child's first run, in-process only", async () => {
+    const parent = buildEmbeddedAttemptToolRunContext({ senderId: "U-ALICE", oboToken: OBO });
+    expect(parent.requesterOboToken).toBe(OBO);
+
+    const child = await spawnFrom(
+      "agent:main:main",
+      parent.requesterUsageAttribution,
+      parent.requesterOboToken,
+    );
+
+    expect(child.agentParams?.oboToken).toBe(OBO);
+    // The bearer rides the agent call only: never on the child's session entry.
+    expect(child.persistedJson).not.toContain(OBO);
+    expect(child.childEntry).not.toHaveProperty("oboToken");
+  });
+
+  it("forwards the OBO token to a depth-2 grandchild whose requester received one", async () => {
+    const parent = buildEmbeddedAttemptToolRunContext({ senderId: "U-ALICE", oboToken: OBO });
+    const child = await spawnFrom(
+      "agent:main:main",
+      parent.requesterUsageAttribution,
+      parent.requesterOboToken,
+    );
+
+    // The child run received oboToken via the agent call; it has no sender of its own.
+    const childRun = buildEmbeddedAttemptToolRunContext({
+      senderId: undefined,
+      usageAttribution: child.childEntry?.usageAttribution as UsageAttribution | undefined,
+      oboToken: child.agentParams?.oboToken as string | undefined,
+    });
+    hoisted.depthBySession.set(child.childSessionKey, 1);
+    const grandchild = await spawnFrom(
+      child.childSessionKey,
+      childRun.requesterUsageAttribution,
+      childRun.requesterOboToken,
+    );
+
+    expect(grandchild.agentParams?.oboToken).toBe(OBO);
+    expect(grandchild.persistedJson).not.toContain(OBO);
+  });
+
+  it("omits oboToken when the requester run has none", async () => {
+    const blank = buildEmbeddedAttemptToolRunContext({ senderId: "U-ALICE", oboToken: "  " });
+    expect(blank).not.toHaveProperty("requesterOboToken");
+    const nullToken = buildEmbeddedAttemptToolRunContext({ senderId: "U-ALICE", oboToken: null });
+    expect(nullToken).not.toHaveProperty("requesterOboToken");
+
+    const child = await spawnFrom("agent:main:main", blank.requesterUsageAttribution);
+
+    expect(child.agentParams).not.toHaveProperty("oboToken");
   });
 });

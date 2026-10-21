@@ -20,6 +20,7 @@ import {
   resetGlobalHookRunner,
 } from "../../../plugins/hook-runner-global.js";
 import { createHookRunnerWithRegistry } from "../../../plugins/hooks.test-helpers.js";
+import { log } from "../logger.js";
 import { wrapStreamFnWithDiagnosticModelCallEvents } from "./attempt.model-diagnostic-events.js";
 
 async function collectModelCallEvents(run: () => Promise<void>): Promise<DiagnosticEventPayload[]> {
@@ -934,6 +935,33 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
 
     const withoutObo = await boonHeadersFor({ senderId: "U9" });
     expect(withoutObo).not.toHaveProperty("x-boon-gateway-obo-token");
+  });
+
+  it("emits the OBO header for a sender-less child run and logs only presence, never the value", async () => {
+    const token = "eyJ.child-run.secret-obo";
+    const debugSpy = vi.spyOn(log, "debug");
+    try {
+      const child = await boonHeadersFor({
+        sessionId: "child-session",
+        oboToken: token,
+        usageAttribution: { userId: "U-ALICE", userName: "Alice", userSource: "slack" },
+      });
+      expect(child["x-boon-gateway-obo-token"]).toBe(token);
+      expect(child["x-boon-user-id"]).toBe("U-ALICE");
+
+      const noToken = await boonHeadersFor({
+        sessionId: "child-session",
+        usageAttribution: { userId: "U-ALICE" },
+      });
+      expect(noToken).not.toHaveProperty("x-boon-gateway-obo-token");
+
+      const lines = debugSpy.mock.calls.map((args) => args.map(String).join(" "));
+      expect(lines.some((line) => line.includes("obo=present"))).toBe(true);
+      expect(lines.some((line) => line.includes("obo=absent"))).toBe(true);
+      expect(lines.join("\n")).not.toContain(token);
+    } finally {
+      debugSpy.mockRestore();
+    }
   });
 
   it("strips control characters from header values and omits all-control values", async () => {

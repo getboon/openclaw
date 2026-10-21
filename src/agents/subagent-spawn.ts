@@ -218,6 +218,13 @@ export type SpawnSubagentContext = {
    * child's sender identity, so sender-scoped tool policy is unaffected.
    */
   requesterUsageAttribution?: UsageAttribution;
+  /**
+   * Gateway OBO bearer of the requester turn. Passed in-process on the child's first
+   * `agent` call only; never persisted, logged, or echoed. Later turns of a
+   * `spawnMode: "session"` child cannot carry it (it is per-turn and expires), so they
+   * run without it and keep only the user header from usageAttribution.
+   */
+  requesterOboToken?: string;
 };
 
 export type SpawnSubagentResult = {
@@ -1314,6 +1321,7 @@ export async function spawnSubagentDirect(
   const childDepth = callerDepth + 1;
   const spawnedByKey = requesterInternalKey;
   const usageAttribution = normalizeUsageAttribution(ctx.requesterUsageAttribution);
+  const requesterOboToken = normalizeOptionalString(ctx.requesterOboToken);
   const childCapabilities = resolveSubagentCapabilities({
     depth: childDepth,
     maxSpawnDepth,
@@ -1621,6 +1629,7 @@ export async function spawnSubagentDirect(
           : {}),
         ...publicSpawnedMetadata,
         ...(usageAttribution ? { usageAttribution } : {}),
+        ...(requesterOboToken ? { oboToken: requesterOboToken } : {}),
       },
       timeoutMs: resolveSubagentAgentGatewayTimeoutMs(runTimeoutSeconds),
     });

@@ -244,6 +244,9 @@ export const AgentParamsSchema = Type.Object(
         { additionalProperties: false },
       ),
     ),
+    // Gateway OBO bearer for the run's model calls. Honored only for in-process
+    // callers (subagent spawn); dropped otherwise. Never persisted or echoed.
+    oboToken: Type.Optional(Type.String()),
     idempotencyKey: NonEmptyString,
     label: Type.Optional(SessionLabelString),
   },

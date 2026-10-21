@@ -296,6 +296,7 @@ export function createSessionsSpawnTool(
     requesterTurnRunId?: string;
     /** Billing-only user the spawned child inherits for usage headers. */
     requesterUsageAttribution?: SpawnSubagentContext["requesterUsageAttribution"];
+    requesterOboToken?: SpawnSubagentContext["requesterOboToken"];
   } & SpawnedToolContext,
 ): AnyAgentTool {
   const acpAvailable = isAcpRuntimeSpawnAvailable({
@@ -544,6 +545,7 @@ export function createSessionsSpawnTool(
           requesterInputProvenanceKind: opts?.requesterInputProvenanceKind,
           requesterTurnRunId: opts?.requesterTurnRunId,
           requesterUsageAttribution: opts?.requesterUsageAttribution,
+          requesterOboToken: opts?.requesterOboToken,
         },
       );
 

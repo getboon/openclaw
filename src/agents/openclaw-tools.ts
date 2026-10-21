@@ -170,6 +170,8 @@ export function createOpenClawTools(
     requesterSenderId?: string | null;
     /** Billing-only user of this run for usage headers of the sessions it spawns or messages. */
     requesterUsageAttribution?: UsageAttribution;
+    /** Gateway OBO bearer forwarded in-process to spawned children's first run. */
+    requesterOboToken?: string;
     /** Auth profiles already loaded for this run; used for prompt-time tool availability. */
     authProfileStore?: AuthProfileStore;
     /** Ephemeral session UUID — regenerated on /new and /reset. */
@@ -546,6 +548,7 @@ export function createOpenClawTools(
             requesterInputProvenanceKind: options?.inputProvenanceKind,
             requesterTurnRunId: options?.runId,
             requesterUsageAttribution: options?.requesterUsageAttribution,
+            requesterOboToken: options?.requesterOboToken,
           }),
         ]
       : []),

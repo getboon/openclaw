@@ -168,6 +168,8 @@ export type AgentCommandOpts = {
   suppressPromptPersistence?: boolean;
   /** Billing-only originating user for model-call usage headers; never sender identity. */
   usageAttribution?: UsageAttribution;
+  /** Gateway OBO bearer for this run's model calls (in-process spawn only); never persisted. */
+  oboToken?: string;
 };
 
 /** Restricted option surface for external ingress callsites. */

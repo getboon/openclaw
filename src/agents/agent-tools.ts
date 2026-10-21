@@ -491,6 +491,8 @@ export function createOpenClawCodingTools(options?: {
   senderE164?: string | null;
   /** Billing-only user of this run for usage headers of the sessions it spawns or messages. */
   requesterUsageAttribution?: UsageAttribution;
+  /** Gateway OBO bearer of this run; forwarded in-process to children's first run only. Never log or persist. */
+  requesterOboToken?: string;
   /** Reply-to mode for Slack auto-threading. */
   replyToMode?: "off" | "first" | "all" | "batched";
   /** Mutable ref to track if a reply was sent (for "first" mode). */
@@ -1079,6 +1081,7 @@ export function createOpenClawCodingTools(options?: {
           requesterAgentIdOverride: agentId,
           requesterSenderId: options?.senderId,
           requesterUsageAttribution: options?.requesterUsageAttribution,
+          requesterOboToken: options?.requesterOboToken,
           senderIsOwner: options?.senderIsOwner,
           authProfileStore: options?.authProfileStore,
           sessionId: options?.sessionId,

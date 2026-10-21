@@ -238,6 +238,15 @@ function resolveTrustedUsageAttribution(
     : undefined;
 }
 
+// Gateway-audience OBO token forwarded for the run's model calls. It is a bearer
+// credential: same in-process-only trust gate as usage attribution, never persisted.
+function resolveTrustedOboToken(
+  client: GatewayRequestHandlerOptions["client"],
+  value: unknown,
+): string | undefined {
+  return client?.internal?.inProcessDispatch === true ? normalizeOptionalString(value) : undefined;
+}
+
 function resolveCanUseInternalRuntimeHandoff(
   client: GatewayRequestHandlerOptions["client"],
 ): boolean {
@@ -1059,9 +1068,11 @@ export const agentHandlers: GatewayRequestHandlers = {
       workspaceDir?: string;
       voiceWakeTrigger?: string;
       usageAttribution?: unknown;
+      oboToken?: unknown;
     };
     const allowModelOverride = resolveAllowModelOverrideFromClient(client);
     const usageAttribution = resolveTrustedUsageAttribution(client, request.usageAttribution);
+    const oboToken = resolveTrustedOboToken(client, request.oboToken);
     const canUseInternalRuntimeHandoff = resolveCanUseInternalRuntimeHandoff(client);
     const requestedModelOverride = Boolean(request.provider || request.model);
     const requestedInternalSessionEffects = request.sessionEffects === "internal";
@@ -2743,6 +2754,7 @@ export const agentHandlers: GatewayRequestHandlers = {
               }),
               allowModelOverride,
               ...(usageAttribution ? { usageAttribution } : {}),
+              ...(oboToken ? { oboToken } : {}),
             },
             runId,
             dedupeKeys: agentDedupeKeys,

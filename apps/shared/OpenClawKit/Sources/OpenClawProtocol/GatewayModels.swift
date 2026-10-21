@@ -789,6 +789,7 @@ public struct AgentParams: Codable, Sendable {
     public let disablemessagetool: Bool?
     public let voicewaketrigger: String?
     public let usageattribution: [String: AnyCodable]?
+    public let obotoken: String?
     public let idempotencykey: String
     public let label: String?
 
@@ -832,6 +833,7 @@ public struct AgentParams: Codable, Sendable {
         disablemessagetool: Bool?,
         voicewaketrigger: String?,
         usageattribution: [String: AnyCodable]?,
+        obotoken: String?,
         idempotencykey: String,
         label: String?)
     {
@@ -874,6 +876,7 @@ public struct AgentParams: Codable, Sendable {
         self.disablemessagetool = disablemessagetool
         self.voicewaketrigger = voicewaketrigger
         self.usageattribution = usageattribution
+        self.obotoken = obotoken
         self.idempotencykey = idempotencykey
         self.label = label
     }
@@ -918,6 +921,7 @@ public struct AgentParams: Codable, Sendable {
         case disablemessagetool = "disableMessageTool"
         case voicewaketrigger = "voiceWakeTrigger"
         case usageattribution = "usageAttribution"
+        case obotoken = "oboToken"
         case idempotencykey = "idempotencyKey"
         case label
     }
