@@ -138,14 +138,9 @@ export const EMPTY_RESPONSE_RETRY_INSTRUCTION =
   "The previous attempt did not produce a user-visible answer. Continue from the current state and produce the visible answer now. Do not restart from scratch.";
 export const SETTLED_TOOL_CONTINUATION_INSTRUCTION =
   "The previous assistant turn completed its tool calls but did not produce a user-visible answer. Continue from the current transcript and produce the final user-visible answer now. Do not repeat completed tool calls or restart from scratch. Tools are unavailable in this step: it is a text-only pass, so reply with plain text and do not attempt any tool call.";
-// ENG-21585: a turn that spawns a sub-agent and then narrates a status line
-// instead of calling sessions_yield ends up shipping that narration as the
-// final answer while the sub-agent's real result is still in flight. This
-// backstop forces exactly one real sessions_yield call instead of letting the
-// runtime treat the narration as complete — it must be a genuine tool call
-// (not synthesized metadata) so plugin-side `after_tool_call` hooks and the
-// eval harness's own yield detection see it the same way an explicit yield
-// would produce.
+// The forced continuation must land as a real sessions_yield tool call, not
+// synthesized metadata, so downstream hooks and consumers that key off an
+// actual yield see this the same way they'd see an explicit one.
 export const IMPLICIT_YIELD_CONTINUATION_INSTRUCTION =
   "The previous turn spawned a sub-agent whose result this answer depends on, but ended with plain text instead of calling sessions_yield. That text was not delivered. Call sessions_yield now with a one-line progress message instead of answering — you will be resumed once the sub-agent completes.";
 
@@ -816,18 +811,12 @@ export function resolveSettledToolContinuationInstruction(params: {
   return SETTLED_TOOL_CONTINUATION_INSTRUCTION;
 }
 
-/**
- * Forces one real `sessions_yield` call when a turn narrated over a sub-agent
- * it spawned this turn instead of pausing for it. `hasPendingAcceptedSessionSpawn`
- * is caller-supplied (a live registry lookup, kept out of this pure function)
- * and must be scoped to specifically the spawns in `attempt.acceptedSessionSpawns` —
- * an unrelated already-completed descendant must not trigger this.
- */
+/** Forces one real `sessions_yield` call when a turn narrated over a sub-agent it spawned instead of pausing for it. */
 export function resolveImplicitYieldContinuationInstruction(params: {
   aborted: boolean;
   timedOut: boolean;
   hasPendingAcceptedSessionSpawn: boolean;
-  attempt: IncompleteTurnAttempt;
+  attempt: IncompleteTurnAttempt & Partial<Pick<EmbeddedRunAttemptResult, "visibleToolNames">>;
 }): string | null {
   const assistant = params.attempt.currentAttemptAssistant;
   if (
@@ -835,6 +824,9 @@ export function resolveImplicitYieldContinuationInstruction(params: {
     params.timedOut ||
     !params.hasPendingAcceptedSessionSpawn ||
     !hasAcceptedSessionSpawn(params.attempt.acceptedSessionSpawns) ||
+    // Forcing the instruction is pointless if the turn's own tool set never
+    // exposed sessions_yield — the model has no way to comply.
+    params.attempt.visibleToolNames?.includes("sessions_yield") !== true ||
     assistant?.stopReason !== "stop" ||
     params.attempt.lastToolError ||
     params.attempt.clientToolCalls ||

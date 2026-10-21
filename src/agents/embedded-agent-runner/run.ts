@@ -496,18 +496,17 @@ function createScopedAuthProfileStore(
     : createEmptyAuthProfileStore();
 }
 
-// ENG-21585: scoped to THIS turn's own spawns (never the broader registry) so
-// an unrelated, already-settled descendant from an earlier turn can't force a
-// yield continuation here. A missing registry record is treated as pending —
-// registerSubagentRun runs before sessions_spawn returns "accepted", so a
-// miss here means the lookup raced the write, not that the run never existed.
+// Scoped to this turn's own spawns so an already-settled descendant never
+// forces a continuation. A missing row means the run ended and was cleaned
+// up, not that registration raced: registerSubagentRun always runs before
+// sessions_spawn returns "accepted".
 function hasLivePendingAcceptedSessionSpawn(spawns: AcceptedSessionSpawn[] | undefined): boolean {
   if (!spawns?.length) {
     return false;
   }
   return spawns.some((spawn) => {
     const run = getSubagentRunByChildSessionKey(spawn.childSessionKey);
-    return !run || isLiveUnendedSubagentRun(run);
+    return run !== null && isLiveUnendedSubagentRun(run);
   });
 }
 
@@ -4027,11 +4026,9 @@ async function runEmbeddedAgentInternal(
             );
             continue;
           }
-          // Unlike the settled-tool continuation above, this backstop is not
-          // restricted to the native openclaw harness: sessions_spawn/sessions_yield
-          // are ordinary catalog tools any harness can call, and the race this
-          // guards against (narrate, then stop, while a just-spawned child is
-          // still live) is a model-behavior gap, not a harness-specific one.
+          // Unlike the settled-tool continuation above, not harness-restricted:
+          // sessions_spawn/sessions_yield are ordinary catalog tools any
+          // harness can call, so this race isn't harness-specific either.
           const nextImplicitYieldContinuationInstruction = emptyAssistantReplyIsSilent
             ? null
             : resolveImplicitYieldContinuationInstruction({
