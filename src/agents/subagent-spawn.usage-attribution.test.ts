@@ -12,6 +12,15 @@ import type { UsageAttribution } from "./usage-attribution.js";
 
 const hoisted = vi.hoisted(() => ({
   callGatewayMock: vi.fn(),
+  // Spawns from a channel/tool turn dispatch in-process; false exercises the socket fallback.
+  inProcess: true,
+  // Records which transport carried each request so wire-safety can be asserted.
+  transports: [] as Array<{
+    via: "in-process" | "socket";
+    method?: string;
+    params?: unknown;
+    options?: unknown;
+  }>,
   configOverride: {} as Record<string, unknown>,
   depthBySession: new Map<string, number>(),
   updateSessionStoreMock: vi.fn(),
@@ -55,7 +64,17 @@ async function spawnFrom(
 describe("subagent spawn usage attribution", () => {
   beforeAll(async () => {
     ({ spawnSubagentDirect } = await loadSubagentSpawnModuleForTest({
-      callGatewayMock: hoisted.callGatewayMock,
+      callGatewayMock: vi.fn(async (...args: unknown[]) => {
+        const request = args[0] as { method?: string; params?: unknown };
+        hoisted.transports.push({ via: "socket", ...request });
+        return await hoisted.callGatewayMock(request);
+      }),
+      hasInProcessGatewayContextMock: vi.fn(() => hoisted.inProcess),
+      dispatchGatewayMethodInProcessMock: vi.fn(async (...args: unknown[]) => {
+        const [method, params, options] = args as [string, unknown, unknown];
+        hoisted.transports.push({ via: "in-process", method, params, options });
+        return await hoisted.callGatewayMock({ method, params });
+      }),
       getRuntimeConfig: () => hoisted.configOverride,
       registerSubagentRunMock: hoisted.registerSubagentRunMock,
       updateSessionStoreMock: hoisted.updateSessionStoreMock,
@@ -66,6 +85,8 @@ describe("subagent spawn usage attribution", () => {
 
   beforeEach(() => {
     hoisted.depthBySession.clear();
+    hoisted.inProcess = true;
+    hoisted.transports.length = 0;
     hoisted.callGatewayMock.mockClear();
     hoisted.registerSubagentRunMock.mockClear();
     hoisted.updateSessionStoreMock.mockReset();
@@ -152,6 +173,10 @@ describe("subagent spawn usage attribution", () => {
     );
 
     expect(child.agentParams?.oboToken).toBe(OBO);
+    const agentTransport = hoisted.transports.find((entry) => entry.method === "agent");
+    expect(agentTransport?.via).toBe("in-process");
+    // Spawn-built params: the only path the agent method trusts these fields from.
+    expect(agentTransport?.options).toMatchObject({ inProcessDispatch: true });
     // The bearer rides the agent call only: never on the child's session entry.
     expect(child.persistedJson).not.toContain(OBO);
     expect(child.childEntry).not.toHaveProperty("oboToken");
@@ -180,6 +205,26 @@ describe("subagent spawn usage attribution", () => {
 
     expect(grandchild.agentParams?.oboToken).toBe(OBO);
     expect(grandchild.persistedJson).not.toContain(OBO);
+  });
+
+  it("keeps in-process-only fields off the socket fallback while still attributing the child", async () => {
+    hoisted.inProcess = false;
+    const parent = buildEmbeddedAttemptToolRunContext({ senderId: "U-ALICE", oboToken: OBO });
+
+    const child = await spawnFrom(
+      "agent:main:main",
+      parent.requesterUsageAttribution,
+      parent.requesterOboToken,
+    );
+
+    const agentTransport = hoisted.transports.find((entry) => entry.method === "agent");
+    expect(agentTransport?.via).toBe("socket");
+    // An older gateway's closed `agent` schema would reject usageAttribution outright.
+    expect(child.agentParams).not.toHaveProperty("oboToken");
+    expect(child.agentParams).not.toHaveProperty("usageAttribution");
+    expect(JSON.stringify(hoisted.transports)).not.toContain(OBO);
+    // The child entry patch still carries the originating user for its runs.
+    expect(child.childEntry?.usageAttribution).toEqual({ userId: "U-ALICE" });
   });
 
   it("omits oboToken when the requester run has none", async () => {

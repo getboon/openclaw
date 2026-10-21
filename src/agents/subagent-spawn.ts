@@ -301,7 +301,26 @@ async function callSubagentGateway(
       },
     );
   }
-  return await subagentSpawnDeps.callGateway(request);
+  return await subagentSpawnDeps.callGateway(stripInProcessOnlyParams(request));
+}
+
+// Both fields are honored only for in-process dispatch, so keep them off the socket:
+// the OBO is a live credential, and an older gateway's closed `agent` schema rejects
+// `usageAttribution`. The child stays attributed via its session-entry patch.
+function stripInProcessOnlyParams<T extends { params?: unknown }>(request: T): T {
+  const params = request.params;
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return request;
+  }
+  if (!("oboToken" in params) && !("usageAttribution" in params)) {
+    return request;
+  }
+  const {
+    oboToken: _oboToken,
+    usageAttribution: _usageAttribution,
+    ...rest
+  } = params as Record<string, unknown>;
+  return { ...request, params: rest };
 }
 
 function readGatewayRunId(response: Awaited<ReturnType<typeof callGateway>>): string | undefined {
