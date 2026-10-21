@@ -44,7 +44,7 @@ import type { CommandQueueEnqueueOptions } from "../../process/command-queue.typ
 import { createAgentHarnessTaskRuntimeScope } from "../../tasks/agent-harness-task-runtime-scope.js";
 import { resolveUserPath } from "../../utils.js";
 import { isMarkdownCapableMessageChannel } from "../../utils/message-channel.js";
-import { hasAcceptedSessionSpawn } from "../accepted-session-spawn.js";
+import { hasAcceptedSessionSpawn, type AcceptedSessionSpawn } from "../accepted-session-spawn.js";
 import {
   retireSessionMcpRuntime,
   retireSessionMcpRuntimeForSessionKey,
@@ -144,6 +144,8 @@ import {
   suspendSession,
   type SessionSuspensionParams,
 } from "../session-suspension.js";
+import { getSubagentRunByChildSessionKey } from "../subagent-registry.js";
+import { isLiveUnendedSubagentRun } from "../subagent-run-liveness.js";
 import { classifyToolFailureReason, type ToolErrorSummary } from "../tool-error-summary.js";
 import { resolveToolLoopDetectionConfig } from "../tool-loop-detection-config.js";
 import { derivePromptTokens, normalizeUsage, type UsageLike } from "../usage.js";
@@ -221,6 +223,7 @@ import {
   hasAttemptTerminalState,
   resolveAttemptReplayMetadata,
   resolveEmptyResponseRetryInstruction,
+  resolveImplicitYieldContinuationInstruction,
   resolveIncompleteTurnPayloadText,
   resolveReasoningOnlyRetryInstruction,
   resolveSettledToolContinuationInstruction,
@@ -491,6 +494,21 @@ function createScopedAuthProfileStore(
           : {}),
       }
     : createEmptyAuthProfileStore();
+}
+
+// ENG-21585: scoped to THIS turn's own spawns (never the broader registry) so
+// an unrelated, already-settled descendant from an earlier turn can't force a
+// yield continuation here. A missing registry record is treated as pending —
+// registerSubagentRun runs before sessions_spawn returns "accepted", so a
+// miss here means the lookup raced the write, not that the run never existed.
+function hasLivePendingAcceptedSessionSpawn(spawns: AcceptedSessionSpawn[] | undefined): boolean {
+  if (!spawns?.length) {
+    return false;
+  }
+  return spawns.some((spawn) => {
+    const run = getSubagentRunByChildSessionKey(spawn.childSessionKey);
+    return !run || isLiveUnendedSubagentRun(run);
+  });
 }
 
 export function buildTraceToolSummary(params: {
@@ -1733,6 +1751,8 @@ async function runEmbeddedAgentInternal(
       let emptyResponseRetryInstruction: string | null = null;
       let settledToolContinuationInstruction: string | null = null;
       let settledToolContinuationAttempts = 0;
+      let implicitYieldContinuationInstruction: string | null = null;
+      let implicitYieldContinuationAttempts = 0;
       let compactionContinuationRetryInstruction: string | null = null;
       let unfinishedStepsRetryInstruction: string | null = null;
       let nextAttemptPromptOverride: string | null = null;
@@ -2039,6 +2059,7 @@ async function runEmbeddedAgentInternal(
             reasoningOnlyRetryInstruction,
             emptyResponseRetryInstruction,
             settledToolContinuationInstruction,
+            implicitYieldContinuationInstruction,
             compactionContinuationRetryInstruction,
             unfinishedStepsRetryInstruction,
           ].filter(
@@ -4006,6 +4027,41 @@ async function runEmbeddedAgentInternal(
             );
             continue;
           }
+          // Unlike the settled-tool continuation above, this backstop is not
+          // restricted to the native openclaw harness: sessions_spawn/sessions_yield
+          // are ordinary catalog tools any harness can call, and the race this
+          // guards against (narrate, then stop, while a just-spawned child is
+          // still live) is a model-behavior gap, not a harness-specific one.
+          const nextImplicitYieldContinuationInstruction = emptyAssistantReplyIsSilent
+            ? null
+            : resolveImplicitYieldContinuationInstruction({
+                aborted,
+                timedOut,
+                hasPendingAcceptedSessionSpawn: hasLivePendingAcceptedSessionSpawn(
+                  attempt.acceptedSessionSpawns,
+                ),
+                attempt,
+              });
+          if (nextImplicitYieldContinuationInstruction && implicitYieldContinuationAttempts < 1) {
+            implicitYieldContinuationAttempts += 1;
+            if (
+              params.currentMessageId !== undefined &&
+              params.currentMessageId === lastPersistedCurrentMessageId
+            ) {
+              // Same leaf-replay guard as the settled-tool continuation above:
+              // keep the continuation as the new model prompt instead of
+              // replaying the inbound leaf a second time.
+              nextAttemptPromptOverride = nextImplicitYieldContinuationInstruction;
+              suppressNextUserMessagePersistence = true;
+            } else {
+              implicitYieldContinuationInstruction = nextImplicitYieldContinuationInstruction;
+            }
+            log.warn(
+              `turn narrated over a live un-yielded sub-agent spawn: runId=${params.runId} sessionId=${params.sessionId} ` +
+                `provider=${activeErrorContext.provider}/${activeErrorContext.model} — forcing sessions_yield`,
+            );
+            continue;
+          }
           if (
             !nextReasoningOnlyRetryInstruction &&
             nextEmptyResponseRetryInstruction &&
@@ -4278,6 +4334,7 @@ async function runEmbeddedAgentInternal(
             reasoningOnlyRetryInstruction = null;
             emptyResponseRetryInstruction = null;
             settledToolContinuationInstruction = null;
+            implicitYieldContinuationInstruction = null;
             compactionContinuationRetryInstruction = null;
             unfinishedStepsRetryInstruction = null;
             log.warn(

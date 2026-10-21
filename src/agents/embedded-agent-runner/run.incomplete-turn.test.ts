@@ -941,6 +941,87 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     expectWarnMessageWith("reasoning-only assistant turn detected");
   });
 
+  it("forces a sessions_yield continuation when a turn narrates over a sub-agent it just spawned (ENG-21585)", async () => {
+    // No run is registered for "child-doc-conversion-1" in the real subagent
+    // registry, so the lookup misses and the runtime defaults to "pending" —
+    // exactly the state right after sessions_spawn accepts, before the
+    // registry write is visible to this read path.
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    const narratedAssistant = {
+      role: "assistant",
+      stopReason: "stop",
+      provider: "openai",
+      model: "gpt-5.4",
+      content: [{ type: "text", text: "Reading title block and notes tiles." }],
+    } as unknown as EmbeddedRunAttemptResult["lastAssistant"];
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({
+        assistantTexts: ["Reading title block and notes tiles."],
+        acceptedSessionSpawns: [
+          { runId: "run-doc-conversion-1", childSessionKey: "child-doc-conversion-1" },
+        ],
+        lastAssistant: narratedAssistant,
+        currentAttemptAssistant: narratedAssistant,
+      }),
+    );
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({
+        assistantTexts: [],
+        yieldDetected: true,
+        lastAssistant: {
+          role: "assistant",
+          stopReason: "stop",
+          provider: "openai",
+          model: "gpt-5.4",
+          content: [],
+        } as unknown as EmbeddedRunAttemptResult["lastAssistant"],
+      }),
+    );
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      provider: "openai",
+      model: "gpt-5.4",
+      runId: "run-implicit-yield-continuation",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
+    const secondCall = runAttemptCall(1);
+    expect(secondCall.prompt).toContain("Call sessions_yield now with a one-line progress message");
+    expectWarnMessageWith("turn narrated over a live un-yielded sub-agent spawn");
+  });
+
+  it("does not force a yield continuation once sessions_yield was actually called", async () => {
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({
+        assistantTexts: ["Working on it in the background."],
+        acceptedSessionSpawns: [
+          { runId: "run-doc-conversion-2", childSessionKey: "child-doc-conversion-2" },
+        ],
+        yieldDetected: true,
+        lastAssistant: {
+          role: "assistant",
+          stopReason: "stop",
+          provider: "openai",
+          model: "gpt-5.4",
+          content: [{ type: "text", text: "Working on it in the background." }],
+        } as unknown as EmbeddedRunAttemptResult["lastAssistant"],
+      }),
+    );
+
+    const result = await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      provider: "openai",
+      model: "gpt-5.4",
+      runId: "run-explicit-yield-no-forced-continuation",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
+    expect(result.meta?.livenessState).not.toBe("abandoned");
+    expectNoWarnMessageWith("turn narrated over a live un-yielded sub-agent spawn");
+  });
+
   it("retries generic empty GPT turns with a visible-answer continuation instruction", async () => {
     mockedClassifyFailoverReason.mockReturnValue(null);
     mockedRunEmbeddedAttempt.mockResolvedValueOnce(
