@@ -1186,6 +1186,7 @@ export function createFollowupRunner(params: {
                 senderId: run.senderId,
                 senderName: run.senderName,
                 senderSource: run.senderSource,
+                usageAttribution: run.usageAttribution,
                 senderUsername: run.senderUsername,
                 senderE164: run.senderE164,
                 channelContext: run.channelContext,

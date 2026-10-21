@@ -310,6 +310,9 @@ function buildTemplateSenderContext(sessionCtx: TemplateContext, run: FollowupRu
     // get-reply-run (omitted for system-event providers); like oboToken it is not on
     // the persisted sessionCtx, so it must be read from `run`.
     senderSource: run.senderSource,
+    // Billing-only fallback user for sender-less turns; read from `run` for the same
+    // reason as senderSource. Dropping it here leaves completion turns unattributed.
+    usageAttribution: run.usageAttribution,
     senderUsername: normalizeOptionalString(sessionCtx.SenderUsername),
     senderE164: normalizeOptionalString(sessionCtx.SenderE164),
     // Gateway-audience OBO → x-boon-gateway-obo-token (ENG-19115). Unlike the

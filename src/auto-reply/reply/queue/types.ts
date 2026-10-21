@@ -4,6 +4,7 @@ import type { AutoFallbackPrimaryProbe } from "../../../agents/agent-scope.js";
 import type { ExecToolDefaults } from "../../../agents/bash-tools.js";
 import type { CurrentInboundPromptContext } from "../../../agents/embedded-agent-runner/run/params.js";
 import type { SilentReplyPromptMode } from "../../../agents/system-prompt.types.js";
+import type { UsageAttribution } from "../../../agents/usage-attribution.js";
 import type { ChatType } from "../../../channels/chat-type.js";
 import type { InboundEventKind } from "../../../channels/inbound-event/kind.js";
 import type { SessionEntry } from "../../../config/sessions.js";
@@ -122,6 +123,8 @@ export type FollowupRun = {
     senderName?: string;
     /** Originating platform (slack, msteams, boon-web, ...) for usage attribution. */
     senderSource?: string;
+    /** Billing-only user for sender-less turns; usage headers only, never sender identity. */
+    usageAttribution?: UsageAttribution;
     senderUsername?: string;
     senderE164?: string;
     senderIsOwner?: boolean;

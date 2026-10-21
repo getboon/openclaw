@@ -19,6 +19,7 @@ import { resolveAgentHarnessPolicy } from "../../agents/harness/policy.js";
 import { listOpenAIAuthProfileProvidersForAgentRuntime } from "../../agents/openai-routing.js";
 import { resolveIngressWorkspaceOverrideForSpawnedRun } from "../../agents/spawned-context.js";
 import type { SilentReplyPromptMode } from "../../agents/system-prompt.types.js";
+import { normalizeUsageAttribution } from "../../agents/usage-attribution.js";
 import { normalizeChatType } from "../../channels/chat-type.js";
 import { resolveGroupSessionKey } from "../../config/sessions/group.js";
 import {
@@ -1363,6 +1364,12 @@ export async function runPreparedReply(
       senderSource: isSystemEventProvider(sessionCtx.Provider)
         ? undefined
         : normalizeOptionalString(sessionCtx.Provider),
+      // Billing-only user for sender-less turns (a subagent completion handed back by a
+      // channel plugin, or a spawned session's later turns). Per-turn on the inbound ctx
+      // like OboToken, else the entry's inherited user; used only when senderId is absent.
+      usageAttribution:
+        normalizeUsageAttribution(ctx.UsageAttribution ?? sessionCtx.UsageAttribution) ??
+        sessionEntry?.usageAttribution,
       senderUsername: normalizeOptionalString(sessionCtx.SenderUsername),
       senderE164: normalizeOptionalString(sessionCtx.SenderE164),
       // Queued system events are prompt content in the same trusted session;

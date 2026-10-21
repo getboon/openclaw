@@ -62,6 +62,7 @@ import { resolveRequesterStoreKey } from "./subagent-requester-store-key.js";
 import { deleteSubagentSessionForCleanup } from "./subagent-session-cleanup.js";
 import type { SpawnSubagentMode } from "./subagent-spawn.types.js";
 import { isAnnounceSkip } from "./tools/sessions-send-tokens.js";
+import { normalizeUsageAttribution } from "./usage-attribution.js";
 
 type SubagentAnnounceDeps = {
   callGateway: typeof callGateway;
@@ -276,12 +277,11 @@ export async function runSubagentAnnounceFlow(params: {
   try {
     let targetRequesterSessionKey = params.requesterSessionKey;
     let targetRequesterOrigin = normalizeDeliveryContext(params.requesterOrigin);
-    const childSessionId = (() => {
-      const entry = loadSessionEntryByKey(params.childSessionKey);
-      return typeof entry?.sessionId === "string" && entry.sessionId.trim()
-        ? entry.sessionId.trim()
+    const childEntry = loadSessionEntryByKey(params.childSessionKey);
+    const childSessionId =
+      typeof childEntry?.sessionId === "string" && childEntry.sessionId.trim()
+        ? childEntry.sessionId.trim()
         : undefined;
-    })();
     const settleTimeoutMs = Math.min(Math.max(params.timeoutMs, 1), 120_000);
     let reply = params.roundOneReply;
     let outcome: SubagentRunOutcome | undefined = params.outcome;
@@ -564,6 +564,16 @@ export async function runSubagentAnnounceFlow(params: {
           })
         : targetRequesterOrigin;
     const directIdempotencyKey = buildAnnounceIdempotencyKey(announceId);
+    // The requester's completion turn has no inbound sender. Bill it to the user the
+    // child was spawned for (captured from the requester turn's sender at spawn), else
+    // the requester's own inherited user; without this its model calls go unattributed.
+    // A later steer/send by another user attributes that run, but the run registry does
+    // not record its user, so this completion still uses the spawn-time user.
+    const usageAttribution =
+      normalizeUsageAttribution(childEntry?.usageAttribution) ??
+      normalizeUsageAttribution(
+        loadRequesterSessionEntry(targetRequesterSessionKey).entry?.usageAttribution,
+      );
     const ownerOrigin = completionDirectOrigin ?? directOrigin;
     const ownerChannel = normalizeMessageChannel(
       completionDirectOrigin?.channel ?? directOrigin?.channel,
@@ -604,6 +614,7 @@ export async function runSubagentAnnounceFlow(params: {
           label: params.label,
           signal: params.signal,
           finalAttempt: params.finalAttempt,
+          ...(usageAttribution ? { usageAttribution } : {}),
         };
         let ownerResult;
         try {
@@ -664,6 +675,7 @@ export async function runSubagentAnnounceFlow(params: {
         bestEffortDeliver: params.bestEffortDeliver,
         directIdempotencyKey,
         signal: params.signal,
+        usageAttribution,
       });
     }
     params.onDeliveryResult?.(delivery);
