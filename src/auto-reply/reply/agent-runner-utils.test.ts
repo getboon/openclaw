@@ -327,6 +327,19 @@ describe("agent-runner-utils", () => {
     expect(resolved.senderContext.senderId).toBe("sender-1");
   });
 
+  it("carries run.senderSource into the primary-turn sender context", () => {
+    const resolved = buildEmbeddedRunExecutionParams({
+      run: makeRun({ senderSource: "slack" }),
+      sessionCtx: { Provider: "slack", To: "thread-1", SenderId: "sender-1" },
+      hasRepliedRef: undefined,
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      runId: "run-1",
+    });
+
+    expect(resolved.senderContext.senderSource).toBe("slack");
+  });
+
   it("leaves oboToken undefined in the sender context when the run has none", () => {
     const resolved = buildEmbeddedRunExecutionParams({
       run: makeRun({}),

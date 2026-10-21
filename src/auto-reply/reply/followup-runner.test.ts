@@ -675,6 +675,32 @@ describe("createFollowupRunner reply-lane admission", () => {
     expect(call.senderId).toBe("U123");
   });
 
+  it("forwards run.senderSource and senderName into the embedded runner params", async () => {
+    runEmbeddedAgentMock.mockResolvedValueOnce({ payloads: [], meta: {} });
+    const runner = createFollowupRunner({
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      sessionKey: "main",
+      defaultModel: "anthropic/claude",
+    });
+
+    await runner(
+      createQueuedRun({
+        run: {
+          provider: "anthropic",
+          model: "claude",
+          senderId: "U123",
+          senderName: "Alice",
+          senderSource: "slack",
+        },
+      }),
+    );
+
+    const call = requireLastMockCallArg(runEmbeddedAgentMock, "run embedded agent");
+    expect(call.senderSource).toBe("slack");
+    expect(call.senderName).toBe("Alice");
+  });
+
   it("leaves oboToken undefined on the embedded runner params when the run has none", async () => {
     runEmbeddedAgentMock.mockResolvedValueOnce({ payloads: [], meta: {} });
     const runner = createFollowupRunner({

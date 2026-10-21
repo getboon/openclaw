@@ -306,6 +306,10 @@ function buildTemplateSenderContext(sessionCtx: TemplateContext, run: FollowupRu
     senderId: normalizeOptionalString(sessionCtx.SenderId),
     channelContext: sessionCtx.ChannelContext,
     senderName: normalizeOptionalString(sessionCtx.SenderName),
+    // Originating platform for the x-boon-user-source usage header. Set on the run by
+    // get-reply-run (omitted for system-event providers); like oboToken it is not on
+    // the persisted sessionCtx, so it must be read from `run`.
+    senderSource: run.senderSource,
     senderUsername: normalizeOptionalString(sessionCtx.SenderUsername),
     senderE164: normalizeOptionalString(sessionCtx.SenderE164),
     // Gateway-audience OBO → x-boon-gateway-obo-token (ENG-19115). Unlike the

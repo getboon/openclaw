@@ -120,6 +120,8 @@ export type FollowupRun = {
      */
     oboToken?: string;
     senderName?: string;
+    /** Originating platform (slack, msteams, boon-web, ...) for usage attribution. */
+    senderSource?: string;
     senderUsername?: string;
     senderE164?: string;
     senderIsOwner?: boolean;
