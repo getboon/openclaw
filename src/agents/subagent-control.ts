@@ -38,8 +38,6 @@ import {
 } from "./subagent-registry.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 import { resolveInternalSessionKey, resolveMainSessionAlias } from "./tools/sessions-helpers.js";
-import { callAgentWithUsageAttribution } from "./usage-attribution-dispatch.js";
-import type { UsageAttribution } from "./usage-attribution.js";
 
 /** Recent-run default window used by subagent control UI/tools. */
 export const DEFAULT_RECENT_MINUTES = 30;
@@ -444,8 +442,6 @@ export async function steerControlledSubagentRun(params: {
   controller: ResolvedSubagentController;
   entry: SubagentRunRecord;
   message: string;
-  /** Billing-only user of the controlling turn; overrides the child's spawn-time user for this run. */
-  usageAttribution?: UsageAttribution;
 }): Promise<
   | {
       status: "forbidden" | "done" | "rate_limited" | "error";
@@ -575,22 +571,19 @@ export async function steerControlledSubagentRun(params: {
   const idempotencyKey = crypto.randomUUID();
   let runId: string = idempotencyKey;
   try {
-    const response = await callAgentWithUsageAttribution<{ runId: string }>({
-      callGateway: subagentControlDeps.callGateway,
-      request: {
-        params: {
-          message: params.message,
-          sessionKey: params.entry.childSessionKey,
-          sessionId: restartSessionId,
-          idempotencyKey,
-          deliver: false,
-          channel: INTERNAL_MESSAGE_CHANNEL,
-          lane: AGENT_LANE_SUBAGENT,
-          timeout: 0,
-        },
-        timeoutMs: 10_000,
+    const response = await subagentControlDeps.callGateway<{ runId: string }>({
+      method: "agent",
+      params: {
+        message: params.message,
+        sessionKey: params.entry.childSessionKey,
+        sessionId: restartSessionId,
+        idempotencyKey,
+        deliver: false,
+        channel: INTERNAL_MESSAGE_CHANNEL,
+        lane: AGENT_LANE_SUBAGENT,
+        timeout: 0,
       },
-      usageAttribution: params.usageAttribution,
+      timeoutMs: 10_000,
     });
     if (typeof response?.runId === "string" && response.runId) {
       runId = response.runId;
@@ -641,8 +634,6 @@ export async function sendControlledSubagentMessage(params: {
   controller: ResolvedSubagentController;
   entry: SubagentRunRecord;
   message: string;
-  /** Billing-only user of the controlling turn; overrides the child's spawn-time user for this run. */
-  usageAttribution?: UsageAttribution;
 }) {
   const ownershipError = ensureControllerOwnsRun({
     controller: params.controller,
@@ -688,22 +679,19 @@ export async function sendControlledSubagentMessage(params: {
       callGateway: subagentControlDeps.callGateway,
     });
 
-    const response = await callAgentWithUsageAttribution<{ runId: string }>({
-      callGateway: subagentControlDeps.callGateway,
-      request: {
-        params: {
-          message: params.message,
-          sessionKey: targetSessionKey,
-          sessionId: targetSessionId,
-          idempotencyKey,
-          deliver: false,
-          channel: INTERNAL_MESSAGE_CHANNEL,
-          lane: AGENT_LANE_SUBAGENT,
-          timeout: 0,
-        },
-        timeoutMs: 10_000,
+    const response = await subagentControlDeps.callGateway<{ runId: string }>({
+      method: "agent",
+      params: {
+        message: params.message,
+        sessionKey: targetSessionKey,
+        sessionId: targetSessionId,
+        idempotencyKey,
+        deliver: false,
+        channel: INTERNAL_MESSAGE_CHANNEL,
+        lane: AGENT_LANE_SUBAGENT,
+        timeout: 0,
       },
-      usageAttribution: params.usageAttribution,
+      timeoutMs: 10_000,
     });
     const responseRunId = typeof response?.runId === "string" ? response.runId : undefined;
     if (responseRunId) {

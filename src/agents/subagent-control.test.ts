@@ -26,7 +26,6 @@ import {
   getSubagentRunByChildSessionKey,
   resetSubagentRegistryForTests,
 } from "./subagent-registry.js";
-import { testing as usageAttributionDispatchTesting } from "./usage-attribution-dispatch.js";
 
 vi.mock("../gateway/call.js", () => ({
   callGateway: vi.fn(),
@@ -1510,88 +1509,5 @@ describe("steerControlledSubagentRun", () => {
     expect(result.sessionId).not.toBe("old-child-session");
     const agentParams = agentCalls[0]?.params as { sessionId?: string } | undefined;
     expect(agentParams?.sessionId).toBe(result.sessionId);
-  });
-});
-
-describe("subagent control usage attribution", () => {
-  const childSessionKey = "agent:main:subagent:shared-worker";
-  const alice = { userId: "U-ALICE", userName: "Alice", userSource: "slack" };
-  const bob = { userId: "U-BOB", userName: "Bob", userSource: "slack" };
-  const controller = {
-    controllerSessionKey: "agent:main:main",
-    callerSessionKey: "agent:main:main",
-    callerIsSubagent: false,
-    controlScope: "children" as const,
-  };
-  const entry = {
-    runId: "run-shared-worker",
-    childSessionKey,
-    requesterSessionKey: "agent:main:main",
-    requesterDisplayKey: "main",
-    controllerSessionKey: "agent:main:main",
-    task: "shared worker task",
-    cleanup: "keep" as const,
-    createdAt: Date.now() - 5_000,
-    startedAt: Date.now() - 4_000,
-  };
-  let dispatched: Array<{ params: Record<string, unknown>; options: unknown }>;
-
-  beforeEach(() => {
-    dispatched = [];
-    addSubagentRunForTests({ ...entry });
-    setSubagentControlDepsForTest({
-      callGateway: async <T = Record<string, unknown>>(request: CallGatewayOptions) => {
-        if (request.method === "agent.wait") {
-          return { status: "ok" } as T;
-        }
-        if (request.method === "chat.history") {
-          return { messages: [] } as T;
-        }
-        throw new Error(`unexpected socket method: ${request.method}`);
-      },
-    });
-    usageAttributionDispatchTesting.setDepsForTest({
-      hasInProcessGatewayContext: () => true,
-      dispatchGatewayMethodInProcess: (async (
-        _method: string,
-        params: Record<string, unknown>,
-        options: unknown,
-      ) => {
-        dispatched.push({ params, options });
-        return { runId: "run-bob" };
-      }) as never,
-    });
-  });
-
-  afterEach(() => {
-    usageAttributionDispatchTesting.setDepsForTest();
-    resetSubagentRegistryForTests({ persist: false });
-    testing.setDepsForTest();
-  });
-
-  it.each([
-    { name: "steer", run: steerControlledSubagentRun },
-    { name: "send", run: sendControlledSubagentMessage },
-  ])("attributes a $name by another user to that user, not the spawning user", async ({ run }) => {
-    // Alice spawned the child; Bob is the user driving this turn.
-    const storePath = writeSessionStoreFixture("shared-worker", {
-      [childSessionKey]: {
-        sessionId: "child-session",
-        updatedAt: Date.now(),
-        usageAttribution: alice,
-      },
-    });
-
-    await run({
-      cfg: cfgWithSessionStore(storePath),
-      controller,
-      entry: { ...entry },
-      message: "follow up from bob",
-      usageAttribution: bob,
-    });
-
-    expect(dispatched).toHaveLength(1);
-    expect(dispatched[0]?.params.usageAttribution).toEqual(bob);
-    expect(dispatched[0]?.options).toMatchObject({ inProcessDispatch: true });
   });
 });
