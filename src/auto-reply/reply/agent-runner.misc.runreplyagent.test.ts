@@ -3373,3 +3373,142 @@ describe("runReplyAgent private message_tool_only final warning (#85714)", () =>
     expect(warnPrivateFinalSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("runReplyAgent observed reply delivery via message tool", () => {
+  const onObservedReplyDeliverySpy = vi.fn();
+
+  beforeEach(() => {
+    onObservedReplyDeliverySpy.mockReset();
+  });
+
+  async function runAutomaticModeCase(params: {
+    messagingToolSentTargets?: unknown[];
+    sessionEntry?: Partial<SessionEntry>;
+  }) {
+    const sessionKey = "automatic-mode";
+    const sessionCtx = {
+      Provider: "whatsapp",
+      OriginatingChannel: "whatsapp",
+      OriginatingTo: "+15550001111",
+      AccountId: "primary",
+      MessageSid: "msg",
+      ChatType: "direct",
+    } as unknown as TemplateContext;
+    const followupRun = {
+      prompt: "hello",
+      summaryLine: "hello",
+      enqueuedAt: Date.now(),
+      run: {
+        agentId: "main",
+        sessionId: "session",
+        sessionKey,
+        messageProvider: "whatsapp",
+        sessionFile: "/tmp/session.jsonl",
+        workspaceDir: "/tmp",
+        // No visibleReplies override: direct chat defaults to automatic mode
+        // (source-reply-delivery-mode.ts), the exact mode the old gate missed.
+        config: createCliBackendTestConfig(),
+        skillsSnapshot: {},
+        provider: "anthropic",
+        model: "claude",
+        thinkLevel: "low",
+        verboseLevel: "off",
+        elevatedLevel: "off",
+        bashElevated: { enabled: false, allowed: false, defaultLevel: "off" },
+        timeoutMs: 1_000,
+        blockReplyBreak: "message_end",
+      },
+    } as unknown as FollowupRun;
+
+    runEmbeddedAgentMock.mockResolvedValueOnce({
+      // Sanctioned convention (system-prompt.ts:557): deliver via the message
+      // tool, then close with the silent token.
+      payloads: [{ text: "no_reply" }],
+      meta: { agentMeta: {}, finalAssistantVisibleText: "no_reply" },
+      ...(params.messagingToolSentTargets
+        ? { messagingToolSentTargets: params.messagingToolSentTargets }
+        : {}),
+    });
+
+    return runReplyAgent({
+      commandBody: "hello",
+      followupRun,
+      queueKey: sessionKey,
+      resolvedQueue: { mode: "interrupt" } as unknown as QueueSettings,
+      shouldSteer: false,
+      shouldFollowup: false,
+      isActive: false,
+      isStreaming: false,
+      opts: { onObservedReplyDelivery: onObservedReplyDeliverySpy },
+      typing: createMockTypingController(),
+      sessionCtx,
+      sessionEntry: params.sessionEntry as SessionEntry | undefined,
+      sessionKey,
+      defaultModel: "anthropic/claude-opus-4-6",
+      resolvedVerboseLevel: "off",
+      isNewSession: false,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      shouldInjectGroupIntro: false,
+      typingMode: "instant",
+    });
+  }
+
+  it("observes delivery when an implicit message-tool send reaches this turn's own chat", async () => {
+    await runAutomaticModeCase({
+      messagingToolSentTargets: [
+        { tool: "message", provider: "whatsapp", to: "+15550001111", text: "hi there" },
+      ],
+    });
+    expect(onObservedReplyDeliverySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not observe delivery when the matched target's account id differs", async () => {
+    await runAutomaticModeCase({
+      messagingToolSentTargets: [
+        {
+          tool: "message",
+          provider: "whatsapp",
+          to: "+15550001111",
+          accountId: "secondary",
+          text: "hi there",
+        },
+      ],
+    });
+    expect(onObservedReplyDeliverySpy).not.toHaveBeenCalled();
+  });
+
+  it("observes delivery even when sendPolicy denies automatic delivery for this session", async () => {
+    // A sendPolicy deny only blanks the automatic end-of-turn text
+    // (agent-runner.ts's suppressDelivery -> pendingText branch); the message
+    // tool itself has no sendPolicy check, so a real send must still count.
+    await runAutomaticModeCase({
+      messagingToolSentTargets: [
+        { tool: "message", provider: "whatsapp", to: "+15550001111", text: "hi there" },
+      ],
+      sessionEntry: { sendPolicy: "deny" },
+    });
+    expect(onObservedReplyDeliverySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not observe delivery when the message tool sent to a different chat", async () => {
+    await runAutomaticModeCase({
+      messagingToolSentTargets: [
+        { tool: "message", provider: "whatsapp", to: "+15559998888", text: "hi there" },
+      ],
+    });
+    expect(onObservedReplyDeliverySpy).not.toHaveBeenCalled();
+  });
+
+  it("does not observe delivery when the matched target carries no visible content", async () => {
+    await runAutomaticModeCase({
+      messagingToolSentTargets: [{ tool: "message", provider: "whatsapp", to: "+15550001111" }],
+    });
+    expect(onObservedReplyDeliverySpy).not.toHaveBeenCalled();
+  });
+
+  it("does not observe delivery when no message tool send happened at all", async () => {
+    await runAutomaticModeCase({});
+    expect(onObservedReplyDeliverySpy).not.toHaveBeenCalled();
+  });
+});
