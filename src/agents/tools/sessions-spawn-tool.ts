@@ -294,6 +294,9 @@ export function createSessionsSpawnTool(
     requesterInputProvenanceKind?: SpawnSubagentContext["requesterInputProvenanceKind"];
     /** Requester run id; the spawn failure backstop restarts at most once per run. */
     requesterTurnRunId?: string;
+    /** Billing-only user the spawned child inherits for usage headers. */
+    requesterUsageAttribution?: SpawnSubagentContext["requesterUsageAttribution"];
+    requesterOboToken?: SpawnSubagentContext["requesterOboToken"];
   } & SpawnedToolContext,
 ): AnyAgentTool {
   const acpAvailable = isAcpRuntimeSpawnAvailable({
@@ -541,6 +544,8 @@ export function createSessionsSpawnTool(
           inheritedToolDenylist: opts?.inheritedToolDenylist,
           requesterInputProvenanceKind: opts?.requesterInputProvenanceKind,
           requesterTurnRunId: opts?.requesterTurnRunId,
+          requesterUsageAttribution: opts?.requesterUsageAttribution,
+          requesterOboToken: opts?.requesterOboToken,
         },
       );
 

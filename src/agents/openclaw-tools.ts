@@ -70,6 +70,7 @@ import { createTtsTool } from "./tools/tts-tool.js";
 import { createUpdatePlanTool } from "./tools/update-plan-tool.js";
 import { createVideoGenerateTool } from "./tools/video-generate-tool.js";
 import { createWebFetchTool, createWebSearchTool } from "./tools/web-tools.js";
+import type { UsageAttribution } from "./usage-attribution.js";
 import { resolveWorkspaceRoot } from "./workspace-dir.js";
 
 type OpenClawToolsDeps = {
@@ -167,6 +168,10 @@ export function createOpenClawTools(
     recordToolPrepStage?: (name: string) => void;
     /** Trusted sender id from inbound context (not tool args). */
     requesterSenderId?: string | null;
+    /** Billing-only user of this run for usage headers of the sessions it spawns or messages. */
+    requesterUsageAttribution?: UsageAttribution;
+    /** Gateway OBO bearer forwarded in-process to spawned children's first run. */
+    requesterOboToken?: string;
     /** Auth profiles already loaded for this run; used for prompt-time tool availability. */
     authProfileStore?: AuthProfileStore;
     /** Ephemeral session UUID — regenerated on /new and /reset. */
@@ -518,6 +523,7 @@ export function createOpenClawTools(
             sandboxed: options?.sandboxed,
             config: resolvedConfig,
             callGateway: openClawToolsDeps.callGateway,
+            requesterUsageAttribution: options?.requesterUsageAttribution,
           }),
         ]),
     ...(includeSubagentSpawnTool
@@ -541,6 +547,8 @@ export function createOpenClawTools(
             inheritedToolDenylist: options?.inheritedToolDenylist,
             requesterInputProvenanceKind: options?.inputProvenanceKind,
             requesterTurnRunId: options?.runId,
+            requesterUsageAttribution: options?.requesterUsageAttribution,
+            requesterOboToken: options?.requesterOboToken,
           }),
         ]
       : []),

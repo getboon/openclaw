@@ -14,6 +14,7 @@ import {
   readLatestAssistantReplySnapshot,
   waitForAgentRun,
 } from "../run-wait.js";
+import type { UsageAttribution } from "../usage-attribution.js";
 import { runAgentStep } from "./agent-step.js";
 import { resolveAnnounceTarget } from "./sessions-announce-target.js";
 import {
@@ -83,6 +84,8 @@ export async function runSessionsSendA2AFlow(params: {
   baseline?: AssistantReplySnapshot;
   roundOneReply?: string;
   waitRunId?: string;
+  /** User of the sessions_send turn; the follow-up steps run on its behalf. */
+  usageAttribution?: UsageAttribution;
 }) {
   const runContextId = params.waitRunId ?? "unknown";
   try {
@@ -172,6 +175,7 @@ export async function runSessionsSendA2AFlow(params: {
           sourceChannel:
             nextSessionKey === params.requesterSessionKey ? params.requesterChannel : targetChannel,
           sourceTool: "sessions_send",
+          usageAttribution: params.usageAttribution,
         });
         if (!replyText || isReplySkip(replyText) || isNonDeliverableSessionsReply(replyText)) {
           break;
@@ -203,6 +207,7 @@ export async function runSessionsSendA2AFlow(params: {
       sourceSessionKey: params.requesterSessionKey,
       sourceChannel: params.requesterChannel,
       sourceTool: "sessions_send",
+      usageAttribution: params.usageAttribution,
     });
     if (
       announceTarget &&

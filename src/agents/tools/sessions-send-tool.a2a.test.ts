@@ -243,6 +243,34 @@ describe("runSessionsSendA2AFlow announce delivery", () => {
     expect(gatewayCalls.find((call) => call.method === "send")).toBeUndefined();
   });
 
+  it("runs ping-pong and announce steps on behalf of the sending turn's user", async () => {
+    const bob = { userId: "U-BOB", userName: "Bob", userSource: "slack" };
+    vi.mocked(runAgentStep)
+      .mockResolvedValueOnce("Requester follow-up")
+      .mockResolvedValueOnce("ANNOUNCE_SKIP");
+
+    await runSessionsSendA2AFlow({
+      targetSessionKey: "agent:main:discord:channel:target-room",
+      displayKey: "agent:main:discord:channel:target-room",
+      message: "Test message",
+      announceTimeoutMs: 10_000,
+      maxPingPongTurns: 1,
+      requesterSessionKey: "agent:main:main",
+      requesterChannel: "webchat",
+      roundOneReply: "Substantive channel reply",
+      usageAttribution: bob,
+    });
+
+    const steps = vi.mocked(runAgentStep).mock.calls.map(([input]) => input);
+    expect(steps.map((step) => step.message)).toEqual([
+      "Substantive channel reply",
+      "Agent-to-agent announce step.",
+    ]);
+    for (const step of steps) {
+      expect(step.usageAttribution).toEqual(bob);
+    }
+  });
+
   it.each([
     {
       source: "deliveryContext.accountId",

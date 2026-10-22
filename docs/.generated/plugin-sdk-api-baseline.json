@@ -1081,7 +1081,7 @@
           "exportName": "PluginRuntime",
           "kind": "type",
           "source": {
-            "line": 88,
+            "line": 94,
             "path": "src/plugins/runtime/types.ts"
           }
         },
@@ -1279,7 +1279,7 @@
           "exportName": "SubagentRunParams",
           "kind": "type",
           "source": {
-            "line": 18,
+            "line": 19,
             "path": "src/plugins/runtime/types.ts"
           }
         },
@@ -1288,7 +1288,7 @@
           "exportName": "SubagentRunResult",
           "kind": "type",
           "source": {
-            "line": 30,
+            "line": 36,
             "path": "src/plugins/runtime/types.ts"
           }
         },
@@ -10246,7 +10246,7 @@
           "exportName": "GatewayRequestHandlerOptions",
           "kind": "type",
           "source": {
-            "line": 167,
+            "line": 169,
             "path": "src/gateway/server-methods/shared-types.ts"
           }
         },
@@ -10624,7 +10624,7 @@
           "exportName": "PluginRuntime",
           "kind": "type",
           "source": {
-            "line": 88,
+            "line": 94,
             "path": "src/plugins/runtime/types.ts"
           }
         },
@@ -15357,7 +15357,7 @@
           "exportName": "PluginRuntime",
           "kind": "type",
           "source": {
-            "line": 88,
+            "line": 94,
             "path": "src/plugins/runtime/types.ts"
           }
         }

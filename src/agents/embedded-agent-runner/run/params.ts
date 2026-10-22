@@ -33,6 +33,7 @@ import type { AgentRunSessionTarget } from "../../run-session-target.js";
 import type { AgentMessage } from "../../runtime/index.js";
 import type { SilentReplyPromptMode } from "../../system-prompt.types.js";
 import type { PromptMode } from "../../system-prompt.types.js";
+import type { UsageAttribution } from "../../usage-attribution.js";
 import type { EmbeddedAgentExecutionPhase } from "../execution-phase.js";
 import type { AuthProfileFailurePolicy } from "./auth-profile-failure-policy.types.js";
 export type { ClientToolDefinition } from "../../command/shared-types.js";
@@ -97,6 +98,12 @@ export type RunEmbeddedAgentParams = {
    * verify and skip metering internal-test traffic. Opaque; forwarded verbatim.
    */
   oboToken?: string | null;
+  /**
+   * Billing-only originating user for runs with no inbound sender (subagent
+   * children, plugin-started runs). Fills the usage headers when senderId is absent;
+   * never used for command auth or sender-scoped tool policy.
+   */
+  usageAttribution?: UsageAttribution;
   /** Trusted sender identity bit for command/channel-action auth. */
   senderIsOwner?: boolean;
   /** Device-scoped operator session allowed to review approvals initiated by this run. */

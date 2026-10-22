@@ -1185,6 +1185,8 @@ export function createFollowupRunner(params: {
                 groupSpace: run.groupSpace,
                 senderId: run.senderId,
                 senderName: run.senderName,
+                senderSource: run.senderSource,
+                usageAttribution: run.usageAttribution,
                 senderUsername: run.senderUsername,
                 senderE164: run.senderE164,
                 channelContext: run.channelContext,

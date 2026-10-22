@@ -3222,6 +3222,7 @@ export async function runEmbeddedAttempt(
           ...(params.oboToken && { oboToken: params.oboToken }),
           ...(params.senderName && { senderName: params.senderName }),
           ...(params.senderSource && { senderSource: params.senderSource }),
+          ...(params.usageAttribution && { usageAttribution: params.usageAttribution }),
           ...(params.messageThreadId != null &&
             String(params.messageThreadId) !== "" && {
               threadId: String(params.messageThreadId),
