@@ -3384,6 +3384,7 @@ describe("runReplyAgent observed reply delivery via message tool", () => {
   async function runAutomaticModeCase(params: {
     messagingToolSentTargets?: unknown[];
     sessionEntry?: Partial<SessionEntry>;
+    messageThreadId?: string;
   }) {
     const sessionKey = "automatic-mode";
     const sessionCtx = {
@@ -3393,6 +3394,7 @@ describe("runReplyAgent observed reply delivery via message tool", () => {
       AccountId: "primary",
       MessageSid: "msg",
       ChatType: "direct",
+      ...(params.messageThreadId ? { MessageThreadId: params.messageThreadId } : {}),
     } as unknown as TemplateContext;
     const followupRun = {
       prompt: "hello",
@@ -3476,6 +3478,52 @@ describe("runReplyAgent observed reply delivery via message tool", () => {
       ],
     });
     expect(onObservedReplyDeliverySpy).not.toHaveBeenCalled();
+  });
+
+  it("observes delivery when the message-tool send matches this turn's own thread", async () => {
+    await runAutomaticModeCase({
+      messageThreadId: "thread-1",
+      messagingToolSentTargets: [
+        {
+          tool: "message",
+          provider: "whatsapp",
+          to: "+15550001111",
+          threadId: "thread-1",
+          text: "hi there",
+        },
+      ],
+    });
+    expect(onObservedReplyDeliverySpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not observe delivery when the message-tool send lands in a different thread", async () => {
+    await runAutomaticModeCase({
+      messageThreadId: "thread-1",
+      messagingToolSentTargets: [
+        {
+          tool: "message",
+          provider: "whatsapp",
+          to: "+15550001111",
+          threadId: "thread-2",
+          text: "hi there",
+        },
+      ],
+    });
+    expect(onObservedReplyDeliverySpy).not.toHaveBeenCalled();
+  });
+
+  it("observes delivery for a media-only message-tool send", async () => {
+    await runAutomaticModeCase({
+      messagingToolSentTargets: [
+        {
+          tool: "message",
+          provider: "whatsapp",
+          to: "+15550001111",
+          mediaUrls: ["https://example.com/photo.jpg"],
+        },
+      ],
+    });
+    expect(onObservedReplyDeliverySpy).toHaveBeenCalledTimes(1);
   });
 
   it("observes delivery even when sendPolicy denies automatic delivery for this session", async () => {
