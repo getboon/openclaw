@@ -3139,9 +3139,8 @@ describe("dispatchReplyFromConfig", () => {
     const onItemEvent = vi.fn();
     const onCommandOutput = vi.fn();
     const onToolResult = vi.fn();
-    // ENG-19103: reasoning-lane callbacks must forward through the same
-    // suppressed-source escape hatch as the tool-lifecycle callbacks above —
-    // a channel-owned "thinking" lane (e.g. anychat-boon-web) needs both.
+    // Reasoning callbacks share the suppressed-source escape hatch with the
+    // tool-lifecycle callbacks above; a channel-owned progress UI needs both.
     const onReasoningStream = vi.fn();
     const onReasoningEnd = vi.fn();
 

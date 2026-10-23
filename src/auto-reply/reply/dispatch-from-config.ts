@@ -3044,9 +3044,9 @@ export async function dispatchReplyFromConfig(
             typingPolicy: typing.typingPolicy,
             suppressTyping: typing.suppressTyping,
             onPartialReply: wrapProgressCallback(params.replyOptions?.onPartialReply),
-            // ENG-19103: a channel-owned "thinking" lane needs these to
-            // survive message_tool_only like onToolStart/onItemEvent do, via
-            // the same escape hatch, or it silently never streams content.
+            // Reasoning callbacks share the suppressed-source escape hatch
+            // with the tool-lifecycle callbacks above, or a channel-owned
+            // progress UI silently never receives streamed content.
             onReasoningStream: wrapProgressCallback(params.replyOptions?.onReasoningStream, {
               forwardWhenSourceDeliverySuppressed: true,
             }),
