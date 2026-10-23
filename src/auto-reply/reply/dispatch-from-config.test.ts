@@ -3139,6 +3139,11 @@ describe("dispatchReplyFromConfig", () => {
     const onItemEvent = vi.fn();
     const onCommandOutput = vi.fn();
     const onToolResult = vi.fn();
+    // ENG-19103: reasoning-lane callbacks must forward through the same
+    // suppressed-source escape hatch as the tool-lifecycle callbacks above —
+    // a channel-owned "thinking" lane (e.g. anychat-boon-web) needs both.
+    const onReasoningStream = vi.fn();
+    const onReasoningEnd = vi.fn();
 
     const replyResolver = async (
       _ctx: MsgContext,
@@ -3148,6 +3153,8 @@ describe("dispatchReplyFromConfig", () => {
       await opts?.onToolStart?.({ name: "exec", phase: "start" });
       await opts?.onItemEvent?.({ itemId: "1", kind: "tool", progressText: "running exec" });
       await opts?.onCommandOutput?.({ phase: "end", name: "exec", status: "ok", exitCode: 0 });
+      await opts?.onReasoningStream?.({ text: "reasoning about the exec step" });
+      await opts?.onReasoningEnd?.();
       await opts?.onToolResult?.({ text: "exec: ok" });
       return { text: "done" } satisfies ReplyPayload;
     };
@@ -3165,6 +3172,8 @@ describe("dispatchReplyFromConfig", () => {
         onItemEvent,
         onCommandOutput,
         onToolResult,
+        onReasoningStream,
+        onReasoningEnd,
       },
     });
 
@@ -3180,6 +3189,8 @@ describe("dispatchReplyFromConfig", () => {
       status: "ok",
       exitCode: 0,
     });
+    expect(onReasoningStream).toHaveBeenCalledWith({ text: "reasoning about the exec step" });
+    expect(onReasoningEnd).toHaveBeenCalledTimes(1);
     expect(onToolResult).not.toHaveBeenCalled();
     expect(dispatcher.sendToolResult).not.toHaveBeenCalled();
     expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();

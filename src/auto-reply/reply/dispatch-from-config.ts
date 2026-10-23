@@ -3044,8 +3044,15 @@ export async function dispatchReplyFromConfig(
             typingPolicy: typing.typingPolicy,
             suppressTyping: typing.suppressTyping,
             onPartialReply: wrapProgressCallback(params.replyOptions?.onPartialReply),
-            onReasoningStream: wrapProgressCallback(params.replyOptions?.onReasoningStream),
-            onReasoningEnd: wrapProgressCallback(params.replyOptions?.onReasoningEnd),
+            // ENG-19103: a channel-owned "thinking" lane needs these to
+            // survive message_tool_only like onToolStart/onItemEvent do, via
+            // the same escape hatch, or it silently never streams content.
+            onReasoningStream: wrapProgressCallback(params.replyOptions?.onReasoningStream, {
+              forwardWhenSourceDeliverySuppressed: true,
+            }),
+            onReasoningEnd: wrapProgressCallback(params.replyOptions?.onReasoningEnd, {
+              forwardWhenSourceDeliverySuppressed: true,
+            }),
             onAssistantMessageStart: wrapProgressCallback(
               params.replyOptions?.onAssistantMessageStart,
             ),
