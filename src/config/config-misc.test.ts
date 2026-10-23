@@ -1172,6 +1172,26 @@ describe("model compat config schema", () => {
       expect(res.success).toBe(true);
     },
   );
+
+  it.each([
+    { key: "requiresGoogleThoughtSignatures", success: true },
+    { key: "requiresGoogleThoughtSignature", success: false },
+  ])("validates compat key $key as $success", ({ key, success }) => {
+    const compat = { [key]: true };
+    const res = OpenClawSchema.safeParse({
+      models: {
+        providers: {
+          gateway: {
+            baseUrl: "https://gateway.example.com/v1",
+            api: "openai-completions",
+            models: [{ id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", compat }],
+          },
+        },
+      },
+    });
+
+    expect(res.success).toBe(success);
+  });
 });
 
 describe("config paths", () => {
