@@ -410,7 +410,11 @@ function resolveToolResultContentBlocks(result: object): unknown[] {
   if (record.content && typeof record.content === "object") {
     return [record.content];
   }
-  return [record];
+  // No `type` and no `content` field at all: this is a bare result envelope
+  // (e.g. `{ details: {...} }`), not a content block. Stringifying the whole
+  // envelope here would leak its internal metadata/details fields as if they
+  // were the tool's text output.
+  return [];
 }
 
 export function extractToolResultText(result: unknown): string | undefined {

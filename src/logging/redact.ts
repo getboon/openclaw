@@ -1187,6 +1187,15 @@ function redactStructuredSecretValue(
     if (seen.has(value)) {
       return "[Circular]";
     }
+    if (value instanceof Error) {
+      // Error.message/stack are non-enumerable, so returning the instance
+      // as-is would look redacted to Object.entries-based callers while a
+      // direct `.message` property read (e.g. error-field extraction) still
+      // leaks the raw, unredacted text. Reduce to {} instead of passing the
+      // instance through isPlainRedactableObject's generic "leave non-plain
+      // objects alone" path.
+      return {};
+    }
     if (!isPlainRedactableObject(value)) {
       return value;
     }
