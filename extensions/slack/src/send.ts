@@ -36,7 +36,7 @@ import { validateSlackBlocksArray } from "./blocks-input.js";
 import { createSlackTokenCacheKey, createSlackWebClient, getSlackWriteClient } from "./client.js";
 import { markdownToSlackMrkdwnChunks } from "./format.js";
 import { SLACK_TEXT_LIMIT } from "./limits.js";
-import { loadOutboundMediaFromUrl } from "./runtime-api.js";
+import { loadOutboundMediaFromUrl, type OutboundMediaAccess } from "./runtime-api.js";
 import { recordSlackThreadParticipation } from "./sent-thread-cache.js";
 import { parseSlackTarget } from "./targets.js";
 import { normalizeSlackThreadTsCandidate, resolveSlackThreadTsValue } from "./thread-ts.js";
@@ -113,10 +113,7 @@ type SlackSendOpts = {
   token?: string;
   accountId?: string;
   mediaUrl?: string;
-  mediaAccess?: {
-    localRoots?: readonly string[];
-    readFile?: (filePath: string) => Promise<Buffer>;
-  };
+  mediaAccess?: OutboundMediaAccess;
   uploadFileName?: string;
   uploadTitle?: string;
   mediaLocalRoots?: readonly string[];
@@ -1147,10 +1144,7 @@ async function uploadSlackFile(params: {
   client: WebClient;
   channelId: string;
   mediaUrl: string;
-  mediaAccess?: {
-    localRoots?: readonly string[];
-    readFile?: (filePath: string) => Promise<Buffer>;
-  };
+  mediaAccess?: OutboundMediaAccess;
   uploadFileName?: string;
   uploadTitle?: string;
   mediaLocalRoots?: readonly string[];

@@ -47,6 +47,8 @@ import {
   describeSessionsSendTool,
   SESSIONS_SEND_TOOL_DISPLAY_SUMMARY,
 } from "../tool-description-presets.js";
+import { callAgentWithUsageAttribution } from "../usage-attribution-dispatch.js";
+import type { UsageAttribution } from "../usage-attribution.js";
 import type { AnyAgentTool } from "./common.js";
 import { jsonResult, readNonNegativeIntegerParam, readStringParam } from "./common.js";
 import {
@@ -246,6 +248,7 @@ async function startAgentRun(params: {
   callGateway: GatewayCaller;
   runId: string;
   sendParams: Record<string, unknown>;
+  usageAttribution: UsageAttribution | undefined;
   sessionKey: string;
   deliveryTimeoutMs?: number;
   allowActiveRunQueueDelivery?: boolean;
@@ -298,14 +301,17 @@ async function startAgentRun(params: {
       }
       const fallbackSessionKey = resolveCronRunScopedFallbackSessionKey(params.sessionKey);
       if (fallbackSessionKey && shouldFallbackCronRunScopedActiveDelivery(queueOutcome)) {
-        const response = await params.callGateway<{ runId: string }>({
-          method: "agent",
-          params: {
-            ...params.sendParams,
-            sessionKey: fallbackSessionKey,
-            idempotencyKey: crypto.randomUUID(),
+        const response = await callAgentWithUsageAttribution<{ runId: string }>({
+          callGateway: params.callGateway,
+          request: {
+            params: {
+              ...params.sendParams,
+              sessionKey: fallbackSessionKey,
+              idempotencyKey: crypto.randomUUID(),
+            },
+            timeoutMs: 10_000,
           },
-          timeoutMs: 10_000,
+          usageAttribution: params.usageAttribution,
         });
         return {
           ok: true,
@@ -319,10 +325,10 @@ async function startAgentRun(params: {
         formatEmbeddedAgentQueueFailureSummary(queueOutcome) ?? "active run queue rejected";
       throw new Error(queueSummary);
     }
-    const response = await params.callGateway<{ runId: string }>({
-      method: "agent",
-      params: params.sendParams,
-      timeoutMs: 10_000,
+    const response = await callAgentWithUsageAttribution<{ runId: string }>({
+      callGateway: params.callGateway,
+      request: { params: params.sendParams, timeoutMs: 10_000 },
+      usageAttribution: params.usageAttribution,
     });
     return {
       ok: true,
@@ -358,6 +364,8 @@ export function createSessionsSendTool(opts?: {
   sandboxed?: boolean;
   config?: OpenClawConfig;
   callGateway?: GatewayCaller;
+  /** Billing-only user of the current turn; runs it starts in the target are attributed to it. */
+  requesterUsageAttribution?: UsageAttribution;
 }): AnyAgentTool {
   return {
     label: "Session Send",
@@ -702,6 +710,7 @@ export function createSessionsSendTool(opts?: {
           roundOneReply,
           waitRunId,
           notifyRequesterOnWaitFailure,
+          usageAttribution: opts?.requesterUsageAttribution,
         });
       };
 
@@ -710,6 +719,7 @@ export function createSessionsSendTool(opts?: {
           callGateway: gatewayCall,
           runId,
           sendParams,
+          usageAttribution: opts?.requesterUsageAttribution,
           sessionKey: displayKey,
           deliveryTimeoutMs: announceTimeoutMs,
           allowActiveRunQueueDelivery: true,
@@ -733,6 +743,7 @@ export function createSessionsSendTool(opts?: {
         callGateway: gatewayCall,
         runId,
         sendParams,
+        usageAttribution: opts?.requesterUsageAttribution,
         sessionKey: displayKey,
         deliveryTimeoutMs: announceTimeoutMs,
       });

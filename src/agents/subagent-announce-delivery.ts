@@ -78,6 +78,7 @@ import { isSyntheticNoOutputResult } from "./subagent-announce-output.js";
 import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
 import { resolveRequesterStoreKey } from "./subagent-requester-store-key.js";
 import type { SpawnSubagentMode } from "./subagent-spawn.types.js";
+import type { UsageAttribution } from "./usage-attribution.js";
 
 const DEFAULT_SUBAGENT_ANNOUNCE_TIMEOUT_MS = 120_000;
 type SubagentAnnounceDeliveryDeps = {
@@ -139,6 +140,8 @@ async function runAnnounceAgentCall(params: {
     params.agentParams,
     {
       expectFinal: params.expectFinal,
+      // Core-built handoff params: the agent method may trust their usageAttribution.
+      inProcessDispatch: true,
       forceSyntheticClient: shouldPreserveUserFacingSessionStateForInputProvenance(
         params.agentParams.inputProvenance,
       ),
@@ -1386,6 +1389,7 @@ async function sendSubagentAnnounceDirectly(params: {
   sourceTool?: string;
   requesterIsSubagent: boolean;
   signal?: AbortSignal;
+  usageAttribution?: UsageAttribution;
 }): Promise<SubagentAnnounceDeliveryResult> {
   if (params.signal?.aborted) {
     return {
@@ -1618,6 +1622,9 @@ async function sendSubagentAnnounceDirectly(params: {
       ...(completionSourceReplyDeliveryMode
         ? { sourceReplyDeliveryMode: completionSourceReplyDeliveryMode }
         : {}),
+      // Billing-only user for the sender-less handoff turn; the agent method honors it
+      // only for in-process dispatch and never treats it as sender identity.
+      ...(params.usageAttribution ? { usageAttribution: params.usageAttribution } : {}),
       idempotencyKey: params.directIdempotencyKey,
     };
     let directAnnounceResponse: unknown;
@@ -1887,6 +1894,8 @@ export async function deliverSubagentAnnouncement(params: {
   bestEffortDeliver?: boolean;
   directIdempotencyKey: string;
   signal?: AbortSignal;
+  /** Originating user for the requester's completion turn (usage headers only). */
+  usageAttribution?: UsageAttribution;
 }): Promise<SubagentAnnounceDeliveryResult> {
   return await runSubagentAnnounceDispatch({
     expectsCompletionMessage: params.expectsCompletionMessage,
@@ -1917,6 +1926,7 @@ export async function deliverSubagentAnnouncement(params: {
         expectsCompletionMessage: params.expectsCompletionMessage,
         signal: params.signal,
         bestEffortDeliver: params.bestEffortDeliver,
+        usageAttribution: params.usageAttribution,
       }),
   });
 }

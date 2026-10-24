@@ -20,7 +20,7 @@ export type { DmPolicy, GroupPolicy } from "openclaw/plugin-sdk/config-contracts
 import type { OpenClawConfig as RuntimeOpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 
 export { type ChannelMessageActionName } from "openclaw/plugin-sdk/channel-contract";
-export { loadOutboundMediaFromUrl } from "./outbound-media.runtime.js";
+export { loadOutboundMediaFromUrl } from "openclaw/plugin-sdk/outbound-media";
 export {
   resolveWhatsAppGroupRequireMention,
   resolveWhatsAppGroupToolPolicy,

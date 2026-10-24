@@ -823,6 +823,13 @@ export function runAgentAttempt(params: {
     hasRepliedRef: params.runContext.hasRepliedRef,
     senderId: params.runContext.senderId,
     senderIsOwner: params.opts.senderIsOwner,
+    // Spawned sessions persist the originating user on the entry, so later turns
+    // (sessions_send, steer, announce) stay attributed without a per-call param.
+    usageAttribution: params.opts.usageAttribution ?? params.sessionEntry?.usageAttribution,
+    // Per-run only, deliberately not read from the session entry: the token is a
+    // per-turn bearer that expires, so later turns of a persisted child run without it
+    // and keep only the user header.
+    oboToken: params.opts.oboToken,
     sessionFile: params.sessionFile,
     workspaceDir: params.workspaceDir,
     cwd: params.cwd,

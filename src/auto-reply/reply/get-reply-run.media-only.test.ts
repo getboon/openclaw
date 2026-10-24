@@ -375,6 +375,39 @@ describe("runPreparedReply media-only handling", () => {
     expect(call.followupRun.run.explicitSkillName).toBe("selected-skill");
   });
 
+  it("carries the inbound UsageAttribution onto the run without inventing a sender", async () => {
+    const usageAttribution = {
+      userId: "U-origin",
+      userName: "Ada",
+      userSource: "anychat-boon-web",
+    };
+    const params = baseParams();
+    params.ctx = { ...params.ctx, UsageAttribution: usageAttribution };
+
+    await runPreparedReply(params);
+
+    const run = requireRunReplyAgentCall().followupRun.run;
+    expect(run.usageAttribution).toEqual(usageAttribution);
+    expect(run.senderId).toBeUndefined();
+  });
+
+  it("falls back to the session entry's inherited usage attribution", async () => {
+    const usageAttribution = { userId: "U-inherited", userSource: "slack" };
+    await runPreparedReply(
+      baseParams({
+        sessionEntry: { sessionId: "session-1", updatedAt: 1, usageAttribution },
+      }),
+    );
+
+    expect(requireRunReplyAgentCall().followupRun.run.usageAttribution).toEqual(usageAttribution);
+  });
+
+  it("leaves usage attribution unset when the turn and session carry none", async () => {
+    await runPreparedReply(baseParams());
+
+    expect(requireRunReplyAgentCall().followupRun.run.usageAttribution).toBeUndefined();
+  });
+
   it("propagates non-visible assistant silence for group runs", async () => {
     await runPreparedReply(baseParams());
 

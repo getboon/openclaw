@@ -30,6 +30,8 @@ function firstAttemptParams(): {
   promptCacheKey?: string;
   suppressLiveStreamOutput?: boolean;
   oboToken?: string;
+  senderSource?: string;
+  usageAttribution?: unknown;
 } {
   const call = mockedRunEmbeddedAttempt.mock.calls[0] as
     | [
@@ -40,6 +42,8 @@ function firstAttemptParams(): {
           promptCacheKey?: string;
           suppressLiveStreamOutput?: boolean;
           oboToken?: string;
+          senderSource?: string;
+          usageAttribution?: unknown;
         },
       ]
     | undefined;
@@ -215,6 +219,20 @@ describe("runEmbeddedAgent cron before_agent_reply seam", () => {
     await runEmbeddedAgent({ ...overflowBaseRunParams });
 
     expect(firstAttemptParams().oboToken).toBeUndefined();
+  });
+
+  it("forwards the sender source and inherited usage attribution into the embedded attempt", async () => {
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(makeAttemptResult({ promptError: null }));
+    const usageAttribution = { userId: "U-ALICE", userName: "Alice", userSource: "slack" };
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      senderSource: "slack",
+      usageAttribution,
+    });
+
+    expect(firstAttemptParams().senderSource).toBe("slack");
+    expect(firstAttemptParams().usageAttribution).toEqual(usageAttribution);
   });
 
   it("forwards suppressed live stream output into the embedded attempt", async () => {

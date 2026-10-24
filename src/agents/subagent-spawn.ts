@@ -34,6 +34,7 @@ import { stringifyRouteThreadId } from "../plugin-sdk/channel-route.js";
 import { listRegisteredPluginAgentPromptGuidance } from "../plugins/command-registry-state.js";
 import type { SubagentLifecycleHookRunner } from "../plugins/hooks.js";
 import { isValidAgentId, normalizeAgentId, parseAgentSessionKey } from "../routing/session-key.js";
+import type { InputProvenance } from "../sessions/input-provenance.js";
 import { resolveUserPath } from "../utils.js";
 import type { DeliveryContext } from "../utils/delivery-context.types.js";
 import { listAgentIds, resolveAgentDir } from "./agent-scope-config.js";
@@ -65,9 +66,11 @@ import { buildSubagentInitialUserMessage } from "./subagent-initial-user-message
 import { countActiveRunsForSession, registerSubagentRun } from "./subagent-registry.js";
 import { resolveSubagentRunTimerDelayMs } from "./subagent-run-timeout.js";
 import { resolveSubagentSpawnAcceptedNote } from "./subagent-spawn-accepted-note.js";
+import { resolveSpawnFailureBackstop } from "./subagent-spawn-backstop.js";
 import { resolveSubagentSpawnOwnership } from "./subagent-spawn-ownership.js";
 import { resolveSubagentTargetPolicy } from "./subagent-target-policy.js";
 import { normalizeSubagentTaskName } from "./subagent-task-name.js";
+import { normalizeUsageAttribution, type UsageAttribution } from "./usage-attribution.js";
 export {
   SUBAGENT_SPAWN_ACCEPTED_NOTE,
   SUBAGENT_SPAWN_SESSION_ACCEPTED_NOTE,
@@ -199,6 +202,27 @@ type SpawnSubagentContext = {
   workspaceDir?: string;
   inheritedToolAllowlist?: string[];
   inheritedToolDenylist?: string[];
+  /**
+   * Origin of the requester turn. A user turn — unset (ordinary messages carry no marker) or
+   * `external_user` — restarts the consecutive-failure backstop; completion wakes
+   * (`inter_session`) and internal handoffs (`internal_system`) keep counting.
+   */
+  requesterInputProvenanceKind?: InputProvenance["kind"];
+  /** Requester run id; the backstop restarts at most once per requester turn. */
+  requesterTurnRunId?: string;
+  /**
+   * Billing-only user the child inherits for model-call usage headers: the requester
+   * turn's sender, or the requester's own inherited attribution. Never becomes the
+   * child's sender identity, so sender-scoped tool policy is unaffected.
+   */
+  requesterUsageAttribution?: UsageAttribution;
+  /**
+   * Gateway OBO bearer of the requester turn. Passed in-process on the child's first
+   * `agent` call only; never persisted, logged, or echoed. Later turns of a
+   * `spawnMode: "session"` child cannot carry it (it is per-turn and expires), so they
+   * run without it and keep only the user header from usageAttribution.
+   */
+  requesterOboToken?: string;
 };
 
 export type SpawnSubagentResult = {
@@ -267,13 +291,34 @@ async function callSubagentGateway(
       request.params as Record<string, unknown>,
       {
         expectFinal: request.expectFinal,
+        // Spawn-built params: the agent method may trust their in-process-only fields.
+        inProcessDispatch: true,
         ...(scopes != null ? { forceSyntheticClient: true } : {}),
         ...(typeof request.timeoutMs === "number" ? { timeoutMs: request.timeoutMs } : {}),
         ...(scopes != null ? { syntheticScopes: scopes } : {}),
       },
     );
   }
-  return await subagentSpawnDeps.callGateway(request);
+  return await subagentSpawnDeps.callGateway(stripInProcessOnlyParams(request));
+}
+
+// Both fields are honored only for in-process dispatch, so keep them off the socket:
+// the OBO is a live credential, and an older gateway's closed `agent` schema rejects
+// `usageAttribution`. The child stays attributed via its session-entry patch.
+function stripInProcessOnlyParams<T extends { params?: unknown }>(request: T): T {
+  const params = request.params;
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return request;
+  }
+  if (!("oboToken" in params) && !("usageAttribution" in params)) {
+    return request;
+  }
+  const {
+    oboToken: _oboToken,
+    usageAttribution: _usageAttribution,
+    ...rest
+  } = params as Record<string, unknown>;
+  return { ...request, params: rest };
 }
 
 function readGatewayRunId(response: Awaited<ReturnType<typeof callGateway>>): string | undefined {
@@ -329,6 +374,10 @@ function buildDirectChildSessionPatch(patch: Record<string, unknown>): Partial<S
   }
   if (typeof patch.spawnedCwd === "string" && patch.spawnedCwd.trim()) {
     entry.spawnedCwd = patch.spawnedCwd.trim();
+  }
+  const usageAttribution = normalizeUsageAttribution(patch.usageAttribution);
+  if (usageAttribution) {
+    entry.usageAttribution = usageAttribution;
   }
   const inheritedToolDeny = normalizeInheritedToolDenylist(patch.inheritedToolDeny);
   if (inheritedToolDeny.length > 0) {
@@ -1175,6 +1224,17 @@ export async function spawnSubagentDirect(
       error: `sessions_spawn has reached max active children for this session (${activeChildren}/${maxChildren})`,
     };
   }
+  // Refuse an autonomous re-spawn loop before any side effect; child runs are registered under
+  // the completion owner, so that is the history to read.
+  const backstopError = resolveSpawnFailureBackstop({
+    cfg,
+    requesterSessionKey: ownership.completionRequesterSessionKey,
+    provenanceKind: ctx.requesterInputProvenanceKind,
+    requesterTurnRunId: ctx.requesterTurnRunId,
+  });
+  if (backstopError) {
+    return { status: "error", error: backstopError };
+  }
 
   const requesterAgentId = normalizeAgentId(
     ctx.requesterAgentIdOverride ?? parseAgentSessionKey(requesterInternalKey)?.agentId,
@@ -1275,6 +1335,8 @@ export async function spawnSubagentDirect(
   }
   const childDepth = callerDepth + 1;
   const spawnedByKey = requesterInternalKey;
+  const usageAttribution = normalizeUsageAttribution(ctx.requesterUsageAttribution);
+  const requesterOboToken = normalizeOptionalString(ctx.requesterOboToken);
   const childCapabilities = resolveSubagentCapabilities({
     depth: childDepth,
     maxSpawnDepth,
@@ -1500,6 +1562,7 @@ export async function spawnSubagentDirect(
     spawnedBy: spawnedByKey,
     ...(spawnedMetadata.workspaceDir ? { spawnedWorkspaceDir: spawnedMetadata.workspaceDir } : {}),
     ...(spawnedCwd ? { spawnedCwd } : {}),
+    ...(usageAttribution ? { usageAttribution } : {}),
   });
   if (spawnLineagePatchError) {
     await cleanupFailedSpawnBeforeAgentStart({
@@ -1580,6 +1643,8 @@ export async function spawnSubagentDirect(
             }
           : {}),
         ...publicSpawnedMetadata,
+        ...(usageAttribution ? { usageAttribution } : {}),
+        ...(requesterOboToken ? { oboToken: requesterOboToken } : {}),
       },
       timeoutMs: resolveSubagentAgentGatewayTimeoutMs(runTimeoutSeconds),
     });

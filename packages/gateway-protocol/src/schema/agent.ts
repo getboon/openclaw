@@ -234,6 +234,21 @@ export const AgentParamsSchema = Type.Object(
     ),
     disableMessageTool: Type.Optional(Type.Boolean()),
     voiceWakeTrigger: Type.Optional(Type.String()),
+    // Billing-only originating user for model-call usage attribution. Honored only
+    // for in-process callers (subagent spawn, plugin runtime); dropped otherwise.
+    usageAttribution: Type.Optional(
+      Type.Object(
+        {
+          userId: NonEmptyString,
+          userName: Type.Optional(Type.String()),
+          userSource: Type.Optional(Type.String()),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    // Gateway OBO bearer for the run's model calls. Honored only for in-process
+    // callers (subagent spawn); dropped otherwise. Never persisted or echoed.
+    oboToken: Type.Optional(Type.String()),
     idempotencyKey: NonEmptyString,
     label: Type.Optional(SessionLabelString),
   },

@@ -1385,6 +1385,7 @@ export async function runEmbeddedAttempt(
             agentId: sessionAgentId,
             ...(params.crestodianTool ? { crestodianTool: params.crestodianTool } : {}),
             ...buildEmbeddedAttemptToolRunContext({ ...params, trace: runTrace }),
+            inputProvenanceKind: params.inputProvenance?.kind,
             messageChannel: params.messageChannel,
             chatType: params.chatType,
             exec: {
@@ -3352,6 +3353,7 @@ export async function runEmbeddedAttempt(
           ...(params.oboToken && { oboToken: params.oboToken }),
           ...(params.senderName && { senderName: params.senderName }),
           ...(params.senderSource && { senderSource: params.senderSource }),
+          ...(params.usageAttribution && { usageAttribution: params.usageAttribution }),
           ...(params.messageThreadId != null &&
             String(params.messageThreadId) !== "" && {
               threadId: String(params.messageThreadId),

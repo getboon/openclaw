@@ -1,5 +1,6 @@
 // Imessage plugin module implements channel behavior.
 import { resolveOutboundSendDep } from "openclaw/plugin-sdk/channel-outbound";
+import type { OutboundMediaAccess } from "openclaw/plugin-sdk/outbound-media";
 import { resolveIMessageDuplicateSourceOwner, type ResolvedIMessageAccount } from "./accounts.js";
 import { PAIRING_APPROVED_MESSAGE, resolveChannelMediaMaxBytes } from "./channel-api.js";
 import type { ChannelPlugin } from "./channel-api.js";
@@ -16,6 +17,7 @@ export async function sendIMessageOutbound(params: {
   to: string;
   text: string;
   mediaUrl?: string;
+  mediaAccess?: OutboundMediaAccess;
   mediaLocalRoots?: readonly string[];
   audioAsVoice?: boolean;
   accountId?: string;
@@ -36,6 +38,7 @@ export async function sendIMessageOutbound(params: {
   return await send(params.to, params.text, {
     config: params.cfg,
     ...(params.mediaUrl ? { mediaUrl: params.mediaUrl } : {}),
+    ...(params.mediaAccess ? { mediaAccess: params.mediaAccess } : {}),
     ...(params.mediaLocalRoots?.length ? { mediaLocalRoots: params.mediaLocalRoots } : {}),
     ...(params.audioAsVoice ? { audioAsVoice: true } : {}),
     maxBytes,

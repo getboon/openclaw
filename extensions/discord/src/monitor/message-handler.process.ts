@@ -28,10 +28,11 @@ import {
 import { recordInboundSession } from "openclaw/plugin-sdk/conversation-runtime";
 import { createLazyRuntimeModule } from "openclaw/plugin-sdk/lazy-runtime";
 import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/markdown-table-runtime";
-import { getAgentScopedMediaLocalRoots } from "openclaw/plugin-sdk/media-runtime";
+import { resolveAgentScopedOutboundMediaAccess } from "openclaw/plugin-sdk/media-runtime";
 import { resolveChunkMode } from "openclaw/plugin-sdk/reply-chunking";
 import { createChannelHistoryWindow } from "openclaw/plugin-sdk/reply-history";
 import {
+  buildTtsSupplementMediaPayload,
   getReplyPayloadTtsSupplement,
   isReplyPayloadNonTerminalToolErrorWarning,
   resolveSendableOutboundReplyParts,
@@ -206,7 +207,16 @@ async function processDiscordMessageInner(
     accountId,
   });
   const removeAckAfterReply = cfg.messages?.removeAckAfterReply ?? false;
-  const mediaLocalRoots = getAgentScopedMediaLocalRoots(cfg, route.agentId);
+  // Roots alone are not enough: a relative attachment path (e.g. from the
+  // message tool) must resolve against the agent workspace before the
+  // allowed-directory check runs, or it falls through to the gateway cwd and
+  // is rejected even though the workspace is an allowed root.
+  const mediaAccess = resolveAgentScopedOutboundMediaAccess({
+    cfg,
+    agentId: route.agentId,
+    sessionKey: route.sessionKey,
+    accountId,
+  });
   const isRoomEvent = ctx.inboundEventKind === "room_event";
   const shouldAckReaction = () =>
     Boolean(
@@ -714,7 +724,7 @@ async function processDiscordMessageInner(
         chunkMode,
         sessionKey: ctxPayload.SessionKey,
         threadBindings,
-        mediaLocalRoots,
+        mediaAccess,
         kind: "block",
       });
       replyReference.markSent();
@@ -795,7 +805,7 @@ async function processDiscordMessageInner(
           chunkMode,
           sessionKey: ctxPayload.SessionKey,
           threadBindings,
-          mediaLocalRoots,
+          mediaAccess,
           kind: "block",
         });
         replyReference.markSent();
@@ -829,6 +839,7 @@ async function processDiscordMessageInner(
       draftStream && isFinal && !draftPreview.isProgressMode && !deliverablePayload.isError;
     if (shouldFinalizeDraftPreview) {
       const ttsSupplement = getReplyPayloadTtsSupplement(deliverablePayload);
+      const previewReplyToId = replyReference.peek();
 
       const result = await deliverWithFinalizableLivePreviewAdapter({
         kind: info.kind,
@@ -861,6 +872,41 @@ async function processDiscordMessageInner(
             markUserFacingFinalDelivered();
             draftPreview.markPreviewFinalized();
             replyReference.markSent();
+          },
+          buildSupplementalPayload: () =>
+            ttsSupplement ? buildTtsSupplementMediaPayload(deliverablePayload) : undefined,
+          deliverSupplemental: async (supplementalPayload) => {
+            if (isProcessAborted(abortSignal)) {
+              return false;
+            }
+            const supplementalReplyToId =
+              previewReplyToId ??
+              replyReference.peek() ??
+              (replyToMode === "all"
+                ? typeof message.id === "string" && message.id
+                  ? message.id
+                  : ctxPayload.MessageSid
+                : undefined);
+            await deliverDiscordReply({
+              cfg,
+              replies: [supplementalPayload],
+              target: deliverTarget,
+              token,
+              accountId,
+              rest: deliveryRest,
+              runtime,
+              replyToId: supplementalReplyToId,
+              replyToMode,
+              textLimit,
+              maxLinesPerMessage,
+              tableMode,
+              chunkMode,
+              sessionKey: ctxPayload.SessionKey,
+              threadBindings,
+              mediaAccess,
+              kind: info.kind,
+            });
+            return true;
           },
           logPreviewEditFailure: (err) => {
             logVerbose(
@@ -901,8 +947,8 @@ async function processDiscordMessageInner(
             chunkMode,
             sessionKey: ctxPayload.SessionKey,
             threadBindings,
-            mediaLocalRoots,
             allowedMentions,
+            mediaAccess,
             kind: info.kind,
           });
           return true;
@@ -950,7 +996,7 @@ async function processDiscordMessageInner(
       chunkMode,
       sessionKey: ctxPayload.SessionKey,
       threadBindings,
-      mediaLocalRoots,
+      mediaAccess,
       kind: info.kind,
     });
     replyReference.markSent();

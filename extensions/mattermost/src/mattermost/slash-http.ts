@@ -911,6 +911,7 @@ async function handleSlashCommandAsync(params: {
           to,
           accountId: account.accountId,
           agentId: route.agentId,
+          sessionKey: route.sessionKey,
           textLimit,
           tableMode,
           sendMessage: sendMessageMattermost,

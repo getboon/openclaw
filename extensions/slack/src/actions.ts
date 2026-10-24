@@ -10,6 +10,7 @@ import { createSlackWebClient, getSlackWriteClient } from "./client.js";
 import { buildSlackEditTextPayload } from "./edit-text.js";
 import { resolveSlackMedia } from "./monitor/media.js";
 import type { SlackMediaResult } from "./monitor/media.js";
+import type { OutboundMediaAccess } from "./runtime-api.js";
 import { sendMessageSlack } from "./send.js";
 import { resolveSlackBotToken } from "./token.js";
 
@@ -296,10 +297,7 @@ export async function sendSlackMessage(
   opts: Omit<SlackActionClientOpts, "cfg"> & {
     cfg: OpenClawConfig;
     mediaUrl?: string;
-    mediaAccess?: {
-      localRoots?: readonly string[];
-      readFile?: (filePath: string) => Promise<Buffer>;
-    };
+    mediaAccess?: OutboundMediaAccess;
     mediaLocalRoots?: readonly string[];
     mediaReadFile?: (filePath: string) => Promise<Buffer>;
     threadTs?: string;

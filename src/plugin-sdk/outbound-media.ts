@@ -6,6 +6,11 @@ import { buildOutboundMediaLoadOptions, type OutboundMediaAccess } from "../medi
 import type { PluginStateKeyedStore } from "./plugin-state-runtime.js";
 import { loadWebMedia } from "./web-media.js";
 
+// Canonical host media access contract (includes workspaceDir). Plugins should
+// import this instead of redeclaring a narrower local shape that can silently
+// drop fields such as workspaceDir when an intermediate rebuilds the object.
+export type { OutboundMediaAccess };
+
 /** Media loading policy used before plugin media is handed to channel delivery. */
 export type OutboundMediaLoadOptions = {
   /** Maximum allowed media payload size before the load is rejected. */
@@ -28,6 +33,8 @@ export type OutboundMediaLoadOptions = {
   optimizeImages?: boolean;
   /** Allows explicit proxy DNS behavior to be trusted by the media fetch guard. */
   trustExplicitProxyDns?: boolean;
+  /** Whether image re-optimization runs (default `true`); pass `false` to skip it, e.g. when a caller forces document delivery. */
+  optimizeImages?: boolean;
 };
 
 /** Load outbound media from a remote URL or approved local path using the shared web-media policy. */
@@ -48,6 +55,7 @@ export async function loadOutboundMediaFromUrl(
       requestInit: options.requestInit,
       optimizeImages: options.optimizeImages,
       trustExplicitProxyDns: options.trustExplicitProxyDns,
+      optimizeImages: options.optimizeImages,
     }),
   );
 }

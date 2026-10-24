@@ -24,6 +24,7 @@ import {
 } from "../../../plugins/hook-runner-global.js";
 import { createHookRunnerWithRegistry } from "../../../plugins/hooks.test-helpers.js";
 import { withEnvAsync } from "../../../test-utils/env.js";
+import { log } from "../logger.js";
 import { wrapStreamFnWithDiagnosticModelCallEvents } from "./attempt.model-diagnostic-events.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -1182,6 +1183,29 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(threadOnly).not.toHaveProperty("x-boon-user-id");
   });
 
+  it("falls back to usageAttribution for the user headers when the run has no sender", async () => {
+    // Subagent children and plugin-started runs have no inbound sender of their own.
+    const headers = await boonHeadersFor({
+      sessionId: "child-session",
+      usageAttribution: { userId: "U-ALICE", userName: "Alice", userSource: "slack" },
+    });
+    expect(headers["x-boon-user-id"]).toBe("U-ALICE");
+    expect(headers["x-boon-user-name"]).toBe("Alice");
+    expect(headers["x-boon-user-source"]).toBe("slack");
+    expect(headers["x-boon-session-id"]).toBe("child-session");
+  });
+
+  it("prefers the turn sender over usageAttribution without mixing identities", async () => {
+    const headers = await boonHeadersFor({
+      senderId: "U-BOB",
+      usageAttribution: { userId: "U-ALICE", userName: "Alice", userSource: "slack" },
+    });
+    expect(headers["x-boon-user-id"]).toBe("U-BOB");
+    // Bob has no name/source on this turn; Alice's must not be attached to Bob's id.
+    expect(headers).not.toHaveProperty("x-boon-user-name");
+    expect(headers).not.toHaveProperty("x-boon-user-source");
+  });
+
   it("emits x-boon-gateway-obo-token from oboToken and omits it when absent", async () => {
     // ENG-19115 — the gateway-audience OBO (set on MsgContext.OboToken by
     // anychat-boon-web, ENG-19116) rides to x-boon-gateway-obo-token so the
@@ -1193,6 +1217,33 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
 
     const withoutObo = await boonHeadersFor({ senderId: "U9" });
     expect(withoutObo).not.toHaveProperty("x-boon-gateway-obo-token");
+  });
+
+  it("emits the OBO header for a sender-less child run and logs only presence, never the value", async () => {
+    const token = "eyJ.child-run.secret-obo";
+    const debugSpy = vi.spyOn(log, "debug");
+    try {
+      const child = await boonHeadersFor({
+        sessionId: "child-session",
+        oboToken: token,
+        usageAttribution: { userId: "U-ALICE", userName: "Alice", userSource: "slack" },
+      });
+      expect(child["x-boon-gateway-obo-token"]).toBe(token);
+      expect(child["x-boon-user-id"]).toBe("U-ALICE");
+
+      const noToken = await boonHeadersFor({
+        sessionId: "child-session",
+        usageAttribution: { userId: "U-ALICE" },
+      });
+      expect(noToken).not.toHaveProperty("x-boon-gateway-obo-token");
+
+      const lines = debugSpy.mock.calls.map((args) => args.map(String).join(" "));
+      expect(lines.some((line) => line.includes("obo=present"))).toBe(true);
+      expect(lines.some((line) => line.includes("obo=absent"))).toBe(true);
+      expect(lines.join("\n")).not.toContain(token);
+    } finally {
+      debugSpy.mockRestore();
+    }
   });
 
   it("strips control characters from header values and omits all-control values", async () => {

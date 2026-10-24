@@ -1333,6 +1333,53 @@ describe("initSessionState RawBody", () => {
     expect(store[sessionKey]?.displayName).toBe("Dashboard Chat");
   });
 
+  it.each([
+    { name: "/new", body: "/new continue", resetTriggered: true, staleMs: 0 },
+    { name: "an idle rollover", body: "hello again", resetTriggered: false, staleMs: 60 * 60_000 },
+  ])(
+    "keeps a spawned session's usage attribution across $name",
+    async ({ body, resetTriggered, staleMs }) => {
+      const root = await makeCaseDir("openclaw-spawned-usage-attribution-");
+      const storePath = path.join(root, "sessions.json");
+      const sessionKey = "agent:main:subagent:usage-attribution";
+      const existingSessionId = "spawned-session-before-reset";
+      const usageAttribution = { userId: "U-ALICE", userName: "Alice", userSource: "slack" };
+      const lastActiveAt = Date.now() - staleMs;
+
+      await writeSessionStoreFast(storePath, {
+        [sessionKey]: {
+          sessionId: existingSessionId,
+          updatedAt: lastActiveAt,
+          lastInteractionAt: lastActiveAt,
+          spawnedBy: "agent:main:main",
+          usageAttribution,
+        },
+      });
+
+      const result = await initSessionState({
+        ctx: { RawBody: body, SessionKey: sessionKey },
+        cfg: {
+          session: {
+            store: storePath,
+            resetTriggers: ["/new"],
+            reset: { mode: "idle", idleMinutes: 30 },
+          },
+        } as OpenClawConfig,
+        commandAuthorized: true,
+      });
+
+      expect(result.isNewSession).toBe(true);
+      expect(result.resetTriggered).toBe(resetTriggered);
+      expect(result.sessionId).not.toBe(existingSessionId);
+      expect(result.sessionEntry.usageAttribution).toEqual(usageAttribution);
+      const store = JSON.parse(await fs.readFile(storePath, "utf-8")) as Record<
+        string,
+        { usageAttribution?: unknown }
+      >;
+      expect(store[sessionKey]?.usageAttribution).toEqual(usageAttribution);
+    },
+  );
+
   it("clears an auto-fallback model override on an implicit daily stale rollover (#90119)", async () => {
     // Counterpart: auto-created fallback overrides must still be cleared on a
     // daily rollover so stale sessions return to the configured default.

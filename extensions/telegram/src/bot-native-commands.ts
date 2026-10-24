@@ -1174,7 +1174,7 @@ export const registerTelegramNativeCommands = ({
     chatId: number;
     threadSpec: ReturnType<typeof resolveTelegramThreadSpec>;
     route: ReturnType<typeof resolveTelegramConversationRoute>["route"];
-    mediaLocalRoots: readonly string[] | undefined;
+    mediaAccess: ReturnType<TelegramNativeCommandRuntime["resolveAgentScopedOutboundMediaAccess"]>;
     tableMode: ReturnType<typeof resolveMarkdownTableMode>;
     chunkMode: TelegramChunkMode;
   } | null> => {
@@ -1229,10 +1229,16 @@ export const registerTelegramNativeCommands = ({
         return null;
       }
     }
-    const mediaLocalRoots = nativeCommandRuntime.getAgentScopedMediaLocalRoots(
-      runtimeCfg,
-      route.agentId,
-    );
+    // Roots alone are not enough: a relative attachment path (e.g. from the
+    // message tool) must resolve against the agent workspace before the
+    // allowed-directory check runs, or it falls through to the gateway cwd
+    // and is rejected even though the workspace is an allowed root.
+    const mediaAccess = nativeCommandRuntime.resolveAgentScopedOutboundMediaAccess({
+      cfg: runtimeCfg,
+      agentId: route.agentId,
+      sessionKey: route.sessionKey,
+      accountId: route.accountId,
+    });
     const tableMode = resolveMarkdownTableMode({
       cfg: runtimeCfg,
       channel: "telegram",
@@ -1244,7 +1250,7 @@ export const registerTelegramNativeCommands = ({
       "telegram",
       route.accountId,
     );
-    return { chatId, threadSpec, route, mediaLocalRoots, tableMode, chunkMode };
+    return { chatId, threadSpec, route, mediaAccess, tableMode, chunkMode };
   };
   const buildCommandDeliveryBaseOptions = (params: {
     cfg: OpenClawConfig;
@@ -1254,7 +1260,7 @@ export const registerTelegramNativeCommands = ({
     policySessionKey?: string;
     mirrorIsGroup?: boolean;
     mirrorGroupId?: string;
-    mediaLocalRoots?: readonly string[];
+    mediaAccess?: ReturnType<TelegramNativeCommandRuntime["resolveAgentScopedOutboundMediaAccess"]>;
     threadSpec: ReturnType<typeof resolveTelegramThreadSpec>;
     tableMode: ReturnType<typeof resolveMarkdownTableMode>;
     chunkMode: TelegramChunkMode;
@@ -1273,7 +1279,7 @@ export const registerTelegramNativeCommands = ({
     token: opts.token,
     runtime,
     bot,
-    mediaLocalRoots: params.mediaLocalRoots,
+    mediaAccess: params.mediaAccess,
     mediaMaxBytes,
     replyToMode: params.standardMessages ? peerBotReplyToMode : replyToMode,
     textLimit,
@@ -1388,7 +1394,7 @@ export const registerTelegramNativeCommands = ({
         if (!runtimeContext) {
           return;
         }
-        const { threadSpec, route, mediaLocalRoots, tableMode, chunkMode } = runtimeContext;
+        const { threadSpec, route, mediaAccess, tableMode, chunkMode } = runtimeContext;
         const threadParams = buildTelegramThreadParams(threadSpec) ?? {};
         const originatingTo = buildTelegramRoutingTarget(chatId, threadSpec);
         const executionCfg = getRuntimeConfigSnapshot() ?? cfg;
@@ -1730,7 +1736,7 @@ export const registerTelegramNativeCommands = ({
           policySessionKey: commandTargetSessionKey,
           mirrorIsGroup: isGroup,
           mirrorGroupId: isGroup ? String(chatId) : undefined,
-          mediaLocalRoots,
+          mediaAccess,
           threadSpec,
           tableMode,
           chunkMode,
@@ -2048,7 +2054,7 @@ export const registerTelegramNativeCommands = ({
         if (!runtimeContext) {
           return;
         }
-        const { threadSpec, route, mediaLocalRoots, tableMode, chunkMode } = runtimeContext;
+        const { threadSpec, route, mediaAccess, tableMode, chunkMode } = runtimeContext;
         const targetSessionKey = resolveCommandTargetSessionKey({
           runtimeCfg,
           route,
@@ -2071,7 +2077,7 @@ export const registerTelegramNativeCommands = ({
           policySessionKey: targetSessionKey,
           mirrorIsGroup: isGroup,
           mirrorGroupId: isGroup ? String(chatId) : undefined,
-          mediaLocalRoots,
+          mediaAccess,
           threadSpec,
           tableMode,
           chunkMode,

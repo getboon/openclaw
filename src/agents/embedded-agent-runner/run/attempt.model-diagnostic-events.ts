@@ -38,6 +38,7 @@ import type {
   PluginHookModelCallStartedEvent,
 } from "../../../plugins/hook-types.js";
 import type { StreamFn } from "../../runtime/index.js";
+import type { UsageAttribution } from "../../usage-attribution.js";
 import { derivePromptTokens, normalizeUsage, type UsageLike } from "../../usage.js";
 import { log } from "../logger.js";
 
@@ -48,6 +49,10 @@ type ModelCallDiagnosticContext = {
   senderId?: string;
   senderName?: string;
   senderSource?: string;
+  // Billing-only originating user for runs without an inbound sender (subagent
+  // children, plugin-started runs). Used for the user headers only when senderId
+  // is absent; never sender identity.
+  usageAttribution?: UsageAttribution;
   threadId?: string;
   // Gateway-audience OBO (set on MsgContext.OboToken by anychat-boon-web,
   // ENG-19116) carrying boon-core's signed internal_test claim. Emitted as
@@ -736,11 +741,20 @@ function withBoonUsageHeaders(
   options: ModelCallStreamOptions,
   ctx: ModelCallDiagnosticContext,
 ): ModelCallStreamOptions {
+  // The turn's own sender wins; inherited attribution fills in only when the run has
+  // no sender. The user triple comes from one source so identities never mix.
+  const user = ctx.senderId
+    ? { id: ctx.senderId, name: ctx.senderName, source: ctx.senderSource }
+    : {
+        id: ctx.usageAttribution?.userId,
+        name: ctx.usageAttribution?.userName,
+        source: ctx.usageAttribution?.userSource,
+      };
   const entries: Array<[string, string | undefined]> = [
     [BOON_SESSION_HEADER_NAME, ctx.sessionId],
-    [BOON_USER_HEADER_NAME, ctx.senderId],
-    [BOON_USER_NAME_HEADER_NAME, ctx.senderName],
-    [BOON_USER_SOURCE_HEADER_NAME, ctx.senderSource],
+    [BOON_USER_HEADER_NAME, user.id],
+    [BOON_USER_NAME_HEADER_NAME, user.name],
+    [BOON_USER_SOURCE_HEADER_NAME, user.source],
     [BOON_THREAD_HEADER_NAME, ctx.threadId],
     [BOON_OBO_HEADER_NAME, ctx.oboToken],
   ];

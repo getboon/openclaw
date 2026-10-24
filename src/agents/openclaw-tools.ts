@@ -12,6 +12,7 @@ import { callGateway } from "../gateway/call.js";
 import { isEmbeddedMode } from "../infra/embedded-mode.js";
 import { getActiveSecretsRuntimeConfigSnapshot } from "../secrets/runtime-state.js";
 import { getActiveRuntimeWebToolsMetadata } from "../secrets/runtime-web-tools-state.js";
+import type { InputProvenance } from "../sessions/input-provenance.js";
 import { isCronRunSessionKey } from "../sessions/session-key-utils.js";
 import { resolveTranscriptsConfig } from "../transcripts/config.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.js";
@@ -71,6 +72,7 @@ import { createTtsTool } from "./tools/tts-tool.js";
 import { createUpdatePlanTool } from "./tools/update-plan-tool.js";
 import { createVideoGenerateTool } from "./tools/video-generate-tool.js";
 import { createWebFetchTool, createWebSearchTool } from "./tools/web-tools.js";
+import type { UsageAttribution } from "./usage-attribution.js";
 import { resolveWorkspaceRoot } from "./workspace-dir.js";
 
 type OpenClawToolsDeps = {
@@ -97,6 +99,8 @@ export function createOpenClawTools(
     runSessionKey?: string;
     agentChannel?: GatewayMessageChannel;
     runId?: string;
+    /** Origin of the current turn (unset or `external_user` = a new user message). */
+    inputProvenanceKind?: InputProvenance["kind"];
     agentAccountId?: string;
     /** Delivery target for topic/thread routing. */
     agentTo?: string;
@@ -173,6 +177,10 @@ export function createOpenClawTools(
     recordToolPrepStage?: (name: string) => void;
     /** Trusted sender id from inbound context (not tool args). */
     requesterSenderId?: string | null;
+    /** Billing-only user of this run for usage headers of the sessions it spawns or messages. */
+    requesterUsageAttribution?: UsageAttribution;
+    /** Gateway OBO bearer forwarded in-process to spawned children's first run. */
+    requesterOboToken?: string;
     /** Auth profiles already loaded for this run; used for prompt-time tool availability. */
     authProfileStore?: AuthProfileStore;
     /** Ephemeral session UUID — regenerated on /new and /reset. */
@@ -526,6 +534,7 @@ export function createOpenClawTools(
             sandboxed: options?.sandboxed,
             config: resolvedConfig,
             callGateway: openClawToolsDeps.callGateway,
+            requesterUsageAttribution: options?.requesterUsageAttribution,
           }),
         ]),
     ...(includeSubagentSpawnTool
@@ -547,6 +556,10 @@ export function createOpenClawTools(
             workspaceDir: spawnWorkspaceDir,
             inheritedToolAllowlist: options?.inheritedToolAllowlist,
             inheritedToolDenylist: options?.inheritedToolDenylist,
+            requesterInputProvenanceKind: options?.inputProvenanceKind,
+            requesterTurnRunId: options?.runId,
+            requesterUsageAttribution: options?.requesterUsageAttribution,
+            requesterOboToken: options?.requesterOboToken,
           }),
         ]
       : []),

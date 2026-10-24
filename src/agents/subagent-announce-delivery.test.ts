@@ -190,6 +190,7 @@ async function deliverSlackThreadAnnouncement(params: {
   internalEvents?: AgentInternalEvent[];
   sourceTool?: string;
   requesterAbandoned?: boolean;
+  usageAttribution?: { userId: string; userName?: string; userSource?: string };
 }) {
   // Slack thread delivery exercises all origins because direct, session, and
   // completion routing can differ after a child run outlives its requester.
@@ -222,6 +223,7 @@ async function deliverSlackThreadAnnouncement(params: {
     directIdempotencyKey: params.directIdempotencyKey,
     internalEvents: params.internalEvents,
     sourceTool: params.sourceTool,
+    usageAttribution: params.usageAttribution,
   });
 }
 
@@ -1252,6 +1254,38 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     expect(queueEmbeddedAgentMessageWithOutcome).not.toHaveBeenCalled();
   });
 
+  it("attributes the dormant requester's completion turn to the originating user", async () => {
+    const callGateway = createGatewayMock();
+    const usageAttribution = { userId: "U123", userName: "Ada", userSource: "slack" };
+    await deliverSlackThreadAnnouncement({
+      callGateway,
+      sessionId: "requester-session-attr",
+      isActive: false,
+      expectsCompletionMessage: true,
+      directIdempotencyKey: "announce-attr",
+      usageAttribution,
+    });
+
+    const params = expectGatewayAgentParams(callGateway, { deliver: true });
+    expect(params.usageAttribution).toEqual(usageAttribution);
+    // Attribution is billing-only: the handoff turn still carries no sender identity.
+    expect(params).not.toHaveProperty("senderId");
+  });
+
+  it("sends no usage attribution when none was resolved for the completion", async () => {
+    const callGateway = createGatewayMock();
+    await deliverSlackThreadAnnouncement({
+      callGateway,
+      sessionId: "requester-session-no-attr",
+      isActive: false,
+      expectsCompletionMessage: true,
+      directIdempotencyKey: "announce-no-attr",
+    });
+
+    const params = expectGatewayAgentParams(callGateway, { deliver: true });
+    expect(params).not.toHaveProperty("usageAttribution");
+  });
+
   it("directly delivers direct-message subagent text when the announce agent returns no visible output", async () => {
     const callGateway = createGatewayMock({
       result: {
@@ -1801,6 +1835,8 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     expect(mockCallArg(dispatchGatewayMethodInProcess, 0, 2)).toMatchObject({
       expectFinal: true,
       forceSyntheticClient: true,
+      // Core-built handoff params: the agent method may trust their usageAttribution.
+      inProcessDispatch: true,
       timeoutMs: 120_000,
     });
   });

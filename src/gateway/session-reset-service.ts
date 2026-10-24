@@ -1139,6 +1139,7 @@ export async function performGatewaySessionReset(params: {
             spawnedCwd: params.clearSpawnedCwd
               ? undefined
               : (params.spawnedCwd ?? currentEntry?.spawnedCwd),
+            usageAttribution: currentEntry?.usageAttribution,
             parentSessionKey: currentEntry?.parentSessionKey,
             forkedFromParent: currentEntry?.forkedFromParent,
             spawnDepth: currentEntry?.spawnDepth,

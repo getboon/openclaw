@@ -469,7 +469,7 @@ describe("deliverWebReply", () => {
     await deliverWebReply({
       replyResult: { text: "aaaaaa", mediaUrl: "http://example.com/img.jpg" },
       msg,
-      mediaLocalRoots,
+      mediaAccess: { localRoots: mediaLocalRoots },
       maxMediaBytes: 1024 * 1024,
       textLimit: 3,
       replyLogger,
@@ -479,6 +479,7 @@ describe("deliverWebReply", () => {
     expect(loadWebMedia).toHaveBeenCalledWith("http://example.com/img.jpg", {
       maxBytes: 1024 * 1024,
       localRoots: mediaLocalRoots,
+      hostReadCapability: false,
     });
 
     const mediaPayload = requireRecord(
@@ -492,6 +493,59 @@ describe("deliverWebReply", () => {
     expect(msg.platform.reply).toHaveBeenCalledWith("aaa", undefined);
     findLoggerContext(replyLogger.info, "auto-reply sent (media)", "replyLogger.info");
     expect(logVerbose).toHaveBeenCalled();
+  });
+
+  it("forwards mediaAccess workspaceDir to the media loader for relative paths", async () => {
+    const msg = makeMsg();
+    mockLoadedImageMedia();
+
+    await deliverWebReply({
+      replyResult: { text: "pic", mediaUrl: "projects/lazo-lodge/estimate.pdf" },
+      msg,
+      mediaAccess: {
+        localRoots: ["/tmp/agent-root"],
+        workspaceDir: "/tmp/agent-root/workspace",
+      },
+      maxMediaBytes: 1024 * 1024,
+      textLimit: 200,
+      replyLogger,
+      skipLog: true,
+    });
+
+    expect(loadWebMedia).toHaveBeenCalledWith("projects/lazo-lodge/estimate.pdf", {
+      maxBytes: 1024 * 1024,
+      localRoots: ["/tmp/agent-root"],
+      workspaceDir: "/tmp/agent-root/workspace",
+      hostReadCapability: false,
+    });
+  });
+
+  it("forwards mediaAccess.readFile as a host reader instead of silently dropping it", async () => {
+    const msg = makeMsg();
+    mockLoadedImageMedia();
+    const readFile = vi.fn(async () => Buffer.from("fake-image-bytes"));
+
+    await deliverWebReply({
+      replyResult: { text: "pic", mediaUrl: "projects/lazo-lodge/estimate.pdf" },
+      msg,
+      mediaAccess: {
+        localRoots: ["/tmp/agent-root"],
+        workspaceDir: "/tmp/agent-root/workspace",
+        readFile,
+      },
+      maxMediaBytes: 1024 * 1024,
+      textLimit: 200,
+      replyLogger,
+      skipLog: true,
+    });
+
+    expect(loadWebMedia).toHaveBeenCalledWith("projects/lazo-lodge/estimate.pdf", {
+      maxBytes: 1024 * 1024,
+      localRoots: ["/tmp/agent-root"],
+      workspaceDir: "/tmp/agent-root/workspace",
+      readFile,
+      hostReadCapability: true,
+    });
   });
 
   it("marks errors visible after accepted media delivery", async () => {
@@ -688,10 +742,12 @@ describe("deliverWebReply", () => {
     expect(loadWebMedia).toHaveBeenNthCalledWith(1, "http://example.com/bad.jpg", {
       maxBytes: 1024 * 1024,
       localRoots: undefined,
+      hostReadCapability: false,
     });
     expect(loadWebMedia).toHaveBeenNthCalledWith(2, "http://example.com/good.pdf", {
       maxBytes: 1024 * 1024,
       localRoots: undefined,
+      hostReadCapability: false,
     });
     expect(msg.platform.sendMedia).toHaveBeenCalledTimes(2);
     const secondPayload = requireRecord(
@@ -827,6 +883,7 @@ describe("deliverWebReply", () => {
     expect(loadWebMedia).toHaveBeenCalledWith("/tmp/voice.ogg", {
       maxBytes: 1024 * 1024,
       localRoots: undefined,
+      hostReadCapability: false,
     });
     expect(msg.platform.sendMedia).toHaveBeenCalledTimes(1);
     const mediaPayload = requireRecord(

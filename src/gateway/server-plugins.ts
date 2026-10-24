@@ -251,6 +251,7 @@ function createSyntheticOperatorClient(params?: {
   allowModelOverride?: boolean;
   agentRunTracking?: "plugin_subagent";
   pluginSubagentToolsAllow?: string[];
+  inProcessDispatch?: boolean;
   pluginRuntimeOwnerId?: string;
   scopes?: string[];
 }): GatewayRequestOptions["client"] {
@@ -272,6 +273,7 @@ function createSyntheticOperatorClient(params?: {
       scopes: params?.scopes ?? [WRITE_SCOPE],
     },
     internal: {
+      ...(params?.inProcessDispatch ? { inProcessDispatch: true } : {}),
       allowModelOverride: params?.allowModelOverride === true,
       ...(params?.agentRunTracking ? { agentRunTracking: params.agentRunTracking } : {}),
       ...(params?.pluginSubagentToolsAllow
@@ -339,6 +341,19 @@ function mergeGatewayClientInternal(
   };
 }
 
+// Request scopes flow through AsyncLocalStorage into the runs a handler starts, so a
+// nested dispatch would otherwise inherit an outer core-built request's trust flag.
+// The flag must describe only the params of the dispatch that sets it.
+function withoutInheritedInProcessDispatch(
+  client: GatewayRequestOptions["client"] | undefined,
+): GatewayRequestOptions["client"] | undefined {
+  if (!client?.internal?.inProcessDispatch) {
+    return client;
+  }
+  const { inProcessDispatch: _inherited, ...internal } = client.internal;
+  return { ...client, internal };
+}
+
 type DispatchGatewayMethodInProcessOptions = {
   allowSyntheticModelOverride?: boolean;
   agentRunTracking?: "plugin_subagent";
@@ -346,6 +361,12 @@ type DispatchGatewayMethodInProcessOptions = {
   disableSyntheticClient?: boolean;
   expectFinal?: boolean;
   forceSyntheticClient?: boolean;
+  /**
+   * Core-built params only: marks the client as trusted in-process dispatch so the
+   * `agent` method honors `usageAttribution`/`oboToken`. Never set for caller-supplied
+   * params (the plugin SDK `dispatchGatewayMethod` proxies authenticated HTTP bodies).
+   */
+  inProcessDispatch?: boolean;
   pluginRuntimeOwnerId?: string;
   requireScopedClient?: boolean;
   syntheticScopes?: string[];
@@ -458,17 +479,19 @@ export async function dispatchGatewayMethodInProcessRaw(
     allowModelOverride: options?.allowSyntheticModelOverride === true,
     agentRunTracking: options?.agentRunTracking,
     pluginSubagentToolsAllow: options?.pluginSubagentToolsAllow,
+    inProcessDispatch: options?.inProcessDispatch,
     ...(pluginRuntimeOwnerId ? { pluginRuntimeOwnerId } : {}),
     scopes: options?.syntheticScopes,
   });
   const scopedClient = mergeGatewayClientInternal(
-    scope?.client,
-    pluginRuntimeOwnerId || options?.agentRunTracking
+    withoutInheritedInProcessDispatch(scope?.client),
+    pluginRuntimeOwnerId || options?.agentRunTracking || options?.inProcessDispatch
       ? {
           ...(options?.agentRunTracking ? { agentRunTracking: options.agentRunTracking } : {}),
           ...(options?.pluginSubagentToolsAllow
             ? { pluginSubagentToolsAllow: [...options.pluginSubagentToolsAllow] }
             : {}),
+          ...(options?.inProcessDispatch ? { inProcessDispatch: true } : {}),
           ...(pluginRuntimeOwnerId ? { pluginRuntimeOwnerId } : {}),
         }
       : undefined,
@@ -655,6 +678,7 @@ export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
           ...(params.lane && { lane: params.lane }),
           ...(params.cwd && { cwd: params.cwd }),
           ...(params.lightContext === true && { bootstrapContextMode: "lightweight" }),
+          ...(params.usageAttribution && { usageAttribution: params.usageAttribution }),
           // The gateway `agent` schema requires `idempotencyKey: NonEmptyString`,
           // so fall back to a generated UUID when the caller omits it. Without
           // this, plugin subagent runs (for example memory-core dreaming
@@ -665,6 +689,7 @@ export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
           allowSyntheticModelOverride,
           agentRunTracking: "plugin_subagent",
           ...(params.disableTools === true ? { pluginSubagentToolsAllow: [] } : {}),
+          inProcessDispatch: true,
           ...(pluginId ? { pluginRuntimeOwnerId: pluginId } : {}),
         },
       );

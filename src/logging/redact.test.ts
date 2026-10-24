@@ -266,6 +266,19 @@ describe("redactSensitiveText", () => {
     );
   });
 
+  it("masks gateway OBO bearer fields and headers", () => {
+    const token = "obo_abcdefghijklmnopqrstuvwxyz0123";
+    expect(redactSensitiveFieldValue("oboToken", token)).toBe("obo_ab…0123");
+    expect(redactSensitiveFieldValue("obo_token", token)).toBe("obo_ab…0123");
+    expect(redactSensitiveFieldValue("obo-token", token)).toBe("obo_ab…0123");
+    expect(redactSensitiveText(`x-boon-gateway-obo-token: ${token}`, { mode: "tools" })).toBe(
+      "x-boon-gateway-obo-token: obo_ab…0123",
+    );
+    expect(
+      redactSensitiveText(`{ 'x-boon-gateway-obo-token': '${token}' }`, { mode: "tools" }),
+    ).toBe("{ 'x-boon-gateway-obo-token': 'obo_ab…0123' }");
+  });
+
   it("masks structured payment credential field values by key", () => {
     expect(redactSensitiveFieldValue("sharedPaymentToken", "spt_abcdefghijklmnopqrstuvwxyz")).toBe(
       "spt_ab…wxyz",

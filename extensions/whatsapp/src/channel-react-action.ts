@@ -1,6 +1,7 @@
 // Whatsapp plugin module implements channel react action behavior.
 import { readBooleanParam } from "openclaw/plugin-sdk/boolean-param";
 import { jsonResult } from "openclaw/plugin-sdk/channel-actions";
+import type { OutboundMediaAccess } from "openclaw/plugin-sdk/outbound-media";
 import {
   isWhatsAppGroupJid,
   resolveAuthorizedWhatsAppOutboundTarget,
@@ -23,10 +24,7 @@ type WhatsAppMessageActionParams = {
   cfg: OpenClawConfig;
   accountId?: string | null;
   requesterSenderId?: string | null;
-  mediaAccess?: {
-    localRoots?: readonly string[];
-    readFile?: (filePath: string) => Promise<Buffer>;
-  };
+  mediaAccess?: OutboundMediaAccess;
   mediaLocalRoots?: readonly string[];
   mediaReadFile?: (filePath: string) => Promise<Buffer>;
   toolContext?: {

@@ -38,6 +38,11 @@ The prompt is compact, with fixed sections:
 - **OpenClaw Self-Update**: inspect config safely with `config.schema.lookup`, patch with `config.patch`, replace the full config with `config.apply`, and run `update.run` only on explicit user request. The agent-facing `gateway` tool refuses to rewrite `tools.exec.ask` / `tools.exec.security`, including legacy `tools.bash.*` aliases that normalize to those protected paths.
 - **Workspace**: working directory (`agents.defaults.workspace`).
 - **Documentation**: local docs/source path and when to read them.
+- **Attachments**: what a `media://inbound/<id>` ref (shown for an uploaded
+  file) resolves to on disk, so the model can pass a real path to an
+  external CLI run through `exec` instead of the opaque ref. In a sandboxed
+  run, the stated path is relative to the sandbox working directory instead
+  of an absolute host path.
 - **Workspace Files (injected)**: notes that bootstrap files are included below.
 - **Sandbox** (when enabled): sandboxed runtime, sandbox paths, elevated-exec availability.
 - **Current Date & Time**: time zone only (cache-stable; the live clock comes from `session_status`).
@@ -68,7 +73,7 @@ On channels with native approval cards/buttons, the prompt tells the agent to re
 OpenClaw renders smaller system prompts for sub-agents. The runtime sets a `promptMode` per run (not user-facing config):
 
 - `full` (default): all sections above.
-- `minimal`: used for sub-agents; omits the memory prompt section (bundled as **Memory Recall**), **OpenClaw Self-Update**, **Model Aliases**, **User Identity**, **Assistant Output Directives**, **Messaging**, **Silent Replies**, and **Heartbeats**. Tooling, **Safety**, **Skills** (when supplied), Workspace, Sandbox, Current Date & Time (when known), Runtime, and injected context stay available.
+- `minimal`: used for sub-agents; omits the memory prompt section (bundled as **Memory Recall**), **OpenClaw Self-Update**, **Model Aliases**, **User Identity**, **Attachments**, **Assistant Output Directives**, **Messaging**, **Silent Replies**, and **Heartbeats**. Tooling, **Safety**, **Skills** (when supplied), Workspace, Sandbox, Current Date & Time (when known), Runtime, and injected context stay available.
 - `none`: returns only the base identity line.
 
 Under `promptMode=minimal`, extra injected prompts are labeled **Subagent Context** instead of **Group Chat Context**.

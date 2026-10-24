@@ -34,6 +34,7 @@ import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
 import { isLikelyContextOverflowError } from "./embedded-agent-helpers/errors.js";
 import type { FailoverReason } from "./embedded-agent-helpers/types.js";
 import { isOpenClawAbortableWrapper } from "./embedded-agent-runner/run/abortable.js";
+import { withStreamCutoffRetryBudget } from "./embedded-agent-runner/run/stream-cutoff-retry-budget.js";
 import {
   FailoverError,
   buildFailoverRemediationHint,
@@ -1409,7 +1410,10 @@ export async function runWithModelFallback<T>(
 ): Promise<ModelFallbackRunResult<T>> {
   const deferredSuspension: DeferredSessionSuspensionState = {};
   try {
-    const result = await runWithModelFallbackInternal(params, deferredSuspension);
+    // All candidates of this execution share one stream cut-off retry budget.
+    const result = await withStreamCutoffRetryBudget(() =>
+      runWithModelFallbackInternal(params, deferredSuspension),
+    );
     if (result.outcome === "exhausted") {
       flushDeferredSessionSuspension(deferredSuspension);
     }

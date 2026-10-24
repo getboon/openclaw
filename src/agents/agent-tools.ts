@@ -23,6 +23,7 @@ import { logWarn } from "../logger.js";
 import type { PluginHookChannelContext } from "../plugins/hook-types.js";
 import { copyPluginToolMeta, getPluginToolMeta } from "../plugins/tools.js";
 import { GATEWAY_OWNER_ONLY_CORE_TOOLS } from "../security/dangerous-tools.js";
+import type { InputProvenance } from "../sessions/input-provenance.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import type { SkillSnapshot, SkillUsagePath } from "../skills/types.js";
 import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
@@ -117,6 +118,7 @@ import {
   replaceWithEffectiveCronCreatorToolAllowlist,
   type CronCreatorToolAllowlistEntry,
 } from "./tools/cron-tool.js";
+import type { UsageAttribution } from "./usage-attribution.js";
 
 const MEMORY_FLUSH_ALLOWED_TOOL_NAMES = new Set(["read", "write"]);
 
@@ -412,6 +414,8 @@ export function createOpenClawCodingTools(options?: {
   oneShotCliRun?: boolean;
   /** Stable run identifier for this agent invocation. */
   runId?: string;
+  /** Origin of the current turn (unset or `external_user` = a new user message). */
+  inputProvenanceKind?: InputProvenance["kind"];
   /** Device-scoped operator session allowed to review approvals initiated by this run. */
   approvalReviewerDeviceId?: string;
   /** Diagnostic trace context for hook/log correlation during this run. */
@@ -487,6 +491,10 @@ export function createOpenClawCodingTools(options?: {
   senderName?: string | null;
   senderUsername?: string | null;
   senderE164?: string | null;
+  /** Billing-only user of this run for usage headers of the sessions it spawns or messages. */
+  requesterUsageAttribution?: UsageAttribution;
+  /** Gateway OBO bearer of this run; forwarded in-process to children's first run only. Never log or persist. */
+  requesterOboToken?: string;
   /** Reply-to mode for Slack auto-threading. */
   replyToMode?: "off" | "first" | "all" | "batched";
   /** Mutable ref to track if a reply was sent (for "first" mode). */
@@ -1043,6 +1051,7 @@ export function createOpenClawCodingTools(options?: {
           allowHostBrowserControl: sandbox ? sandbox.browserAllowHostControl : true,
           agentSessionKey: options?.sessionKey,
           runId: options?.runId,
+          inputProvenanceKind: options?.inputProvenanceKind,
           runSessionKey: options?.runSessionKey,
           agentChannel: resolveGatewayMessageChannel(options?.messageProvider),
           agentAccountId: options?.agentAccountId,
@@ -1087,6 +1096,8 @@ export function createOpenClawCodingTools(options?: {
           ...(cronSelfRemoveOnlyJobId ? { cronSelfRemoveOnlyJobId } : {}),
           requesterAgentIdOverride: agentId,
           requesterSenderId: options?.senderId,
+          requesterUsageAttribution: options?.requesterUsageAttribution,
+          requesterOboToken: options?.requesterOboToken,
           senderIsOwner: options?.senderIsOwner,
           authProfileStore: options?.authProfileStore,
           sessionId: options?.sessionId,

@@ -542,6 +542,11 @@ export type AgentDefaultsConfig = {
     thinking?: string;
     /** Default run timeout in seconds for spawned sub-agents (explicit 0 = no timeout; unset inherits `agents.defaults.timeoutSeconds`). */
     runTimeoutSeconds?: number;
+    /**
+     * Cap on consecutive failed sub-agent runs per parent session before the next spawn is
+     * refused and the agent must check in with the user. Unset/0 = no cap.
+     */
+    maxConsecutiveFailures?: number;
     /** Gateway timeout in ms for sub-agent announce delivery calls (default: 120000). */
     announceTimeoutMs?: number;
     /** Require explicit agentId in sessions_spawn (no default same-as-caller). Default: false. */

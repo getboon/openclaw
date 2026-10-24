@@ -2,6 +2,7 @@
 // MCP runtime retirement after completed nested turns.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CallGatewayOptions } from "../../gateway/call.js";
+import { testing as usageAttributionDispatchTesting } from "../usage-attribution-dispatch.js";
 import { runAgentStep, testing } from "./agent-step.js";
 
 const runWaitMocks = vi.hoisted(() => ({
@@ -19,6 +20,13 @@ vi.mock("../run-wait.js", () => ({
 
 vi.mock("../agent-bundle-mcp-tools.js", () => ({
   retireSessionMcpRuntimeForSessionKey: bundleMcpRuntimeMocks.retireSessionMcpRuntimeForSessionKey,
+}));
+
+// Attributed steps dispatch in-process; tests inject that seam instead of loading
+// the plugin loader/registry behind the real server-plugins module.
+vi.mock("../../gateway/server-plugins.js", () => ({
+  dispatchGatewayMethodInProcess: vi.fn(),
+  hasInProcessGatewayContext: () => false,
 }));
 
 describe("runAgentStep", () => {
@@ -131,5 +139,64 @@ describe("runAgentStep", () => {
     expect(ingress?.message).toContain("internal announce step");
     expect(ingress?.sourceReplyDeliveryMode).toBe("message_tool_only");
     expect(ingress?.transcriptMessage).toBe("");
+  });
+
+  it("attributes nested steps to the originating user on both execution paths", async () => {
+    const bob = { userId: "U-BOB", userName: "Bob", userSource: "slack" };
+    const dispatched: unknown[][] = [];
+    const gatewayCalls: CallGatewayOptions[] = [];
+    const agentCommandFromIngress = vi.fn(async () => ({
+      payloads: [{ text: "done", mediaUrl: null }],
+      meta: { durationMs: 1 },
+    }));
+    testing.setDepsForTest({
+      agentCommandFromIngress,
+      callGateway: async <T = unknown>(opts: CallGatewayOptions): Promise<T> => {
+        gatewayCalls.push(opts);
+        return { runId: "run-socket" } as T;
+      },
+    });
+    usageAttributionDispatchTesting.setDepsForTest({
+      hasInProcessGatewayContext: () => true,
+      dispatchGatewayMethodInProcess: (async (...args: unknown[]) => {
+        dispatched.push(args);
+        return { runId: "run-in-process" };
+      }) as never,
+    });
+    runWaitMocks.waitForAgentRunAndReadUpdatedAssistantReply.mockResolvedValue({
+      status: "ok",
+      replyText: "done",
+    });
+    const step = {
+      sessionKey: "agent:main:subagent:child",
+      message: "hello",
+      extraSystemPrompt: "reply briefly",
+      timeoutMs: 10_000,
+      usageAttribution: bob,
+    };
+
+    try {
+      await runAgentStep(step);
+      const [method, params, options] = dispatched[0] ?? [];
+      expect(method).toBe("agent");
+      expect((params as { usageAttribution?: unknown }).usageAttribution).toEqual(bob);
+      expect(options).toMatchObject({ inProcessDispatch: true });
+      expect(gatewayCalls).toStrictEqual([]);
+
+      // Without an in-process gateway the socket call stays unchanged.
+      usageAttributionDispatchTesting.setDepsForTest({ hasInProcessGatewayContext: () => false });
+      await runAgentStep(step);
+      expect(gatewayCalls[0]?.method).toBe("agent");
+      expect(gatewayCalls[0]?.params).not.toHaveProperty("usageAttribution");
+
+      // The transcript path runs the command in-process and carries the user directly.
+      await runAgentStep({ ...step, transcriptMessage: "" });
+      const ingressCalls = agentCommandFromIngress.mock.calls as unknown as Array<
+        [{ usageAttribution?: unknown }]
+      >;
+      expect(ingressCalls[0]?.[0]?.usageAttribution).toEqual(bob);
+    } finally {
+      usageAttributionDispatchTesting.setDepsForTest();
+    }
   });
 });

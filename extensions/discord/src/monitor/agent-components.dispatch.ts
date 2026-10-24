@@ -9,7 +9,7 @@ import { isDangerousNameMatchingEnabled } from "openclaw/plugin-sdk/dangerous-na
 import { createLazyRuntimeModule } from "openclaw/plugin-sdk/lazy-runtime";
 import { logError } from "openclaw/plugin-sdk/logging-core";
 import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/markdown-table-runtime";
-import { getAgentScopedMediaLocalRoots } from "openclaw/plugin-sdk/media-runtime";
+import { resolveAgentScopedOutboundMediaAccess } from "openclaw/plugin-sdk/media-runtime";
 import { createNonExitingRuntime, logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { resolveDiscordMaxLinesPerMessage } from "../accounts.js";
 import { createDiscordRestClient } from "../client.js";
@@ -249,7 +249,16 @@ export async function dispatchDiscordComponentEvent(params: {
     token,
     accountId,
   }).rest;
-  const mediaLocalRoots = getAgentScopedMediaLocalRoots(ctx.cfg, agentId);
+  // Roots alone are not enough: a relative attachment path (e.g. from the
+  // message tool) must resolve against the agent workspace before the
+  // allowed-directory check runs, or it falls through to the gateway cwd and
+  // is rejected even though the workspace is an allowed root.
+  const mediaAccess = resolveAgentScopedOutboundMediaAccess({
+    cfg: ctx.cfg,
+    agentId,
+    sessionKey,
+    accountId,
+  });
   const replyToMode =
     ctx.discordConfig?.replyToMode ?? ctx.cfg.channels?.discord?.replyToMode ?? "off";
   const replyReference = createReplyReferencePlanner({
@@ -327,7 +336,7 @@ export async function dispatchDiscordComponentEvent(params: {
               }),
               tableMode,
               chunkMode: resolveChunkMode(ctx.cfg, "discord", accountId),
-              mediaLocalRoots,
+              mediaAccess,
               kind: info.kind,
             });
             replyReference.markSent();

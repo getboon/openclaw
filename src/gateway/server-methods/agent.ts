@@ -63,6 +63,10 @@ import {
   resolveIngressWorkspaceOverrideForSpawnedRun,
 } from "../../agents/spawned-context.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
+import {
+  normalizeUsageAttribution,
+  type UsageAttribution,
+} from "../../agents/usage-attribution.js";
 import { agentCommandFromIngress } from "../../commands/agent.js";
 import {
   evaluateSessionFreshness,
@@ -300,6 +304,28 @@ function resolveAllowModelOverrideFromClient(
   client: GatewayRequestHandlerOptions["client"],
 ): boolean {
   return clientHasAdminScope(client) || client?.internal?.allowModelOverride === true;
+}
+
+// Usage attribution only changes billing headers, but it is still caller-supplied
+// identity: accept it only from in-process dispatch (subagent spawn, plugin
+// runtime), never from a socket client. The request lane is caller-controlled and
+// is not a trust signal on its own.
+function resolveTrustedUsageAttribution(
+  client: GatewayRequestHandlerOptions["client"],
+  value: unknown,
+): UsageAttribution | undefined {
+  return client?.internal?.inProcessDispatch === true
+    ? normalizeUsageAttribution(value)
+    : undefined;
+}
+
+// Gateway-audience OBO token forwarded for the run's model calls. It is a bearer
+// credential: same in-process-only trust gate as usage attribution, never persisted.
+function resolveTrustedOboToken(
+  client: GatewayRequestHandlerOptions["client"],
+  value: unknown,
+): string | undefined {
+  return client?.internal?.inProcessDispatch === true ? normalizeOptionalString(value) : undefined;
 }
 
 function resolveCanUseInternalRuntimeHandoff(
@@ -1175,6 +1201,8 @@ export const agentHandlers: GatewayRequestHandlers = {
       inputProvenance?: InputProvenance;
       workspaceDir?: string;
       voiceWakeTrigger?: string;
+      usageAttribution?: unknown;
+      oboToken?: unknown;
     };
     if (request.cwd && !path.isAbsolute(request.cwd)) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "cwd must be absolute"));
@@ -1189,6 +1217,8 @@ export const agentHandlers: GatewayRequestHandlers = {
       return;
     }
     const allowModelOverride = resolveAllowModelOverrideFromClient(client);
+    const usageAttribution = resolveTrustedUsageAttribution(client, request.usageAttribution);
+    const oboToken = resolveTrustedOboToken(client, request.oboToken);
     const canUseInternalRuntimeHandoff = resolveCanUseInternalRuntimeHandoff(client);
     const requestedModelOverride = Boolean(request.provider || request.model);
     const requestedInternalSessionEffects = request.sessionEffects === "internal";
@@ -3384,6 +3414,8 @@ export const agentHandlers: GatewayRequestHandlers = {
               // Gateway subagent and node runtimes, not standalone placeholders.
               allowGatewaySubagentBinding: true,
               allowModelOverride,
+              ...(usageAttribution ? { usageAttribution } : {}),
+              ...(oboToken ? { oboToken } : {}),
             },
             runId,
             dedupeKeys: agentDedupeKeys,
