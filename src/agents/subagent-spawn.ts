@@ -273,7 +273,7 @@ async function callSubagentGateway(
     params.params,
   );
   const scopes =
-    params.scopes ?? (leastPrivilegeScopes.includes(ADMIN_SCOPE) ? [ADMIN_SCOPE] : undefined);
+    params.scopes ?? (leastPrivilegeScopes.includes(ADMIN_SCOPE) ? [ADMIN_SCOPE] : leastPrivilegeScopes);
   const request = {
     ...params,
     ...(scopes != null ? { scopes } : {}),

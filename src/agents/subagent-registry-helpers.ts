@@ -168,8 +168,11 @@ export async function persistSubagentSessionTiming(
       } else {
         delete next.status;
       }
-      if (status && status !== "killed") {
-        delete next.abortedLastRun;
+      if (status && status !== "killed" && next.abortedLastRun !== undefined) {
+        // Clear to `false`, not delete: restart-resume boot logic may have just
+        // explicitly cleared a crash marker to `false` moments before this
+        // same run's completion lands here, and that explicit clear must survive.
+        next.abortedLastRun = false;
       }
       return next;
     },

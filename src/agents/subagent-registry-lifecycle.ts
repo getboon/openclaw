@@ -1384,6 +1384,14 @@ export function createSubagentRegistryLifecycleController(params: {
     startedAt?: number;
     suppressSessionEffects?: boolean;
     completionSnapshot?: { resultText: string | null; capturedAt: number };
+    /**
+     * Set only by the lifecycle-error/timeout grace-timer retries. These are
+     * low-confidence fallback signals (no further event arrived within the
+     * grace window), so they may confirm an already-killed run (clearing its
+     * provisional marker so cleanup/hooks proceed) but must never replace the
+     * operator's kill outcome/reason with their own guessed classification.
+     */
+    isLowConfidenceGraceRetry?: boolean;
   };
 
   const completeSubagentRun = async (completeParams: CompleteSubagentRunParams) => {
@@ -1504,6 +1512,22 @@ export function createSubagentRegistryLifecycleController(params: {
         if (stableTaskCancellation && !completionPredatesCancellation) {
           // tasks.cancel promotes the provisional marker to durable operator
           // intent. Only an already-durable earlier completion may reopen it.
+          return;
+        }
+        if (completeParams.isLowConfidenceGraceRetry) {
+          // A delayed error/timeout grace-timer retry is a low-confidence
+          // fallback classification arriving after the operator's kill. It
+          // must not replace the kill's outcome/reason, but it is still the
+          // confirming signal that ends the kill's provisional window, so run
+          // the exactly-once ended hook with the kill's own canonical values.
+          entry.killReconciliation = undefined;
+          params.persist();
+          await params.emitSubagentEndedHookForRun({
+            entry,
+            reason: SUBAGENT_ENDED_REASON_KILLED,
+            sendFarewell: completeParams.sendFarewell,
+            accountId: completeParams.accountId,
+          });
           return;
         }
         provisionalKillSnapshot = structuredClone(currentEntry);

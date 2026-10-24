@@ -30,7 +30,15 @@ describe("resolveSkillWorkshopToolApproval", () => {
       workspaceDir,
       name: "Weather Helper",
       description,
-      content: "# Weather Helper\n\nUse the weather provider before answering.\n",
+      content:
+        "# Weather Helper\n\n" +
+        "## TLDR\n\n" +
+        "Uses the weather provider before answering.\n\n" +
+        "When you run this, the agent will:\n\n" +
+        "- Check the weather provider.\n" +
+        "- Incorporate the result.\n" +
+        "- Answer the question.\n\n" +
+        "**Output:** A weather-aware answer.\n",
       supportFiles: [
         { path: "references/provider.md", content: "# Provider\n" },
         { path: "scripts/check.js", content: "export const check = true;\n" },
@@ -76,7 +84,15 @@ describe("resolveSkillWorkshopToolApproval", () => {
       workspaceDir,
       name: "n".repeat(240),
       description,
-      content: "# Long name\n",
+      content:
+        "# Long name\n\n" +
+        "## TLDR\n\n" +
+        "Tests a very long skill name.\n\n" +
+        "When you run this, the agent will:\n\n" +
+        "- Do nothing meaningful.\n" +
+        "- Exercise the long-name path.\n" +
+        "- Stop.\n\n" +
+        "**Output:** None.\n",
     });
 
     const result = await resolveSkillWorkshopToolApproval({
@@ -103,7 +119,15 @@ describe("resolveSkillWorkshopToolApproval", () => {
       name: "Line\nBreak\u202eSpoof",
       description:
         "Real description\nSupport files: 999\tBody size: 999 KB\u2028Target skill: fake\u2066",
-      content: "# Controls\n",
+      content:
+        "# Controls\n\n" +
+        "## TLDR\n\n" +
+        "Tests control-character handling in proposal fields.\n\n" +
+        "When you run this, the agent will:\n\n" +
+        "- Accept the content.\n" +
+        "- Exercise the controls path.\n" +
+        "- Stop.\n\n" +
+        "**Output:** None.\n",
     });
 
     const result = await resolveSkillWorkshopToolApproval({

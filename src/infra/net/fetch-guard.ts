@@ -537,18 +537,30 @@ async function fetchWithSsrFGuardInternal(
       if (canUseTrustedEnvProxy) {
         dispatcher = createHttp1EnvHttpProxyAgent(undefined, timeoutMs);
       } else if (canUseManagedProxy) {
-        if (shouldCheckManagedProxyBypass) {
+        // A caller-declared configured-local-origin target always gets resolved and
+        // policy-checked, even when its base URL isn't itself a loopback literal and
+        // the dispatcher ends up being the plain env-proxy agent. Skipping this for
+        // such targets would let a trusted public hostname that DNS-rebinds to
+        // loopback/private slip through unchecked (ENG security regression; see
+        // "blocks a trusted public hostname that resolves to loopback on the managed
+        // proxy path" in fetch-guard.ssrf.test.ts). Generic env-proxy passthrough
+        // with no configured-local-origin claim intentionally skips local DNS
+        // resolution entirely; the proxy resolves it (see "does not resolve target
+        // DNS before strict managed-proxy dispatch" in the same file).
+        if (params.managedProxyBypass) {
           const pinned = await resolvePinnedHostnameWithPolicy(parsedUrl.hostname, {
             lookupFn: params.lookupFn,
             policy: policyForUrl,
           });
-          dispatcher = shouldUseConfiguredLocalOriginManagedProxyBypass({
-            url: parsedUrl,
-            managedProxyBypass: params.managedProxyBypass,
-            resolvedAddresses: pinned.addresses,
-          })
-            ? createPinnedDispatcher(pinned, dispatcherPolicy, policyForUrl, timeoutMs)
-            : createHttp1EnvHttpProxyAgent(undefined, timeoutMs);
+          dispatcher =
+            shouldCheckManagedProxyBypass &&
+            shouldUseConfiguredLocalOriginManagedProxyBypass({
+              url: parsedUrl,
+              managedProxyBypass: params.managedProxyBypass,
+              resolvedAddresses: pinned.addresses,
+            })
+              ? createPinnedDispatcher(pinned, dispatcherPolicy, policyForUrl, timeoutMs)
+              : createHttp1EnvHttpProxyAgent(undefined, timeoutMs);
         } else {
           dispatcher = createHttp1EnvHttpProxyAgent(undefined, timeoutMs);
         }

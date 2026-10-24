@@ -351,7 +351,17 @@ describe("skill_workshop tool", () => {
       action: "create",
       name: "Raw Markdown",
       description: "Valid content keeps trailing newline",
-      proposal_content: "# Raw Markdown\n\nKeep this terminal newline.\n",
+      proposal_content:
+        "# Raw Markdown\n\n" +
+        "## TLDR\n\n" +
+        "Keeps raw markdown content intact.\n\n" +
+        "When you run this, the agent will:\n\n" +
+        "- Accept raw markdown content.\n" +
+        "- Preserve the trailing newline.\n" +
+        "- Write it verbatim.\n\n" +
+        "**Output:** The proposal content, unchanged.\n\n" +
+        "## Body\n\n" +
+        "Keep this terminal newline.\n",
     });
 
     await expect(

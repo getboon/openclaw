@@ -526,7 +526,7 @@ async function extractFileContext(params: {
     }
     if (!blockText) {
       if (extracted?.images && extracted.images.length > 0) {
-        blockText = "[PDF content rendered to images]";
+        blockText = "[PDF content rendered to images; images not forwarded to model]";
       } else {
         blockText = "[No extractable text]";
       }

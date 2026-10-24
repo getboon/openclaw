@@ -141,7 +141,7 @@ describe("downloadSlackFile", () => {
         url_private_download: "https://files.slack-gov.com/files-pri/T1-F123/image.png",
       }),
     });
-    resolveSlackMedia.mockResolvedValueOnce([makeResolvedSlackMedia()]);
+    resolveSlackMedia.mockResolvedValueOnce({ media: [makeResolvedSlackMedia()], failures: [] });
 
     await downloadSlackFile("F123", {
       client,
@@ -236,7 +236,7 @@ describe("downloadSlackFile", () => {
     client.files.info.mockResolvedValueOnce({
       file: makeSlackFileInfo(file),
     });
-    resolveSlackMedia.mockResolvedValueOnce([makeResolvedSlackMedia()]);
+    resolveSlackMedia.mockResolvedValueOnce({ media: [makeResolvedSlackMedia()], failures: [] });
 
     const result = await downloadSlackFile("F123", {
       client,
@@ -257,7 +257,7 @@ describe("downloadSlackFile", () => {
         skipped_shares: true,
       }),
     });
-    resolveSlackMedia.mockResolvedValueOnce([makeResolvedSlackMedia()]);
+    resolveSlackMedia.mockResolvedValueOnce({ media: [makeResolvedSlackMedia()], failures: [] });
 
     const result = await downloadSlackFile("F123", {
       client,
@@ -319,7 +319,7 @@ describe("downloadSlackFile", () => {
         shares: { private: { C123: [share] } },
       }),
     });
-    resolveSlackMedia.mockResolvedValueOnce([makeResolvedSlackMedia()]);
+    resolveSlackMedia.mockResolvedValueOnce({ media: [makeResolvedSlackMedia()], failures: [] });
 
     const result = await downloadSlackFile("F123", {
       client,
@@ -339,7 +339,7 @@ describe("downloadSlackFile", () => {
         shares: { private: { C123: [{ ts: "111.111" }] } },
       }),
     });
-    resolveSlackMedia.mockResolvedValueOnce([makeResolvedSlackMedia()]);
+    resolveSlackMedia.mockResolvedValueOnce({ media: [makeResolvedSlackMedia()], failures: [] });
 
     await downloadSlackFile("F123", {
       client,

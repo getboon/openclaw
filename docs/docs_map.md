@@ -685,6 +685,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H3: With Teams RSC + Microsoft Graph Application permissions
   - H3: RSC vs Graph API
   - H2: Graph-enabled media + history (required for channels)
+  - H3: Resolving a SharePoint or OneDrive file link shared in a message
   - H2: Known limitations
   - H3: Webhook timeouts
   - H3: Teams cloud and service URL support
@@ -1384,6 +1385,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Sessions
   - H2: Delivery
   - H3: Delivery ownership
+  - H3: Reply style (top-level vs threaded)
   - H3: Failure delivery
   - H2: Scheduling
   - H3: One-shot jobs
@@ -2032,6 +2034,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H3: Channel selection
   - H3: Update steps
   - H3: Plugin sync details
+  - H2: --update shorthand
   - H2: Related
 
 ## cli/voicecall.md
@@ -2557,7 +2560,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Runtime flow
   - H2: Selection source policy
   - H2: Auth failure skip cache
-  - H2: User-visible fallback notices
+  - H2: Fallback is invisible to users
   - H2: Auth storage (keys + OAuth)
   - H2: Profile IDs
   - H2: Rotation order
@@ -2767,6 +2770,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
 - Route: /concepts/queue-steering
 - Headings:
   - H2: Runtime boundary
+  - H2: One long tool call still feels serial
   - H2: Modes
   - H2: Burst example
   - H2: Scope
@@ -3049,6 +3053,15 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Escaped instance names (\032)
   - H2: Enabling / disabling / configuration
   - H2: Related docs
+
+## gateway/boon-pdf-prep.md
+
+- Route: /gateway/boon-pdf-prep
+- Headings:
+  - H2: What it does
+  - H2: Enable
+  - H2: Failure behavior
+  - H2: Disable
 
 ## gateway/bridge-protocol.md
 
@@ -3536,6 +3549,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Signals exported
   - H2: Configuration reference
   - H3: Environment variables
+  - H2: Coexisting with other OpenTelemetry SDKs
   - H2: Privacy and content capture
   - H2: Sampling and flushing
   - H2: Exported metrics
@@ -3830,6 +3844,15 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Why it matters
   - H2: Generating and checking
   - H2: Inspecting a published package
+
+## gateway/sentry-monitor.md
+
+- Route: /gateway/sentry-monitor
+- Headings:
+  - H2: Configure
+  - H2: What it captures
+  - H2: Disable
+  - H2: Related
 
 ## gateway/tailscale.md
 
@@ -5835,6 +5858,14 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Distribution
   - H2: Surface
 
+## plugins/reference/boon-pdf-prep.md
+
+- Route: /plugins/reference/boon-pdf-prep
+- Headings:
+  - H1: Boon Pdf Prep plugin
+  - H2: Distribution
+  - H2: Surface
+
 ## plugins/reference/brave.md
 
 - Route: /plugins/reference/brave
@@ -5843,6 +5874,14 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Distribution
   - H2: Surface
   - H2: Related docs
+
+## plugins/reference/browser-handoff.md
+
+- Route: /plugins/reference/browser-handoff
+- Headings:
+  - H1: Browser Handoff plugin
+  - H2: Distribution
+  - H2: Surface
 
 ## plugins/reference/browser.md
 
@@ -6657,6 +6696,14 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Distribution
   - H2: Surface
   - H2: Related docs
+
+## plugins/reference/sentry-monitor.md
+
+- Route: /plugins/reference/sentry-monitor
+- Headings:
+  - H1: Sentry Monitor plugin
+  - H2: Distribution
+  - H2: Surface
 
 ## plugins/reference/sglang.md
 
@@ -8332,6 +8379,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Provider behavior
   - H3: Anthropic (direct API and Vertex AI)
   - H3: OpenAI (direct API)
+  - H3: Anthropic Vertex
   - H3: Amazon Bedrock
   - H3: OpenRouter
   - H3: Google Gemini (direct API)
@@ -9460,6 +9508,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Async vs synchronous
   - H2: Speech-to-text and Voice Call
   - H2: Provider mappings (how vendors split across surfaces)
+  - H2: Local file access for media tools
   - H2: Related
 
 ## tools/minimax-search.md
@@ -9595,6 +9644,13 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: How it works
   - H2: Channel behavior
   - H2: Reaction level
+  - H2: Related
+
+## tools/retry.md
+
+- Route: /tools/retry
+- Headings:
+  - H2: Usage
   - H2: Related
 
 ## tools/searxng-search.md

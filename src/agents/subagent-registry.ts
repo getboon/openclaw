@@ -463,6 +463,7 @@ type CompleteSubagentRunParams = {
   triggerCleanup: boolean;
   startedAt?: number;
   suppressSessionEffects?: boolean;
+  isLowConfidenceGraceRetry?: boolean;
 };
 
 type SubagentRunGatewayCloseHold = { kept: false } | { kept: true; sessionMarked: Promise<void> };
@@ -623,6 +624,7 @@ function schedulePendingLifecycleError(params: {
       accountId: entry.requesterOrigin?.accountId,
       triggerCleanup: true,
       startedAt: pending.startedAt,
+      isLowConfidenceGraceRetry: true,
     };
     completeSubagentRunInBackground(completionParams, "lifecycle-error-grace", "listener");
   }, LIFECYCLE_ERROR_RETRY_GRACE_MS);
@@ -666,6 +668,7 @@ function schedulePendingLifecycleTimeout(params: {
       accountId: entry.requesterOrigin?.accountId,
       triggerCleanup: true,
       startedAt: pending.startedAt,
+      isLowConfidenceGraceRetry: true,
     };
     completeSubagentRunInBackground(completionParams, "lifecycle-timeout-grace", "listener");
   }, LIFECYCLE_TIMEOUT_RETRY_GRACE_MS);
