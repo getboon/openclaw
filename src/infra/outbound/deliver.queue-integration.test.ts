@@ -13,6 +13,17 @@ import {
   installDeliveryQueueTmpDirHooks,
 } from "./delivery-queue.test-helpers.js";
 
+// sendCrashRecoveryNotice is statically imported by delivery-queue-recovery.ts,
+// so it must be hoisted-mocked here (a dynamic vi.doMock would be too late).
+// Without this, a drain that gives up on an entry tries to send a real
+// crash-recovery notice through the durable send path, which has no working
+// adapter in this suite and re-enqueues itself as a new pending entry.
+const sendCrashRecoveryNoticeMock = vi.hoisted(() => vi.fn(async () => true));
+
+vi.mock("../crash-recovery-notice.js", () => ({
+  sendCrashRecoveryNotice: sendCrashRecoveryNoticeMock,
+}));
+
 let deliverOutboundPayloads: typeof import("./deliver.js").deliverOutboundPayloads;
 
 type MatrixSendFn = (
