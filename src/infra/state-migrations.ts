@@ -6075,6 +6075,7 @@ export async function autoMigrateLegacyState(params: {
     ];
     const notices = [
       ...new Set([
+        ...detected.notices,
         ...(stateDirResult.notices ?? []),
         ...(pluginInstallIndex.notices ?? []),
         ...(pluginPlans.notices ?? []),
@@ -6137,7 +6138,7 @@ export async function autoMigrateLegacyState(params: {
       ...orphanKeys.warnings,
       ...acpSessionMetadata.warnings,
     ];
-    const notices = [...(stateDirResult.notices ?? [])];
+    const notices = [...new Set([...detected.notices, ...(stateDirResult.notices ?? [])])];
     logMigrationResults(changes, warnings, notices);
     return {
       migrated:
@@ -6260,6 +6261,7 @@ export async function autoMigrateLegacyState(params: {
   ];
   const notices = [
     ...new Set([
+      ...detected.notices,
       ...(stateDirResult.notices ?? []),
       ...(pluginInstallIndex.notices ?? []),
       ...(pluginPlans.notices ?? []),
