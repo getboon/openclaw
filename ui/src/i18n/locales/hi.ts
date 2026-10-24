@@ -244,7 +244,7 @@ export const hi: TranslationMap = {
     autoThreshold: "ऑटो-थ्रेशोल्ड",
     overflowRetry: "ओवरफ्लो पुनः प्रयास",
     timeoutRetry: "टाइमआउट पुनः प्रयास",
-    overflowBlock: "context limit reached",
+    overflowBlock: "संदर्भ सीमा पूरी हो गई",
     tokenRange: "{before} से {after} tokens",
     tokensBefore: "{count} tokens पहले",
     tokenDeltaUnavailable: "token delta उपलब्ध नहीं है",

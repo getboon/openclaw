@@ -246,7 +246,7 @@ export const ru: TranslationMap = {
     autoThreshold: "автопорог",
     overflowRetry: "повтор при переполнении",
     timeoutRetry: "повтор при тайм-ауте",
-    overflowBlock: "context limit reached",
+    overflowBlock: "Достигнут лимит контекста",
     tokenRange: "от {before} до {after} токенов",
     tokensBefore: "{count} токенов до",
     tokenDeltaUnavailable: "дельта токенов недоступна",

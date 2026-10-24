@@ -1366,8 +1366,6 @@ jobs:
       - name: Publish with trusted publisher
         if: steps.publication_evidence.outputs.publish_route == 'npm-oidc' && steps.npm_package_version.outputs.already_published != 'true'
         env:
-          NODE_AUTH_TOKEN: ${{ inputs.npm_dist_tag != 'extended-stable' && secrets.NPM_TOKEN || '' }}
-          NPM_TOKEN: ${{ inputs.npm_dist_tag != 'extended-stable' && secrets.NPM_TOKEN || '' }}
           GH_TOKEN: ${{ github.token }}
           OPENCLAW_NPM_PUBLISH_AUTH_MODE: trusted-publisher
           OPENCLAW_PLUGIN_NPM_PUBLISH_TAG: ${{ inputs.npm_dist_tag == 'extended-stable' && inputs.npm_dist_tag || '' }}
