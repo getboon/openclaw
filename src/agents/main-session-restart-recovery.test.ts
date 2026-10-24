@@ -849,8 +849,8 @@ describe("main-session-restart-recovery", () => {
         { label: longLabel, task: "t", status: "running" },
       ]);
 
-      expect(message).toContain(`${longLabel.slice(0, 80)}..., `);
-      expect(message).toContain(`${longTask.slice(0, 80).trimEnd()}... are still running`);
+      expect(message).toContain(`${longLabel.slice(0, 77)}..., `);
+      expect(message).toContain(`${longTask.slice(0, 77).trimEnd()}... are still running`);
       expect(message).not.toContain(longTask.trim());
     });
 
