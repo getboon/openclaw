@@ -1,6 +1,6 @@
+import { AsyncResource } from "node:async_hooks";
 // Tests dispatch-from-config runtime selection, hooks, and provider handoff.
 import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
-import { AsyncResource } from "node:async_hooks";
 import { beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { clearAgentHarnesses, registerAgentHarness } from "../../agents/harness/registry.js";
 import type { ChannelMessagingAdapter } from "../../channels/plugins/types.core.js";
@@ -7994,10 +7994,12 @@ describe("dispatchReplyFromConfig", () => {
     const sessionKey = "agent:main:discord:channel:interrupted-fallback";
     const sessionId = "interrupted-fallback-session";
     sessionStoreMocks.currentEntry = { sessionId, updatedAt: Date.now() };
-    let resolveNotice: ((result: { ok: true; messageId: string }) => void) | undefined;
+    let resolveNotice:
+      | ((result: { ok: true; delivered: true; messageId: string }) => void)
+      | undefined;
     mocks.routeReply.mockImplementationOnce(
       async () =>
-        await new Promise<{ ok: true; messageId: string }>((resolve) => {
+        await new Promise<{ ok: true; delivered: true; messageId: string }>((resolve) => {
           resolveNotice = resolve;
         }),
     );
@@ -8047,7 +8049,7 @@ describe("dispatchReplyFromConfig", () => {
     });
     expect(mutationRan).toBe(false);
 
-    resolveNotice?.({ ok: true, messageId: "fallback-notice" });
+    resolveNotice?.({ ok: true, delivered: true, messageId: "fallback-notice" });
     const result = await dispatch;
     await mutation;
 

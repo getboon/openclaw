@@ -185,7 +185,7 @@ type SpawnSubagentParams = {
   attachMountPath?: string;
 };
 
-type SpawnSubagentContext = {
+export type SpawnSubagentContext = {
   agentSessionKey?: string;
   /** Separate key used only for completion routing, not sandbox policy. */
   completionOwnerKey?: string;

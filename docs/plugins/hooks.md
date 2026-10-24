@@ -128,17 +128,17 @@ observation-only.
 
 **Messages and delivery**
 
-| Hook                            | Purpose                                                           |
-| ------------------------------- | ----------------------------------------------------------------- |
-| **`inbound_claim`**             | Claim an inbound message before agent routing (synthetic replies) |
-| **`channel_pairing_requested`** | Observe newly created DM pairing requests                         |
-| `message_received`              | Observe inbound content, sender, thread, and metadata             |
-| **`message_sending`**           | Rewrite outbound content or cancel delivery                       |
-| **`reply_payload_sending`**     | Mutate or cancel normalized reply payloads before delivery        |
-| `message_sent`                  | Observe outbound delivery success or failure                      |
+| Hook                            | Purpose                                                                            |
+| ------------------------------- | ---------------------------------------------------------------------------------- |
+| **`inbound_claim`**             | Claim an inbound message before agent routing (synthetic replies)                  |
+| **`channel_pairing_requested`** | Observe newly created DM pairing requests                                          |
+| `message_received`              | Observe inbound content, sender, thread, and metadata                              |
+| **`message_sending`**           | Rewrite outbound content or cancel delivery                                        |
+| **`reply_payload_sending`**     | Mutate or cancel normalized reply payloads before delivery                         |
+| `message_sent`                  | Observe outbound delivery success or failure                                       |
 | `delivery_recovery_exhausted`   | Observe a crash-ambiguous send that delivery-recovery gave up on without replaying |
-| **`before_dispatch`**           | Inspect or rewrite an outbound dispatch before channel handoff    |
-| **`reply_dispatch`**            | Participate in the final reply-dispatch pipeline                  |
+| **`before_dispatch`**           | Inspect or rewrite an outbound dispatch before channel handoff                     |
+| **`reply_dispatch`**            | Participate in the final reply-dispatch pipeline                                   |
 
 **Sessions and compaction**
 

@@ -4213,10 +4213,10 @@ describe("subagent registry seam flow", () => {
     });
 
     it("keeps a service-restart wait error unended only while the gateway closes", async () => {
-      let resolveWait: (value: unknown) => void = () => {};
+      let resolveWait: (value: Record<string, unknown>) => void = () => {};
       mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
         request.method === "agent.wait"
-          ? await new Promise((resolve) => {
+          ? await new Promise<Record<string, unknown>>((resolve) => {
               resolveWait = resolve;
             })
           : {},
@@ -4463,10 +4463,10 @@ describe("subagent registry seam flow", () => {
         hasHooks: (hookName: string) => hookName === "subagent_ended",
         runSubagentEnded: mocks.runSubagentEnded,
       } as never);
-      let finishWait: (result: unknown) => void = () => {};
+      let finishWait: (result: Record<string, unknown>) => void = () => {};
       mocks.callGateway.mockImplementation(async (request: { method?: string }) =>
         request.method === "agent.wait"
-          ? await new Promise((resolve) => {
+          ? await new Promise<Record<string, unknown>>((resolve) => {
               finishWait = resolve;
             })
           : {},

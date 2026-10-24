@@ -13,7 +13,7 @@
     "src/agents/subagent-announce.test-support.ts": 1,
     "src/agents/subagent-capabilities.ts": 2,
     "src/agents/subagent-list.ts": 2,
-    "src/agents/subagent-orphan-recovery.ts": 2,
+    "src/agents/subagent-orphan-recovery.ts": 3,
     "src/agents/subagent-session-reconciliation.ts": 2,
     "src/agents/subagent-spawn.ts": 2,
     "src/agents/tools/transcripts-tool.ts": 2,
@@ -38,11 +38,12 @@
     "src/cron/isolated-agent/session.ts": 2,
     "src/infra/approval-request-account-binding.ts": 2,
     "src/infra/heartbeat-runner.ts": 4,
+    "src/infra/progress-nudge-runner.ts": 2,
     "src/plugins/runtime/runtime-agent.ts": 1
   },
   "sessionAccessorWrite": {
     "src/agents/session-suspension.ts": 2,
-    "src/agents/subagent-orphan-recovery.ts": 3,
+    "src/agents/subagent-orphan-recovery.ts": 4,
     "src/agents/subagent-spawn.ts": 2,
     "src/auto-reply/reply/commands-name.ts": 2,
     "src/auto-reply/reply/dispatch-from-config.ts": 2,

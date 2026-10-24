@@ -29,8 +29,6 @@ export type OutboundMediaLoadOptions = {
   fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   /** Extra fetch options merged into remote media requests. */
   requestInit?: RequestInit;
-  /** Whether shared media loading may optimize image payloads. */
-  optimizeImages?: boolean;
   /** Allows explicit proxy DNS behavior to be trusted by the media fetch guard. */
   trustExplicitProxyDns?: boolean;
   /** Whether image re-optimization runs (default `true`); pass `false` to skip it, e.g. when a caller forces document delivery. */
@@ -53,7 +51,6 @@ export async function loadOutboundMediaFromUrl(
       proxyUrl: options.proxyUrl,
       fetchImpl: options.fetchImpl,
       requestInit: options.requestInit,
-      optimizeImages: options.optimizeImages,
       trustExplicitProxyDns: options.trustExplicitProxyDns,
       optimizeImages: options.optimizeImages,
     }),

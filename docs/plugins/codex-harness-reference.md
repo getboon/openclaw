@@ -465,12 +465,12 @@ catalog for that harness and account.
 
 If discovery fails or times out, OpenClaw uses a bundled fallback catalog:
 
-| Model id       | Display name | Reasoning efforts              |
-| -------------- | ------------ | ------------------------------- |
-| `gpt-5.6-sol`  | GPT-5.6 Sol  | low, medium, high, xhigh, max   |
-| `gpt-5.6-luna` | GPT-5.6 Luna | low, medium, high, xhigh, max   |
-| `gpt-5.5`      | GPT-5.5      | low, medium, high, xhigh        |
-| `gpt-5.4-mini` | GPT-5.4-Mini | low, medium, high, xhigh        |
+| Model id       | Display name | Reasoning efforts             |
+| -------------- | ------------ | ----------------------------- |
+| `gpt-5.6-sol`  | GPT-5.6 Sol  | low, medium, high, xhigh, max |
+| `gpt-5.6-luna` | GPT-5.6 Luna | low, medium, high, xhigh, max |
+| `gpt-5.5`      | GPT-5.5      | low, medium, high, xhigh      |
+| `gpt-5.4-mini` | GPT-5.4-Mini | low, medium, high, xhigh      |
 
 <Note>
 The current bundled harness is `@openai/codex` `0.155.1`. A clean-home

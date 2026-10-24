@@ -538,7 +538,6 @@ describe("user turn transcript persistence", () => {
           role: "user",
           content: "[redacted by hook]",
           idempotencyKey: "chat-run-1:user",
-          __openclaw: { senderIsOwner: true },
           provenance,
           __openclaw: {
             hookOwned: true,

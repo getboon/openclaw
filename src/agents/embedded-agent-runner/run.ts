@@ -3672,7 +3672,7 @@ async function runEmbeddedAgentInternal(
           // same giant call. Retry once on the same model, asking for the step in smaller pieces.
           if (
             shouldRetryCutOffGeneration({
-              assistant: assistantForFailover,
+              assistant: attemptAssistant,
               attempt,
               aborted,
               timedOut,
@@ -3697,8 +3697,8 @@ async function runEmbeddedAgentInternal(
             log.warn(
               `[stream-cutoff-retry] generation cut off mid-stream; retrying same model in smaller steps ` +
                 `attempt=${streamCutoffRetries}/${MAX_STREAM_CUTOFF_RETRIES} ` +
-                `provider=${assistantForFailover?.provider ?? provider} ` +
-                `model=${assistantForFailover?.model ?? model.id} ` +
+                `provider=${attemptAssistant?.provider ?? provider} ` +
+                `model=${attemptAssistant?.model ?? model.id} ` +
                 `sessionKey=${params.sessionKey ?? params.sessionId}`,
             );
             continue;

@@ -326,6 +326,20 @@ describe("skill research auto-capture", () => {
         "",
         "# Signal Scout",
         "",
+        "## TLDR",
+        "",
+        "Mines the market for signals and validates them before drafting.",
+        "",
+        "When you run this, the agent will:",
+        "",
+        "- Capture a signal.",
+        "- Validate it against evidence.",
+        "- Score it.",
+        "",
+        "**Output:** A scored, validated signal.",
+        "",
+        "## Workflow",
+        "",
         "- Capture first, score later.",
         "",
       ].join("\n"),
@@ -382,6 +396,20 @@ describe("skill research auto-capture", () => {
         "---",
         "",
         "# Signal Scout",
+        "",
+        "## TLDR",
+        "",
+        "Mines the market for signals and validates them before drafting.",
+        "",
+        "When you run this, the agent will:",
+        "",
+        "- Capture a signal.",
+        "- Validate it against evidence.",
+        "- Score it.",
+        "",
+        "**Output:** A scored, validated signal.",
+        "",
+        "## Workflow",
         "",
         "- Capture first, score later.",
         "",
@@ -892,7 +920,14 @@ describe("skill research auto-capture", () => {
       workspaceDir,
       name: "github-pr-workflow",
       description: "Manual GitHub workflow proposal.",
-      content: "# GitHub PR Workflow\n\n- Manual draft.\n",
+      content:
+        "## TLDR\n\n" +
+        "Manual draft of the GitHub PR workflow skill.\n\n" +
+        "When you run this, the agent will:\n\n" +
+        "- Inspect the exact head before landing.\n" +
+        "- Run the checklist.\n" +
+        "- Land the change.\n\n" +
+        "**Output:** A landed pull request.\n",
       createdBy: "cli",
     });
 
