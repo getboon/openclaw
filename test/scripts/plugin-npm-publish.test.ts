@@ -46,7 +46,7 @@ describe("plugin npm publish wrapper", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe(
-      "usage: bash scripts/plugin-npm-publish.sh [--dry-run|--pack|--pack-dry-run|--publish] <package-dir>",
+      "usage: bash scripts/plugin-npm-publish.sh [--repo-root <dir>] [--dry-run|--pack|--pack-dry-run|--publish] <package-dir>",
     );
     expect(result.stderr).toBe("");
   });
@@ -57,8 +57,39 @@ describe("plugin npm publish wrapper", () => {
     expect(result.status).toBe(2);
     expect(result.stdout).toBe("");
     expect(result.stderr.trim()).toBe(
-      "usage: bash scripts/plugin-npm-publish.sh [--dry-run|--pack|--pack-dry-run|--publish] <package-dir>",
+      "usage: bash scripts/plugin-npm-publish.sh [--repo-root <dir>] [--dry-run|--pack|--pack-dry-run|--publish] <package-dir>",
     );
+  });
+
+  it("rejects --repo-root without a value", () => {
+    const result = runPluginPublishWrapper(["--repo-root"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr.trim()).toBe("--repo-root requires a value");
+  });
+
+  it("rejects a package dir that does not exist under --repo-root", () => {
+    const fixture = makePackage("2026.7.33");
+    const result = runPluginPublishWrapper(["--repo-root", fixture.packageDir, "--dry-run", "nope"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr.trim()).toBe(
+      `package dir not found under --repo-root: ${fixture.packageDir}/nope`,
+    );
+  });
+
+  it("resolves a relative package dir against --repo-root, independent of cwd", () => {
+    const fixture = makePackage("2026.7.33");
+    const result = runPluginPublishWrapper(
+      ["--repo-root", fixture.packageDir, "--dry-run", "."],
+      { OPENCLAW_PLUGIN_NPM_PUBLISH_TAG: "extended-stable", PATH: fixture.path },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`Resolved package dir: ${fixture.packageDir}`);
+    expect(result.stdout).toContain("Resolved package name: @openclaw/demo");
   });
 
   it("requires an explicit artifact directory for real pack mode", () => {

@@ -155,10 +155,6 @@ export function abortSessionRunTargetWithOutcome(params: { key?: string; session
   return { active, aborted };
 }
 
-export function abortSessionRunTarget(params: { key?: string; sessionId?: string }): boolean {
-  return abortSessionRunTargetWithOutcome(params).aborted;
-}
-
 export function formatAbortReplyText(
   stoppedSubagents?: number,
   rejectionReason?: "finalizing",
@@ -281,6 +277,21 @@ function notifyRequesterOfStoppedSubagents(requesterKey: string, names: string[]
   });
 }
 
+function markSubagentRunTerminatedBestEffort(
+  params: Parameters<typeof markSubagentRunTerminated>[0],
+): number {
+  try {
+    return abortDeps.markSubagentRunTerminated(params);
+  } catch (error) {
+    // The runtime abort already happened. Keep stopping siblings and descendants;
+    // durable reconciliation can retry the rolled-back registry transition later.
+    logVerbose(
+      `abort: failed to persist killed subagent ${params.runId ?? params.childSessionKey ?? "unknown"}: ${formatErrorMessage(error)}`,
+    );
+    return 0;
+  }
+}
+
 export function stopSubagentsForRequester(params: {
   cfg: OpenClawConfig;
   requesterSessionKey?: string;
@@ -333,7 +344,7 @@ export function stopSubagentsForRequester(params: {
     seenChildKeys.add(childKey);
     childSessionKeys.push(childKey);
 
-    if (!run.endedAt) {
+    if (!run.endedAt || run.pauseReason === "sessions_yield") {
       const cleared = clearSessionQueues([childKey]);
       const parsed = parseAgentSessionKey(childKey);
       const storePath = resolveStorePath(params.cfg.session?.store, { agentId: parsed?.agentId });
@@ -349,10 +360,11 @@ export function stopSubagentsForRequester(params: {
       const abortRejected = abortOutcome.active && !abortOutcome.aborted;
       const markedTerminated = abortRejected
         ? false
-        : abortDeps.markSubagentRunTerminated({
+        : markSubagentRunTerminatedBestEffort({
             runId: run.runId,
             childSessionKey: childKey,
             reason: "killed",
+            suppressTaskDelivery: true,
           }) > 0;
       if (markedTerminated) {
         silenceKilledSubagentTask(run.runId);

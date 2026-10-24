@@ -138,6 +138,28 @@ describe("browser control server", () => {
     slowTimeoutMs,
   );
 
+  it.each([
+    {
+      body: { kind: "clickCoords", x: "0x10", y: "20" },
+      message: "x must be a finite number",
+    },
+    {
+      body: { kind: "clickCoords", x: "20", y: "0x10" },
+      message: "y must be a finite number",
+    },
+  ])(
+    "returns ACT_INVALID_REQUEST for non-decimal coordinate clicks",
+    async ({ body, message }) => {
+      const base = await startServerAndBase();
+      const response = await postActAndReadError(base, body);
+
+      expect(response.status).toBe(400);
+      expect(response.body.code).toBe("ACT_INVALID_REQUEST");
+      expect(response.body.error).toContain(message);
+    },
+    slowTimeoutMs,
+  );
+
   it(
     "returns ACT_EXISTING_SESSION_UNSUPPORTED for unsupported existing-session actions",
     async () => {
@@ -309,6 +331,40 @@ describe("browser control server", () => {
         id: "d1",
         message: "Continue?",
       });
+    },
+    slowTimeoutMs,
+  );
+
+  it(
+    "returns action download metadata from /act responses",
+    async () => {
+      const base = await startServerAndBase();
+      pwMocks.executeActViaPlaywright.mockResolvedValueOnce({
+        downloads: [
+          {
+            url: "https://example.com/report.pdf",
+            suggestedFilename: "report.pdf",
+            path: "/tmp/openclaw/downloads/report.pdf",
+          },
+        ],
+      });
+
+      const response = await postJson<{
+        ok: boolean;
+        downloads?: Array<{ url?: string; suggestedFilename?: string; path?: string }>;
+      }>(`${base}/act`, {
+        kind: "click",
+        ref: "5",
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.downloads).toEqual([
+        {
+          url: "https://example.com/report.pdf",
+          suggestedFilename: "report.pdf",
+          path: "/tmp/openclaw/downloads/report.pdf",
+        },
+      ]);
     },
     slowTimeoutMs,
   );

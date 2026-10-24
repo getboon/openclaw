@@ -1,3 +1,4 @@
+import { AsyncResource } from "node:async_hooks";
 /**
  * Shared detached-task lifecycle for media generation tools.
  *
@@ -20,12 +21,7 @@ import {
   resolveRequiredCompletionDeliveryFailureTerminalResult,
   type RequiredCompletionTerminalResult,
 } from "../../tasks/task-completion-contract.js";
-import {
-  deliveryContextFromSession,
-  normalizeDeliveryContext,
-  type DeliveryContext,
-} from "../../utils/delivery-context.js";
-import type { DeliveryContextSessionSource } from "../../utils/delivery-context.types.js";
+import { normalizeDeliveryContext, type DeliveryContext } from "../../utils/delivery-context.js";
 import {
   INTERNAL_MESSAGE_CHANNEL,
   isDeliverableMessageChannel,
@@ -35,6 +31,7 @@ import {
   type AgentGeneratedAttachment,
 } from "../generated-attachments.js";
 import { formatAgentInternalEventsForPrompt, type AgentInternalEvent } from "../internal-events.js";
+import { MEDIA_GENERATION_DELIVERING_COMPLETION_PROGRESS } from "../media-generation-task-status-shared.js";
 import {
   deliverSubagentAnnouncement,
   loadRequesterSessionEntry,
@@ -44,6 +41,9 @@ import { resolveAnnounceOrigin } from "../subagent-announce-origin.js";
 
 const log = createSubsystemLogger("agents/tools/media-generate-background-shared");
 const MEDIA_GENERATION_TASK_KEEPALIVE_INTERVAL_MS = 60_000;
+const detachedMediaGenerationAsyncRoot = new AsyncResource(
+  "openclaw.media-generation.detached-root",
+);
 const MEDIA_DIRECT_FALLBACK_DELIVERY_REASONS = new Set<SubagentAnnounceDeliveryFailureReason>([
   "generated_media_missing",
   "message_tool_delivery_missing",
@@ -64,21 +64,6 @@ export type MediaGenerateBackgroundScheduler = (work: () => Promise<void>) => vo
 
 /** Optional callback invoked when async media generation starts. */
 export type MediaGenerateAsyncStartCallback = (message: string) => Promise<void> | void;
-
-function resolvePinnedMediaRequesterOrigin(params: {
-  requesterOrigin?: DeliveryContext;
-  sessionEntry?: DeliveryContextSessionSource;
-}): DeliveryContext | undefined {
-  const requesterOrigin = normalizeDeliveryContext(params.requesterOrigin);
-  const sessionOrigin = deliveryContextFromSession(params.sessionEntry);
-  const accountsConflict =
-    requesterOrigin?.accountId &&
-    sessionOrigin?.accountId &&
-    requesterOrigin.accountId !== sessionOrigin.accountId;
-  return accountsConflict
-    ? requesterOrigin
-    : resolveAnnounceOrigin(params.sessionEntry, requesterOrigin);
-}
 
 /** Returns whether a media generation request should detach for a session. */
 export function shouldDetachMediaGenerationTask(sessionKey: string | undefined): boolean {
@@ -168,10 +153,10 @@ function createMediaGenerationTaskRun(params: {
   try {
     // Pin the complete requester route when detached work starts. Completion-time
     // session state can move to another peer while generation is still running.
-    const requesterOrigin = resolvePinnedMediaRequesterOrigin({
-      requesterOrigin: params.requesterOrigin,
-      sessionEntry: loadRequesterSessionEntry(sessionKey).entry,
-    });
+    const requesterOrigin = resolveAnnounceOrigin(
+      loadRequesterSessionEntry(sessionKey).entry,
+      params.requesterOrigin,
+    );
     const task = createRunningTaskRun({
       runtime: "cli",
       taskKind: params.taskKind,
@@ -339,9 +324,11 @@ export function createDefaultMediaGenerateBackgroundScheduler(params: {
   onCrash: (message: string, meta?: Record<string, unknown>) => void;
 }): MediaGenerateBackgroundScheduler {
   return (work) => {
-    queueMicrotask(() => {
-      void work().catch((error: unknown) => {
-        params.onCrash(`Detached ${params.toolName} job crashed`, { error });
+    detachedMediaGenerationAsyncRoot.runInAsyncScope(() => {
+      queueMicrotask(() => {
+        void work().catch((error: unknown) => {
+          params.onCrash(`Detached ${params.toolName} job crashed`, { error });
+        });
       });
     });
   };
@@ -448,7 +435,7 @@ export function scheduleMediaGenerationTaskCompletion<
     try {
       params.lifecycle.recordTaskProgress({
         handle: params.handle,
-        progressSummary: "Generated media; delivering completion",
+        progressSummary: MEDIA_GENERATION_DELIVERING_COMPLETION_PROGRESS,
       });
     } catch (error) {
       params.onWakeFailure(`${params.toolName} completion progress update failed`, {

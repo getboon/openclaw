@@ -438,4 +438,114 @@ describe("fetchDiscord", () => {
       vi.useRealTimers();
     }
   });
+
+  it("throws DiscordApiError on malformed JSON success response body", async () => {
+    const fetcher = withFetchPreconnect(
+      async () => new Response("NOT JSON {{{", { status: 200 }),
+    );
+
+    let error: unknown;
+    try {
+      await fetchDiscord("/users/@me/guilds", "test", fetcher, {
+        retry: { attempts: 1 },
+      });
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).toBeInstanceOf(DiscordApiError);
+    expect(String(error)).toContain("Discord API /users/@me/guilds returned malformed JSON");
+  });
+
+  it("returns under-cap requestDiscord responses from a real loopback HTTP server", async () => {
+    const payload = { id: "channel-42", name: "loopback", type: 0 };
+    let contentLength: string | null | undefined;
+    let requestUrl: string | undefined;
+    let authorization: string | undefined;
+    const server = createServer((req, res) => {
+      requestUrl = req.url;
+      authorization = req.headers.authorization;
+      const body = JSON.stringify(payload);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.write(body.slice(0, 12));
+      res.end(body.slice(12));
+    });
+    const port = await listenLoopbackServer(server);
+
+    try {
+      stubDiscordFetchToLoopback(`http://127.0.0.1:${port}`, (response) => {
+        contentLength = response.headers.get("content-length");
+      });
+
+      const result = await requestDiscord<typeof payload>("/channels/channel-42", "test-token", {
+        retry: { attempts: 1 },
+      });
+
+      expect(result).toEqual(payload);
+      expect(requestUrl).toBe("/api/v10/channels/channel-42");
+      expect(authorization).toBe("Bot test-token");
+      expect(contentLength).toBeNull();
+      console.log(
+        `[discord requestDiscord loopback proof] normal path: returned=${JSON.stringify(result)} content_length=${contentLength ?? "none"}`,
+      );
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("rejects oversized valid JSON requestDiscord responses from a real loopback HTTP server", async () => {
+    const oversizedPayloadBytes = DISCORD_SUCCESS_RESPONSE_LIMIT_BYTES + 256 * 1024;
+    let contentLength: string | null | undefined;
+    let requestUrl: string | undefined;
+    let streamedBytes = 0;
+    const server = createServer((req, res) => {
+      requestUrl = req.url;
+      const chunk = Buffer.alloc(64 * 1024, 0x78);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.write('{"id":"');
+
+      const writeMore = () => {
+        while (streamedBytes < oversizedPayloadBytes) {
+          if (res.destroyed) {
+            return;
+          }
+          streamedBytes += chunk.byteLength;
+          if (!res.write(chunk)) {
+            res.once("drain", writeMore);
+            return;
+          }
+        }
+        res.end('"}');
+      };
+
+      writeMore();
+    });
+    const port = await listenLoopbackServer(server);
+
+    try {
+      stubDiscordFetchToLoopback(`http://127.0.0.1:${port}`, (response) => {
+        contentLength = response.headers.get("content-length");
+      });
+
+      let error: unknown;
+      try {
+        await requestDiscord("/channels/123/messages", "test-token", {
+          retry: { attempts: 1 },
+        });
+      } catch (err) {
+        error = err;
+      }
+
+      expect(error).toBeInstanceOf(Error);
+      expect(String(error)).toContain("Discord API /channels/123/messages response body too large");
+      expect(String(error)).toContain(`limit: ${DISCORD_SUCCESS_RESPONSE_LIMIT_BYTES} bytes`);
+      expect(requestUrl).toBe("/api/v10/channels/123/messages");
+      expect(contentLength).toBeNull();
+      console.log(
+        `[discord requestDiscord loopback proof] oversized path: cap=${DISCORD_SUCCESS_RESPONSE_LIMIT_BYTES} streamed>=${streamedBytes} content_length=${contentLength ?? "none"} rejected=${String(error)}`,
+      );
+    } finally {
+      await closeServer(server);
+    }
+  });
 });

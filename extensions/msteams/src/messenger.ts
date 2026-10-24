@@ -36,7 +36,7 @@ import {
 import type { MSTeamsActivityLike } from "./sdk-types.js";
 import type { MSTeamsApp } from "./sdk.js";
 
-export type MSTeamsConversationReference = {
+type MSTeamsConversationReference = {
   activityId?: string;
   user?: { id?: string; name?: string; aadObjectId?: string };
   agent?: { id?: string; name?: string; aadObjectId?: string } | null;
@@ -58,7 +58,7 @@ export type MSTeamsConversationReference = {
   aadObjectId?: string;
 };
 
-export type MSTeamsReplyRenderOptions = {
+type MSTeamsReplyRenderOptions = {
   textChunkLimit: number;
   chunkText?: boolean;
   mediaMode?: "split" | "inline";
@@ -75,13 +75,13 @@ export type MSTeamsRenderedMessage = {
   mediaUrl?: string;
 };
 
-export type MSTeamsSendRetryOptions = {
+type MSTeamsSendRetryOptions = {
   maxAttempts?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;
 };
 
-export type MSTeamsSendRetryEvent = {
+type MSTeamsSendRetryEvent = {
   messageIndex: number;
   messageCount: number;
   nextAttempt: number;

@@ -1371,7 +1371,7 @@
         "advanced"
       ],
       "label": "Compaction Notify User",
-      "help": "When enabled, sends brief compaction notices to the user when compaction starts and when it completes (for example, '🧹 Compacting context...' and '🧹 Compaction complete'). Disabled by default to keep compaction silent and non-intrusive.",
+      "help": "When enabled, sends brief context-maintenance notices to the user: when compaction starts and completes (for example, '🧹 Compacting context...' and '🧹 Compaction complete'), and when a pre-compaction memory flush is exhausted so the reply continues in a degraded state (for example, '⚠️ Memory maintenance temporarily failed; continuing your reply.'). Disabled by default to keep context maintenance silent and non-intrusive.",
       "hasChildren": false
     },
     {
@@ -1499,7 +1499,7 @@
         "security"
       ],
       "label": "Compaction Reserve Tokens",
-      "help": "Token headroom reserved for reply generation and tool output after compaction runs. Use higher reserves for verbose/tool-heavy sessions, and lower reserves when maximizing retained history matters more.",
+      "help": "Token headroom reserved for reply generation and tool output after compaction runs. Use higher reserves for verbose/tool-heavy sessions, and lower reserves when maximizing retained history matters more. When the active model context window is known, the effective reserve is capped to preserve usable prompt space.",
       "hasChildren": false
     },
     {
@@ -5428,6 +5428,20 @@
       "hasChildren": false
     },
     {
+      "path": "agents.defaults.utilityModel",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "advanced"
+      ],
+      "label": "Utility Model",
+      "help": "Optional lower-cost model (provider/model or alias) for short internal tasks such as generated session and thread titles. Falls back to the agent's primary model when unset.",
+      "hasChildren": false
+    },
+    {
       "path": "agents.defaults.verboseDefault",
       "kind": "core",
       "type": "string",
@@ -8485,7 +8499,8 @@
         "high",
         "xhigh",
         "adaptive",
-        "max"
+        "max",
+        "ultra"
       ],
       "deprecated": false,
       "sensitive": false,
@@ -10313,6 +10328,20 @@
       "hasChildren": false
     },
     {
+      "path": "agents.list.*.utilityModel",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "advanced"
+      ],
+      "label": "Agent Utility Model",
+      "help": "Optional per-agent utility model override for short internal tasks. Overrides agents.defaults.utilityModel.",
+      "hasChildren": false
+    },
+    {
       "path": "agents.list.*.verboseDefault",
       "kind": "core",
       "type": "string",
@@ -10762,6 +10791,26 @@
       ],
       "label": "Audio Transcription Timeout (sec)",
       "help": "Maximum time allowed for the transcription command to finish before it is aborted. Increase this for longer recordings, and keep it tight in latency-sensitive deployments.",
+      "hasChildren": false
+    },
+    {
+      "path": "audit",
+      "kind": "core",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": true
+    },
+    {
+      "path": "audit.enabled",
+      "kind": "core",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
       "hasChildren": false
     },
     {
@@ -11808,7 +11857,7 @@
         "performance"
       ],
       "label": "Remote CDP Handshake Timeout (ms)",
-      "help": "Timeout in milliseconds for post-connect CDP handshake readiness checks against remote browser targets. Raise this for slow-start remote browsers and lower to fail fast in automation loops.",
+      "help": "Timeout in milliseconds for post-connect CDP handshake readiness checks against remote browser targets. The larger of this value and remoteCdpTimeoutMs also bounds persistent remote tab enumeration. Raise this for slow-start remote browsers and lower to fail fast in automation loops.",
       "hasChildren": false
     },
     {
@@ -11822,7 +11871,7 @@
         "performance"
       ],
       "label": "Remote CDP Timeout (ms)",
-      "help": "Timeout in milliseconds for connecting to a remote CDP endpoint before failing the browser attach attempt. Increase for high-latency tunnels, or lower for faster failure detection.",
+      "help": "Timeout in milliseconds for connecting to a remote CDP endpoint before failing the browser attach attempt. The larger of this value and remoteCdpHandshakeTimeoutMs also bounds persistent remote tab enumeration. Increase for high-latency tunnels, or lower for faster failure detection.",
       "hasChildren": false
     },
     {
@@ -12769,6 +12818,36 @@
       ],
       "label": "Cron Store Path",
       "help": "Path to the cron job store file used to persist scheduled jobs across restarts. Set an explicit path only when you need custom storage layout, backups, or mounted volumes.",
+      "hasChildren": false
+    },
+    {
+      "path": "cron.triggers",
+      "kind": "core",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": true
+    },
+    {
+      "path": "cron.triggers.enabled",
+      "kind": "core",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "cron.triggers.minIntervalMs",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
       "hasChildren": false
     },
     {
@@ -14828,7 +14907,7 @@
         "network"
       ],
       "label": "Gateway APNs Delivery",
-      "help": "APNs delivery settings for iOS devices paired to this gateway. Use relay settings for official/TestFlight builds that register through the external push relay.",
+      "help": "APNs delivery settings for iOS devices paired to this gateway. Use relay settings for official App Store builds that register through the external push relay.",
       "hasChildren": true
     },
     {
@@ -14858,7 +14937,7 @@
         "url-secret"
       ],
       "label": "Gateway APNs Relay Base URL",
-      "help": "Optional custom base HTTPS URL for the external APNs relay service used by official/TestFlight iOS builds. Keep this aligned with the relay URL baked into the iOS build so registration and send traffic hit the same deployment.",
+      "help": "Optional custom base HTTPS URL for the external APNs relay service used by official App Store iOS builds. Keep this aligned with the relay URL baked into the iOS build so registration and send traffic hit the same deployment.",
       "hasChildren": false
     },
     {
@@ -15019,6 +15098,21 @@
       "deprecated": false,
       "sensitive": false,
       "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "gateway.remote.sshHostKeyPolicy",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "access",
+        "network"
+      ],
+      "label": "Remote Gateway SSH Host-Key Policy",
+      "help": "macOS SSH host-key verification policy. \"strict\" requires an already trusted host key; \"openssh\" explicitly delegates to effective OpenSSH configuration.",
       "hasChildren": false
     },
     {
@@ -15210,6 +15304,64 @@
       ],
       "label": "Gateway Tailscale Service Name",
       "help": "Optional Tailscale Service name for Serve mode, such as \"svc:openclaw\". The value must use Tailscale's svc:<dns-label> format. When set, OpenClaw passes it to tailscale serve --service and reports the derived Service URL.",
+      "hasChildren": false
+    },
+    {
+      "path": "gateway.terminal",
+      "kind": "core",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "network"
+      ],
+      "label": "Operator Terminal",
+      "help": "Operator terminal served to Control UI and mobile clients: a PTY-backed shell on the gateway host, restricted to admin-scope operator sessions. It starts in the target agent's workspace and is refused for fully-sandboxed agents (sandbox.mode 'all') rather than handing back an unconfined host shell.",
+      "hasChildren": true
+    },
+    {
+      "path": "gateway.terminal.detachedSessionTimeoutSeconds",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "network",
+        "performance",
+        "storage"
+      ],
+      "label": "Operator Terminal Detached Session Timeout",
+      "help": "Seconds a terminal session survives after its connection drops (laptop sleep, page reload), staying reattachable via terminal.attach with its recent output replayed. Set 0 to kill sessions the moment the connection drops. Default: 300 (5 minutes). Detached sessions keep running their commands, so shorten this on shared or exposed hosts.",
+      "hasChildren": false
+    },
+    {
+      "path": "gateway.terminal.enabled",
+      "kind": "core",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "network"
+      ],
+      "label": "Operator Terminal Enabled",
+      "help": "Enables the operator terminal for admin-scope clients when true (default: false). This exposes a browser/mobile shell with the gateway process environment, so enable it only for trusted operator deployments. Changing this restarts the gateway so connected clients reload with the correct terminal availability and content-security policy.",
+      "hasChildren": false
+    },
+    {
+      "path": "gateway.terminal.shell",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "network"
+      ],
+      "label": "Operator Terminal Shell",
+      "help": "Shell executable the operator terminal launches. Leave unset to use the host login shell ($SHELL on Unix, %ComSpec% on Windows), or pin an explicit interpreter for a consistent operator environment.",
       "hasChildren": false
     },
     {
@@ -15947,6 +16099,96 @@
       "path": "hooks.internal.installs.*.clawhubPackage",
       "kind": "core",
       "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "hooks.internal.installs.*.clawhubTrustAcknowledgedAt",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "hooks.internal.installs.*.clawhubTrustCheckedAt",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "hooks.internal.installs.*.clawhubTrustDisposition",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "hooks.internal.installs.*.clawhubTrustModerationState",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "hooks.internal.installs.*.clawhubTrustPending",
+      "kind": "core",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "hooks.internal.installs.*.clawhubTrustReasons",
+      "kind": "core",
+      "type": "array",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": true
+    },
+    {
+      "path": "hooks.internal.installs.*.clawhubTrustReasons.*",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "hooks.internal.installs.*.clawhubTrustScanStatus",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "hooks.internal.installs.*.clawhubTrustStale",
+      "kind": "core",
+      "type": "boolean",
       "required": false,
       "deprecated": false,
       "sensitive": false,
@@ -16760,6 +17002,120 @@
       ],
       "label": "Sensitive Data Redaction Mode",
       "help": "Sensitive log/transcript redaction mode: \"off\" disables general log and transcript masking, while \"tools\" redacts sensitive tool/config payload fields in those sinks. Safety-boundary UI, tool, and diagnostic payloads may still redact even when this is \"off\".",
+      "hasChildren": false
+    },
+    {
+      "path": "marketplaces",
+      "kind": "core",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "advanced"
+      ],
+      "label": "Marketplaces",
+      "help": "Marketplace feed and local package source profile settings. Feeds provide package selection and governance metadata, while sources define the local source names that install candidates may reference.",
+      "hasChildren": true
+    },
+    {
+      "path": "marketplaces.feeds",
+      "kind": "core",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "advanced"
+      ],
+      "label": "Marketplace Feeds",
+      "help": "Named marketplace feed profiles. The default public profile can be used as shipped, and deployments can add or override profiles to point OpenClaw at their effective feed endpoint.",
+      "hasChildren": true
+    },
+    {
+      "path": "marketplaces.feeds.*",
+      "kind": "core",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": true
+    },
+    {
+      "path": "marketplaces.feeds.*.url",
+      "kind": "core",
+      "type": "string",
+      "required": true,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "advanced"
+      ],
+      "label": "Marketplace Feed URL",
+      "help": "HTTPS URL for the marketplace feed profile. Remote feed documents cannot introduce new registry domains or credentials; they only reference locally configured sources by name.",
+      "hasChildren": false
+    },
+    {
+      "path": "marketplaces.feeds.*.verification",
+      "kind": "core",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "advanced"
+      ],
+      "label": "Marketplace Feed Verification",
+      "help": "Feed authenticity policy. This slice accepts only unsigned HTTPS feeds; signed verification is added when envelope enforcement is wired.",
+      "hasChildren": true
+    },
+    {
+      "path": "marketplaces.feeds.*.verification.mode",
+      "kind": "core",
+      "type": "string",
+      "required": true,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "marketplaces.sources",
+      "kind": "core",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "advanced"
+      ],
+      "label": "Marketplace Sources",
+      "help": "Named package source profiles that feed entries can reference using sourceRef. Keep credentials and registry endpoints local so remote feeds cannot bootstrap trust roots.",
+      "hasChildren": true
+    },
+    {
+      "path": "marketplaces.sources.*",
+      "kind": "core",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": true
+    },
+    {
+      "path": "marketplaces.sources.*.type",
+      "kind": "core",
+      "type": "string",
+      "required": true,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "advanced"
+      ],
+      "label": "Marketplace Source Type",
+      "help": "Package source profile type: npm, clawhub, or git. This slice validates sourceRef names only; registry and host endpoints are added when installer resolution can enforce them.",
       "hasChildren": false
     },
     {
@@ -18459,6 +18815,45 @@
       "hasChildren": false
     },
     {
+      "path": "messages.responseUsage",
+      "kind": "core",
+      "type": [
+        "object",
+        "string"
+      ],
+      "required": false,
+      "enumValues": [
+        "on",
+        "off",
+        "tokens",
+        "full"
+      ],
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "advanced"
+      ],
+      "label": "Default Usage Footer Mode",
+      "help": "Default per-reply usage footer mode (\"off\"|\"tokens\"|\"full\") seeded into sessions that have not chosen one via /usage. Also accepts \"on\" as a legacy alias for \"tokens\". Accepts a bare mode or a per-channel map with a \"default\" fallback. Precedence: session value -> channel entry -> default -> off; an explicit /usage choice (including off) is persisted and overrides the default. Use /usage reset (aliases: inherit, clear, default) to clear a session override and re-inherit this configured default.",
+      "hasChildren": true
+    },
+    {
+      "path": "messages.responseUsage.*",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "enumValues": [
+        "on",
+        "off",
+        "tokens",
+        "full"
+      ],
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
       "path": "messages.statusReactions",
       "kind": "core",
       "type": "object",
@@ -18557,6 +18952,16 @@
       "hasChildren": false
     },
     {
+      "path": "messages.statusReactions.emojis.queued",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
       "path": "messages.statusReactions.emojis.stallHard",
       "kind": "core",
       "type": "string",
@@ -18617,7 +19022,7 @@
         "advanced"
       ],
       "label": "Enable Status Reactions",
-      "help": "Enable lifecycle status reactions on supported channels. Slack and Discord treat unset as enabled when ack reactions are active; Telegram and WhatsApp require this to be true before lifecycle reactions are used.",
+      "help": "Enable lifecycle status reactions on supported channels. Discord treats unset as enabled when ack reactions are active; Slack, Signal, Telegram, and WhatsApp require this to be true before lifecycle reactions are used. Slack uses native assistant thread status for progress by default.",
       "hasChildren": false
     },
     {
@@ -20125,6 +20530,16 @@
     },
     {
       "path": "models.providers.*.models.*.compat.supportsStrictMode",
+      "kind": "core",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "models.providers.*.models.*.compat.supportsTemperature",
       "kind": "core",
       "type": "boolean",
       "required": false,
@@ -23928,7 +24343,8 @@
         "high",
         "xhigh",
         "adaptive",
-        "max"
+        "max",
+        "ultra"
       ],
       "deprecated": false,
       "sensitive": false,
@@ -24153,6 +24569,20 @@
       "hasChildren": false
     },
     {
+      "path": "talk.realtime.prefixPaddingMs",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "media"
+      ],
+      "label": "Talk Realtime Prefix Padding (ms)",
+      "help": "Milliseconds of audio retained before realtime voice activity is detected.",
+      "hasChildren": false
+    },
+    {
       "path": "talk.realtime.provider",
       "kind": "core",
       "type": "string",
@@ -24253,6 +24683,34 @@
       "hasChildren": false
     },
     {
+      "path": "talk.realtime.reasoningEffort",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "media"
+      ],
+      "label": "Talk Realtime Reasoning Effort",
+      "help": "Provider-specific reasoning effort for realtime Talk sessions, such as minimal, low, medium, or high.",
+      "hasChildren": false
+    },
+    {
+      "path": "talk.realtime.silenceDurationMs",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "media"
+      ],
+      "label": "Talk Realtime Silence Duration (ms)",
+      "help": "Milliseconds of silence before a realtime Talk user turn is committed.",
+      "hasChildren": false
+    },
+    {
       "path": "talk.realtime.speakerVoice",
       "kind": "core",
       "type": "string",
@@ -24298,6 +24756,20 @@
       ],
       "label": "Talk Realtime Transport",
       "help": "Talk byte/session transport: webrtc, provider-websocket, gateway-relay, or managed-room.",
+      "hasChildren": false
+    },
+    {
+      "path": "talk.realtime.vadThreshold",
+      "kind": "core",
+      "type": "number",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "media"
+      ],
+      "label": "Talk Realtime VAD Threshold",
+      "help": "Realtime voice activity detection threshold from 0 (most sensitive) to 1 (least sensitive).",
       "hasChildren": false
     },
     {
@@ -34907,6 +35379,20 @@
       ],
       "label": "Wizard Last Run Version",
       "help": "OpenClaw version recorded at the time of the most recent wizard run on this config. Use this when diagnosing behavior differences across version-to-version setup changes.",
+      "hasChildren": false
+    },
+    {
+      "path": "wizard.securityAcknowledgedAt",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "advanced"
+      ],
+      "label": "Wizard Security Acknowledgement Timestamp",
+      "help": "ISO timestamp for when the setup security acknowledgement was accepted on this config. Setup uses this to avoid repeating the acknowledgement on later wizard runs.",
       "hasChildren": false
     }
   ]

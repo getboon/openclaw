@@ -1,11 +1,17 @@
 // Generates postbuild runtime artifacts: plugin metadata, SDK aliases, stable
 // runtime aliases, static assets, and compatibility chunks for live upgrades.
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { copyBundledPluginMetadata } from "./copy-bundled-plugin-metadata.mjs";
 import { copyPluginSdkRootAlias } from "./copy-plugin-sdk-root-alias.mjs";
+import { escapeRegExp } from "./lib/regexp.mjs";
+import {
+  readRuntimeDependencyOwnership,
+  RUNTIME_DEPENDENCY_OWNERSHIP_RELATIVE_PATH,
+} from "./lib/runtime-dependency-ownership-contract.mts";
 import {
   copyStaticExtensionAssets,
   copyStaticExtensionAssetsToRuntimeOverlay,
@@ -22,7 +28,6 @@ const ROOT_RUNTIME_ALIAS_PATTERN = /^(?<base>.+\.(?:runtime|contract))-[A-Za-z0-
 const ROOT_STABLE_RUNTIME_ALIAS_PATTERN = /^.+\.(?:runtime|contract)\.js$/u;
 const ROOT_RUNTIME_IMPORT_SPECIFIER_PATTERN =
   /(["'])\.\/([^"']+\.(?:runtime|contract)-[A-Za-z0-9_-]+\.js)\1/gu;
-const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 const PLUGIN_SDK_ROOT_ALIAS_OUTPUT = "dist/plugin-sdk/root-alias.cjs";
 const OFFICIAL_CHANNEL_CATALOG_OUTPUT = "dist/channel-catalog.json";
 const LEGACY_ROOT_RUNTIME_COMPAT_ALIASES = [
@@ -149,14 +154,14 @@ export const LEGACY_CLI_EXIT_COMPAT_CHUNKS = [
 /**
  * Lists generated plugin SDK root-alias outputs.
  */
-export function listPluginSdkRootAliasOutputs() {
+function listPluginSdkRootAliasOutputs() {
   return [PLUGIN_SDK_ROOT_ALIAS_OUTPUT];
 }
 
 /**
  * Lists generated official channel catalog outputs.
  */
-export function listOfficialChannelCatalogOutputs() {
+function listOfficialChannelCatalogOutputs() {
   return [OFFICIAL_CHANNEL_CATALOG_OUTPUT];
 }
 
@@ -200,7 +205,7 @@ function resolveStableRootRuntimeAliasCandidate(params) {
     return { candidate, source };
   });
   const implementationCandidates = candidatesWithSources.filter(
-    ({ source }) => source.trim() !== `export * from "./${aliasFileName}";`,
+    ({ source }) => !isRuntimeAliasSource(source, aliasFileName),
   );
   const candidateNames = implementationCandidates.map(({ candidate }) => candidate);
   if (candidateNames.length === 1) {
@@ -232,7 +237,7 @@ function resolveStableRootRuntimeAliasCandidate(params) {
 /**
  * Lists stable aliases for hashed root runtime/contract chunks.
  */
-export function listStableRootRuntimeAliasOutputs(params = {}) {
+function listStableRootRuntimeAliasOutputs(params = {}) {
   const rootDir = params.rootDir ?? ROOT;
   const distDir = path.join(rootDir, "dist");
   const fsImpl = params.fs ?? fs;
@@ -252,7 +257,7 @@ export function listStableRootRuntimeAliasOutputs(params = {}) {
 /**
  * Lists compatibility chunk outputs required for old CLI exit paths.
  */
-export function listLegacyCliExitCompatOutputs(params = {}) {
+function listLegacyCliExitCompatOutputs(params = {}) {
   const chunks = params.chunks ?? LEGACY_CLI_EXIT_COMPAT_CHUNKS;
   return chunks
     .map(({ dest }) => dest.replace(/\\/g, "/"))
@@ -262,7 +267,7 @@ export function listLegacyCliExitCompatOutputs(params = {}) {
 /**
  * Lists legacy hashed runtime aliases that may be needed during live upgrades.
  */
-export function listLegacyRootRuntimeCompatOutputs(params = {}) {
+function listLegacyRootRuntimeCompatOutputs(params = {}) {
   const rootDir = params.rootDir ?? ROOT;
   const distDir = path.join(rootDir, "dist");
   const fsImpl = params.fs ?? fs;
@@ -299,6 +304,54 @@ export function listCoreRuntimePostBuildOutputs(params = {}) {
   ].toSorted((left, right) => left.localeCompare(right));
 }
 
+const RUNTIME_CHUNK_DEFAULT_EXPORT_PATTERN =
+  /(^|\n)\s*export\b\s*(?:default\b|\{[^}]*(?:\bas\s+default\b|\bdefault\b\s*(?=[,}]))[^}]*\})/u;
+
+function formatRuntimeAliasSource(targetFileName, forwardDefault = false) {
+  const specifier = JSON.stringify(`./${targetFileName}`);
+  const starSource = `export * from ${specifier};\n`;
+  return forwardDefault ? `${starSource}export { default } from ${specifier};\n` : starSource;
+}
+
+function isRuntimeAliasSource(source, targetFileName) {
+  const normalizedSource = source.trim();
+  return (
+    normalizedSource === formatRuntimeAliasSource(targetFileName).trim() ||
+    normalizedSource === formatRuntimeAliasSource(targetFileName, true).trim()
+  );
+}
+
+/**
+ * Builds alias module source for a runtime chunk target. `export * from`
+ * never re-exports `default`, so when the target chunk has a default export
+ * the alias must forward it explicitly — otherwise lazy `import()` consumers
+ * that destructure `default` receive `undefined` (e.g. the post-compaction
+ * count reconcile failed this way with "TypeError: reconcile is not a
+ * function" on every compaction).
+ */
+function buildRuntimeAliasSource(params) {
+  const { distDir, fsImpl, targetFileName } = params;
+  let targetSource;
+  try {
+    targetSource = fsImpl.readFileSync(path.join(distDir, targetFileName), "utf8");
+  } catch {
+    return formatRuntimeAliasSource(targetFileName);
+  }
+  return formatRuntimeAliasSource(
+    targetFileName,
+    RUNTIME_CHUNK_DEFAULT_EXPORT_PATTERN.test(targetSource),
+  );
+}
+
+function writeRuntimeDependencyOwnership(rootDir, ownership, fsImpl) {
+  if (ownership) {
+    fsImpl.writeFileSync(
+      path.join(rootDir, RUNTIME_DEPENDENCY_OWNERSHIP_RELATIVE_PATH),
+      `${JSON.stringify({ chunks: Object.fromEntries(Object.entries(ownership.chunks).toSorted(([a], [b]) => a.localeCompare(b))) })}\n`,
+    );
+  }
+}
+
 /**
  * Writes stable aliases for current hashed runtime chunks.
  */
@@ -308,6 +361,7 @@ export function writeStableRootRuntimeAliases(params = {}) {
   const fsImpl = params.fs ?? fs;
   const candidatesByAlias = collectStableRootRuntimeAliasCandidates({ distDir, fs: fsImpl });
 
+  const ownership = readRuntimeDependencyOwnership(rootDir, fsImpl);
   for (const [aliasFileName, candidates] of candidatesByAlias) {
     const aliasPath = path.join(distDir, aliasFileName);
     const candidate = resolveStableRootRuntimeAliasCandidate({
@@ -318,10 +372,30 @@ export function writeStableRootRuntimeAliases(params = {}) {
     });
     if (!candidate) {
       fsImpl.rmSync?.(aliasPath, { force: true });
+      if (ownership) {
+        delete ownership.chunks[aliasFileName];
+      }
       continue;
     }
-    writeTextFileIfChanged(aliasPath, `export * from "./${candidate}";\n`);
+    const source = buildRuntimeAliasSource({ distDir, fsImpl, targetFileName: candidate });
+    const owner = ownership?.chunks[candidate];
+    if (ownership && owner) {
+      const targetSource = fsImpl.readFileSync(path.join(distDir, candidate));
+      if (createHash("sha256").update(targetSource).digest("hex") !== owner.sha256) {
+        throw new Error(
+          `runtime dependency ownership no longer matches ${candidate}; rebuild dist`,
+        );
+      }
+      ownership.chunks[aliasFileName] = {
+        extensions: owner.extensions,
+        sha256: createHash("sha256").update(source).digest("hex"),
+      };
+    } else if (ownership) {
+      delete ownership.chunks[aliasFileName];
+    }
+    writeTextFileIfChanged(aliasPath, source);
   }
+  writeRuntimeDependencyOwnership(rootDir, ownership, fsImpl);
 }
 
 /**
@@ -370,6 +444,7 @@ export function rewriteRootRuntimeImportsToStableAliases(params = {}) {
     return;
   }
 
+  const ownership = readRuntimeDependencyOwnership(rootDir, fsImpl);
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith(".js")) {
       continue;
@@ -392,9 +467,21 @@ export function rewriteRootRuntimeImportsToStableAliases(params = {}) {
       },
     );
     if (rewritten !== source) {
+      const owner = ownership?.chunks[entry.name];
+      // Carry the producer's proof through this exact transformation; never
+      // rehash unknown or independently modified build outputs.
+      if (owner) {
+        if (createHash("sha256").update(source).digest("hex") !== owner.sha256) {
+          throw new Error(
+            `runtime dependency ownership no longer matches ${entry.name}; rebuild dist`,
+          );
+        }
+        owner.sha256 = createHash("sha256").update(rewritten).digest("hex");
+      }
       writeTextFileIfChanged(filePath, rewritten);
     }
   }
+  writeRuntimeDependencyOwnership(rootDir, ownership, fsImpl);
 }
 
 function resolveRootRuntimeCandidateByMarkers(params) {
@@ -480,7 +567,10 @@ export function writeLegacyRootRuntimeCompatAliases(params = {}) {
     if (!targetFileName) {
       continue;
     }
-    writeTextFileIfChanged(legacyPath, `export * from "./${targetFileName}";\n`);
+    writeTextFileIfChanged(
+      legacyPath,
+      buildRuntimeAliasSource({ distDir, fsImpl, targetFileName }),
+    );
   }
 }
 

@@ -38,6 +38,16 @@
       "hasChildren": true
     },
     {
+      "path": "channels.clickclack.accounts.*.agentActivity",
+      "kind": "channel",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
       "path": "channels.clickclack.accounts.*.agentId",
       "kind": "channel",
       "type": "string",
@@ -247,6 +257,16 @@
       "path": "channels.clickclack.accounts.*.workspace",
       "kind": "channel",
       "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "channels.clickclack.agentActivity",
+      "kind": "channel",
+      "type": "boolean",
       "required": false,
       "deprecated": false,
       "sensitive": false,
@@ -7148,7 +7168,7 @@
         "network"
       ],
       "label": "Discord Realtime Model",
-      "help": "Provider realtime session model, such as gpt-realtime-2. This is separate from voice.model, which remains the OpenClaw agent brain model.",
+      "help": "Provider realtime session model, such as gpt-realtime-2.1. This is separate from voice.model, which remains the OpenClaw agent brain model.",
       "hasChildren": false
     },
     {
@@ -11944,6 +11964,16 @@
       "hasChildren": false
     },
     {
+      "path": "channels.imessage.accounts.*.actions.polls",
+      "kind": "channel",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
       "path": "channels.imessage.accounts.*.actions.reactions",
       "kind": "channel",
       "type": "boolean",
@@ -12933,6 +12963,16 @@
     },
     {
       "path": "channels.imessage.actions.leaveGroup",
+      "kind": "channel",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "channels.imessage.actions.polls",
       "kind": "channel",
       "type": "boolean",
       "required": false,
@@ -25289,6 +25329,26 @@
       "hasChildren": false
     },
     {
+      "path": "channels.signal.accounts.*.aliases",
+      "kind": "channel",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": true
+    },
+    {
+      "path": "channels.signal.accounts.*.aliases.*",
+      "kind": "channel",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
       "path": "channels.signal.accounts.*.allowFrom",
       "kind": "channel",
       "type": "array",
@@ -25992,6 +26052,46 @@
       "hasChildren": false
     },
     {
+      "path": "channels.signal.accounts.*.replyToMode",
+      "kind": "channel",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "channels.signal.accounts.*.replyToModeByChatType",
+      "kind": "channel",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": true
+    },
+    {
+      "path": "channels.signal.accounts.*.replyToModeByChatType.direct",
+      "kind": "channel",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "channels.signal.accounts.*.replyToModeByChatType.group",
+      "kind": "channel",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
       "path": "channels.signal.accounts.*.responsePrefix",
       "kind": "channel",
       "type": "string",
@@ -26045,6 +26145,26 @@
       "path": "channels.signal.actions.reactions",
       "kind": "channel",
       "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "channels.signal.aliases",
+      "kind": "channel",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": true
+    },
+    {
+      "path": "channels.signal.aliases.*",
+      "kind": "channel",
+      "type": "string",
       "required": false,
       "deprecated": false,
       "sensitive": false,
@@ -26797,6 +26917,46 @@
       "hasChildren": false
     },
     {
+      "path": "channels.signal.replyToMode",
+      "kind": "channel",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "channels.signal.replyToModeByChatType",
+      "kind": "channel",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": true
+    },
+    {
+      "path": "channels.signal.replyToModeByChatType.direct",
+      "kind": "channel",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "channels.signal.replyToModeByChatType.group",
+      "kind": "channel",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
       "path": "channels.signal.responsePrefix",
       "kind": "channel",
       "type": "string",
@@ -27273,6 +27433,26 @@
       "path": "channels.slack.accounts.*.channels.*.enabled",
       "kind": "channel",
       "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "channels.slack.accounts.*.channels.*.ignoreOtherMentions",
+      "kind": "channel",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "channels.slack.accounts.*.channels.*.replyToMode",
+      "kind": "channel",
+      "type": "string",
       "required": false,
       "deprecated": false,
       "sensitive": false,
@@ -29284,6 +29464,26 @@
       "path": "channels.slack.channels.*.enabled",
       "kind": "channel",
       "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "channels.slack.channels.*.ignoreOtherMentions",
+      "kind": "channel",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
+      "path": "channels.slack.channels.*.replyToMode",
+      "kind": "channel",
+      "type": "string",
       "required": false,
       "deprecated": false,
       "sensitive": false,
@@ -31613,6 +31813,20 @@
       "hasChildren": false
     },
     {
+      "path": "channels.synology-chat.webhookUrl",
+      "kind": "channel",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": true,
+      "tags": [
+        "channels",
+        "network",
+        "security"
+      ],
+      "hasChildren": false
+    },
+    {
       "path": "channels.telegram",
       "kind": "channel",
       "type": "object",
@@ -33258,21 +33472,6 @@
       "kind": "channel",
       "type": "integer",
       "required": false,
-      "deprecated": false,
-      "sensitive": false,
-      "tags": [],
-      "hasChildren": false
-    },
-    {
-      "path": "channels.telegram.accounts.*.includeGroupHistoryContext",
-      "kind": "channel",
-      "type": "string",
-      "required": false,
-      "enumValues": [
-        "none",
-        "mention-only",
-        "recent"
-      ],
       "deprecated": false,
       "sensitive": false,
       "tags": [],
@@ -35817,26 +36016,6 @@
       "hasChildren": false
     },
     {
-      "path": "channels.telegram.includeGroupHistoryContext",
-      "kind": "channel",
-      "type": "string",
-      "required": false,
-      "enumValues": [
-        "none",
-        "mention-only",
-        "recent"
-      ],
-      "deprecated": false,
-      "sensitive": false,
-      "tags": [
-        "channels",
-        "network"
-      ],
-      "label": "Telegram Group History Context",
-      "help": "Controls prior Telegram group messages included in model context: \"mention-only\" keeps messages addressed to the bot and bot replies (default), \"recent\" includes recent room history, and \"none\" disables group history context.",
-      "hasChildren": false
-    },
-    {
       "path": "channels.telegram.linkPreview",
       "kind": "channel",
       "type": "boolean",
@@ -36764,7 +36943,7 @@
         "storage"
       ],
       "label": "Telegram Trusted Local File Roots",
-      "help": "Trusted local filesystem roots for self-hosted Telegram Bot API absolute file_path values. Only absolute paths inside these roots are read directly; all other absolute paths are rejected.",
+      "help": "Trusted local filesystem roots for self-hosted Telegram Bot API file_path values. Exact in-root paths are read directly; container paths under /var/lib/telegram-bot-api can map into a host volume mount. Other absolute paths are rejected.",
       "hasChildren": true
     },
     {
@@ -38665,6 +38844,21 @@
       "sensitive": false,
       "tags": [],
       "hasChildren": true
+    },
+    {
+      "path": "channels.whatsapp.actions.calls",
+      "kind": "channel",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [
+        "channels",
+        "network"
+      ],
+      "label": "WhatsApp Voice Calls",
+      "help": "Expose the experimental requester-bound WhatsApp voice-call tool. Default: false. Requires a separately paired MeowCaller CLI.",
+      "hasChildren": false
     },
     {
       "path": "channels.whatsapp.actions.polls",

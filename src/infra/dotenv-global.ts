@@ -38,7 +38,7 @@ export function readDotEnvFile(params: {
   filePath: string;
   quiet?: boolean;
 }): LoadedDotEnvFile | null {
-  let content: string;
+  let content: Buffer;
   try {
     // Resolve symlinks so a symlinked .env file works while the bounded
     // read still rejects oversized targets.
@@ -47,7 +47,7 @@ export function readDotEnvFile(params: {
       filePath: resolved,
       maxBytes: MAX_DOTENV_FILE_BYTES,
     });
-    content = buffer.toString("utf8");
+    content = buffer;
   } catch (error) {
     if (!params.quiet) {
       const code =

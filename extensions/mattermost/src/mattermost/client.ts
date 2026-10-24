@@ -75,7 +75,7 @@ export const MattermostPostSchema = z
 
 export type MattermostPost = z.infer<typeof MattermostPostSchema>;
 
-export type MattermostFileInfo = {
+type MattermostFileInfo = {
   id: string;
   name?: string | null;
   mime_type?: string | null;
@@ -110,16 +110,6 @@ async function readMattermostSuccessText(res: Response, path: string): Promise<s
 
 export async function readMattermostError(res: Response): Promise<string> {
   const contentType = res.headers.get("content-type") ?? "";
-  if (!res.body) {
-    if (contentType.includes("application/json")) {
-      const data = (await res.json()) as { message?: string } | undefined;
-      if (data?.message) {
-        return data.message;
-      }
-      return JSON.stringify(data);
-    }
-    return await res.text();
-  }
   const text = await readResponseTextLimited(res, MATTERMOST_ERROR_BODY_LIMIT_BYTES);
   if (contentType.includes("application/json")) {
     try {
@@ -677,7 +667,7 @@ export async function createMattermostPost(
   });
 }
 
-export type MattermostTeam = {
+type MattermostTeam = {
   id: string;
   name?: string | null;
   display_name?: string | null;

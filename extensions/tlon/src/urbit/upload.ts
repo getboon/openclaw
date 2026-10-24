@@ -28,6 +28,7 @@ export async function uploadImageFromUrl(imageUrl: string): Promise<string> {
       ssrfPolicy: undefined,
       requestInit: { method: "GET" },
     });
+
     const contentType = fetched.contentType || "image/png";
     const blob = new Blob([new Uint8Array(fetched.buffer)], { type: contentType });
 

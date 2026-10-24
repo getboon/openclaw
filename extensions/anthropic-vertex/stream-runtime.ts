@@ -14,6 +14,10 @@ import {
 import {
   resolveClaudeFable5ModelIdentity,
   resolveClaudeModelIdentity,
+  resolveClaudeMythos5ModelIdentity,
+  resolveClaudeOpus5ModelIdentity,
+  resolveClaudeSonnet5ModelIdentity,
+  requiresClaudeMandatoryAdaptiveThinking,
   supportsClaudeAdaptiveThinking,
   supportsClaudeNativeMaxEffort,
   supportsClaudeNativeXhighEffort,
@@ -54,12 +58,20 @@ function isClaudeFable5Model(modelId: string): boolean {
   return resolveClaudeFable5ModelIdentity({ id: modelId }) !== undefined;
 }
 
+function isClaudeSonnet5Model(modelId: string): boolean {
+  return resolveClaudeSonnet5ModelIdentity({ id: modelId }) !== undefined;
+}
+
+function isClaudeOpus5Model(modelId: string): boolean {
+  return resolveClaudeOpus5ModelIdentity({ id: modelId }) !== undefined;
+}
+
 function isClaudeMythos5Model(modelId: string): boolean {
-  return /(?:^|-)claude-mythos-5(?=$|[^a-z0-9])/.test(resolveClaudeModelIdentity({ id: modelId }));
+  return resolveClaudeMythos5ModelIdentity({ id: modelId }) !== undefined;
 }
 
 function supportsAdaptiveThinking(modelId: string): boolean {
-  return supportsClaudeAdaptiveThinking({ id: modelId }) || isClaudeMythos5Model(modelId);
+  return supportsClaudeAdaptiveThinking({ id: modelId });
 }
 
 function mapAnthropicAdaptiveEffort(
@@ -135,8 +147,11 @@ export function createAnthropicVertexStreamFn(
   });
 
   return (model, context, options) => {
-    const transportModel = model as Model<"anthropic-messages"> & {
-      api: string;
+    // Simple completions use a synthetic registry API to select this plugin.
+    // The shared Anthropic transport must receive its canonical API or it recurses.
+    const transportModel = (
+      model.api === "anthropic-messages" ? model : { ...model, api: "anthropic-messages" as const }
+    ) as Model<"anthropic-messages"> & {
       baseUrl?: string;
       provider: string;
     };
@@ -145,13 +160,21 @@ export function createAnthropicVertexStreamFn(
       requestedMaxTokens: options?.maxTokens,
     });
     const contractModelId = resolveClaudeModelIdentity(model);
-    const fable5 = isClaudeFable5Model(contractModelId);
-    const mandatoryAdaptiveThinking = fable5 || isClaudeMythos5Model(contractModelId);
+    // Sonnet 5 and Opus 5 default thinking on when the caller omits reasoning.
+    const adaptiveDefaultClaude5 =
+      isClaudeSonnet5Model(contractModelId) || isClaudeOpus5Model(contractModelId);
+    const mandatoryAdaptiveThinking = requiresClaudeMandatoryAdaptiveThinking({
+      id: contractModelId,
+    });
+    const requestedReasoning = options?.reasoning;
     const reasoning =
-      (options?.reasoning as ModelThinkingLevel | undefined) ??
-      (mandatoryAdaptiveThinking ? "high" : undefined);
+      requestedReasoning === "off" && mandatoryAdaptiveThinking
+        ? "low"
+        : (requestedReasoning ??
+          (mandatoryAdaptiveThinking || adaptiveDefaultClaude5 ? "high" : undefined));
     const adaptiveThinking =
-      mandatoryAdaptiveThinking || Boolean(reasoning && supportsAdaptiveThinking(contractModelId));
+      mandatoryAdaptiveThinking ||
+      Boolean(reasoning && reasoning !== "off" && supportsAdaptiveThinking(contractModelId));
     const temperature =
       adaptiveThinking ||
       isClaudeOpus47OrNewerModel(contractModelId) ||
@@ -174,7 +197,9 @@ export function createAnthropicVertexStreamFn(
       metadata: options?.metadata,
     };
 
-    if (reasoning) {
+    if (reasoning === "off") {
+      opts.thinkingEnabled = false;
+    } else if (reasoning) {
       if (supportsAdaptiveThinking(contractModelId)) {
         opts.thinkingEnabled = true;
         opts.effort = mapAnthropicAdaptiveEffort(
@@ -183,14 +208,19 @@ export function createAnthropicVertexStreamFn(
           contractModelId,
         ) as AnthropicVertexEffort;
       } else {
-        opts.thinkingEnabled = true;
         const budgets = options?.thinkingBudgets;
-        opts.thinkingBudgetTokens =
+        const thinkingBudgetTokens =
           (budgets && reasoning in budgets
             ? budgets[reasoning as keyof typeof budgets]
             : undefined) ?? 10000;
+        const requestMaxTokens = opts.maxTokens ?? transportModel.maxTokens;
+        opts.thinkingEnabled =
+          thinkingBudgetTokens >= 1024 && thinkingBudgetTokens < requestMaxTokens;
+        if (opts.thinkingEnabled) {
+          opts.thinkingBudgetTokens = thinkingBudgetTokens;
+        }
       }
-    } else if (fable5) {
+    } else if (mandatoryAdaptiveThinking) {
       opts.thinkingEnabled = true;
       opts.effort = "high";
     } else {

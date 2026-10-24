@@ -13,6 +13,7 @@ const DEFAULT_EXPECTED_POLICY: CliCommandPathPolicy = {
   routeConfigGuard: "never",
   loadPlugins: "never",
   pluginRegistry: { scope: "all" },
+  ownsProtocolStdout: false,
   hideBanner: false,
   ensureCliPath: true,
   networkProxy: "default",
@@ -288,6 +289,12 @@ describe("command-path-policy", () => {
     expect(resolveCliNetworkProxyPolicy(["node", "openclaw", "skills", "search", "browser"])).toBe(
       "default",
     );
+  });
+
+  it("routes ClawHub skill verification through the network proxy", () => {
+    expect(
+      resolveCliNetworkProxyPolicy(["node", "openclaw", "skills", "verify", "@demo-owner/weather"]),
+    ).toBe("default");
   });
 
   it("uses the longest catalog command path for deep network proxy overrides", async () => {

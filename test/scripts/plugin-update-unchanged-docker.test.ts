@@ -198,11 +198,17 @@ describe("plugin update unchanged Docker E2E", () => {
   });
 
   it("bounds corrupt plugin update commands and prints diagnostics on hangs", () => {
+    const runner = readFileSync("scripts/e2e/update-corrupt-plugin-docker.sh", "utf8");
     const script = readFileSync(CORRUPT_UPDATE_SCENARIO_SCRIPT, "utf8");
 
+    expect(runner).toContain("-e OPENCLAW_UPDATE_CORRUPT_PLUGIN_BASELINE");
     expect(script).toContain("OPENCLAW_UPDATE_CORRUPT_PLUGIN_TIMEOUT_SECONDS");
     expect(script).toContain(
       "openclaw_e2e_read_positive_int_env OPENCLAW_UPDATE_CORRUPT_PLUGIN_TIMEOUT_SECONDS 900",
+    );
+    expect(script).toContain("OPENCLAW_UPDATE_CORRUPT_PLUGIN_STEP_TIMEOUT_SECONDS");
+    expect(script).toContain(
+      "default_update_step_timeout_seconds=$((10#$update_timeout_seconds - 30))",
     );
     expect(script).not.toContain(
       'update_timeout_seconds="${OPENCLAW_UPDATE_CORRUPT_PLUGIN_TIMEOUT_SECONDS:-900}"',
@@ -211,6 +217,7 @@ describe("plugin update unchanged Docker E2E", () => {
       script.match(/openclaw_e2e_maybe_timeout "\$\{update_timeout_seconds\}s" \\/gu)?.length,
     ).toBe(2);
     expect(script).toContain("--channel beta");
+    expect(script.match(/--timeout "\$update_step_timeout_seconds"/g)).toHaveLength(2);
     expect(script).toContain("OPENCLAW_UPDATE_POST_CORE=1");
     expect(script).not.toContain(
       'node "$entry" update --channel beta --tag "${OPENCLAW_CURRENT_PACKAGE_TGZ',

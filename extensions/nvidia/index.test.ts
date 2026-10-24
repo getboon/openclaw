@@ -7,7 +7,10 @@ import {
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import plugin from "./index.js";
-import { clearNvidiaFeaturedModelCacheForTests } from "./provider-catalog.js";
+import {
+  clearNvidiaFeaturedModelCacheForTests,
+  NVIDIA_FEATURED_MODELS_URL,
+} from "./provider-catalog.js";
 
 const ssrfRuntimeMocks = vi.hoisted(() => ({
   fetchWithSsrFGuard: vi.fn(),
@@ -44,6 +47,7 @@ afterEach(() => {
 function mockFeaturedCatalogResponse(payload: unknown, status = 200) {
   ssrfRuntimeMocks.fetchWithSsrFGuard.mockResolvedValueOnce({
     response: Response.json(payload, { status }),
+    finalUrl: NVIDIA_FEATURED_MODELS_URL,
     release: vi.fn(),
   });
 }
@@ -117,6 +121,7 @@ describe("nvidia provider hooks", () => {
         provider: "nvidia",
         method: "api-key",
         choiceId: "nvidia-api-key",
+        appGuidedSecret: true,
         choiceLabel: "NVIDIA API key",
         groupId: "nvidia",
         groupLabel: "NVIDIA",
@@ -203,6 +208,7 @@ describe("nvidia provider hooks", () => {
 
     expect(entries?.map((entry) => entry.id)).toEqual([
       "nvidia/nemotron-3-ultra-550b-a55b",
+      "nvidia/nemotron-3.5-lightning-30b-a3b",
       "nvidia/nemotron-3-super-120b-a12b",
       "moonshotai/kimi-k2.5",
       "minimaxai/minimax-m2.7",
@@ -222,6 +228,7 @@ describe("nvidia provider hooks", () => {
 
     expect(entries?.map((entry) => entry.id)).toEqual([
       "nvidia/nemotron-3-ultra-550b-a55b",
+      "nvidia/nemotron-3.5-lightning-30b-a3b",
       "nvidia/nemotron-3-super-120b-a12b",
       "moonshotai/kimi-k2.5",
       "minimaxai/minimax-m2.7",
@@ -291,6 +298,7 @@ describe("nvidia provider hooks", () => {
     const staticRows = await catalogProvider?.staticCatalog?.(buildCatalogContext());
     expect(staticRows?.map((entry) => `${entry.source}:${entry.provider}/${entry.model}`)).toEqual([
       "static:nvidia/nvidia/nemotron-3-ultra-550b-a55b",
+      "static:nvidia/nvidia/nemotron-3.5-lightning-30b-a3b",
       "static:nvidia/nvidia/nemotron-3-super-120b-a12b",
       "static:nvidia/moonshotai/kimi-k2.5",
       "static:nvidia/minimaxai/minimax-m2.7",

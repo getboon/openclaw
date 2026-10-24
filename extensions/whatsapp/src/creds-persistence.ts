@@ -1,4 +1,5 @@
 // Whatsapp plugin module implements creds persistence behavior.
+import { enqueueKeyedTask } from "openclaw/plugin-sdk/keyed-async-queue";
 import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import { replaceFileAtomic } from "openclaw/plugin-sdk/security-runtime";
 import { assertWebCredsPathRegularFileOrMissing, resolveWebCredsPath } from "./creds-files.js";
@@ -19,7 +20,9 @@ export async function writeWebCredsRawAtomically(params: {
   filePath: string;
   content: string;
   tempPrefix: string;
+  beforeCredentialPersistence?: () => Promise<void>;
 }): Promise<void> {
+  await params.beforeCredentialPersistence?.();
   await assertWebCredsPathRegularFileOrMissing(params.filePath);
   await replaceFileAtomic({
     filePath: params.filePath,
@@ -31,15 +34,21 @@ export async function writeWebCredsRawAtomically(params: {
     syncParentDir: true,
     beforeRename: async ({ filePath }) => {
       await assertWebCredsPathRegularFileOrMissing(filePath);
+      await params.beforeCredentialPersistence?.();
     },
   });
 }
 
-export async function writeCredsJsonAtomically(authDir: string, creds: unknown): Promise<void> {
+export async function writeCredsJsonAtomically(
+  authDir: string,
+  creds: unknown,
+  beforeCredentialPersistence?: () => Promise<void>,
+): Promise<void> {
   await writeWebCredsRawAtomically({
     filePath: resolveWebCredsPath(authDir),
     content: await stringifyCreds(creds),
     tempPrefix: ".creds",
+    beforeCredentialPersistence,
   });
 }
 
@@ -48,18 +57,17 @@ export function enqueueCredsSave(
   saveCreds: () => Promise<void> | void,
   onError: (error: unknown) => void,
 ): void {
-  const previous = credsSaveQueues.get(authDir) ?? Promise.resolve();
-  const next = previous
-    .then(() => saveCreds())
-    .catch((error: unknown) => {
-      onError(error);
-    })
-    .finally(() => {
-      if (credsSaveQueues.get(authDir) === next) {
-        credsSaveQueues.delete(authDir);
+  void enqueueKeyedTask({
+    tails: credsSaveQueues,
+    key: authDir,
+    task: async () => {
+      try {
+        await saveCreds();
+      } catch (error) {
+        onError(error);
       }
-    });
-  credsSaveQueues.set(authDir, next);
+    },
+  });
 }
 
 export function waitForCredsSaveQueue(authDir?: string): Promise<void> {

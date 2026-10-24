@@ -275,6 +275,24 @@ export async function readResponseText(
         if (truncated) {
           break;
         }
+        if (bytesRead >= maxBytes) {
+          // Reached the byte cap. A body that is exactly maxBytes bytes is
+          // complete only once EOF confirms it. Keep the conservative result
+          // if that confirming read fails or the body continues.
+          truncated = true;
+          while (true) {
+            const { done: atEnd, value: extra } = await reader.read();
+            if (atEnd) {
+              truncated = false;
+              break;
+            }
+            if (extra && extra.byteLength > 0) {
+              truncated = true;
+              break;
+            }
+          }
+          break;
+        }
       }
     } catch {
       // Stream errors mean the accumulated bytes are only a partial body.
@@ -287,7 +305,10 @@ export async function readResponseText(
       }
       try {
         reader.releaseLock();
-      } catch {}
+      } catch {
+        // The read/cancel path already produced the best-effort body result;
+        // lock-release failures must not replace that outcome.
+      }
     }
 
     const bytes = concatBytes(parts, bytesRead);

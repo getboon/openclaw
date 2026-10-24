@@ -25,7 +25,9 @@ import type {
 } from "../../plugins/document-extractor-types.js";
 import { resolveUserPath } from "../../utils.js";
 import type { AuthProfileStore } from "../auth-profiles/types.js";
+import { applySecretRefHeaderSentinels } from "../model-auth.js";
 import { getModelProviderRequestTransport } from "../provider-request-config.js";
+import { registerProviderStreamForModel } from "../provider-stream.js";
 import type { AgentToolUpdateCallback } from "../runtime/index.js";
 import { optionalFiniteNumberSchema } from "../schema/typebox.js";
 import { readFiniteNumberParam, ToolInputError } from "./common.js";
@@ -390,7 +392,10 @@ async function runPdfPrompt(params: {
     cfg: effectiveCfg,
     modelOverride: params.modelOverride,
     run: async (provider, modelId) => {
-      const model = resolveModelFromRegistry({ modelRegistry, provider, modelId });
+      const model = applySecretRefHeaderSentinels(
+        resolveModelFromRegistry({ modelRegistry, provider, modelId }),
+        effectiveCfg,
+      );
       const apiKey = await resolveModelRuntimeApiKey({
         model,
         cfg: effectiveCfg,
@@ -449,6 +454,15 @@ async function runPdfPrompt(params: {
           return { text, provider, model: modelId, native: true };
         }
       }
+
+      // PDF-only model selections may not have loaded their provider plugin yet.
+      // Register before complete() so plugin-owned APIs resolve on first use.
+      registerProviderStreamForModel({
+        model,
+        cfg: effectiveCfg,
+        agentDir: params.agentDir,
+        ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
+      });
 
       const extractionResult = await getExtractions();
       const extractions = extractionResult.chunks;

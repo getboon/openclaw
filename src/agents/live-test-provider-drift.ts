@@ -96,6 +96,8 @@ export function isLiveProviderUnavailableDrift(error: unknown): boolean {
     msg.includes("unable to access non-serverless model") ||
     msg.includes("create and start a new dedicated endpoint") ||
     msg.includes("no available capacity was found for the model") ||
+    msg.includes("upstream request failed: model is unavailable") ||
+    (msg.includes("only available hosted in china") && msg.includes("requires explicit opt in")) ||
     (msg.includes("502") && msg.includes("internal server error"))
   );
 }

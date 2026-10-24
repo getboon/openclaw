@@ -82,14 +82,14 @@ describe("sendClickClackText routing", () => {
       replyToId: "msg_root",
     });
 
-    expect(createThreadReply).toHaveBeenCalledWith("msg_thread_root", "Done.");
+    expect(createThreadReply).toHaveBeenCalledWith("msg_thread_root", "Done.", expect.anything());
     expect(createChannelMessage).not.toHaveBeenCalled();
   });
 
   it("threads when the target itself names a thread", async () => {
     await sendClickClackText({ cfg, to: "thread:msg_root", text: "hi" });
 
-    expect(createThreadReply).toHaveBeenCalledWith("msg_root", "hi");
+    expect(createThreadReply).toHaveBeenCalledWith("msg_root", "hi", expect.anything());
     expect(createChannelMessage).not.toHaveBeenCalled();
   });
 

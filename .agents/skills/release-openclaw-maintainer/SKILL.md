@@ -237,6 +237,19 @@ Stable publication is not complete until `main` carries the actual shipped relea
 
 ## Handle versions and release files consistently
 
+Use the release preparation controller before manual version edits:
+
+```bash
+pnpm release:prepare -- --version YYYY.M.PATCH-beta.N --shadow
+pnpm release:prepare -- --version YYYY.M.PATCH-beta.N --write
+pnpm release:prepare -- --version YYYY.M.PATCH-beta.N --check
+```
+
+Shadow mode is the default and never runs mutating commands. Write mode aligns
+the root and macOS versions, optionally Android with `--android`, then runs only
+the version-owned generated metadata DAG. Every mode writes an exact
+HEAD/worktree-bound manifest under git metadata for cutover review.
+
 - Version locations include:
   - `package.json`
   - `apps/android/app/build.gradle.kts`
@@ -882,10 +895,13 @@ node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>
     and choose the intended `npm_dist_tag` (`beta` default; `latest` only for
     an intentional direct stable publish). Wait for it to pass. Save that run id
     because the real publish requires it to reuse the prepared npm tarball.
-17. Before real publish, review the early performance run if it has completed.
-    Compare against earlier release evidence or clawgrit reports where
-    available. Call out minor regressions in the release proof; block on major
-    regressions unless waived or proven noisy.
+17. Before real publish, run Full Release Validation through the trusted
+    current-`main` SHA-pinned helper for the exact release SHA with evidence
+    reuse disabled. Save the successful run ID and exact attempt as
+    `full_release_validation_run_attempt=<saved-attempt>`. Review the early
+    performance run if it has completed. Compare against earlier release
+    evidence or clawgrit reports where available. Call out minor regressions in
+    the release proof; block on major regressions unless waived or proven noisy.
 18. For stable releases, start `.github/workflows/macos-release.yml` in
     `openclaw/openclaw` and wait for the public validation-only run to pass.
 19. For stable releases, start

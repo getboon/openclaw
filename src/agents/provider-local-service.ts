@@ -3,6 +3,7 @@
  * keep shared services alive while requests run and stop them after idle.
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import {
   clampPositiveTimerTimeoutMs,
@@ -17,6 +18,7 @@ import {
   signalChildProcessTree,
   shouldDetachChildForProcessTree,
 } from "../process/child-process-tree.js";
+import { unwrapHeadersInitSentinelsForProviderEgress } from "./provider-secret-egress.js";
 
 const log = createSubsystemLogger("provider-local-service");
 const DEFAULT_READY_TIMEOUT_MS = 120_000;
@@ -182,18 +184,16 @@ function localServiceKey(
     command: service.command,
     args: service.args ?? [],
     cwd: service.cwd ?? "",
-    env: sortedStringRecord(service.env),
+    envHash: hashStringRecord(service.env),
     healthUrl,
   });
 }
 
-function sortedStringRecord(record: Record<string, string> | undefined): Record<string, string> {
-  if (!record) {
-    return {};
-  }
-  return Object.fromEntries(
-    Object.entries(record).toSorted(([left], [right]) => left.localeCompare(right)),
+function hashStringRecord(record: Record<string, string> | undefined): string {
+  const sorted = Object.entries(record ?? {}).toSorted(([left], [right]) =>
+    left.localeCompare(right),
   );
+  return createHash("sha256").update(JSON.stringify(sorted)).digest("hex");
 }
 
 function buildHealthProbeHeaders(
@@ -222,6 +222,12 @@ async function probeHealth(
   signal?: AbortSignal | null,
 ): Promise<boolean> {
   throwIfAborted(signal);
+  // Local-service orchestration retains sentinel headers across retries. Only
+  // the actual health request may materialize credentials.
+  const egressHeaders = unwrapHeadersInitSentinelsForProviderEgress(
+    headers,
+    "to probe local model provider health",
+  );
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DEFAULT_PROBE_TIMEOUT_MS);
   timeout.unref?.();
@@ -229,7 +235,7 @@ async function probeHealth(
   signal?.addEventListener("abort", onAbort, { once: true });
   let response: Response | undefined;
   try {
-    response = await fetch(url, { headers, signal: controller.signal });
+    response = await fetch(url, { headers: egressHeaders, signal: controller.signal });
     return response.ok;
   } catch {
     if (signal?.aborted) {

@@ -1,5 +1,6 @@
 // Diagnostic logger records structured runtime events, timings, and health snapshots.
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
+import { resolveCompactionTimeoutMs } from "../agents/embedded-agent-runner/compaction-safety-timeout.js";
 import { getRuntimeConfig } from "../config/config.js";
 import { resolveAllAgentSessionStoreTargetsSync } from "../config/sessions/targets.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -10,6 +11,7 @@ import {
   type DiagnosticPhaseSnapshot,
   type DiagnosticLivenessWarningReason,
 } from "../infra/diagnostic-events.js";
+import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 import { emitDiagnosticMemorySample, resetDiagnosticMemoryForTest } from "./diagnostic-memory.js";
 import {
   getCurrentDiagnosticPhase,
@@ -66,6 +68,7 @@ import {
   startDiagnosticStabilityRecorder,
   stopDiagnosticStabilityRecorder,
 } from "./diagnostic-stability.js";
+
 export { diagnosticLogger, logLaneDequeue, logLaneEnqueue } from "./diagnostic-runtime.js";
 
 const webhookStats = {
@@ -85,12 +88,9 @@ const DEFAULT_LIVENESS_EVENT_LOOP_DELAY_WARN_MS = 1_000;
 const DEFAULT_LIVENESS_EVENT_LOOP_UTILIZATION_WARN = 0.95;
 const DEFAULT_LIVENESS_CPU_CORE_RATIO_WARN = 0.9;
 const DEFAULT_LIVENESS_WARN_COOLDOWN_MS = 120_000;
-let commandPollBackoffRuntimePromise: Promise<
-  typeof import("../agents/command-poll-backoff.runtime.js")
-> | null = null;
-let stuckSessionRecoveryRuntimePromise: Promise<
-  typeof import("./diagnostic-stuck-session-recovery.runtime.js")
-> | null = null;
+const loadStuckSessionRecoveryRuntime = createLazyRuntimeModule(
+  () => import("./diagnostic-stuck-session-recovery.runtime.js"),
+);
 
 type EmitDiagnosticMemorySample = typeof emitDiagnosticMemorySample;
 type EventLoopDelayMonitor = ReturnType<typeof monitorEventLoopDelay>;
@@ -154,16 +154,14 @@ let lastDiagnosticLivenessEventLoopUtilization: EventLoopUtilization | null = nu
 let lastDiagnosticLivenessEventAt = 0;
 let lastDiagnosticLivenessWarnAt = 0;
 
-function loadCommandPollBackoffRuntime() {
-  commandPollBackoffRuntimePromise ??= import("../agents/command-poll-backoff.runtime.js");
-  return commandPollBackoffRuntimePromise;
-}
+const loadCommandPollBackoffRuntime = createLazyRuntimeModule(
+  () => import("../agents/command-poll-backoff.runtime.js"),
+);
 
 async function recoverStuckSession(
   params: StuckSessionRecoveryRequest,
 ): Promise<StuckSessionRecoveryOutcome> {
-  stuckSessionRecoveryRuntimePromise ??= import("./diagnostic-stuck-session-recovery.runtime.js");
-  return stuckSessionRecoveryRuntimePromise
+  return loadStuckSessionRecoveryRuntime()
     .then(({ recoverStuckDiagnosticSession }) => recoverStuckDiagnosticSession(params))
     .catch((err: unknown) => {
       diag.warn(`stuck session recovery unavailable: ${String(err)}`);
@@ -546,7 +544,6 @@ function isStalledModelCallRecoveryEligible(params: {
     params.classification?.eventType === "session.stalled" &&
     params.classification.classification === "stalled_agent_run" &&
     params.classification.activeWorkKind === "model_call" &&
-    params.activity?.hasActiveEmbeddedRun === true &&
     typeof lastProgressAgeMs === "number" &&
     lastProgressAgeMs >= params.stuckSessionAbortMs
   );
@@ -1233,6 +1230,7 @@ export function startDiagnosticHeartbeat(
     }
     const stuckSessionWarnMs = resolveStuckSessionWarnMs(heartbeatConfig);
     const stuckSessionAbortMs = resolveStuckSessionAbortMs(heartbeatConfig, stuckSessionWarnMs);
+    const compactionSafetyTimeoutMs = resolveCompactionTimeoutMs(heartbeatConfig);
     const now = Date.now();
     pruneDiagnosticSessionStates(now, true);
     const work = getDiagnosticWorkSnapshot(now);
@@ -1329,6 +1327,7 @@ export function startDiagnosticHeartbeat(
               expectedState: state.state,
               stateGeneration: state.generation,
               staleActiveProgressAbortMs: stuckSessionAbortMs,
+              compactionSafetyTimeoutMs,
             },
           });
         } else if (
@@ -1351,6 +1350,7 @@ export function startDiagnosticHeartbeat(
               allowActiveAbort: true,
               expectedState: state.state,
               stateGeneration: state.generation,
+              compactionSafetyTimeoutMs,
             },
           });
         }

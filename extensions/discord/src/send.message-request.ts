@@ -1,6 +1,6 @@
 // Discord plugin module implements send.message request behavior.
 import { randomBytes } from "node:crypto";
-import { MessageFlags, type APIEmbed } from "discord-api-types/v10";
+import { MessageFlags, type APIAllowedMentions, type APIEmbed } from "discord-api-types/v10";
 import {
   Embed,
   serializePayload,
@@ -15,6 +15,7 @@ export const SUPPRESS_NOTIFICATIONS_FLAG = MessageFlags.SuppressNotifications;
 export type DiscordSendComponentFactory = (text: string) => TopLevelComponents[];
 export type DiscordSendComponents = TopLevelComponents[] | DiscordSendComponentFactory;
 export type DiscordSendEmbeds = Array<APIEmbed | Embed>;
+export type DiscordAllowedMentions = APIAllowedMentions;
 
 export function createDiscordMessageNonce(): string {
   return randomBytes(12).toString("hex");
@@ -54,6 +55,7 @@ export function buildDiscordMessagePayload(params: {
   text: string;
   components?: TopLevelComponents[];
   embeds?: Embed[];
+  allowedMentions?: DiscordAllowedMentions;
   flags?: number;
   files?: MessagePayloadFile[];
 }): MessagePayloadObject {
@@ -68,6 +70,9 @@ export function buildDiscordMessagePayload(params: {
   }
   if (!hasV2 && params.embeds?.length) {
     payload.embeds = params.embeds;
+  }
+  if (params.allowedMentions) {
+    payload.allowed_mentions = params.allowedMentions;
   }
   if (params.flags !== undefined) {
     payload.flags = params.flags;
@@ -96,6 +101,7 @@ type DiscordMessageRequestParams = {
   text: string;
   components?: TopLevelComponents[];
   embeds?: Embed[];
+  allowedMentions?: DiscordAllowedMentions;
   files?: MessagePayloadFile[];
   flags?: number;
   replyTo?: string;

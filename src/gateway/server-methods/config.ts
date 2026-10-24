@@ -53,6 +53,7 @@ import {
 } from "../../secrets/runtime.js";
 import { diffConfigPaths } from "../config-diff.js";
 import { resolveConfigReloadMetadata } from "../config-reload-plan.js";
+import { loadGatewayConfigRevisionProjector } from "../config-revision-token.js";
 import {
   formatControlPlaneActor,
   resolveControlPlaneActor,
@@ -118,7 +119,7 @@ function requireConfigBaseHash(
     );
     return false;
   }
-  if (baseHash !== snapshotHash) {
+  if (baseHash !== loadGatewayConfigRevisionProjector().projectRawHash(snapshotHash)) {
     respond(
       false,
       undefined,
@@ -498,7 +499,7 @@ function parseValidateConfigFromRawOrRespond(
     : restored.result;
   const validationCandidate = stripBundledProviderRuntimeDefaults({
     candidate: projectedValidationCandidate,
-    sourceConfig: snapshot.parsed,
+    sourceConfig: snapshot.sourceConfig,
   });
   const sourceValidated = validateConfigObjectRawWithPlugins(validationCandidate);
   if (!sourceValidated.ok) {
@@ -695,7 +696,17 @@ export const configHandlers: GatewayRequestHandlers = {
     }
     const snapshot = await readConfigFileSnapshot();
     const schema = loadSchemaWithPlugins();
-    respond(true, redactConfigSnapshot(snapshot, schema.uiHints), undefined);
+    const redacted = redactConfigSnapshot(snapshot, schema.uiHints);
+    respond(
+      true,
+      {
+        ...redacted,
+        hash: redacted.hash
+          ? loadGatewayConfigRevisionProjector().projectRawHash(redacted.hash)
+          : redacted.hash,
+      },
+      undefined,
+    );
   },
   "config.schema": ({ params, respond }) => {
     if (!assertValidParams(params, validateConfigSchemaParams, "config.schema", respond)) {
@@ -859,7 +870,27 @@ export const configHandlers: GatewayRequestHandlers = {
       });
       return;
     }
-    const validated = validateConfigObjectWithPlugins(restoredMerge.result);
+    const validationCandidate = stripBundledProviderRuntimeDefaults({
+      candidate: restoredMerge.result,
+      sourceConfig: snapshot.sourceConfig,
+    });
+    const sourceValidated = validateConfigObjectRawWithPlugins(validationCandidate);
+    if (!sourceValidated.ok) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          summarizeConfigValidationIssues(sourceValidated.issues),
+          {
+            details: { issues: sourceValidated.issues },
+          },
+        ),
+      );
+      return;
+    }
+    const writeConfig = validationCandidate as OpenClawConfig;
+    const validated = validateConfigObjectWithPlugins(validationCandidate);
     if (!validated.ok) {
       respond(
         false,
@@ -908,7 +939,7 @@ export const configHandlers: GatewayRequestHandlers = {
     const writeResult = await commitGatewayConfigWrite({
       snapshot,
       writeOptions,
-      nextConfig: validated.config,
+      nextConfig: writeConfig,
       context,
       disconnectSharedAuthClients,
     });

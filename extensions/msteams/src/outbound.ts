@@ -148,6 +148,7 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
     payload,
     deps,
     threadSuppressed,
+    onDeliveryResult,
   }) => {
     const replyStyleOverride = resolveReplyStyleOverride(threadSuppressed);
     const msteamsData = asObjectRecord(payload.channelData?.msteams);
@@ -173,9 +174,12 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
     );
     if (mediaUrls.length > 0) {
       const send = resolveMSTeamsMediaSend({ cfg, deps });
-      const result = await sendPayloadMediaSequence({
+      const result = await sendPayloadMediaSequence<MSTeamsSendResult>({
         text,
         mediaUrls,
+        onResult: async (deliveryResult) => {
+          await onDeliveryResult?.(attachChannelToResult("msteams", deliveryResult));
+        },
         send: async ({ text: textLocal, mediaUrl: mediaUrlLocal }) =>
           await send(to, textLocal, {
             mediaUrl: mediaUrlLocal,
@@ -197,6 +201,7 @@ export const msteamsOutbound: ChannelOutboundAdapter = {
       let result: Awaited<ReturnType<MSTeamsTextSendFn>>;
       for (const chunk of chunks) {
         result = await send(to, chunk, { replyStyleOverride });
+        await onDeliveryResult?.(attachChannelToResult("msteams", result));
       }
       return attachChannelToResult("msteams", result!);
     }

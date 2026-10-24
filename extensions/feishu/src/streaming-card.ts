@@ -185,6 +185,9 @@ function truncateSummary(text: string, max = 50): string {
     return "";
   }
   const clean = text.replace(/\n/g, " ").trim();
+  // Slice on a code-point boundary so a surrogate pair (emoji / astral char)
+  // straddling the limit is dropped whole, instead of leaving a lone surrogate
+  // half that Feishu renders as the replacement char.
   return clean.length <= max ? clean : sliceUtf16Safe(clean, 0, max - 3) + "...";
 }
 

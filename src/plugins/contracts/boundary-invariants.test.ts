@@ -25,12 +25,13 @@ const BUNDLED_TYPED_HOOK_REGISTRATION_FILES = [
   "extensions/memory-lancedb/index.ts",
   "extensions/sentry-monitor/src/register.ts",
   "extensions/thread-ownership/index.ts",
+  "extensions/workboard/index.ts",
 ] as const;
 const BUNDLED_TYPED_HOOK_REGISTRATION_GUARDS = {
   "extensions/acpx/index.ts": ["reply_dispatch"],
   "extensions/active-memory/index.ts": ["before_prompt_build"],
   "extensions/boon-pdf-prep/src/register.ts": ["before_prompt_build", "message_received"],
-  "extensions/codex/index.ts": ["inbound_claim"],
+  "extensions/codex/index.ts": ["after_compaction", "inbound_claim", "session_end"],
   "extensions/diffs/src/plugin.ts": ["before_prompt_build"],
   "extensions/discord/subagent-hooks-api.ts": ["subagent_delivery_target", "subagent_ended"],
   "extensions/feishu/subagent-hooks-api.ts": ["subagent_delivery_target", "subagent_ended"],
@@ -49,6 +50,7 @@ const BUNDLED_TYPED_HOOK_REGISTRATION_GUARDS = {
     "subagent_ended",
   ],
   "extensions/thread-ownership/index.ts": ["message_received", "message_sending"],
+  "extensions/workboard/index.ts": ["subagent_ended"],
 } as const satisfies Record<
   (typeof BUNDLED_TYPED_HOOK_REGISTRATION_FILES)[number],
   readonly string[]

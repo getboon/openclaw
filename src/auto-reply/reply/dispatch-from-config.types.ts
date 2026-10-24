@@ -8,7 +8,11 @@ import type { InternalGetReplyFromConfig, InternalGetReplyOptions } from "./get-
 import type { ReplyDispatchKind, ReplyDispatcher } from "./reply-dispatcher.types.js";
 
 /** Why a turn ended before the agent ever ran. Absent means the agent ran. */
-export type DispatchTurnSkipReason = "active-run" | "aborted" | "duplicate";
+export type DispatchTurnSkipReason =
+  | "active-run"
+  | "aborted"
+  | "duplicate"
+  | "lifecycle-invalidated";
 
 export type DispatchFromConfigResult = {
   queuedFinal: boolean;

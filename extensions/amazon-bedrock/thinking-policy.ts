@@ -9,6 +9,9 @@ import type {
 import {
   resolveClaudeFable5ModelIdentity,
   resolveClaudeModelIdentity,
+  resolveClaudeMythos5ModelIdentity,
+  resolveClaudeOpus5ModelIdentity,
+  resolveClaudeSonnet5ModelIdentity,
 } from "openclaw/plugin-sdk/provider-model-shared";
 
 const BASE_CLAUDE_THINKING_LEVELS = [
@@ -32,7 +35,7 @@ function isOpus46BedrockModelRef(modelRef: string): boolean {
 }
 
 /** Return whether a Bedrock model ref names Claude Opus 4.7. */
-export function isOpus47BedrockModelRef(modelRef: string): boolean {
+function isOpus47BedrockModelRef(modelRef: string): boolean {
   return /(?:^|[/.:])(?:(?:us|eu|ap|apac|au|jp|global)\.)?(?:anthropic\.)?claude-opus-4[.-]7(?:$|[-.:/])/i.test(
     modelRef,
   );
@@ -58,6 +61,9 @@ export function isLatestAdaptiveBedrockModelRef(
   const canonicalModelId = resolveClaudeModelIdentity(modelRef);
   return (
     resolveClaudeFable5ModelIdentity(modelRef) !== undefined ||
+    resolveClaudeMythos5ModelIdentity(modelRef) !== undefined ||
+    resolveClaudeSonnet5ModelIdentity(modelRef) !== undefined ||
+    resolveClaudeOpus5ModelIdentity(modelRef) !== undefined ||
     [modelId, canonicalModelId].some(
       (candidate) =>
         isOpus47OrNewerBedrockModelRef(candidate) || isMythosPreviewBedrockModelRef(candidate),
@@ -70,7 +76,12 @@ export function supportsBedrockNativeMaxEffort(
   modelId: string,
   params?: Record<string, unknown>,
 ): boolean {
-  if (resolveClaudeFable5ModelIdentity({ id: modelId, params })) {
+  if (
+    resolveClaudeFable5ModelIdentity({ id: modelId, params }) ||
+    resolveClaudeMythos5ModelIdentity({ id: modelId, params }) ||
+    resolveClaudeSonnet5ModelIdentity({ id: modelId, params }) ||
+    resolveClaudeOpus5ModelIdentity({ id: modelId, params })
+  ) {
     return true;
   }
   const canonicalModelId = resolveClaudeModelIdentity({ id: modelId, params });
@@ -85,7 +96,10 @@ export function resolveBedrockNativeThinkingLevelMap(
   params?: Record<string, unknown>,
 ): ProviderRuntimeModel["thinkingLevelMap"] | undefined {
   const modelRef = { id: modelId, params };
-  if (resolveClaudeFable5ModelIdentity(modelRef)) {
+  if (resolveClaudeFable5ModelIdentity(modelRef) || resolveClaudeMythos5ModelIdentity(modelRef)) {
+    return { off: "low", minimal: "low", xhigh: "xhigh", max: "max" };
+  }
+  if (resolveClaudeSonnet5ModelIdentity(modelRef) || resolveClaudeOpus5ModelIdentity(modelRef)) {
     return { off: "low", minimal: "low", xhigh: "xhigh", max: "max" };
   }
   if (!supportsBedrockNativeMaxEffort(modelId, params)) {
@@ -106,7 +120,12 @@ export function resolveBedrockClaudeThinkingProfile(
   const trimmed = modelId.trim();
   const canonicalModelId = resolveClaudeModelIdentity({ id: trimmed, params });
   const modelRefs = [trimmed, canonicalModelId];
-  if (resolveClaudeFable5ModelIdentity({ id: trimmed, params })) {
+  if (
+    resolveClaudeFable5ModelIdentity({ id: trimmed, params }) ||
+    resolveClaudeMythos5ModelIdentity({ id: trimmed, params }) ||
+    resolveClaudeSonnet5ModelIdentity({ id: trimmed, params }) ||
+    resolveClaudeOpus5ModelIdentity({ id: trimmed, params })
+  ) {
     return {
       levels: [...BASE_CLAUDE_THINKING_LEVELS, { id: "xhigh" }, { id: "adaptive" }, { id: "max" }],
       defaultLevel: "high",

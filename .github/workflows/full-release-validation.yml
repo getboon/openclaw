@@ -134,7 +134,7 @@ permissions:
 
 concurrency:
   group: full-release-validation-${{ inputs.ref }}-${{ inputs.rerun_group }}
-  cancel-in-progress: ${{ (inputs.ref == 'main' && inputs.rerun_group == 'all') || startsWith(inputs.ref, 'tideclaw/alpha/') }}
+  cancel-in-progress: ${{ (inputs.ref == 'main' && inputs.rerun_group == 'all') || startsWith(inputs.ref, 'tideclaw/alpha/') || startsWith(inputs.ref, 'release/') }}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -938,6 +938,22 @@ jobs:
                 fetch_child_jobs |
                   jq -s '[.[] | select(.status == "completed" and .conclusion != "success" and .conclusion != "skipped")]'
               )"
+              if [[ "$workflow" == "openclaw-release-checks.yml" && "$RELEASE_PROFILE" == "beta" ]]; then
+                # Beta treats live-provider suites as advisory (live_advisory in
+                # openclaw-live-and-e2e-checks-reusable.yml); their failures must
+                # not fail-fast-cancel the remaining release-check matrix. Repo
+                # E2E under the same caller stays blocking.
+                failed_jobs_json="$(
+                  jq '[.[] | select(
+                    (.name | startswith("Run repo/live E2E validation / "))
+                    and ((.name | contains("Docker live"))
+                      or (.name | contains("Live media suites"))
+                      or (.name | contains("validate_live_provider_suites"))
+                      or (.name | contains("validate_release_live_cache"))
+                      or (.name | contains("prepare_live_test_image")))
+                    | not)]' <<< "$failed_jobs_json"
+                )"
+              fi
               if jq -e 'length > 0' <<< "$failed_jobs_json" >/dev/null; then
                 echo "::error::${workflow} has failed child jobs before the workflow completed; cancelling the remaining matrix."
                 jq '.[] | {name, conclusion, url: .html_url}' <<< "$failed_jobs_json"
@@ -1538,7 +1554,17 @@ jobs:
             head_sha="$(jq -r '.headSha // ""' <<< "$run_json")"
             echo "${label}: ${status}/${conclusion} attempt ${attempt} head ${head_sha}: ${url}"
 
-            if [[ "$head_sha" != "$PARENT_WORKFLOW_SHA" ]]; then
+            # release-ci/extended-stable carrier branches are fast-forwarded to pin
+            # the exact target under validation, so their head_sha IS the content
+            # SHA, not the orchestrator's own code SHA; everywhere else (dispatched
+            # from the same ref as this orchestrator) the child must have run the
+            # same workflow-file version, so compare against PARENT_WORKFLOW_SHA.
+            if [[ ( "$CHILD_WORKFLOW_REF" == release-ci/* || "$CHILD_WORKFLOW_REF" =~ ^extended-stable/[0-9]{4}\.([1-9]|1[0-2])\.33$ ) && -n "${TARGET_SHA// }" ]]; then
+              if [[ "$head_sha" != "$TARGET_SHA" ]]; then
+                echo "::error::${label} child run used ${head_sha}, expected ${TARGET_SHA}. Dispatch Full Release Validation from a release-ci or extended-stable ref pinned to the target SHA, not a moving branch."
+                return 1
+              fi
+            elif [[ "$head_sha" != "$PARENT_WORKFLOW_SHA" ]]; then
               echo "::error::${label} child run used workflow SHA ${head_sha}, expected parent workflow SHA ${PARENT_WORKFLOW_SHA}. Use the SHA-pinned release helper when a moving branch cannot stay fixed."
               return 1
             fi
@@ -1824,9 +1850,13 @@ jobs:
             echo "Release checks were skipped by rerun group; skipping automatic release evidence update."
             exit 0
           fi
+          # In reuse mode the child runs live on the chain-root validation run
+          # (the evidence consumer scrapes dispatch logs from the given run),
+          # so durable evidence must reference that run id, not this wrapper.
           notes="Automatically requested by Full Release Validation ${GITHUB_RUN_ID_VALUE} after child workflows completed; the parent summary re-checks current child run conclusions."
           if [[ "$EVIDENCE_REUSE" == "true" && -n "${EVIDENCE_ROOT_RUN_ID// }" ]]; then
             notes="Automatically requested by Full Release Validation ${GITHUB_RUN_ID_VALUE}, which reused green product evidence from chain-root run ${EVIDENCE_ROOT_RUN_ID} under policy ${EVIDENCE_POLICY}."
+            GITHUB_RUN_ID_VALUE="$EVIDENCE_ROOT_RUN_ID"
           fi
           if [[ -z "${RELEASES_DISPATCH_TOKEN// }" ]]; then
             echo "OPENCLAW_RELEASES_DISPATCH_TOKEN is not configured; skipping automatic release evidence update."
