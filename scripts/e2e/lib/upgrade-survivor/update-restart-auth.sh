@@ -238,6 +238,35 @@ write_update_restart_service_auth_env() {
   printf 'GATEWAY_AUTH_TOKEN_REF=%s\n' "$GATEWAY_AUTH_TOKEN_REF" >"$OPENCLAW_STATE_DIR/gateway.systemd.env"
 }
 
+assert_update_restart_probe_inactive() {
+  local active_status=0
+  systemctl --user is-active --quiet openclaw-gateway.service || active_status=$?
+  [ "$active_status" -eq 3 ] && return 0
+  echo "gateway service is not confirmed inactive" >&2
+  [ "$active_status" -ne 0 ] || active_status=1
+  return "$active_status"
+}
+
+stop_update_restart_probe_gateway() {
+  local command_timeout="$1" stop_status=0
+  local stop_log="${OPENCLAW_UPGRADE_SURVIVOR_SYSTEMCTL_SHIM_DAEMON_LOG}.stop"
+  openclaw_e2e_maybe_timeout "$command_timeout" \
+    systemctl --user stop openclaw-gateway.service >"$stop_log" 2>&1 || stop_status=$?
+  if [ "$stop_status" -eq 0 ]; then
+    assert_update_restart_probe_inactive >>"$stop_log" 2>&1 || stop_status=$?
+  fi
+  if [ "$stop_status" -eq 0 ] && openclaw_e2e_probe_tcp 127.0.0.1 18789 400; then
+    echo "Baseline gateway listener is still open after service stop." >>"$stop_log"
+    stop_status=1
+  fi
+  if [ "$stop_status" -ne 0 ]; then
+    echo "gateway service shutdown could not be verified; preserving authored config snapshot" >&2
+    openclaw_e2e_print_log "$stop_log" >&2
+    return "$stop_status"
+  fi
+  gateway_pid=""
+}
+
 prepare_update_restart_probe_current_install() {
   local port="$1"
   local log_file="$2"
@@ -246,6 +275,14 @@ prepare_update_restart_probe_current_install() {
   local ready_epoch
 
   echo "Preparing candidate-auth gateway for automatic update restart."
+  OPENCLAW_UPGRADE_SURVIVOR_RESTART_AUTHORED_CONFIG="${log_file}.authored-config"
+  export OPENCLAW_UPGRADE_SURVIVOR_RESTART_AUTHORED_CONFIG
+  if ! node scripts/e2e/lib/upgrade-survivor/config-parking.mjs \
+    park-restart-probe "$OPENCLAW_CONFIG_PATH" \
+    "$OPENCLAW_UPGRADE_SURVIVOR_RESTART_AUTHORED_CONFIG" "$port"; then
+    echo "failed to park authored config for restart probe" >&2
+    return 1
+  fi
   install_update_restart_systemctl_shim
   seed_update_restart_probe_device_auth
   start_epoch="$(node -e "process.stdout.write(String(Date.now()))")"

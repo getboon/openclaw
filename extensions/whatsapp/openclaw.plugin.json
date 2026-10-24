@@ -7,6 +7,9 @@
   "activation": {
     "onStartup": false
   },
+  "contracts": {
+    "tools": ["whatsapp_call", "whatsapp_login"]
+  },
   "channels": ["whatsapp"],
   "configSchema": {
     "type": "object",

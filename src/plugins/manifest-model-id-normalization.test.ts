@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { captureEnv, deleteTestEnvValue, setTestEnvValue } from "../test-utils/env.js";
 import {
@@ -327,7 +327,6 @@ describe("manifest model id normalization", () => {
   it("reuses manifest metadata while file fingerprints are unchanged", () => {
     const stateDir = makeTempDir();
     const pluginDir = path.join(stateDir, "extensions", "normalizer");
-    const manifestPath = path.join(pluginDir, "openclaw.plugin.json");
     writeInstallIndex({ stateDir, pluginDir });
     writeNormalizerManifest({ pluginDir, prefix: "alpha" });
 
@@ -336,15 +335,16 @@ describe("manifest model id normalization", () => {
     setTestEnvValue("OPENCLAW_DISABLE_BUNDLED_PLUGINS", "1");
     deleteTestEnvValue("OPENCLAW_BUNDLED_PLUGINS_DIR");
 
-    const openSyncSpy = vi.spyOn(fs, "openSync");
-
-    expect(listOpenClawPluginManifestMetadata(process.env)).toHaveLength(1);
-    expect(listOpenClawPluginManifestMetadata(process.env)).toHaveLength(1);
-
-    const manifestReads = openSyncSpy.mock.calls.filter(
-      ([filePath]) => String(filePath) === manifestPath,
-    );
-    expect(manifestReads).toHaveLength(1);
-    openSyncSpy.mockRestore();
+    // The scan also lists source-checkout extensions/ manifests when tests run
+    // from a repo checkout, so only pin the record for the plugin under test.
+    const listNormalizerRecords = () =>
+      listOpenClawPluginManifestMetadata(process.env).filter(
+        (record) => record.pluginDir === pluginDir,
+      );
+    const firstRecords = listNormalizerRecords();
+    const secondRecords = listNormalizerRecords();
+    expect(firstRecords).toHaveLength(1);
+    expect(secondRecords).toHaveLength(1);
+    expect(secondRecords[0]).toBe(firstRecords[0]);
   });
 });

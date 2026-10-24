@@ -412,7 +412,7 @@ describe("subscribeEmbeddedAgentSession", () => {
   it("delivers generated image media once in markdown verbose output", async () => {
     const onToolResult = vi.fn();
     const onBlockReply = vi.fn();
-    const { emit } = createSubscribedHarness({
+    const { emit, subscription } = createSubscribedHarness({
       runId: "run",
       onToolResult,
       onBlockReply,
@@ -466,6 +466,7 @@ describe("subscribeEmbeddedAgentSession", () => {
       text: "Here is the image.",
       mediaUrls: ["/tmp/generated.png"],
     });
+    expect(subscription.getHostOwnedToolMediaUrls()).toEqual(["/tmp/generated.png"]);
   });
 
   it("does not duplicate generated image media when the assistant reply has MEDIA lines", async () => {
@@ -768,6 +769,31 @@ describe("subscribeEmbeddedAgentSession", () => {
       mediaUrls: ["/tmp/reply.opus"],
       audioAsVoice: true,
     });
+    expect(subscription.getHostOwnedToolMediaUrls()).toEqual([]);
+  });
+
+  it("tracks built-in generated image media as host-owned", () => {
+    const { emit, subscription } = createSubscribedSessionHarness({
+      runId: "run",
+      builtinToolNames: new Set(["image_generate"]),
+    });
+
+    emit({
+      type: "tool_execution_end",
+      toolName: "image_generate",
+      toolCallId: "tc-1",
+      isError: false,
+      result: {
+        details: {
+          media: {
+            mediaUrl: "/tmp/generated.png",
+          },
+        },
+      },
+    });
+    emit({ type: "agent_end" });
+
+    expect(subscription.getHostOwnedToolMediaUrls()).toEqual(["/tmp/generated.png"]);
   });
 
   it("counts orphaned tool media emitted through block replies", async () => {
@@ -883,6 +909,70 @@ describe("subscribeEmbeddedAgentSession", () => {
       .filter((value): value is string => typeof value === "string");
     expect(streamTexts.at(-1)).toBe("Checking files done");
     expect(onReasoningEnd).toHaveBeenCalledTimes(1);
+  });
+
+  type ReasoningWindowGateCase = {
+    label: string;
+    reasoningMode: "off" | "stream";
+    streamReasoningInNonStreamModes?: boolean;
+    expected: boolean;
+  };
+
+  it.each<ReasoningWindowGateCase>([
+    {
+      label: "absent opt-in with off reasoning",
+      reasoningMode: "off",
+      expected: false,
+    },
+    {
+      label: "false opt-in with off reasoning",
+      reasoningMode: "off",
+      streamReasoningInNonStreamModes: false,
+      expected: false,
+    },
+    {
+      label: "false opt-in with stream reasoning",
+      reasoningMode: "stream",
+      streamReasoningInNonStreamModes: false,
+      expected: true,
+    },
+    {
+      label: "true opt-in with off reasoning",
+      reasoningMode: "off",
+      streamReasoningInNonStreamModes: true,
+      expected: true,
+    },
+  ])("gates reasoning-window streaming for $label", (params) => {
+    const onReasoningStream = vi.fn();
+    const { emit } = createSubscribedHarness({
+      runId: "run",
+      reasoningMode: params.reasoningMode,
+      ...(params.streamReasoningInNonStreamModes === undefined
+        ? {}
+        : { streamReasoningInNonStreamModes: params.streamReasoningInNonStreamModes }),
+      onReasoningStream,
+    });
+
+    emit({
+      type: "message_update",
+      message: {
+        role: "assistant",
+        content: [{ type: "thinking", thinking: "Checking files" }],
+      },
+      assistantMessageEvent: {
+        type: "thinking_delta",
+        delta: "Checking files",
+      },
+    });
+
+    if (params.expected) {
+      expect(onReasoningStream).toHaveBeenCalledWith({
+        text: "Checking files",
+        ...(params.reasoningMode === "stream" ? {} : { requiresReasoningProgressOptIn: true }),
+      });
+    } else {
+      expect(onReasoningStream).not.toHaveBeenCalled();
+    }
   });
 
   it("extracts correct reasoning delta for incremental stream updates", () => {

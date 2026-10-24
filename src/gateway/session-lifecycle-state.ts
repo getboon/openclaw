@@ -68,6 +68,7 @@ function mapAgentRunTerminalOutcomeToSessionStatus(
     case "aborted":
       return "killed";
     case "blocked":
+    case "abandoned":
     case "failed":
       return "failed";
     default:

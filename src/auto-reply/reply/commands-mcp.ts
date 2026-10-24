@@ -7,6 +7,7 @@ import {
 import { redactConfigObject } from "../../config/redact-snapshot.js";
 import { buildConfigSchema } from "../../config/schema.js";
 import {
+  rejectNonOwnerCommand,
   rejectUnauthorizedCommand,
   requireCommandFlagEnabled,
   requireGatewayClientScope,
@@ -38,6 +39,10 @@ export const handleMcpCommand: CommandHandler = async (params, allowTextCommands
   const unauthorized = rejectUnauthorizedCommand(params, "/mcp");
   if (unauthorized) {
     return unauthorized;
+  }
+  const nonOwner = rejectNonOwnerCommand(params, "/mcp");
+  if (nonOwner) {
+    return nonOwner;
   }
   const disabled = requireCommandFlagEnabled(params.cfg, {
     label: "/mcp",

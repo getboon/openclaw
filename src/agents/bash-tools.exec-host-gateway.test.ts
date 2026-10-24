@@ -21,6 +21,8 @@ import {
   planShellAuthorization,
   type ExecAuthorizationPlan,
 } from "../infra/exec-authorization-plan.js";
+import { buildCwdBoundHashedArgPattern } from "../infra/exec-command-resolution.js";
+import { withTempDir } from "../test-helpers/temp-dir.js";
 import type { ExecApprovalFollowupTarget } from "./bash-tools.exec-host-shared.js";
 import type { ExecApprovalFollowupFactory, ExecToolDetails } from "./bash-tools.exec-types.js";
 
@@ -419,6 +421,24 @@ describe("processGatewayAllowlist", () => {
     return { authorizationPlan, resolvedPath };
   }
 
+  it("rejects a replaced cwd at the final allowed-command boundary", async () => {
+    await withTempDir({ prefix: "gateway-exec-cwd-" }, async (dir) => {
+      const workdir = path.join(dir, "work");
+      await fs.promises.mkdir(workdir);
+      hasExactCommandDurableExecApprovalMock.mockReturnValue(true);
+      buildEnforcedShellCommandMock.mockReturnValue({ ok: true, command: "echo ok" });
+      const result = await runGatewayAllowlist({ command: "echo ok", workdir });
+      expect(result.revalidateBeforeExecution).toEqual(expect.any(Function));
+      expect(await result.revalidateBeforeExecution?.()).toBeUndefined();
+      await fs.promises.rename(workdir, path.join(dir, "original"));
+      await fs.promises.mkdir(workdir);
+      const denied = await result.revalidateBeforeExecution?.();
+      expect(denied?.details.status).toBe("failed");
+      expect(JSON.stringify(denied)).toContain("approval cwd changed");
+      expect(runExecProcessMock).not.toHaveBeenCalled();
+    });
+  });
+
   async function runTimedOutStrictInlineEval(params: {
     security: "full" | "allowlist";
     askFallback: "full" | "allowlist";
@@ -582,6 +602,7 @@ describe("processGatewayAllowlist", () => {
     }
 
     expect(result!).toEqual({
+      revalidateBeforeExecution: expect.any(Function),
       execCommandOverride: undefined,
       allowWithoutEnforcedCommand: true,
     });
@@ -621,8 +642,10 @@ describe("processGatewayAllowlist", () => {
       }),
     );
     expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
-    expect(result!).toEqual({
+    expect(result).toEqual({
+      revalidateBeforeExecution: expect.any(Function),
       execCommandOverride: `${resolvedPath} ok`,
+      allowWithoutEnforcedCommand: false,
     });
     expect(captured.events).toHaveLength(1);
     expect(captured.events[0]).toMatchObject({
@@ -661,7 +684,9 @@ describe("processGatewayAllowlist", () => {
   });
 
   it("reviews and executes the same PATH-resolved executable", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-auto-review-path-"));
+    const tempDir = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-auto-review-path-")),
+    );
     const shadowGit = path.join(tempDir, "git");
     fs.writeFileSync(shadowGit, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     try {
@@ -681,7 +706,11 @@ describe("processGatewayAllowlist", () => {
       expect(defaultExecAutoReviewerMock).toHaveBeenCalledWith(
         expect.objectContaining({ resolvedPath: shadowGit }),
       );
-      expect(result).toEqual({ execCommandOverride: `${shadowGit} status` });
+      expect(result).toEqual({
+        revalidateBeforeExecution: expect.any(Function),
+        execCommandOverride: `${shadowGit} status`,
+        allowWithoutEnforcedCommand: false,
+      });
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
@@ -769,7 +798,11 @@ describe("processGatewayAllowlist", () => {
     );
     expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
     expect(warnings[0]).toContain("reviewer or explicit approval");
-    expect(result.execCommandOverride).toBe(`${resolvedPath} -c 'print(1)'`);
+    expect(result).toEqual({
+      revalidateBeforeExecution: expect.any(Function),
+      execCommandOverride: `${resolvedPath} -c 'print(1)'`,
+      allowWithoutEnforcedCommand: false,
+    });
   });
 
   it("uses a plan-backed enforced command when the allowlist plan is usable", async () => {
@@ -804,11 +837,10 @@ describe("processGatewayAllowlist", () => {
       ask: "off",
     });
 
-    const expectedExecutable =
-      authorizationPlan.groups[0]?.candidates[0]?.sourceSegment.resolution?.execution
-        .resolvedRealPath ??
-      authorizationPlan.groups[0]?.candidates[0]?.sourceSegment.resolution?.execution.resolvedPath;
-    expect(result).toEqual({ execCommandOverride: `${expectedExecutable} -c 16` });
+    expect(result).toEqual({
+      revalidateBeforeExecution: expect.any(Function),
+      execCommandOverride: "/usr/bin/head -c 16",
+    });
   });
 
   it("keeps unrenderable allowlist plans on the human approval path", async () => {
@@ -920,7 +952,10 @@ describe("processGatewayAllowlist", () => {
     });
 
     expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
-    expect(result).toEqual({ execCommandOverride: undefined });
+    expect(result).toEqual({
+      execCommandOverride: undefined,
+      revalidateBeforeExecution: expect.any(Function),
+    });
   });
 
   it("offers allow-always for shell-wrapper misses with reusable executable patterns", async () => {
@@ -969,7 +1004,12 @@ describe("processGatewayAllowlist", () => {
       allowAlwaysPersistence: {
         kind: "patterns",
         commandText: "sh -c 'git status'",
-        patterns: [{ pattern: "/usr/bin/git", argPattern: undefined }],
+        patterns: [
+          {
+            pattern: "/usr/bin/git",
+            argPattern: buildCwdBoundHashedArgPattern(["/usr/bin/git", "status"], process.cwd()),
+          },
+        ],
       },
     });
     expect(buildExecApprovalPendingToolResultMock).toHaveBeenCalledWith(
@@ -1390,7 +1430,10 @@ EOF`,
     });
 
     expect(createAndRegisterDefaultExecApprovalRequestMock).not.toHaveBeenCalled();
-    expect(result).toEqual({ execCommandOverride: undefined });
+    expect(result).toEqual({
+      execCommandOverride: undefined,
+      revalidateBeforeExecution: expect.any(Function),
+    });
   });
 
   it("keeps denying allowlist misses when durable trust does not match", async () => {

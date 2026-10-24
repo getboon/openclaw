@@ -6,8 +6,10 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
 import { parse as parseYaml } from "yaml";
 import { listChangedPathsFromGit, listStagedChangedPaths } from "./changed-lanes.mjs";
+import { assertDeclaredShrinkwrapDependencies } from "./lib/npm-shrinkwrap-dependencies.mjs";
 import { resolveNpmRunner } from "./npm-runner.mjs";
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -15,10 +17,13 @@ const EXACT_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u;
 const STABLE_VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)$/u;
 const NPM_SHRINKWRAP_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
 const NPM_SHRINKWRAP_COMMAND_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+const NPM_SHRINKWRAP_DEFAULT_JOBS = 4;
+const NPM_SHRINKWRAP_MAX_JOBS = 16;
+const SHRINKWRAP_WORKER_KIND = "openclaw-shrinkwrap-package";
 
 function usage() {
   return [
-    "Usage: node scripts/generate-npm-shrinkwrap.mjs [--check] [--all|--plugins|--changed|--package-dir <dir>] [--base <ref>] [--head <ref>] [--staged]",
+    "Usage: node scripts/generate-npm-shrinkwrap.mjs [--check] [--all|--plugins|--changed|--package-dir <dir>] [--base <ref>] [--head <ref>] [--staged] [--jobs <count>]",
     "  default: root package only",
   ].join("\n");
 }
@@ -95,6 +100,11 @@ function readPnpmLockPackages() {
     if (metadata && typeof metadata === "object" && typeof metadata.version === "string") {
       lockPackages.add(`${parsed.name}@${metadata.version}`);
     }
+  }
+  // Workspace links have no registry entry in pnpm's packages table. Their
+  // release manifests still define versions that npm must install from the registry.
+  for (const [name, version] of readWorkspacePackageVersions()) {
+    lockPackages.add(`${name}@${version}`);
   }
   return lockPackages;
 }
@@ -379,9 +389,45 @@ function readShrinkwrapOverrides() {
   );
 }
 
-function packageJsonForShrinkwrap(packageJson, shrinkwrapOverrides) {
+function readWorkspacePackageVersions() {
+  return new Map(
+    [".", ...listManagedShrinkwrapPackageDirs()].map((dir) => {
+      const manifest = JSON.parse(readFileSync(path.join(ROOT_DIR, dir, "package.json"), "utf8"));
+      return [manifest.name, manifest.version];
+    }),
+  );
+}
+
+function packageJsonForShrinkwrap(
+  packageJson,
+  shrinkwrapOverrides,
+  workspaceVersions = readWorkspacePackageVersions(),
+  options = {},
+) {
   const normalized = { ...packageJson };
   delete normalized.devDependencies;
+  for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {
+    const dependencies = normalized[field];
+    if (!dependencies || typeof dependencies !== "object" || Array.isArray(dependencies)) {
+      continue;
+    }
+    normalized[field] = Object.fromEntries(
+      Object.entries(dependencies).map(([name, spec]) => {
+        if (typeof spec !== "string" || !spec.startsWith("workspace:")) {
+          return [name, spec];
+        }
+        const version = options.releaseWorkspaceDependencies?.[name] ?? workspaceVersions.get(name);
+        if (!version || !EXACT_VERSION_PATTERN.test(version)) {
+          throw new Error(`Cannot resolve published workspace dependency ${name}: ${spec}`);
+        }
+        const range = spec.slice("workspace:".length);
+        return [
+          name,
+          range === "*" ? version : range === "^" || range === "~" ? `${range}${version}` : range,
+        ];
+      }),
+    );
+  }
   normalized.overrides = mergeOverrides(packageJson.overrides, shrinkwrapOverrides, {});
   return normalized;
 }
@@ -686,8 +732,9 @@ function normalizeNpmVersionDrift(lockfile) {
     if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
       continue;
     }
-    // npm 11 patch releases disagree on these package-lock v3 metadata fields.
-    // Keep the shrinkwrap stable across supported Node 24 patch versions.
+    // npm versions and mutable registry metadata disagree on these package-lock
+    // fields. None affect resolution, so keep generated shrinkwraps stable.
+    delete metadata.deprecated;
     delete metadata.libc;
     if (metadata.peer === true) {
       delete metadata.peer;
@@ -701,6 +748,16 @@ function generateShrinkwrap(packageDir, options = {}) {
   try {
     const packageJson = JSON.parse(readFileSync(path.join(packageDir, "package.json"), "utf8"));
     const currentShrinkwrap = readCurrentShrinkwrap(packageDir);
+    const currentRootDependencies = currentShrinkwrap?.packages?.[""]?.dependencies;
+    const currentAiVersion = currentRootDependencies?.["@openclaw/ai"];
+    const releaseWorkspaceDependencies =
+      path.resolve(packageDir) === ROOT_DIR &&
+      packageJson.dependencies?.["@openclaw/ai"]?.startsWith("workspace:") &&
+      typeof currentAiVersion === "string" &&
+      EXACT_VERSION_PATTERN.test(currentAiVersion) &&
+      currentShrinkwrap?.packages?.["node_modules/@openclaw/ai"]?.version === currentAiVersion
+        ? { "@openclaw/ai": currentAiVersion }
+        : undefined;
     const shrinkwrapOverrides = mergeOverrides(
       options.useCurrentShrinkwrapOverrides
         ? readCurrentShrinkwrapOverrides(packageDir, declaredPackageDependencies(packageJson))
@@ -713,6 +770,7 @@ function generateShrinkwrap(packageDir, options = {}) {
       : [];
     const npmInstallArgs = [
       "install",
+      "--registry=https://registry.npmjs.org",
       "--package-lock-only",
       "--ignore-scripts",
       "--no-audit",
@@ -721,8 +779,22 @@ function generateShrinkwrap(packageDir, options = {}) {
     ];
     writeFileSync(
       path.join(tempDir, "package.json"),
-      `${JSON.stringify(packageJsonForShrinkwrap(packageJson, shrinkwrapOverrides), null, 2)}\n`,
+      `${JSON.stringify(
+        packageJsonForShrinkwrap(packageJson, shrinkwrapOverrides, readWorkspacePackageVersions(), {
+          releaseWorkspaceDependencies,
+        }),
+        null,
+        2,
+      )}\n`,
     );
+    if (releaseWorkspaceDependencies && currentShrinkwrap) {
+      // Retain the published workspace seed until release preflight rewrites the
+      // packed root to the exact candidate tarball and registry version.
+      writeFileSync(
+        path.join(tempDir, "npm-shrinkwrap.json"),
+        `${JSON.stringify(currentShrinkwrap, null, 2)}\n`,
+      );
+    }
     runNpm(npmInstallArgs, tempDir);
     runNpm(
       ["shrinkwrap", "--ignore-scripts", "--no-audit", "--no-fund", ...peerResolutionArgs],
@@ -737,14 +809,26 @@ function generateShrinkwrap(packageDir, options = {}) {
       ),
       currentShrinkwrap,
     );
-    assertShrinkwrapMatchesPnpmLock(generated);
+    assertShrinkwrapMatchesPnpmLock(
+      generated,
+      new Set(
+        Object.entries(releaseWorkspaceDependencies ?? {}).map(
+          ([name, version]) => `${name}@${version}`,
+        ),
+      ),
+    );
+    assertDeclaredShrinkwrapDependencies(generated, packageJson);
     return `${JSON.stringify(generated, null, 2)}\n`;
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
-function collectPnpmLockViolations(shrinkwrap, pnpmLockPackages = readPnpmLockPackages()) {
+function collectPnpmLockViolations(
+  shrinkwrap,
+  pnpmLockPackages = readPnpmLockPackages(),
+  allowedPackageKeys = new Set(),
+) {
   const packages = shrinkwrap?.packages;
   if (!packages || typeof packages !== "object") {
     return [];
@@ -759,7 +843,7 @@ function collectPnpmLockViolations(shrinkwrap, pnpmLockPackages = readPnpmLockPa
       continue;
     }
     const packageKey = `${packageName}@${metadata.version}`;
-    if (!pnpmLockPackages.has(packageKey)) {
+    if (!pnpmLockPackages.has(packageKey) && !allowedPackageKeys.has(packageKey)) {
       violations.push({ path: lockPath, packageKey });
     }
   }
@@ -1041,8 +1125,12 @@ function restoreCurrentPnpmLockedPackages(
   return generated;
 }
 
-function assertShrinkwrapMatchesPnpmLock(shrinkwrap) {
-  const violations = collectPnpmLockViolations(shrinkwrap);
+function assertShrinkwrapMatchesPnpmLock(shrinkwrap, allowedPackageKeys = new Set()) {
+  const violations = collectPnpmLockViolations(
+    shrinkwrap,
+    readPnpmLockPackages(),
+    allowedPackageKeys,
+  );
   if (violations.length === 0) {
     return;
   }
@@ -1064,25 +1152,34 @@ function shrinkwrapPathForPackage(packageDir) {
   return path.join(packageDir, "npm-shrinkwrap.json");
 }
 
-function listPublishablePluginPackageDirs() {
-  const extensionsDir = path.join(ROOT_DIR, "extensions");
-  return readdirSync(extensionsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.posix.join("extensions", entry.name))
+function listManagedShrinkwrapPackageDirs() {
+  // Published workspace packages (packages/*) ship npm-shrinkwrap.json just
+  // like publishable plugins so their transitive dependency tree stays pinned.
+  // Keep any already-tracked shrinkwrap managed too, including private packages,
+  // or version alignment can leave that release metadata silently stale.
+  return ["extensions", "packages"]
+    .flatMap((parentDir) =>
+      readdirSync(path.join(ROOT_DIR, parentDir), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.posix.join(parentDir, entry.name)),
+    )
     .filter((packageDir) => {
       const packageJsonPath = path.join(ROOT_DIR, packageDir, "package.json");
       if (!existsSync(packageJsonPath)) {
         return false;
       }
       const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-      return packageJson.openclaw?.release?.publishToNpm === true;
+      return (
+        packageJson.openclaw?.release?.publishToNpm === true ||
+        existsSync(shrinkwrapPathForPackage(path.join(ROOT_DIR, packageDir)))
+      );
     })
     .toSorted((left, right) => left.localeCompare(right));
 }
 
 function shrinkwrapPackageDirsForChangedPaths(changedPaths) {
   const packageDirs = new Set();
-  const publishablePluginPackageDirs = new Set(listPublishablePluginPackageDirs());
+  const managedShrinkwrapPackageDirs = new Set(listManagedShrinkwrapPackageDirs());
   let hasAmbiguousDependencyPolicyChange = false;
   let hasLockfileChange = false;
 
@@ -1098,11 +1195,11 @@ function shrinkwrapPackageDirsForChangedPaths(changedPaths) {
       packageDirs.add(ROOT_DIR);
       continue;
     }
-    const extensionMatch = changedPath.match(
-      /^(extensions\/[^/]+)\/(?:package\.json|npm-shrinkwrap\.json)$/u,
+    const workspacePackageMatch = changedPath.match(
+      /^((?:extensions|packages)\/[^/]+)\/(?:package\.json|npm-shrinkwrap\.json)$/u,
     );
-    if (extensionMatch && publishablePluginPackageDirs.has(extensionMatch[1])) {
-      packageDirs.add(path.resolve(ROOT_DIR, extensionMatch[1]));
+    if (workspacePackageMatch && managedShrinkwrapPackageDirs.has(workspacePackageMatch[1])) {
+      packageDirs.add(path.resolve(ROOT_DIR, workspacePackageMatch[1]));
       continue;
     }
     if (changedPath === "pnpm-lock.yaml") {
@@ -1120,14 +1217,14 @@ function shrinkwrapPackageDirsForChangedPaths(changedPaths) {
   if (hasAmbiguousDependencyPolicyChange) {
     return [
       ROOT_DIR,
-      ...listPublishablePluginPackageDirs().map((dir) => path.resolve(ROOT_DIR, dir)),
+      ...listManagedShrinkwrapPackageDirs().map((dir) => path.resolve(ROOT_DIR, dir)),
     ];
   }
 
   if (hasLockfileChange) {
     return [
       ROOT_DIR,
-      ...listPublishablePluginPackageDirs().map((dir) => path.resolve(ROOT_DIR, dir)),
+      ...listManagedShrinkwrapPackageDirs().map((dir) => path.resolve(ROOT_DIR, dir)),
     ];
   }
   return [...packageDirs].toSorted((left, right) =>
@@ -1180,6 +1277,7 @@ export function resolvePackageDirs(args) {
   const packageDirIndex = args.indexOf("--package-dir");
   const baseIndex = args.indexOf("--base");
   const headIndex = args.indexOf("--head");
+  const jobsIndex = args.indexOf("--jobs");
   if (packageDirIndex !== -1 && (all || plugins || changed)) {
     throw new Error("--package-dir cannot be combined with --all, --plugins, or --changed.");
   }
@@ -1214,20 +1312,30 @@ export function resolvePackageDirs(args) {
       index += 1;
       continue;
     }
+    if (arg === "--jobs") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("-")) {
+        throw new Error("--jobs requires a positive integer.");
+      }
+      index += 1;
+      continue;
+    }
     throw new Error(usage());
   }
 
   if (!changed && (baseIndex !== -1 || headIndex !== -1 || staged)) {
     throw new Error("--base, --head, and --staged require --changed.");
   }
+  const jobs = resolveShrinkwrapJobs(jobsIndex === -1 ? undefined : args[jobsIndex + 1]);
 
   if (all) {
     return {
       check,
       changedPaths: check ? listCheckChangedPaths() : [],
+      jobs,
       packageDirs: [
         ROOT_DIR,
-        ...listPublishablePluginPackageDirs().map((dir) => path.resolve(ROOT_DIR, dir)),
+        ...listManagedShrinkwrapPackageDirs().map((dir) => path.resolve(ROOT_DIR, dir)),
       ],
     };
   }
@@ -1235,7 +1343,8 @@ export function resolvePackageDirs(args) {
     return {
       check,
       changedPaths: check ? listCheckChangedPaths() : [],
-      packageDirs: listPublishablePluginPackageDirs().map((dir) => path.resolve(ROOT_DIR, dir)),
+      jobs,
+      packageDirs: listManagedShrinkwrapPackageDirs().map((dir) => path.resolve(ROOT_DIR, dir)),
     };
   }
   if (changed) {
@@ -1250,17 +1359,25 @@ export function resolvePackageDirs(args) {
     return {
       check,
       changedPaths,
+      jobs,
       packageDirs: shrinkwrapPackageDirsForChangedPaths(changedPaths),
     };
   }
   return {
     check,
     changedPaths: check ? listCheckChangedPaths() : [],
+    jobs,
     packageDirs: packageDirs.length > 0 ? packageDirs : [ROOT_DIR],
   };
 }
 
 function updateOrCheckPackage(packageDir, check, changedPaths = []) {
+  // Comparing two generated trees cannot detect a dependency dropped by the
+  // generator itself. Check the declared runtime closure before invoking npm.
+  if (check) {
+    const manifest = JSON.parse(readFileSync(path.join(packageDir, "package.json"), "utf8"));
+    assertDeclaredShrinkwrapDependencies(readCurrentShrinkwrap(packageDir), manifest);
+  }
   const generated = generateShrinkwrap(packageDir, {
     useCurrentShrinkwrapOverrides:
       check && !packageDependencyInputsChanged(packageDir, changedPaths),
@@ -1269,8 +1386,7 @@ function updateOrCheckPackage(packageDir, check, changedPaths = []) {
   const label = packageLabel(packageDir);
   if (!check) {
     writeFileSync(shrinkwrapPath, generated);
-    process.stdout.write(`${label}: npm-shrinkwrap.json updated.\n`);
-    return;
+    return `${label}: npm-shrinkwrap.json updated.`;
   }
 
   let current;
@@ -1286,33 +1402,135 @@ function updateOrCheckPackage(packageDir, check, changedPaths = []) {
       `${label}: npm-shrinkwrap.json is stale. Run \`pnpm deps:shrinkwrap:generate\`.`,
     );
   }
-  process.stdout.write(`${label}: npm-shrinkwrap.json is current.\n`);
+  return `${label}: npm-shrinkwrap.json is current.`;
 }
 
-function main() {
-  const { check, changedPaths, packageDirs } = resolvePackageDirs(process.argv.slice(2));
+export async function runBoundedTasks(items, jobs, runTask) {
+  const results = Array.from({ length: items.length });
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(jobs, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await runTask(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+export function resolveShrinkwrapJobs(
+  rawValue,
+  env = process.env,
+  fallback = NPM_SHRINKWRAP_DEFAULT_JOBS,
+) {
+  const raw = rawValue ?? env.OPENCLAW_NPM_SHRINKWRAP_JOBS ?? String(fallback);
+  const jobs = readPositiveIntEnv("OPENCLAW_NPM_SHRINKWRAP_JOBS", raw, {
+    OPENCLAW_NPM_SHRINKWRAP_JOBS: raw,
+  });
+  if (jobs > NPM_SHRINKWRAP_MAX_JOBS) {
+    throw new Error(
+      `invalid OPENCLAW_NPM_SHRINKWRAP_JOBS: ${raw}; maximum is ${NPM_SHRINKWRAP_MAX_JOBS}`,
+    );
+  }
+  return jobs;
+}
+
+async function runPackageWorker(packageDir, check, changedPaths) {
+  return await new Promise((resolve, reject) => {
+    const worker = new Worker(new URL(import.meta.url), {
+      workerData: {
+        changedPaths,
+        check,
+        kind: SHRINKWRAP_WORKER_KIND,
+        packageDir,
+      },
+    });
+    worker.once("message", (message) => {
+      if (message.error) {
+        reject(new Error(message.error));
+      } else {
+        resolve(message.output);
+      }
+    });
+    worker.once("error", reject);
+    worker.once("exit", (code) => {
+      if (code !== 0) {
+        reject(new Error(`${packageLabel(packageDir)}: shrinkwrap worker exited ${code}`));
+      }
+    });
+  });
+}
+
+async function updateOrCheckPackages({ check, changedPaths, jobs, packageDirs }) {
+  const outcomes = await runBoundedTasks(packageDirs, jobs, async (packageDir) => {
+    try {
+      const output =
+        jobs === 1
+          ? updateOrCheckPackage(packageDir, check, changedPaths)
+          : await runPackageWorker(packageDir, check, changedPaths);
+      return { output };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  const errors = [];
+  for (const outcome of outcomes) {
+    if (outcome.error) {
+      errors.push(outcome.error);
+    } else {
+      process.stdout.write(`${outcome.output}\n`);
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(errors.join("\n"));
+  }
+}
+
+async function main() {
+  const { check, changedPaths, jobs, packageDirs } = resolvePackageDirs(process.argv.slice(2));
   if (packageDirs.length === 0) {
     process.stdout.write("No shrinkwrap-managed package changes detected.\n");
     return;
   }
-  for (const packageDir of packageDirs) {
-    updateOrCheckPackage(packageDir, check, changedPaths);
-  }
+  const effectiveJobs = Math.min(jobs, packageDirs.length);
+  process.stdout.write(
+    `Processing ${packageDirs.length} shrinkwrap package${packageDirs.length === 1 ? "" : "s"} with ${effectiveJobs} job${effectiveJobs === 1 ? "" : "s"}.\n`,
+  );
+  await updateOrCheckPackages({ check, changedPaths, jobs: effectiveJobs, packageDirs });
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (!isMainThread && workerData?.kind === SHRINKWRAP_WORKER_KIND) {
+  const sendToParent = parentPort?.postMessage.bind(parentPort);
   try {
-    main();
+    const output = updateOrCheckPackage(
+      workerData.packageDir,
+      workerData.check,
+      workerData.changedPaths,
+    );
+    sendToParent?.({ output });
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
+    sendToParent?.({ error: error instanceof Error ? error.message : String(error) });
   }
+} else if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(handleMainError);
+}
+
+/** @param {unknown} error */
+function handleMainError(error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
 }
 
 export {
   // Test-facing helpers cover lockfile normalization, override merging, and
   // changed-package detection without invoking npm.
   collectCurrentShrinkwrapOverrides,
+  generateShrinkwrap,
+  updateOrCheckPackage,
   collectOverrideViolations,
   collectPnpmLockViolations,
   disableShrinkwrappedOverrideConflictSources,

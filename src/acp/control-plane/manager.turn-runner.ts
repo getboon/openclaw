@@ -1,4 +1,5 @@
 /** Runs ACP turns, failover, timeout cleanup, and detached-task progress mirroring. */
+import { randomUUID } from "node:crypto";
 import type { AcpRuntime, AcpRuntimeHandle } from "@openclaw/acp-core/runtime/types";
 import { logVerbose } from "../../globals.js";
 import { AcpRuntimeError, formatAcpErrorChain, toAcpRuntimeError } from "../runtime/errors.js";
@@ -68,6 +69,8 @@ export async function runManagerTurn(params: {
 }): Promise<void> {
   const { input, sessionKey } = params;
   const turnStartedAt = Date.now();
+  // Mint once per admitted turn, not from a caller-controlled request id.
+  const instanceId = randomUUID();
   const actorKey = normalizeActorKey(sessionKey);
   const taskContext =
     input.mode === "prompt"
@@ -80,7 +83,7 @@ export async function runManagerTurn(params: {
         })
       : null;
   if (taskContext) {
-    createBackgroundTaskRecord(taskContext, turnStartedAt);
+    createBackgroundTaskRecord(taskContext, turnStartedAt, instanceId);
   }
   let taskProgressSummary = "";
   const initialResolution = params.resolveSession({
@@ -209,6 +212,8 @@ export async function runManagerTurn(params: {
           }
 
           activeTurn = {
+            requestId: input.requestId,
+            instanceId,
             runtime,
             handle,
             abortController: internalAbortController,
@@ -283,7 +288,7 @@ export async function runManagerTurn(params: {
               });
             },
           });
-          if (!turnOutcome.sawTerminalEvent) {
+          if (!turnOutcome.terminalStatus) {
             throw new AcpRuntimeError(
               "ACP_TURN_FAILED",
               "ACP turn ended without a terminal done event.",
@@ -296,7 +301,7 @@ export async function runManagerTurn(params: {
             const terminalResult = resolveBackgroundTaskTerminalResult(taskProgressSummary);
             markBackgroundTaskTerminal(taskContext.runId, {
               sessionKey,
-              status: "succeeded",
+              status: turnOutcome.terminalStatus === "cancelled" ? "cancelled" : "succeeded",
               endedAt: Date.now(),
               lastEventAt: Date.now(),
               error: undefined,

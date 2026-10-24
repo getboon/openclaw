@@ -7,6 +7,7 @@ import { readPluginInstallIndex } from "../plugin-index-sqlite.mjs";
 const command = process.argv[2];
 const SCENARIOS = new Set([
   "base",
+  "acpx-openclaw-tools-bridge",
   "feishu-channel",
   "bootstrap-persona",
   "channel-post-core-restore",
@@ -90,13 +91,14 @@ function assert(condition, message) {
 
 function seedLegacySessionMetadata(stateDir) {
   const legacySessionsDir = path.join(stateDir, "sessions");
+  const baseUpdatedAt = Date.now() - 24 * 60 * 60 * 1000;
   writeJson(path.join(legacySessionsDir, "sessions.json"), {
     main: {
       sessionId: LEGACY_SESSION_MAIN_ID,
       sessionFile: path.join(legacySessionsDir, `${LEGACY_SESSION_MAIN_ID}.jsonl`),
       provider: "openai",
       model: "gpt-5.5",
-      updatedAt: 1710000000000,
+      updatedAt: baseUpdatedAt,
       skillsSnapshot: {
         prompt: "legacy prompt survives as metadata",
         resolvedSkills: [
@@ -112,14 +114,14 @@ function seedLegacySessionMetadata(stateDir) {
       sessionFile: path.join(legacySessionsDir, `${LEGACY_SESSION_DIRECT_ID}.jsonl`),
       provider: "openai",
       model: "gpt-5.5",
-      updatedAt: 1710000000100,
+      updatedAt: baseUpdatedAt + 100,
     },
     "slack:channel:CUPGRADE": {
       sessionId: LEGACY_SESSION_GROUP_ID,
       sessionFile: path.join(legacySessionsDir, `${LEGACY_SESSION_GROUP_ID}.jsonl`),
       provider: "openai",
       model: "gpt-5.5",
-      updatedAt: 1710000000200,
+      updatedAt: baseUpdatedAt + 200,
       lastChannel: "slack",
       lastTo: "CUPGRADE",
     },
@@ -257,7 +259,12 @@ function assertConfigSurvived() {
   const coverage = getCoverage();
 
   if (acceptsIntent(coverage, "update")) {
-    assert(config.update?.channel === "stable", "update.channel was not preserved");
+    const expectedChannel = process.env.OPENCLAW_UPGRADE_SURVIVOR_UPDATE_CHANNEL || "stable";
+    assert(
+      expectedChannel === "stable" || expectedChannel === "extended-stable",
+      "upgrade survivor update channel was invalid",
+    );
+    assert(config.update?.channel === expectedChannel, "update.channel was not preserved");
   }
   if (acceptsIntent(coverage, "gateway")) {
     assert(config.gateway?.auth?.mode === "token", "gateway auth mode was not preserved");
@@ -268,29 +275,16 @@ function assertConfigSurvived() {
   }
 
   if (acceptsIntent(coverage, "agents")) {
-    const agents = config.agents?.list ?? [];
-    assert(Array.isArray(agents), "agents.list missing after update/doctor");
-    assert(
-      agents.some((agent) => agent?.id === "main"),
-      "main agent missing",
-    );
-    assert(
-      agents.some((agent) => agent?.id === "ops"),
-      "ops agent missing",
-    );
-    if (hasCoverage(coverage)) {
-      assert(config.agents?.defaults?.contextTokens === 64000, "default contextTokens changed");
-    } else {
-      assert(
-        agents.find((agent) => agent?.id === "main")?.contextTokens === 64000,
-        "main agent contextTokens changed",
-      );
-    }
+    const legacyAgents = config.agents?.list ?? [];
+    const mainAgent =
+      config.agents?.entries?.main ?? legacyAgents.find((agent) => agent?.id === "main");
+    const opsAgent =
+      config.agents?.entries?.ops ?? legacyAgents.find((agent) => agent?.id === "ops");
+    assert(mainAgent, "main agent missing");
+    assert(opsAgent, "ops agent missing");
+    assert(config.agents?.defaults?.contextTokens === 64000, "default contextTokens changed");
     if (!hasCoverage(coverage) || !coverage.skippedIntents?.includes("agent-modern-preferences")) {
-      assert(
-        agents.find((agent) => agent?.id === "ops")?.fastModeDefault === true,
-        "ops fastModeDefault changed",
-      );
+      assert(opsAgent.fastModeDefault === true, "ops fastModeDefault changed");
     }
   }
 
@@ -310,6 +304,16 @@ function assertConfigSurvived() {
     if (hasCoverage(coverage) && acceptsIntent(coverage, "feishu-channel")) {
       assert(pluginAllow.includes("feishu"), "feishu plugin allow entry missing");
     }
+  }
+
+  if (hasCoverage(coverage) && acceptsIntent(coverage, "acpx-openclaw-tools-bridge")) {
+    const pluginAllow = config.plugins?.allow ?? [];
+    assert(pluginAllow.includes("acpx"), "ACPX plugin allow entry missing");
+    assert(config.plugins?.entries?.acpx?.enabled === true, "ACPX plugin entry changed");
+    assert(
+      config.plugins?.entries?.acpx?.config?.openClawToolsMcpBridge === true,
+      "ACPX OpenClaw tools bridge config changed",
+    );
   }
 
   if (hasCoverage(coverage) && acceptsIntent(coverage, "configured-plugin-installs")) {

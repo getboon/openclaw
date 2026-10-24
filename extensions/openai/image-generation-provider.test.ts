@@ -1,4 +1,5 @@
 // Openai tests cover image generation provider plugin behavior.
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildOpenAIImageGenerationProvider } from "./image-generation-provider.js";
 
@@ -50,7 +51,8 @@ const {
   logInfoMock: vi.fn(),
 }));
 
-vi.mock("openclaw/plugin-sdk/provider-auth", () => ({
+vi.mock("openclaw/plugin-sdk/provider-auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("openclaw/plugin-sdk/provider-auth")>()),
   ensureAuthProfileStore: ensureAuthProfileStoreMock,
   isProviderApiKeyConfigured: isProviderApiKeyConfiguredMock,
   listProfilesForProvider: listProfilesForProviderMock,
@@ -345,6 +347,8 @@ describe("openai image generation provider", () => {
     expect(provider.defaultModel).toBe("gpt-image-2");
     expect(provider.models).toEqual([
       "gpt-image-2",
+      "gpt-image-2.5-flare",
+      "gpt-image-2.5-sunburst",
       "gpt-image-1.5",
       "gpt-image-1",
       "gpt-image-1-mini",
@@ -352,9 +356,17 @@ describe("openai image generation provider", () => {
     expect(provider.capabilities.geometry?.sizes).toContain("2048x2048");
     expect(provider.capabilities.geometry?.sizes).toContain("3840x2160");
     expect(provider.capabilities.geometry?.sizes).toContain("2160x3840");
+    expect(provider.capabilities.geometry?.sizesByModel).toEqual({
+      "gpt-image-2.5-flare": [],
+      "gpt-image-2.5-sunburst": [],
+    });
     expect(provider.capabilities.output).toEqual({
       formats: ["png", "jpeg", "webp"],
       qualities: ["low", "medium", "high", "auto"],
+      qualitiesByModel: {
+        "gpt-image-2.5-flare": ["low", "medium", "high", "xhigh", "max", "auto"],
+        "gpt-image-2.5-sunburst": ["low", "medium", "high", "xhigh", "max", "auto"],
+      },
       backgrounds: ["transparent", "opaque", "auto"],
     });
   });
@@ -400,6 +412,61 @@ describe("openai image generation provider", () => {
             providers: {
               openai: {
                 baseUrl: "https://openai-compatible.example.test/v1",
+                models: [],
+              },
+            },
+          },
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("reports configured from a config apiKey (gateway-routed openai) with no env/profile creds", () => {
+    const provider = buildOpenAIImageGenerationProvider();
+
+    // Config-only auth: a provider apiKey in config, with no env var and no
+    // auth profile.
+    isProviderApiKeyConfiguredMock.mockReturnValue(false);
+    ensureAuthProfileStoreMock.mockReturnValue({ version: 1, profiles: {} });
+
+    expect(
+      provider.isConfigured?.({
+        agentDir: "/tmp/agent",
+        cfg: {
+          models: {
+            providers: {
+              openai: {
+                baseUrl: "https://gateway.example.test/openai/v1",
+                apiKey: "gateway-token",
+                models: [],
+              },
+            },
+          },
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["empty", ""],
+    ["whitespace-only", "   "],
+  ])("treats a %s config apiKey as not configured", (_label, apiKey) => {
+    const provider = buildOpenAIImageGenerationProvider();
+
+    // Blank placeholders resolve to no usable credential in the generate
+    // path, so readiness must not count them either.
+    isProviderApiKeyConfiguredMock.mockReturnValue(false);
+    ensureAuthProfileStoreMock.mockReturnValue({ version: 1, profiles: {} });
+
+    expect(
+      provider.isConfigured?.({
+        agentDir: "/tmp/agent",
+        cfg: {
+          models: {
+            providers: {
+              openai: {
+                baseUrl: "https://gateway.example.test/openai/v1",
+                apiKey,
                 models: [],
               },
             },
@@ -672,6 +739,99 @@ describe("openai image generation provider", () => {
     expect(result.metadata).toBeUndefined();
   });
 
+  it.each([
+    { model: "gpt-image-2.5-flare", quality: "xhigh" as const },
+    { model: "gpt-image-2.5-sunburst", quality: "max" as const },
+  ])("uses the direct generation contract for $model", async ({ model, quality }) => {
+    mockGeneratedPngResponse();
+
+    const provider = buildOpenAIImageGenerationProvider();
+    const result = await provider.generateImage({
+      provider: "openai",
+      model,
+      prompt: "Create a release badge",
+      cfg: {},
+      quality,
+      size: "auto",
+      outputFormat: "webp",
+      background: "transparent",
+    });
+
+    expect(jsonRequestCall().body).toMatchObject({
+      model,
+      quality,
+      size: "auto",
+      output_format: "webp",
+      background: "transparent",
+    });
+    expect(result.metadata).toBeUndefined();
+  });
+
+  it.each([
+    { model: "gpt-image-2.5-flare", size: "1536x864" },
+    { model: "gpt-image-2.5-sunburst", size: "1024x640" },
+  ])("preserves flexible $model dimensions $size", async ({ model, size }) => {
+    mockGeneratedPngResponse();
+
+    const provider = buildOpenAIImageGenerationProvider();
+    const result = await provider.generateImage({
+      provider: "openai",
+      model,
+      prompt: "Preserve the requested dimensions",
+      cfg: {},
+      size,
+    });
+
+    expect(jsonRequestCall().body).toMatchObject({ model, size });
+    expect(result.metadata).toBeUndefined();
+  });
+
+  it("normalizes invalid GPT Image 2.5 dimensions", async () => {
+    mockGeneratedPngResponse();
+
+    const provider = buildOpenAIImageGenerationProvider();
+    const result = await provider.generateImage({
+      provider: "openai",
+      model: "gpt-image-2.5-flare",
+      prompt: "Normalize invalid dimensions",
+      cfg: {},
+      size: "1024x624",
+    });
+
+    const normalizedSize = (jsonRequestCall().body as { size: string }).size;
+    expect(normalizedSize).not.toBe("1024x624");
+    expect(result.metadata).toEqual({ requestedSize: "1024x624", normalizedSize });
+  });
+
+  it("falls back to the provider baseUrl when the model catalog is omitted", async () => {
+    mockGeneratedPngResponse();
+
+    const provider = buildOpenAIImageGenerationProvider();
+    // Plugin-scoped runtime snapshots can carry a built-in provider overlay
+    // before its model catalog is present.
+    const cfg = {
+      models: {
+        providers: {
+          openai: {
+            baseUrl: "https://openai-compatible.example.com/v1",
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+    const result = await provider.generateImage({
+      provider: "openai",
+      model: "gpt-image-2",
+      prompt: "Create an image through a provider overlay",
+      cfg,
+    });
+
+    expect(httpConfigCall().baseUrl).toBe("https://openai-compatible.example.com/v1");
+    expect(jsonRequestCall().url).toBe(
+      "https://openai-compatible.example.com/v1/images/generations",
+    );
+    expect(result.images).toHaveLength(1);
+  });
+
   it("forwards output and OpenAI-only options on direct generations", async () => {
     mockGeneratedPngResponse();
 
@@ -839,6 +999,44 @@ describe("openai image generation provider", () => {
     expect(httpConfigCall().allowPrivateNetwork).toBe(true);
     expect(jsonRequestCall().allowPrivateNetwork).toBe(true);
     expect(result.images).toHaveLength(1);
+  });
+
+  it("uses a model-specific QA image endpoint without changing the text provider route", async () => {
+    mockGeneratedPngResponse();
+    vi.stubEnv("OPENCLAW_QA_ALLOW_LOCAL_IMAGE_PROVIDER", "1");
+
+    const provider = buildOpenAIImageGenerationProvider();
+    await provider.generateImage({
+      provider: "openai",
+      model: "gpt-image-1",
+      prompt: "Draw a QA lighthouse",
+      cfg: {
+        models: {
+          providers: {
+            openai: {
+              baseUrl: "https://api.openai.com/v1",
+              models: [
+                {
+                  id: "gpt-image-1",
+                  name: "gpt-image-1",
+                  api: "openai-responses",
+                  baseUrl: "http://127.0.0.1:44080/v1",
+                  reasoning: false,
+                  input: ["text"],
+                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                  contextWindow: 128_000,
+                  maxTokens: 4096,
+                },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    expect(httpConfigCall().baseUrl).toBe("http://127.0.0.1:44080/v1");
+    expect(jsonRequestCall().url).toBe("http://127.0.0.1:44080/v1/images/generations");
+    expect(jsonRequestCall().allowPrivateNetwork).toBe(true);
   });
 
   it("forwards edit count, custom size, and multiple input images", async () => {

@@ -244,6 +244,29 @@ describe("acquireSessionWriteLock", () => {
     });
   });
 
+  it("cancels a contended infinite acquisition without leaving a lock waiter", async () => {
+    await withTempSessionLockFile(async ({ sessionFile }) => {
+      const heldLock = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500 });
+      const abortController = new AbortController();
+      const abortError = new Error("stop requested");
+      abortError.name = "AbortError";
+      const pendingLock = acquireSessionWriteLock({
+        sessionFile,
+        timeoutMs: Number.POSITIVE_INFINITY,
+        signal: abortController.signal,
+      });
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      abortController.abort(abortError);
+
+      await expect(pendingLock).rejects.toBe(abortError);
+      await heldLock.release();
+      const nextLock = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500 });
+      await nextLock.release();
+    });
+  });
+
   it("does not reenter locks by default through symlinked session paths", async () => {
     await withSymlinkedSessionPaths(async ({ sessionReal, sessionLink }) => {
       const lock = await acquireSessionWriteLock({ sessionFile: sessionReal, timeoutMs: 500 });
@@ -1101,6 +1124,47 @@ describe("acquireSessionWriteLock", () => {
         },
       ]);
       await expect(fs.access(falseLiveLock)).rejects.toThrow();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("recognizes the exact openclaw-gateway process title as an OpenClaw owner", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-lock-"));
+    const sessionsDir = path.join(root, "sessions");
+    await fs.mkdir(sessionsDir, { recursive: true });
+
+    const nowMs = Date.now();
+    const gatewayLock = path.join(sessionsDir, "gateway.jsonl.lock");
+
+    try {
+      await fs.writeFile(
+        gatewayLock,
+        JSON.stringify({
+          pid: process.pid,
+          createdAt: new Date(nowMs).toISOString(),
+        }),
+        "utf8",
+      );
+
+      const result = await cleanStaleLockFiles({
+        sessionsDir,
+        staleMs: 30_000,
+        nowMs,
+        removeStale: true,
+        readOwnerProcessArgs: () => ["openclaw-gateway"],
+      });
+
+      expect(lockCleanupRecords(result.locks)).toEqual([
+        {
+          name: "gateway.jsonl.lock",
+          removed: false,
+          stale: false,
+          staleReasons: [],
+        },
+      ]);
+      expect(result.cleaned).toEqual([]);
+      await expect(fs.access(gatewayLock)).resolves.toBeUndefined();
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

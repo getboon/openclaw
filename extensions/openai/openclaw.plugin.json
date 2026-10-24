@@ -5,6 +5,9 @@
   },
   "enabledByDefault": true,
   "providers": ["openai"],
+  "providerUsageAuthEnvVars": {
+    "openai": ["OPENAI_ADMIN_KEY"]
+  },
   "modelSupport": {
     "modelPrefixes": ["gpt-", "o1", "o3", "o4"]
   },
@@ -36,6 +39,63 @@
         "baseUrl": "https://api.openai.com/v1",
         "api": "openai-responses",
         "models": [
+          {
+            "id": "gpt-6-astra",
+            "name": "GPT-6 Astra",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "contextWindow": 1050000,
+            "contextTokens": 272000,
+            "maxTokens": 128000,
+            "cost": {
+              "input": 10,
+              "output": 50,
+              "cacheRead": 1,
+              "cacheWrite": 12.5,
+              "tieredPricing": [
+                {
+                  "range": [
+                    0,
+                    272001
+                  ],
+                  "input": 10,
+                  "output": 50,
+                  "cacheRead": 1,
+                  "cacheWrite": 12.5
+                },
+                {
+                  "range": [
+                    272001
+                  ],
+                  "input": 20,
+                  "output": 75,
+                  "cacheRead": 2,
+                  "cacheWrite": 25
+                }
+              ]
+            },
+            "thinkingLevelMap": {
+              "off": null,
+              "minimal": "low",
+              "xhigh": "xhigh",
+              "max": "max"
+            },
+            "compat": {
+              "supportsReasoningEffort": true,
+              "supportedReasoningEfforts": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ],
+              "supportsTemperature": false,
+              "codeMode": "preferred"
+            }
+          },
           {
             "id": "gpt-5.3-chat-latest",
             "name": "GPT-5.3 Chat (latest)",
@@ -140,7 +200,7 @@
             "contextWindow": 1050000,
             "contextTokens": 272000,
             "maxTokens": 128000,
-            "cost": { "input": 2, "output": 12, "cacheRead": 0.2, "cacheWrite": 2.5 },
+            "cost": { "input": 2.5, "output": 15, "cacheRead": 0.25, "cacheWrite": 3.125 },
             "thinkingLevelMap": { "off": "none", "xhigh": "xhigh", "max": "max" },
             "compat": {
               "supportsReasoningEffort": true,
@@ -155,7 +215,7 @@
             "contextWindow": 1050000,
             "contextTokens": 272000,
             "maxTokens": 128000,
-            "cost": { "input": 0.2, "output": 1.2, "cacheRead": 0.02, "cacheWrite": 0.25 },
+            "cost": { "input": 1, "output": 6, "cacheRead": 0.1, "cacheWrite": 1.25 },
             "thinkingLevelMap": { "off": "none", "xhigh": "xhigh", "max": "max" },
             "compat": {
               "supportsReasoningEffort": true,
@@ -324,6 +384,7 @@
       "provider": "openai",
       "method": "api-key",
       "choiceId": "openai-api-key",
+      "appGuidedSecret": true,
       "choiceLabel": "OpenAI API Key",
       "choiceHint": "Use your OpenAI API key directly",
       "assistantPriority": 5,
@@ -344,7 +405,8 @@
     "memoryEmbeddingProviders": ["openai"],
     "mediaUnderstandingProviders": ["openai"],
     "imageGenerationProviders": ["openai"],
-    "videoGenerationProviders": ["openai"]
+    "videoGenerationProviders": ["openai"],
+    "usageProviders": ["openai"]
   },
   "imageGenerationProviderMetadata": {
     "openai": {

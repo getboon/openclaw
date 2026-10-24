@@ -1,7 +1,17 @@
 // Runtime Postbuild tests cover runtime postbuild script behavior.
+import { createHash } from "node:crypto";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { build } from "tsdown";
 import { describe, expect, it, vi } from "vitest";
+import { createRuntimeDependencyOwnershipBuildPlugin } from "../../scripts/lib/runtime-dependency-ownership-build-plugin.mts";
+import {
+  readRuntimeDependencyOwnership,
+  RUNTIME_DEPENDENCY_OWNERSHIP_RELATIVE_PATH,
+  type RuntimeDependencyOwnership,
+} from "../../scripts/lib/runtime-dependency-ownership-contract.mts";
 import {
   copyStaticExtensionAssetsToRuntimeOverlay,
   discoverStaticExtensionAssets,
@@ -359,6 +369,53 @@ describe("runtime postbuild static assets", () => {
       'export * from "./runtime-tts.runtime-AbCd1234.js";\n',
     );
     await expectPathMissing(path.join(distDir, "library.js"));
+  });
+
+  it("forwards default exports through stable and legacy aliases", async () => {
+    const rootDir = createTempDir("openclaw-runtime-postbuild-");
+    const distDir = path.join(rootDir, "dist");
+    await fs.mkdir(distDir, { recursive: true });
+    await fs.writeFile(path.join(rootDir, "package.json"), '{"type":"module"}\n', "utf8");
+    await fs.writeFile(
+      path.join(distDir, "runtime-plugins.runtime-Hash111.js"),
+      "function reconcile(value) { return value; }\nexport { reconcile as default };\n",
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(distDir, "mixed.runtime-Hash222.js"),
+      "export const named = true;\nexport default function run() {}\n",
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(distDir, "named-only.runtime-Hash333.js"),
+      'const marker = "export { marker as default }";\nexport { marker };\n',
+      "utf8",
+    );
+
+    writeStableRootRuntimeAliases({ rootDir });
+    writeLegacyRootRuntimeCompatAliases({ rootDir });
+
+    const stable = await import(
+      pathToFileURL(path.join(distDir, "runtime-plugins.runtime.js")).href
+    );
+    const legacy = await import(
+      pathToFileURL(path.join(distDir, "runtime-plugins.runtime-fLHuT7Vs.js")).href
+    );
+    const mixed = await import(pathToFileURL(path.join(distDir, "mixed.runtime.js")).href);
+    const namedOnly = await import(pathToFileURL(path.join(distDir, "named-only.runtime.js")).href);
+
+    expect(stable.default("stable")).toBe("stable");
+    expect(legacy.default("legacy")).toBe("legacy");
+    expect(mixed.default).toBeTypeOf("function");
+    expect(namedOnly).not.toHaveProperty("default");
+
+    writeStableRootRuntimeAliases({ rootDir });
+    writeLegacyRootRuntimeCompatAliases({ rootDir });
+
+    const stableAfterRerun = await import(
+      `${pathToFileURL(path.join(distDir, "runtime-plugins.runtime.js")).href}?rerun=1`
+    );
+    expect(stableAfterRerun.default("rerun")).toBe("rerun");
   });
 
   it("does not write ambiguous stable aliases for colliding root runtime chunks", async () => {
@@ -846,6 +903,148 @@ describe("runtime postbuild static assets", () => {
       await expect(fs.readFile(path.join(rootDir, "dist", chunk), "utf8")).resolves.toContain(
         "function hasMemoryRuntime()",
       );
+    }
+  });
+});
+
+async function buildInstalledFixture(
+  rootSource: string,
+  pluginSources: Record<string, string> = {},
+) {
+  const root = fsSync.realpathSync(createTempDir("runtime-dependency-ownership-"));
+  const files = {
+    "package.json": JSON.stringify({ name: "openclaw", version: "2026.7.33", type: "module" }),
+    "src/root.js": rootSource,
+    "extensions/example/index.js": `
+      export { value } from "../../src/shared.js";
+      export const load = () => import("./lazy.js");
+    `,
+    "extensions/example/observer.js": 'export { value } from "../../src/shared.js";',
+    "src/shared.js": 'export { value } from "fixture-runtime";',
+    "extensions/example/lazy.js": 'export { lazy } from "fixture-lazy";',
+    ...pluginSources,
+  };
+  for (const [name, source] of Object.entries(files)) {
+    const file = path.join(root, name);
+    fsSync.mkdirSync(path.dirname(file), { recursive: true });
+    fsSync.writeFileSync(file, source);
+  }
+  const bundles = await build({
+    config: false,
+    tsconfig: false,
+    cwd: root,
+    entry: {
+      root: "src/root.js",
+      "extensions/example/index": "extensions/example/index.js",
+      "extensions/example/observer": "extensions/example/observer.js",
+    },
+    outDir: "dist",
+    format: "esm",
+    outputOptions: { entryFileNames: "[name].js", chunkFileNames: "[name]-[hash].js" },
+    platform: "node",
+    dts: false,
+    logLevel: "silent",
+    deps: { neverBundle: ["fixture-runtime", "fixture-lazy"] },
+    plugins: [createRuntimeDependencyOwnershipBuildPlugin(root)],
+  });
+  for (const bundle of bundles) {
+    await bundle[Symbol.asyncDispose]();
+  }
+  const ownership = JSON.parse(
+    fsSync.readFileSync(path.join(root, RUNTIME_DEPENDENCY_OWNERSHIP_RELATIVE_PATH), "utf8"),
+  ) as RuntimeDependencyOwnership;
+  return { root, ownership };
+}
+
+describe("runtime dependency ownership build contract", () => {
+  it.each([false, true])(
+    "preserves postbuild ownership only for unchanged input bytes (stale=%s)",
+    async (stale) => {
+      const { root, ownership } = await buildInstalledFixture("export const ready = true;", {
+        "extensions/example/index.js": 'export { value, load } from "./shared.runtime.js";',
+        "extensions/example/observer.js": 'export { value, load } from "./shared.runtime.js";',
+        "extensions/example/shared.runtime.js": `
+        export { value } from "fixture-runtime";
+        export const load = () => import("./downstream.runtime.js");
+      `,
+        "extensions/example/downstream.runtime.js": 'export { lazy } from "fixture-lazy";',
+      });
+      const dist = path.join(root, "dist");
+      const sharedChunk = Object.keys(ownership.chunks).find((name) =>
+        /^shared\.runtime-.*\.js$/u.test(name),
+      );
+      expect(sharedChunk).toBeDefined();
+      const sharedPath = path.join(dist, sharedChunk!);
+      const original = fsSync.readFileSync(sharedPath, "utf8");
+      if (stale) {
+        fsSync.writeFileSync(sharedPath, `${original}export const changed = true;\n`);
+        expect(() => rewriteRootRuntimeImportsToStableAliases({ rootDir: root })).toThrow(
+          `runtime dependency ownership no longer matches ${sharedChunk}; rebuild dist`,
+        );
+        expect(readRuntimeDependencyOwnership(root)).toEqual(ownership);
+        expect(() => writeStableRootRuntimeAliases({ rootDir: root })).toThrow(
+          `runtime dependency ownership no longer matches ${sharedChunk}; rebuild dist`,
+        );
+        expect(readRuntimeDependencyOwnership(root)).toEqual(ownership);
+        return;
+      }
+      rewriteRootRuntimeImportsToStableAliases({ rootDir: root });
+      writeStableRootRuntimeAliases({ rootDir: root });
+      const updated = readRuntimeDependencyOwnership(root)!;
+      expect(fsSync.readFileSync(sharedPath, "utf8")).toContain('"./downstream.runtime.js"');
+      for (const file of [sharedChunk!, "shared.runtime.js", "downstream.runtime.js"]) {
+        expect(updated.chunks[file]).toEqual({
+          sha256: createHash("sha256")
+            .update(fsSync.readFileSync(path.join(dist, file)))
+            .digest("hex"),
+          extensions: ["example"],
+        });
+      }
+      expect(updated.chunks[sharedChunk!].sha256).not.toBe(ownership.chunks[sharedChunk!].sha256);
+    },
+  );
+
+  it("binds real static and dynamic plugin chunks to their emitted bytes", async () => {
+    const { root, ownership } = await buildInstalledFixture("export const ready = true;");
+    const sources: string[] = [];
+    expect(Object.keys(ownership.chunks)).not.toContain("root.js");
+    for (const [fileName, chunk] of Object.entries(ownership.chunks)) {
+      const source = fsSync.readFileSync(path.join(root, "dist", fileName), "utf8");
+      expect(chunk).toEqual({
+        sha256: createHash("sha256").update(source).digest("hex"),
+        extensions: ["example"],
+      });
+      sources.push(source);
+    }
+    expect(sources.some((source) => source.includes('"fixture-runtime"'))).toBe(true);
+    expect(sources.some((source) => source.includes('"fixture-lazy"'))).toBe(true);
+  });
+
+  it.each([
+    ["static import", 'export { value } from "fixture-runtime";'],
+    [
+      "createRequire import",
+      `import { createRequire } from "node:module";
+       export const value = createRequire(import.meta.url)("fixture-runtime");`,
+    ],
+    ["root-shared chunk", 'export { value } from "./shared.js";'],
+  ])("omits output reached by a root %s", async (name, source) => {
+    const { root, ownership } = await buildInstalledFixture(source);
+    expect(Object.keys(ownership.chunks)).not.toContain("root.js");
+    if (name === "root-shared chunk") {
+      const sharedChunks = fsSync
+        .readdirSync(path.join(root, "dist"))
+        .filter(
+          (file) =>
+            file.endsWith(".js") &&
+            fsSync
+              .readFileSync(path.join(root, "dist", file), "utf8")
+              .includes('"fixture-runtime"'),
+        );
+      expect(sharedChunks.length).toBeGreaterThan(0);
+      for (const file of sharedChunks) {
+        expect(Object.keys(ownership.chunks)).not.toContain(file);
+      }
     }
   });
 });

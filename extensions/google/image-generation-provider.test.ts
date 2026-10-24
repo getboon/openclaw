@@ -1,4 +1,5 @@
 // Google tests cover image generation provider plugin behavior.
+import * as providerAuth from "openclaw/plugin-sdk/provider-auth";
 import * as providerAuthRuntime from "openclaw/plugin-sdk/provider-auth-runtime";
 import * as providerHttp from "openclaw/plugin-sdk/provider-http";
 import { mockPinnedHostnameResolution } from "openclaw/plugin-sdk/test-env";
@@ -554,6 +555,74 @@ describe("Google image-generation provider", () => {
     expect(typeof request.method).toBe("string");
   });
 
+  it("reports configured from a config apiKey (gateway-routed gemini) with no env/profile creds", () => {
+    vi.spyOn(providerAuth, "isProviderApiKeyConfigured").mockReturnValue(false);
+
+    const provider = buildGoogleImageGenerationProvider();
+    expect(
+      provider.isConfigured?.({
+        agentDir: "/tmp/agent",
+        cfg: {
+          models: {
+            providers: {
+              google: {
+                baseUrl: "https://gateway.example.test/gemini/v1beta",
+                apiKey: "gateway-token",
+                models: [],
+              },
+            },
+          },
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("still reports not configured with a custom endpoint and no credentials", () => {
+    vi.spyOn(providerAuth, "isProviderApiKeyConfigured").mockReturnValue(false);
+
+    const provider = buildGoogleImageGenerationProvider();
+    expect(
+      provider.isConfigured?.({
+        agentDir: "/tmp/agent",
+        cfg: {
+          models: {
+            providers: {
+              google: {
+                baseUrl: "https://gateway.example.test/gemini/v1beta",
+                models: [],
+              },
+            },
+          },
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it.each([
+    ["empty", ""],
+    ["whitespace-only", "   "],
+  ])("treats a %s config apiKey as not configured", (_label, apiKey) => {
+    vi.spyOn(providerAuth, "isProviderApiKeyConfigured").mockReturnValue(false);
+
+    const provider = buildGoogleImageGenerationProvider();
+    expect(
+      provider.isConfigured?.({
+        agentDir: "/tmp/agent",
+        cfg: {
+          models: {
+            providers: {
+              google: {
+                baseUrl: "https://gateway.example.test/gemini/v1beta",
+                apiKey,
+                models: [],
+              },
+            },
+          },
+        },
+      }),
+    ).toBe(false);
+  });
+
   it("prefers scoped configured Gemini API keys over environment fallbacks", () => {
     expect(
       geminiWebSearchTesting.resolveGeminiApiKey({
@@ -563,8 +632,8 @@ describe("Google image-generation provider", () => {
   });
 
   it("falls back to the default Gemini model when unset or blank", () => {
-    expect(geminiWebSearchTesting.resolveGeminiModel()).toBe("gemini-2.5-flash");
-    expect(geminiWebSearchTesting.resolveGeminiModel({ model: "  " })).toBe("gemini-2.5-flash");
+    expect(geminiWebSearchTesting.resolveGeminiModel()).toBe("gemini-3.6-flash");
+    expect(geminiWebSearchTesting.resolveGeminiModel({ model: "  " })).toBe("gemini-3.6-flash");
     expect(geminiWebSearchTesting.resolveGeminiModel({ model: "gemini-2.5-pro" })).toBe(
       "gemini-2.5-pro",
     );

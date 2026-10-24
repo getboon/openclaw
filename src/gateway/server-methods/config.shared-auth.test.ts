@@ -4,6 +4,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { RestartSentinelPayload } from "../../infra/restart-sentinel.js";
+import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
+import { createTestRegistry } from "../../test-utils/channel-plugins.js";
+import { loadGatewayConfigRevisionProjector } from "../config-revision-token.js";
 import {
   createConfigHandlerHarness,
   createConfigWriteSnapshot,
@@ -11,6 +14,7 @@ import {
 } from "./config.test-helpers.js";
 
 const readConfigFileSnapshotForWriteMock = vi.fn();
+const readConfigFileSnapshotMock = vi.fn();
 const writeConfigFileMock = vi.fn();
 const persistedConfigResultMock = vi.fn((config: OpenClawConfig) => config);
 const validateConfigObjectWithPluginsMock = vi.fn();
@@ -53,6 +57,7 @@ vi.mock("../../config/io.js", async () => {
     ...actual,
     createConfigIO: () => ({ configPath: "/tmp/openclaw.json" }),
     readConfigFileSnapshotForWrite: readConfigFileSnapshotForWriteMock,
+    readConfigFileSnapshot: readConfigFileSnapshotMock,
   };
 });
 
@@ -141,6 +146,19 @@ function hotReloadConfig(): OpenClawConfig {
   };
 }
 
+function installBrowserReloadRegistry(): void {
+  const registry = createTestRegistry([]);
+  registry.reloads = [
+    {
+      pluginId: "browser",
+      pluginName: "Browser",
+      registration: { restartPrefixes: ["browser"], hotPrefixes: ["browser.profiles"] },
+      source: "test",
+    },
+  ];
+  setActivePluginRegistry(registry);
+}
+
 function mockPreviousConfig(config: OpenClawConfig): void {
   readConfigFileSnapshotForWriteMock.mockResolvedValue(createConfigWriteSnapshot(config));
 }
@@ -152,7 +170,7 @@ async function runConfigPatch(
   const { options, disconnectClientsUsingSharedGatewayAuth } = createConfigHandlerHarness({
     method: "config.patch",
     params: {
-      baseHash: "base-hash",
+      baseHash: loadGatewayConfigRevisionProjector().projectRawHash("base-hash"),
       raw: typeof raw === "string" ? raw : JSON.stringify(raw),
       restartDelayMs: params.restartDelayMs ?? 1_000,
       ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
@@ -171,6 +189,7 @@ function expectNoDirectRestart(): void {
 
 afterEach(() => {
   vi.clearAllMocks();
+  resetPluginRuntimeStateForTest();
 });
 
 beforeEach(() => {
@@ -214,7 +233,7 @@ describe("config shared auth disconnects", () => {
       method: "config.set",
       params: {
         raw: JSON.stringify(submittedConfig, null, 2),
-        baseHash: "base-hash",
+        baseHash: loadGatewayConfigRevisionProjector().projectRawHash("base-hash"),
       },
     });
 
@@ -241,7 +260,7 @@ describe("config shared auth disconnects", () => {
       method: "config.set",
       params: {
         raw: JSON.stringify(nextConfig, null, 2),
-        baseHash: "base-hash",
+        baseHash: loadGatewayConfigRevisionProjector().projectRawHash("base-hash"),
       },
     });
 
@@ -368,7 +387,7 @@ describe("config shared auth disconnects", () => {
     const { options } = createConfigHandlerHarness({
       method: "config.patch",
       params: {
-        baseHash: "base-hash",
+        baseHash: loadGatewayConfigRevisionProjector().projectRawHash("base-hash"),
         raw: JSON.stringify({ gateway: { channelHealthCheckMinutes: 15 } }),
         restartDelayMs: 1_000,
       },
@@ -380,6 +399,34 @@ describe("config shared auth disconnects", () => {
     expect(scheduleGatewaySigusr1RestartMock).not.toHaveBeenCalled();
     const payload = restartSentinelMocks.writeRestartSentinel.mock.calls.at(-1)?.[0];
     expect(payload?.stats?.requiresRestart).toBe(false);
+  });
+
+  it("does not schedule a direct restart for hot-mode browser profile config.patch writes", async () => {
+    installBrowserReloadRegistry();
+    mockPreviousConfig({
+      ...hotReloadConfig(),
+      browser: {
+        profiles: {
+          sandbox: {
+            cdpUrl: "http://127.0.0.1:9222",
+            color: "#0066CC",
+          },
+        },
+      },
+    });
+
+    await runConfigPatch({
+      browser: {
+        profiles: {
+          sandbox: {
+            cdpUrl: "http://127.0.0.1:9223",
+            color: "#0066CC",
+          },
+        },
+      },
+    });
+
+    expectNoDirectRestart();
   });
 
   it("does not add an agent continuation from generic control-plane sessionKey params", async () => {
@@ -395,5 +442,33 @@ describe("config shared auth disconnects", () => {
     const payload = restartSentinelMocks.writeRestartSentinel.mock.calls.at(-1)?.[0];
     expect(payload?.sessionKey).toBe("agent:main:main");
     expect(payload?.continuation).toBeUndefined();
+  });
+});
+
+describe("config revision confidentiality", () => {
+  it("publishes an opaque revision and rejects the raw digest for writes", async () => {
+    const snapshot = createConfigWriteSnapshot(tokenAuthConfig("secret-token")).snapshot;
+    readConfigFileSnapshotMock.mockResolvedValue(snapshot);
+    readConfigFileSnapshotForWriteMock.mockResolvedValue({ snapshot, writeOptions: {} });
+    const get = createConfigHandlerHarness();
+    await configHandlers["config.get"](get.options);
+    const published = get.respond.mock.calls[0]?.[1] as { hash: string };
+    expect(published.hash).toMatch(/^hmac-sha256:v1:/u);
+    expect(published.hash).not.toBe(snapshot.hash);
+    for (const method of ["config.set", "config.patch", "config.apply"]) {
+      const write = createConfigHandlerHarness({
+        method,
+        params: { baseHash: snapshot.hash, raw: "{}" },
+      });
+      await configHandlers[method](write.options);
+      expect(write.respond).toHaveBeenCalledWith(
+        false,
+        undefined,
+        expect.objectContaining({
+          message: expect.stringContaining("config changed since last load"),
+        }),
+      );
+    }
+    expect(published.hash).toBe(loadGatewayConfigRevisionProjector().projectRawHash(snapshot.hash));
   });
 });

@@ -9,6 +9,7 @@ import {
   parseUsageCountedSessionIdFromFileName,
   sessionPathForFile,
 } from "openclaw/plugin-sdk/memory-core-host-engine-qmd";
+import { isMemoryArtifactEligibleForAutomaticContext } from "openclaw/plugin-sdk/memory-core-host-runtime-core";
 import type { MemorySearchResult } from "openclaw/plugin-sdk/memory-core-host-runtime-files";
 import {
   formatMemoryDreamingDay,
@@ -19,6 +20,7 @@ import {
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { appendRegularFile } from "openclaw/plugin-sdk/security-runtime";
 import { normalizeStringEntries, uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { appendFailedDreamingEvent } from "./dreaming-events.js";
 import { writeDailyDreamingPhaseBlock } from "./dreaming-markdown.js";
 import {
   generateAndAppendDreamNarrative,
@@ -39,6 +41,7 @@ import {
 import { textSimilarity as snippetSimilarity } from "./memory/tokenize.js";
 import {
   filterLiveShortTermRecallEntries,
+  filterFreshLightDreamingEntries,
   readLightStagedKeys,
   readShortTermRecallEntries,
   recordDreamingPhaseSignals,
@@ -848,7 +851,12 @@ async function collectSessionIngestionBatches(params: {
   for (const agentId of agentIds) {
     for (const entry of await listSessionTranscriptCorpusEntriesForAgent(agentId)) {
       const absolutePath = entry.sessionFile;
-      if (isCheckpointSessionTranscriptPath(absolutePath)) {
+      if (
+        // Dreaming learns only from the live corpus. Retained reset/delete
+        // archives stay in the shared corpus for QMD and memory_search.
+        entry.artifactKind === "archive-artifact" ||
+        isCheckpointSessionTranscriptPath(absolutePath)
+      ) {
         continue;
       }
       sessionFiles.push({
@@ -1222,6 +1230,15 @@ async function collectDailyIngestionBatches(params: {
     if (!raw) {
       continue;
     }
+    if (
+      !(await isMemoryArtifactEligibleForAutomaticContext({
+        workspaceDir: params.workspaceDir,
+        relativePath,
+        content: raw,
+      }))
+    ) {
+      continue;
+    }
     const lines = stripManagedDailyDreamingLines(raw.split(/\r?\n/));
     const chunks = buildDailySnippetChunks(lines, perFileCap);
     const results: MemorySearchResult[] = [];
@@ -1382,6 +1399,16 @@ export async function seedHistoricalDailyMemorySignals(params: {
       throw err;
     });
     if (!raw) {
+      continue;
+    }
+    if (
+      !(await isMemoryArtifactEligibleForAutomaticContext({
+        workspaceDir: params.workspaceDir,
+        relativePath: entry.relativePath,
+        content: raw,
+      }))
+    ) {
+      skippedPaths.push(entry.filePath);
       continue;
     }
     const lines = stripManagedDailyDreamingLines(raw.split(/\r?\n/));
@@ -1699,10 +1726,14 @@ async function runLightDreaming(params: {
   });
   const recentEntries = await filterLiveShortTermRecallEntries({
     workspaceDir: params.workspaceDir,
-    entries: filterRecallEntriesWithinLookback({
-      entries: await readShortTermRecallEntries({ workspaceDir: params.workspaceDir, nowMs }),
+    entries: await filterFreshLightDreamingEntries({
+      workspaceDir: params.workspaceDir,
       nowMs,
-      lookbackDays: params.config.lookbackDays,
+      entries: filterRecallEntriesWithinLookback({
+        entries: await readShortTermRecallEntries({ workspaceDir: params.workspaceDir, nowMs }),
+        nowMs,
+        lookbackDays: params.config.lookbackDays,
+      }),
     }),
   });
   const rankedEntries = dedupeEntries(
@@ -1907,15 +1938,27 @@ export async function runDreamingSweepPhases(params: {
     cfg: params.cfg as Parameters<typeof resolveMemoryLightDreamingConfig>[0]["cfg"],
   });
   if (light.enabled && light.limit > 0) {
-    await runLightDreaming({
-      workspaceDir: params.workspaceDir,
-      cfg: params.cfg,
-      config: light,
-      logger: params.logger,
-      subagent: params.subagent,
-      nowMs: sweepNowMs,
-      detachNarratives: params.detachNarratives,
-    });
+    try {
+      await runLightDreaming({
+        workspaceDir: params.workspaceDir,
+        cfg: params.cfg,
+        config: light,
+        logger: params.logger,
+        subagent: params.subagent,
+        nowMs: sweepNowMs,
+        detachNarratives: params.detachNarratives,
+      });
+    } catch (err) {
+      await appendFailedDreamingEvent({
+        workspaceDir: params.workspaceDir,
+        phase: "light",
+        error: formatErrorMessage(err),
+        storageMode: light.storage.mode,
+        nowMs: sweepNowMs,
+        logger: params.logger,
+      });
+      throw err;
+    }
   }
 
   const rem = resolveMemoryRemDreamingConfig({
@@ -1923,15 +1966,27 @@ export async function runDreamingSweepPhases(params: {
     cfg: params.cfg as Parameters<typeof resolveMemoryRemDreamingConfig>[0]["cfg"],
   });
   if (rem.enabled && rem.limit > 0) {
-    await runRemDreaming({
-      workspaceDir: params.workspaceDir,
-      cfg: params.cfg,
-      config: rem,
-      logger: params.logger,
-      subagent: params.subagent,
-      nowMs: sweepNowMs,
-      detachNarratives: params.detachNarratives,
-    });
+    try {
+      await runRemDreaming({
+        workspaceDir: params.workspaceDir,
+        cfg: params.cfg,
+        config: rem,
+        logger: params.logger,
+        subagent: params.subagent,
+        nowMs: sweepNowMs,
+        detachNarratives: params.detachNarratives,
+      });
+    } catch (err) {
+      await appendFailedDreamingEvent({
+        workspaceDir: params.workspaceDir,
+        phase: "rem",
+        error: formatErrorMessage(err),
+        storageMode: rem.storage.mode,
+        nowMs: sweepNowMs,
+        logger: params.logger,
+      });
+      throw err;
+    }
   }
 }
 
@@ -1982,6 +2037,13 @@ async function runPhaseIfTriggered(
         });
       }
     } catch (err) {
+      await appendFailedDreamingEvent({
+        workspaceDir,
+        phase: params.phase,
+        error: formatErrorMessage(err),
+        storageMode: params.config.storage.mode,
+        logger: params.logger,
+      });
       params.logger.error(
         `memory-core: ${params.phase} dreaming failed for workspace ${workspaceDir}: ${formatErrorMessage(err)}`,
       );

@@ -1,6 +1,14 @@
 // Gateway live tool probe utilities.
 // Classifies nonce probe replies and retry conditions for live provider checks.
+import { randomUUID } from "node:crypto";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+
+/** Generates a random marker without credential-shaped UUID segments. */
+export function createToolProbeNonce(): string {
+  // A UUID segment ending in fc followed by a dash and its final 12 hex digits
+  // looks like a Firecrawl key. Keep the entropy but avoid that secret syntax.
+  return randomUUID().replaceAll("-", "");
+}
 
 /** Returns true when both expected tool-read nonces are present. */
 export function hasExpectedToolNonce(text: string, nonceA: string, nonceB: string): boolean {
@@ -114,9 +122,14 @@ export function shouldRetryToolReadProbe(params: {
     return true;
   }
   const lower = normalizeLowercaseStringOrEmpty(params.text);
-  const hasMistralProbeMarker = ["left=", "right=", "noncea=", "nonceb="].some((marker) =>
-    lower.includes(marker),
-  );
+  const hasMistralProbeMarker = [
+    "left=",
+    "right=",
+    "noncea=",
+    "nonceb=",
+    "testmarkera=",
+    "testmarkerb=",
+  ].some((marker) => lower.includes(marker));
   if (params.provider === "mistral" && hasMistralProbeMarker) {
     return true;
   }
