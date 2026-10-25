@@ -345,6 +345,29 @@ function hasRuntimeOnlyFollowupMetadata(item: FollowupRun): boolean {
   );
 }
 
+// An ambient/ad-hoc turn kind (a live room event or a live audio turn) has no
+// multi-item representation: collectRuntimeMetadata keeps only one
+// currentTurnSource's kind/audio flag, so folding a second item's distinct
+// turn into the same collected run would silently misreport it. Everything
+// else hasRuntimeOnlyFollowupMetadata covers now has real multi-item support
+// below (createAggregateCancellation combines abortSignals,
+// collectRuntimeMetadata flatMaps deliveryCorrelations and fans out
+// onFollowupAdmissionWaitChange, collectCurrentInboundContext merges
+// currentInboundContext, and resolveFollowupDeliveryContextKey already keys
+// on queuedLifecycle.ownerKey to split distinct admission owners into
+// separate groups before assertSingleAdmissionOwner ever runs), so those no
+// longer need to force individual, uncollected processing.
+function hasUncombinableFollowupMetadata(item: FollowupRun): boolean {
+  return Boolean(
+    item.currentInboundEventKind === "room_event" ||
+    item.currentInboundAudio === true ||
+    item.queuedDeliveryPayloadTransform ||
+    item.queuedDeliveryReplyToMode ||
+    item.queuedDeliveryPayloadDidDeliver ||
+    item.queuedExecutionContext,
+  );
+}
+
 function buildCollectTranscriptPrompt(items: FollowupRun[]): string {
   return buildCollectPrompt({
     title: "[Queued messages while agent was busy]",
@@ -1200,7 +1223,7 @@ export function scheduleFollowupDrain(
           const summarySources = queue.summarySources ?? [];
           const isCrossChannel =
             hasCrossChannelItems(queue.items, resolveCrossChannelKey) ||
-            queue.items.some(hasRuntimeOnlyFollowupMetadata) ||
+            queue.items.some(hasUncombinableFollowupMetadata) ||
             hasMixedSummarySourceContexts(summarySources) ||
             summarySources.some(hasRuntimeOnlyFollowupMetadata) ||
             (summarySources.length > 0 &&
