@@ -1079,7 +1079,12 @@ function classifyFailoverClassificationFromHttpStatus(
     // isHtmlErrorResponse/isCloudflareOrHtmlErrorPage — those also match a
     // generic complete-HTML auth page with no WAF signature (still a genuine
     // auth_html case) or a plain upstream 5xx gateway page misrouted here.
-    if (message && isEdgeWafBlockPage(message)) {
+    // isEdgeWafBlockPage's bare `cdn-cgi/` marker also matches a Cloudflare
+    // JS-challenge interstitial's `cdn-cgi/challenge-platform` script path, so
+    // excludes isCloudflareChallengeResponse explicitly — that case is a
+    // request-independent anti-bot checkpoint, not this fork's auth-miscooldown
+    // bug, and belongs in the existing upstream_html bucket below.
+    if (message && isEdgeWafBlockPage(message) && !isCloudflareChallengeResponse(message)) {
       return toReasonClassification("edge_blocked");
     }
     if (opts?.preserveProviderSignalClassification && messageClassification) {
@@ -1540,8 +1545,15 @@ export function classifyProviderRuntimeFailureKind(
   // status": a bare-status Cloudflare JS-challenge interstitial or a plain
   // upstream 5xx CDN page also carries these markers but is legitimately the
   // existing upstream_html bucket, not this fork's specific auth-miscooldown
-  // bug.
-  if ((status === 401 || status === 403) && message && isEdgeWafBlockPage(message)) {
+  // bug. isCloudflareChallengeResponse is excluded explicitly because
+  // isEdgeWafBlockPage's bare `cdn-cgi/` marker also matches a challenge
+  // page's `cdn-cgi/challenge-platform` script path.
+  if (
+    (status === 401 || status === 403) &&
+    message &&
+    isEdgeWafBlockPage(message) &&
+    !isCloudflareChallengeResponse(message)
+  ) {
     return "edge_blocked";
   }
   if (message && isHtmlErrorResponse(message, status)) {
