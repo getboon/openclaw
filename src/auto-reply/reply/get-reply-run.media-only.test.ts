@@ -2570,6 +2570,58 @@ describe("runPreparedReply media-only handling", () => {
 
     await runPreparedReply(
       baseParams({
+        opts: { abortSignal: abortController.signal },
+        ctx: {
+          Body: "@bot keep this",
+          RawBody: "@bot keep this",
+          CommandBody: "@bot keep this",
+          Provider: "telegram",
+          Surface: "telegram",
+          ChatType: "group",
+        },
+        sessionCtx: {
+          Body: "@bot keep this",
+          BodyStripped: "@bot keep this",
+          Provider: "telegram",
+          Surface: "telegram",
+          ChatType: "group",
+          InboundEventKind: "user_request",
+          MessageSid: "994",
+          SenderName: "Alice",
+        },
+      }),
+    );
+
+    const call = requireLastRunReplyAgentCall();
+    expect(call.shouldFollowup).toBe(true);
+    expect(call.isActive).toBe(true);
+    expect(call.followupRun.currentInboundEventKind).toBe("user_request");
+    expect(call.followupRun.abortSignal).toBeUndefined();
+  });
+
+  it("inherits the abort signal for queued user requests with a Gateway-owned lifecycle", async () => {
+    // Unlike the plain case above, a chat.send call that's still queued keeps
+    // a Gateway-owned queuedFollowupLifecycle (registered in chat-queued-turns.ts)
+    // so an explicit Esc/chat.abort can cancel it before it ever reaches the
+    // model. Detaching this signal would let that queued request through.
+    const queueSettings = await import("./queue/settings-runtime.js");
+    const embeddedAgentRuntime = await import("../../agents/embedded-agent.runtime.js");
+    const abortController = new AbortController();
+    vi.mocked(queueSettings.resolveQueueSettings).mockReturnValueOnce({
+      mode: "collect",
+      debounceMs: 500,
+      cap: 20,
+      dropPolicy: "summarize",
+    });
+    vi.mocked(embeddedAgentRuntime.resolveActiveEmbeddedRunSessionId)
+      .mockReturnValueOnce("active-session")
+      .mockReturnValueOnce("active-session");
+    vi.mocked(embeddedAgentRuntime.isEmbeddedAgentRunActive).mockReturnValueOnce(true);
+    vi.mocked(embeddedAgentRuntime.isEmbeddedAgentRunStreaming).mockReturnValueOnce(true);
+    vi.mocked(buildInboundUserContextPrefix).mockReturnValueOnce("user request context");
+
+    await runPreparedReply(
+      baseParams({
         opts: {
           abortSignal: abortController.signal,
           queuedFollowupLifecycle: { onComplete: vi.fn(), onEnqueued: vi.fn() },
@@ -2599,7 +2651,7 @@ describe("runPreparedReply media-only handling", () => {
     expect(call.shouldFollowup).toBe(true);
     expect(call.isActive).toBe(true);
     expect(call.followupRun.currentInboundEventKind).toBe("user_request");
-    expect(call.followupRun.abortSignal).toBeUndefined();
+    expect(call.followupRun.abortSignal).toBe(abortController.signal);
   });
 
   it("queues active room events instead of interrupting active user requests", async () => {
