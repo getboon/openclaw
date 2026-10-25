@@ -3898,8 +3898,15 @@ async function runEmbeddedAgentInternal(
             compactionCount: autoCompactionCount > 0 ? autoCompactionCount : undefined,
             compactionTokensAfter: lastCompactionTokensAfter,
           };
-          const finalAssistantVisibleText = resolveFinalAssistantVisibleText(attemptAssistant);
-          const finalAssistantRawText = resolveFinalAssistantRawText(attemptAssistant);
+          // Prefer this attempt's own fresh assistant (e.g. the tool-use ->
+          // final-text turn in #80918) over a stale session-level lastAssistant,
+          // but — unlike attemptAssistant's error-classification use elsewhere —
+          // don't gate the fallback on matching the active model: a settled-tool
+          // continuation attempt's own lastAssistant is still the right source
+          // for the turn's final text even when currentAttemptAssistant is unset.
+          const finalTextSourceAssistant = currentAttemptAssistant ?? sessionLastAssistant;
+          const finalAssistantVisibleText = resolveFinalAssistantVisibleText(finalTextSourceAssistant);
+          const finalAssistantRawText = resolveFinalAssistantRawText(finalTextSourceAssistant);
 
           const payloads = buildEmbeddedRunPayloads({
             assistantTexts: attempt.assistantTexts,
