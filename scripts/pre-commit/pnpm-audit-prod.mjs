@@ -43,6 +43,23 @@ const AUDIT_ADVISORY_VERSION_OVERRIDES = [
     advisoryIds: new Set(["1118204", "GHSA-3q49-cfcf-g5fm"]),
     unaffectedVersions: new Set(["2.2.1", "2.2.5"]),
   },
+  // GHSA-mrhx-c7xc-m3w5's published range ("< 4.6.6") is written against
+  // zod's v4 line only -- the bug lives in $ZodArray/handleArrayResult, a v4
+  // internal class introduced in zod's v3->v4 rewrite that v3 never shipped
+  // (confirmed via the advisory's own description and colinhacks/zod#6475).
+  // The overbroad "< 4.6.6" range matches "< X.Y.Z" against every earlier
+  // major too, so it also flags zod 3.25.76 (a2ui/web_core's pinned
+  // dependency, current and unaffected) even though it predates the v4
+  // rewrite entirely. npm's bulk endpoint returns the advisory once per
+  // package regardless of which queried version tripped it, and the
+  // suppression check below requires every currently-resolved version to be
+  // listed, so the real v4 fix (4.6.7, already patched past 4.6.6) is listed
+  // alongside the v3 false positive rather than just the latter.
+  {
+    packageName: "zod",
+    advisoryIds: new Set(["1243066", "GHSA-mrhx-c7xc-m3w5"]),
+    unaffectedVersions: new Set(["3.25.76", "4.6.7"]),
+  },
 ];
 
 /**
