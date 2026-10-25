@@ -306,6 +306,7 @@ describe("sendMessage", () => {
 
     const deliveryParams = expectDeliveryCallFields({
       queuePolicy: "required",
+      requireUnknownSendReconciliation: true,
       mediaAccess,
     });
     expectRecordFields(
@@ -479,6 +480,7 @@ describe("sendMessage", () => {
         channel: "forum",
         to: "123456",
         via: "direct",
+        deliveryStatus: "sent",
       },
       "send message result",
     );
@@ -487,7 +489,21 @@ describe("sendMessage", () => {
   });
 
   it("preserves suppressed direct-send status", async () => {
-    mocks.deliverOutboundPayloads.mockResolvedValueOnce([]);
+    mocks.deliverOutboundPayloads.mockImplementationOnce(async (params: unknown) => {
+      const callbacks = params as {
+        onPayloadDeliveryOutcome?: (outcome: unknown) => void;
+      };
+      callbacks.onPayloadDeliveryOutcome?.({
+        index: 0,
+        status: "suppressed",
+        reason: "cancelled_by_message_sending_hook",
+        hookEffect: {
+          cancelReason: "owned-by-other-agent",
+          metadata: { unsafeForJson: 1n },
+        },
+      });
+      return [];
+    });
 
     const result = await sendMessage({
       cfg: {},
@@ -497,26 +513,34 @@ describe("sendMessage", () => {
     });
 
     expect(result.deliveryStatus).toBe("suppressed");
+    expect(result.payloadOutcomes).toEqual([
+      {
+        index: 0,
+        status: "suppressed",
+        reason: "cancelled_by_message_sending_hook",
+      },
+    ]);
+    expect(() => JSON.stringify(result)).not.toThrow();
   });
 
-  it("does not throw best-effort direct send failures", async () => {
+  it("does not throw best-effort direct send failures but reports the failure", async () => {
     mocks.deliverOutboundPayloads.mockImplementationOnce(async (params: unknown) => {
       (
         params as {
           onPayloadDeliveryOutcome?: (outcome: {
             index: number;
-            payload: { text: string };
             status: "failed";
             error: Error;
-            stage: "send";
+            sentBeforeError: boolean;
+            stage: "platform_send";
           }) => void;
         }
       ).onPayloadDeliveryOutcome?.({
         index: 0,
-        payload: { text: "hi" },
         status: "failed",
         error: new Error("transport unavailable"),
-        stage: "send",
+        sentBeforeError: false,
+        stage: "platform_send",
       });
       return [];
     });
@@ -535,20 +559,20 @@ describe("sendMessage", () => {
         to: "123456",
         via: "direct",
         result: undefined,
+        deliveryStatus: "failed",
+        error: "transport unavailable",
       },
       "best-effort send message result",
     );
-    // bestEffort suppresses the throw, but the result must still say the send
-    // failed — otherwise a genuinely failed send (bad target, transport
-    // error) reads as a plain success with no failure signal anywhere.
-    // `error` (not e.g. `deliveryError`) is what makes `isToolResultError`
-    // classify the message tool's result as a real failure once this becomes
-    // a tool's `details`. It must be a plain string, not the raw `Error`:
-    // tool-result sanitization redacts objects via `Object.entries`, which
-    // never sees an `Error`'s non-enumerable `message`/`stack` and would
-    // otherwise reduce it to `{}`.
-    expect(result.deliveryStatus).toBe("failed");
-    expect(result.error).toBe("transport unavailable");
+    expect(result.payloadOutcomes).toEqual([
+      {
+        index: 0,
+        status: "failed",
+        error: "transport unavailable",
+        sentBeforeError: false,
+        stage: "platform_send",
+      },
+    ]);
 
     expectDeliveryCallFields({
       bestEffort: true,
@@ -556,8 +580,25 @@ describe("sendMessage", () => {
     });
   });
 
-  it("marks a best-effort send as delivered (no failure status) when it actually succeeds", async () => {
-    mocks.deliverOutboundPayloads.mockResolvedValueOnce([{ channel: "forum", messageId: "m1" }]);
+  it("reports partial delivery on best-effort direct sends instead of plain success", async () => {
+    mocks.deliverOutboundPayloads.mockImplementationOnce(async (params: unknown) => {
+      const callbacks = params as {
+        onPayloadDeliveryOutcome?: (outcome: unknown) => void;
+      };
+      callbacks.onPayloadDeliveryOutcome?.({
+        index: 0,
+        status: "sent",
+        results: [{ channel: "forum", messageId: "m1" }],
+      });
+      callbacks.onPayloadDeliveryOutcome?.({
+        index: 1,
+        status: "failed",
+        error: new Error("chunk 2 rejected"),
+        sentBeforeError: true,
+        stage: "platform_send",
+      });
+      return [{ channel: "forum", messageId: "m1" }];
+    });
 
     const result = await sendMessage({
       cfg: {},
@@ -566,8 +607,28 @@ describe("sendMessage", () => {
       content: "hi",
       bestEffort: true,
     });
-
-    expect(result.deliveryStatus).toBeUndefined();
-    expect(result.error).toBeUndefined();
+    expectRecordFields(
+      result,
+      {
+        channel: "forum",
+        to: "123456",
+        via: "direct",
+        result: { channel: "forum", messageId: "m1" },
+        deliveryStatus: "partial_failed",
+        error: "chunk 2 rejected",
+        sentBeforeError: true,
+      },
+      "best-effort partial send message result",
+    );
+    expect(result.payloadOutcomes).toEqual([
+      { index: 0, status: "sent", resultCount: 1 },
+      {
+        index: 1,
+        status: "failed",
+        error: "chunk 2 rejected",
+        sentBeforeError: true,
+        stage: "platform_send",
+      },
+    ]);
   });
 });

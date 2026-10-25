@@ -79,7 +79,9 @@ const MIME_BY_EXT: Record<string, string> = {
   ...buildMimeByExt(),
   // Canonical extension mappings for common MIME aliases
   ".jpg": "image/jpeg",
+  ".m2a": "audio/mpeg",
   ".mp3": "audio/mpeg",
+  ".oga": "audio/ogg",
   ".wav": "audio/wav",
   ".webm": "video/webm",
   // Additional extension aliases
@@ -90,18 +92,6 @@ const MIME_BY_EXT: Record<string, string> = {
   ".xml": "text/xml",
   ".yml": "application/yaml",
 };
-
-const AUDIO_FILE_EXTENSIONS = new Set([
-  ".aac",
-  ".caf",
-  ".flac",
-  ".m4a",
-  ".mp3",
-  ".oga",
-  ".ogg",
-  ".opus",
-  ".wav",
-]);
 
 const fileTypeModuleLoader = createLazyImportLoader(() => import("file-type"));
 
@@ -181,11 +171,7 @@ export function mimeTypeFromFilePath(filePath?: string | null): string | undefin
 
 /** Returns true when a filename extension is a supported audio container. */
 export function isAudioFileName(fileName?: string | null): boolean {
-  const ext = getFileExtension(fileName);
-  if (!ext) {
-    return false;
-  }
-  return AUDIO_FILE_EXTENSIONS.has(ext);
+  return mediaKindFromMime(mimeTypeFromFilePath(fileName)) === "audio";
 }
 
 /** Detects the best MIME type from bytes, file path, and header metadata. */
@@ -259,7 +245,7 @@ export function isGifMedia(opts: {
   contentType?: string | null;
   fileName?: string | null;
 }): boolean {
-  if (opts.contentType?.toLowerCase() === "image/gif") {
+  if (normalizeMimeType(opts.contentType) === "image/gif") {
     return true;
   }
   const ext = getFileExtension(opts.fileName);

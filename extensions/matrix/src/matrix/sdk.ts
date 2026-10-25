@@ -13,6 +13,7 @@ import {
 import type { Direction } from "matrix-js-sdk/lib/models/event-timeline.js";
 import { VerificationMethod } from "matrix-js-sdk/lib/types.js";
 import { KeyedAsyncQueue } from "openclaw/plugin-sdk/keyed-async-queue";
+import { createLazyRuntimeModule } from "openclaw/plugin-sdk/lazy-runtime";
 import type { PinnedDispatcherPolicy } from "openclaw/plugin-sdk/ssrf-dispatcher";
 import {
   normalizeNullableString,
@@ -28,6 +29,7 @@ import {
   formatMatrixErrorReason,
   isMatrixNotFoundError,
 } from "./errors.js";
+import { quiesceMatrixClientSync } from "./sdk/client-sync-quiesce.js";
 import type {
   MatrixCryptoBootstrapOptions,
   MatrixCryptoBootstrapResult,
@@ -233,7 +235,7 @@ export type MatrixRecoveryKeyVerificationResult = MatrixOwnDeviceVerificationSta
   error?: string;
 };
 
-export type MatrixOwnCrossSigningPublicationStatus = {
+type MatrixOwnCrossSigningPublicationStatus = {
   userId: string | null;
   masterKeyPublished: boolean;
   selfSigningKeyPublished: boolean;
@@ -281,7 +283,7 @@ export type MatrixOwnDeviceInfo = {
   current: boolean;
 };
 
-export type MatrixRoomKeyBackupResetOptions = {
+type MatrixRoomKeyBackupResetOptions = {
   rotateRecoveryKey?: boolean;
 };
 
@@ -294,15 +296,13 @@ export type MatrixOwnDeviceDeleteResult = {
 type MatrixCryptoRuntime = typeof import("./sdk/crypto-runtime.js");
 
 let loadedMatrixCryptoRuntime: MatrixCryptoRuntime | null = null;
-let matrixCryptoRuntimePromise: Promise<MatrixCryptoRuntime> | null = null;
 
-async function loadMatrixCryptoRuntime(): Promise<MatrixCryptoRuntime> {
-  matrixCryptoRuntimePromise ??= import("./sdk/crypto-runtime.js").then((runtime) => {
+const loadMatrixCryptoRuntime = createLazyRuntimeModule(() =>
+  import("./sdk/crypto-runtime.js").then((runtime) => {
     loadedMatrixCryptoRuntime = runtime;
     return runtime;
-  });
-  return await matrixCryptoRuntimePromise;
-}
+  }),
+);
 
 const normalizeOptionalString = normalizeNullableString;
 
@@ -346,7 +346,9 @@ export class MatrixClient {
     | import("./sdk/crypto-bootstrap.js").MatrixCryptoBootstrapper<MatrixRawEvent>
     | undefined;
   private readonly autoBootstrapCrypto: boolean;
+  private syncQuiescePromise: Promise<void> | null = null;
   private stopPersistPromise: Promise<void> | null = null;
+  private sdkStopped = false;
   private verificationSummaryListenerBound = false;
   private currentSyncState: MatrixSyncState | null = null;
 
@@ -529,7 +531,7 @@ export class MatrixClient {
         recoveryKeyStore: this.recoveryKeyStore,
         getRoomStateEvent: (roomId, eventType, stateKey = "") =>
           this.getRoomStateEvent(roomId, eventType, stateKey),
-        downloadContent: (mxcUrl) => this.downloadContent(mxcUrl),
+        downloadContent: (mxcUrl, opts) => this.downloadContent(mxcUrl, opts),
       });
     }
     if (!this.verificationSummaryListenerBound) {
@@ -643,6 +645,11 @@ export class MatrixClient {
     if (this.started) {
       return;
     }
+    if (this.sdkStopped) {
+      throw new Error(
+        "Matrix client has been fully stopped and cannot be restarted; acquire a new shared client generation",
+      );
+    }
 
     throwIfMatrixStartupAborted(opts.abortSignal);
     await this.ensureCryptoSupportInitialized();
@@ -698,14 +705,33 @@ export class MatrixClient {
     await this.startSyncSession({ bootstrapCrypto: false });
   }
 
-  stopSyncWithoutPersist(): void {
+  private stopSdkClient(): void {
+    if (this.sdkStopped) {
+      return;
+    }
     if (this.idbPersistTimer) {
       clearInterval(this.idbPersistTimer);
       this.idbPersistTimer = null;
     }
     this.currentSyncState = null;
     this.client.stopClient();
+    this.sdkStopped = true;
     this.started = false;
+  }
+
+  async quiesceSync(): Promise<void> {
+    // Quiescence is terminal for a client generation. Memoize both success and
+    // failure so persistence cannot start a second protected-sync shutdown.
+    this.syncQuiescePromise ??= quiesceMatrixClientSync({
+      client: this.client,
+      emitter: this.emitter,
+      markStopped: () => {
+        this.started = false;
+      },
+      started: this.started,
+      syncStore: this.syncStore,
+    });
+    await this.syncQuiescePromise;
   }
 
   async drainPendingDecryptions(reason = "matrix client shutdown"): Promise<void> {
@@ -713,42 +739,35 @@ export class MatrixClient {
   }
 
   stop(): void {
-    this.stopSyncWithoutPersist();
-    this.decryptBridge?.stop();
-    // Final persist on shutdown
-    this.syncStore?.markCleanShutdown();
-    if (loadedMatrixCryptoRuntime) {
-      const { persistIdbToDisk } = loadedMatrixCryptoRuntime;
-      this.stopPersistPromise = Promise.all([
-        persistIdbToDisk({
-          snapshotPath: this.idbSnapshotPath,
-          databasePrefix: this.cryptoDatabasePrefix,
-        }).catch(noop),
-        this.syncStore?.flush().catch(noop),
-      ]).then(() => undefined);
-      return;
-    }
-    this.stopPersistPromise = loadMatrixCryptoRuntime()
-      .then(async ({ persistIdbToDisk }) => {
-        await Promise.all([
-          persistIdbToDisk({
-            snapshotPath: this.idbSnapshotPath,
-            databasePrefix: this.cryptoDatabasePrefix,
-          }).catch(noop),
-          this.syncStore?.flush().catch(noop),
-        ]);
-      })
-      .catch(noop)
-      .then(() => undefined);
+    void this.stopAndPersist()
+      .catch(() => this.stopWithoutPersist())
+      .catch(noop);
   }
 
   async stopAndPersist(): Promise<void> {
-    this.stop();
+    if (this.stopPersistPromise) {
+      await this.stopPersistPromise;
+      return;
+    }
+    this.stopPersistPromise = (async () => {
+      await this.quiesceSync();
+      this.stopSdkClient();
+      this.decryptBridge?.stop();
+      const runtime = loadedMatrixCryptoRuntime ?? (await loadMatrixCryptoRuntime());
+      await runtime.persistIdbToDisk({
+        snapshotPath: this.idbSnapshotPath,
+        databasePrefix: this.cryptoDatabasePrefix,
+        strict: true,
+      });
+      this.syncStore?.markCleanShutdown();
+      await this.syncStore?.flush();
+    })();
     await this.stopPersistPromise;
   }
 
   stopWithoutPersist(): void {
-    this.stopSyncWithoutPersist();
+    this.syncStore?.discardPendingSyncCursorPersistence();
+    this.stopSdkClient();
     this.decryptBridge?.stop();
     this.stopPersistPromise = Promise.resolve();
   }
@@ -1272,6 +1291,12 @@ export class MatrixClient {
       crossSigningVerified: deviceStatus?.crossSigningVerified === true,
       signedByOwner: deviceStatus?.signedByOwner === true,
     };
+  }
+
+  async refreshOwnDeviceKeys(): Promise<void> {
+    // Rust initialization restores local state without refreshing device signatures.
+    // Query before the one-off status read so a fresh lease sees current owner trust.
+    await this.client.getCrypto()?.userHasCrossSigningKeys(await this.getUserId(), true);
   }
 
   async getOwnDeviceVerificationStatus(): Promise<MatrixOwnDeviceVerificationStatus> {

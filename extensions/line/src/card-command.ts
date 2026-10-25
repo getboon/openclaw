@@ -2,6 +2,8 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
+import { messageAction, postbackAction, uriAction } from "./actions.js";
 import {
   createActionCard,
   createImageCard,
@@ -24,10 +26,13 @@ Types:
   confirm "Question?" --yes "Yes|data" --no "No|data"
   buttons "Title" "Text" --actions "Btn1|url1,Btn2|data2"
 
+Escape a separator that belongs to the data with a backslash: \\, \\|, or \\:
+
 Examples:
   /card info "Welcome" "Thanks for joining!"
   /card image "Product" "Check it out" --url https://example.com/img.jpg
-  /card action "Menu" "Choose an option" --actions "Order|/order,Help|/help"`;
+  /card action "Menu" "Choose an option" --actions "Order|/order,Help|/help"
+  /card action "Links" "Pick one" --actions "Open|https://example.com/a\\,b"`;
 
 function buildLineReply(lineData: LineChannelData): ReplyPayload {
   return {
@@ -35,6 +40,39 @@ function buildLineReply(lineData: LineChannelData): ReplyPayload {
       line: lineData,
     },
   };
+}
+
+/**
+ * Split a card option value on its unescaped separators.
+ *
+ * Each pass consumes escapes for its own separator and preserves every other
+ * backslash. This lets nested comma, pipe, and colon passes stay independent.
+ */
+function splitCardValue(value: string, separator: string): string[] {
+  const parts: string[] = [];
+  let current = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === "\\" && value[index + 1] === separator) {
+      current += separator;
+      index += 1;
+      continue;
+    }
+    if (char === separator) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current);
+  return parts;
+}
+
+/** Split a "Label|data" pair, keeping escaped separators inside either side. */
+function splitCardPair(part: string): [string, string | undefined] {
+  const [label = "", data] = splitCardValue(part, "|").map((piece) => piece.trim());
+  return [label, data];
 }
 
 /**
@@ -48,11 +86,8 @@ function parseActions(actionsStr: string | undefined): CardAction[] {
 
   const results: CardAction[] = [];
 
-  for (const part of actionsStr.split(",")) {
-    const [label, data] = part
-      .trim()
-      .split("|")
-      .map((s) => s.trim());
+  for (const part of splitCardValue(actionsStr, ",")) {
+    const [label, data] = splitCardPair(part);
     if (!label) {
       continue;
     }
@@ -62,22 +97,17 @@ function parseActions(actionsStr: string | undefined): CardAction[] {
     if (actionData.startsWith("http://") || actionData.startsWith("https://")) {
       results.push({
         label,
-        action: { type: "uri", label: label.slice(0, 20), uri: actionData },
+        action: uriAction(label, actionData),
       });
     } else if (actionData.includes("=")) {
       results.push({
         label,
-        action: {
-          type: "postback",
-          label: label.slice(0, 20),
-          data: actionData.slice(0, 300),
-          displayText: label,
-        },
+        action: postbackAction(label, actionData, label),
       });
     } else {
       results.push({
         label,
-        action: { type: "message", label: label.slice(0, 20), text: actionData },
+        action: messageAction(label, actionData),
       });
     }
   }
@@ -89,14 +119,10 @@ function parseActions(actionsStr: string | undefined): CardAction[] {
  * Parse list items format: "Item1|Subtitle1,Item2|Subtitle2"
  */
 function parseListItems(itemsStr: string): ListItem[] {
-  return itemsStr
-    .split(",")
+  return splitCardValue(itemsStr, ",")
     .map((part) => {
-      const [title, subtitle] = part
-        .trim()
-        .split("|")
-        .map((s) => s.trim());
-      return { title: title || "", subtitle };
+      const [title, subtitle] = splitCardPair(part);
+      return { title, subtitle };
     })
     .filter((item) => item.title);
 }
@@ -105,16 +131,15 @@ function parseListItems(itemsStr: string): ListItem[] {
  * Parse receipt items format: "Item1:$10,Item2:$20"
  */
 function parseReceiptItems(itemsStr: string): Array<{ name: string; value: string }> {
-  return itemsStr
-    .split(",")
+  return splitCardValue(itemsStr, ",")
     .map((part) => {
-      const colonIndex = part.lastIndexOf(":");
-      if (colonIndex === -1) {
-        return { name: part.trim(), value: "" };
-      }
+      // The last unescaped colon separates the entry value, so a name may still
+      // contain colons of its own.
+      const segments = splitCardValue(part, ":");
+      const value = segments.length > 1 ? segments.pop() : undefined;
       return {
-        name: part.slice(0, colonIndex).trim(),
-        value: part.slice(colonIndex + 1).trim(),
+        name: segments.join(":").trim(),
+        value: value?.trim() ?? "",
       };
     })
     .filter((item) => item.name);
@@ -191,7 +216,7 @@ export function registerLineCardCommand(api: OpenClawPluginApi): void {
             const bubble = createInfoCard(title, body, footer);
             return buildLineReply({
               flexMessage: {
-                altText: `${title}: ${body}`.slice(0, 400),
+                altText: truncateUtf16Safe(`${title}: ${body}`, 400),
                 contents: bubble,
               },
             });
@@ -206,7 +231,7 @@ export function registerLineCardCommand(api: OpenClawPluginApi): void {
             const bubble = createImageCard(imageUrl, title, caption);
             return buildLineReply({
               flexMessage: {
-                altText: `${title}: ${caption}`.slice(0, 400),
+                altText: truncateUtf16Safe(`${title}: ${caption}`, 400),
                 contents: bubble,
               },
             });
@@ -223,7 +248,7 @@ export function registerLineCardCommand(api: OpenClawPluginApi): void {
             });
             return buildLineReply({
               flexMessage: {
-                altText: `${title}: ${body}`.slice(0, 400),
+                altText: truncateUtf16Safe(`${title}: ${body}`, 400),
                 contents: bubble,
               },
             });
@@ -240,7 +265,10 @@ export function registerLineCardCommand(api: OpenClawPluginApi): void {
             const bubble = createListCard(title, items);
             return buildLineReply({
               flexMessage: {
-                altText: `${title}: ${items.map((i) => i.title).join(", ")}`.slice(0, 400),
+                altText: truncateUtf16Safe(
+                  `${title}: ${items.map((i) => i.title).join(", ")}`,
+                  400,
+                ),
                 contents: bubble,
               },
             });
@@ -261,8 +289,8 @@ export function registerLineCardCommand(api: OpenClawPluginApi): void {
             const bubble = createReceiptCard({ title, items, total, footer });
             return buildLineReply({
               flexMessage: {
-                altText: `${title}: ${items.map((i) => `${i.name} ${i.value}`).join(", ")}`.slice(
-                  0,
+                altText: truncateUtf16Safe(
+                  `${title}: ${items.map((i) => `${i.name} ${i.value}`).join(", ")}`,
                   400,
                 ),
                 contents: bubble,
@@ -275,8 +303,8 @@ export function registerLineCardCommand(api: OpenClawPluginApi): void {
             const yesStr = flags.yes || "Yes|yes";
             const noStr = flags.no || "No|no";
 
-            const [yesLabel, yesData] = yesStr.split("|").map((s) => s.trim());
-            const [noLabel, noData] = noStr.split("|").map((s) => s.trim());
+            const [yesLabel, yesData] = splitCardPair(yesStr);
+            const [noLabel, noData] = splitCardPair(noStr);
 
             return buildLineReply({
               templateMessage: {

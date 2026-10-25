@@ -36,6 +36,11 @@
       - any-glob-to-any-file:
           - "extensions/googlechat/**"
           - "docs/channels/googlechat.md"
+"plugin: logbook":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/logbook/**"
+          - "docs/plugins/logbook.md"
 "plugin: google-meet":
   - changed-files:
       - any-glob-to-any-file:
@@ -128,6 +133,7 @@
       - any-glob-to-any-file:
           - "extensions/qa-lab/**"
           - "qa/scenarios/**"
+          - "docs/maturity/**"
           - "docs/concepts/qa-e2e-automation.md"
           - "docs/concepts/personal-agent-benchmark-pack.md"
           - "docs/channels/qa-channel.md"
@@ -368,6 +374,11 @@
       - any-glob-to-any-file:
           - "extensions/cerebras/**"
           - "docs/providers/cerebras.md"
+"extensions: clawrouter":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/clawrouter/**"
+          - "docs/providers/clawrouter.md"
 "extensions: deepseek":
   - changed-files:
       - any-glob-to-any-file:
@@ -377,6 +388,11 @@
       - any-glob-to-any-file:
           - "extensions/deepinfra/**"
           - "docs/providers/deepinfra.md"
+"extensions: featherless":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/featherless/**"
+          - "docs/providers/featherless.md"
 "extensions: gmi":
   - changed-files:
       - any-glob-to-any-file:
@@ -447,6 +463,16 @@
   - changed-files:
       - any-glob-to-any-file:
           - "extensions/kimi-coding/**"
+"extensions: longcat":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/longcat/**"
+          - "docs/providers/longcat.md"
+"extensions: meta":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "extensions/meta/**"
+          - "docs/providers/meta.md"
 "extensions: minimax":
   - changed-files:
       - any-glob-to-any-file:

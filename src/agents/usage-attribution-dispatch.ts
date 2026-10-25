@@ -39,7 +39,7 @@ export async function callAgentWithUsageAttribution<T = Record<string, unknown>>
     { ...request.params, usageAttribution },
     {
       expectFinal: request.expectFinal,
-      timeoutMs: request.timeoutMs,
+      timeoutMs: request.timeoutMs ?? undefined,
       // Same client shape and scope the socket call would use for `agent`.
       forceSyntheticClient: true,
       syntheticScopes: [WRITE_SCOPE],

@@ -88,6 +88,7 @@ describe("installBrowserCommonMiddleware", () => {
 
     req.emit("aborted");
     expect(req.signal.aborted).toBe(true);
+    expect(req.signal.reason).toEqual(new Error("request aborted"));
   });
 
   it("rejects cross-site mutations before JSON body parsing", async () => {

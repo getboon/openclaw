@@ -1,12 +1,11 @@
-/**
- * Read/write/edit tool wrappers for host and sandbox workspaces.
- * Adds workspace-root guards, adaptive read paging, image validation, memory
- * append-only writes, and parameter cleanup around the session file tools.
- */
 import fs from "node:fs/promises";
+// Read/write/edit tool wrappers for host and sandbox workspaces.
+// Adds workspace-root guards, adaptive read paging, image validation, memory
+// append-only writes, and parameter cleanup around the session file tools.
 import path from "node:path";
 import { URL } from "node:url";
 import { detectMime } from "@openclaw/media-core/mime";
+import { formatByteSize } from "@openclaw/normalization-core";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isWindowsDrivePath } from "../infra/archive-path.js";
 import { toErrorObject } from "../infra/errors.js";
@@ -25,6 +24,7 @@ import {
 } from "../media/media-reference.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
 import { resolveMemoryFlushPlan } from "../plugins/memory-state.js";
+import { clampNumber } from "../utils.js";
 import {
   REQUIRED_PARAM_GROUPS,
   assertRequiredParams,
@@ -35,6 +35,10 @@ import {
 } from "./agent-tools.params.js";
 import type { AnyAgentTool } from "./agent-tools.types.js";
 import type { ImageSanitizationLimits } from "./image-sanitization.js";
+import {
+  withMemoryWriteProvenance,
+  type MemoryWriteProvenanceObserver,
+} from "./memory-write-provenance.js";
 import { toRelativeWorkspacePath } from "./path-policy.js";
 import type { AgentToolResult } from "./runtime/index.js";
 import { assertSandboxPath } from "./sandbox-paths.js";
@@ -77,10 +81,6 @@ const READ_CONTINUATION_NOTICE_RE =
   /\n\n\[(?:Showing lines [^\]]*?Use offset=\d+ to continue\.|\d+ more lines in file\. Use offset=\d+ to continue\.)\]\s*$/;
 const DAILY_MEMORY_PATH_RE = /^memory\/\d{4}-\d{2}-\d{2}\.md$/;
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
 function resolveAdaptiveReadMaxBytes(options?: OpenClawReadToolOptions): number {
   const contextWindowTokens = options?.modelContextWindowTokens;
   if (
@@ -93,7 +93,7 @@ function resolveAdaptiveReadMaxBytes(options?: OpenClawReadToolOptions): number 
   const fromContext = Math.floor(
     contextWindowTokens * CHARS_PER_TOKEN_ESTIMATE * ADAPTIVE_READ_CONTEXT_SHARE,
   );
-  return clamp(fromContext, DEFAULT_READ_PAGE_MAX_BYTES, MAX_ADAPTIVE_READ_MAX_BYTES);
+  return clampNumber(fromContext, DEFAULT_READ_PAGE_MAX_BYTES, MAX_ADAPTIVE_READ_MAX_BYTES);
 }
 
 function malformedXmlArgValuePathError(key: string): Error {
@@ -101,13 +101,12 @@ function malformedXmlArgValuePathError(key: string): Error {
 }
 
 function formatBytes(bytes: number): string {
-  if (bytes >= 1024 * 1024) {
-    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-  }
-  if (bytes >= 1024) {
-    return `${Math.round(bytes / 1024)}KB`;
-  }
-  return `${bytes}B`;
+  return formatByteSize(bytes, {
+    style: "legacy-binary",
+    maxUnit: "mega",
+    separator: "",
+    fractionDigits: (_value, unit) => (unit === "byte" ? null : unit === "kilo" ? 0 : 1),
+  });
 }
 
 function getToolResultText(result: AgentToolResult<unknown>): string | undefined {
@@ -554,6 +553,7 @@ export function resolveToolPathAgainstWorkspaceRoot(params: {
 }
 
 type MemoryFlushAppendOnlyWriteOptions = {
+  memoryWriteProvenance?: MemoryWriteProvenanceObserver;
   root: string;
   relativePath: string;
   containerWorkdir?: string;
@@ -703,14 +703,33 @@ export function wrapToolMemoryFlushAppendOnlyWrite(
         );
       }
 
-      await appendMemoryFlushContent({
-        absolutePath: matched.absolutePath,
-        root: options.root,
-        relativePath: matched.relativePath,
-        content,
-        sandbox: options.sandbox,
-        signal,
-      });
+      const commit = () =>
+        appendMemoryFlushContent({
+          absolutePath: matched.absolutePath,
+          root: options.root,
+          relativePath: matched.relativePath,
+          content,
+          sandbox: options.sandbox,
+          signal,
+        });
+      if (options.memoryWriteProvenance) {
+        const contentBefore = await readOptionalUtf8File({
+          absolutePath: matched.absolutePath,
+          relativePath: matched.relativePath,
+          sandbox: options.sandbox,
+          signal,
+        });
+        const separator =
+          contentBefore && !contentBefore.endsWith("\n") && !content.startsWith("\n") ? "\n" : "";
+        await options.memoryWriteProvenance.write({
+          absolutePath: matched.absolutePath,
+          contentBefore,
+          contentAfter: `${contentBefore}${separator}${content}`,
+          commit,
+        });
+      } else {
+        await commit();
+      }
       return {
         content: [{ type: "text", text: `Appended content to ${matched.relativePath}.` }],
         details: {
@@ -855,6 +874,7 @@ export function wrapToolWorkspaceRootGuardWithOptions(
 }
 
 type SandboxToolParams = {
+  memoryWriteProvenance?: MemoryWriteProvenanceObserver;
   root: string;
   bridge: SandboxFsBridge;
   modelContextWindowTokens?: number;
@@ -875,7 +895,10 @@ export function createSandboxedReadTool(params: SandboxToolParams) {
 /** Create a sandbox-backed write tool with required-parameter validation. */
 export function createSandboxedWriteTool(params: SandboxToolParams) {
   const base = createWriteTool(params.root, {
-    operations: createSandboxWriteOperations(params),
+    operations: withMemoryWriteProvenance(
+      createSandboxWriteOperations(params),
+      params.memoryWriteProvenance,
+    ),
   }) as unknown as AnyAgentTool;
   return wrapToolParamValidation(base, REQUIRED_PARAM_GROUPS.write);
 }
@@ -883,23 +906,38 @@ export function createSandboxedWriteTool(params: SandboxToolParams) {
 /** Create a sandbox-backed edit tool with required-parameter validation. */
 export function createSandboxedEditTool(params: SandboxToolParams) {
   const base = createEditTool(params.root, {
-    operations: createSandboxEditOperations(params),
+    operations: withMemoryWriteProvenance(
+      createSandboxEditOperations(params),
+      params.memoryWriteProvenance,
+    ),
   }) as unknown as AnyAgentTool;
   return wrapToolParamValidation(base, REQUIRED_PARAM_GROUPS.edit);
 }
 
 /** Create a host workspace write tool using guarded filesystem operations. */
-export function createHostWorkspaceWriteTool(root: string, options?: { workspaceOnly?: boolean }) {
+export function createHostWorkspaceWriteTool(
+  root: string,
+  options?: { workspaceOnly?: boolean; memoryWriteProvenance?: MemoryWriteProvenanceObserver },
+) {
   const base = createWriteTool(root, {
-    operations: createHostWriteOperations(root, options),
+    operations: withMemoryWriteProvenance(
+      createHostWriteOperations(root, options),
+      options?.memoryWriteProvenance,
+    ),
   }) as unknown as AnyAgentTool;
   return wrapToolParamValidation(base, REQUIRED_PARAM_GROUPS.write);
 }
 
 /** Create a host workspace edit tool using guarded filesystem operations. */
-export function createHostWorkspaceEditTool(root: string, options?: { workspaceOnly?: boolean }) {
+export function createHostWorkspaceEditTool(
+  root: string,
+  options?: { workspaceOnly?: boolean; memoryWriteProvenance?: MemoryWriteProvenanceObserver },
+) {
   const base = createEditTool(root, {
-    operations: createHostEditOperations(root, options),
+    operations: withMemoryWriteProvenance(
+      createHostEditOperations(root, options),
+      options?.memoryWriteProvenance,
+    ),
   }) as unknown as AnyAgentTool;
   return wrapToolParamValidation(base, REQUIRED_PARAM_GROUPS.edit);
 }
@@ -1031,15 +1069,22 @@ async function statHostFile(absolutePath: string) {
 
 async function writeWorkspaceFile(
   root: string,
-  rootPromise: ReturnType<typeof fsRoot>,
+  getRoot: () => ReturnType<typeof fsRoot>,
   absolutePath: string,
   content: string,
 ) {
+  // Validate the path before starting the fs-safe root: call getRoot() (which opens the
+  // root dir, rejecting if the workspace is missing) only after toCanonicalRelativeWorkspacePath
+  // succeeds. Eagerly starting it would orphan a rejecting root promise as an unhandled
+  // rejection when validation fails first — the readFile/access paths already defer the same way.
   const relative = await toCanonicalRelativeWorkspacePath(root, absolutePath);
-  await (await rootPromise).write(relative, content, { mkdir: true });
+  await (await getRoot()).write(relative, content, { mkdir: true });
 }
 
-function createHostWriteOperations(root: string, options?: { workspaceOnly?: boolean }) {
+function createHostWriteOperations(
+  root: string,
+  options?: { workspaceOnly?: boolean; memoryWriteProvenance?: MemoryWriteProvenanceObserver },
+) {
   const workspaceOnly = options?.workspaceOnly ?? false;
 
   if (!workspaceOnly) {
@@ -1057,8 +1102,12 @@ function createHostWriteOperations(root: string, options?: { workspaceOnly?: boo
     } as const;
   }
 
-  // When workspaceOnly is true, enforce workspace boundary
-  const rootPromise = fsRoot(root);
+  // When workspaceOnly is true, enforce workspace boundary. Resolve the fs-safe
+  // root lazily on first use: constructing the tool (e.g. doctor projecting tool
+  // schemas) must not open an fs handle, and a missing workspace dir must not
+  // orphan a rejecting promise as "Unhandled promise rejection: root dir not found".
+  let rootPromise: ReturnType<typeof fsRoot> | undefined;
+  const getRoot = () => (rootPromise ??= fsRoot(root));
   return {
     mkdir: async (dir: string) => {
       const relative = toRelativeWorkspacePath(root, dir, { allowRoot: true });
@@ -1067,10 +1116,10 @@ function createHostWriteOperations(root: string, options?: { workspaceOnly?: boo
       await fs.mkdir(resolved, { recursive: true });
     },
     writeFile: (absolutePath: string, content: string) =>
-      writeWorkspaceFile(root, rootPromise, absolutePath, content),
+      writeWorkspaceFile(root, getRoot, absolutePath, content),
     readFile: async (absolutePath: string) => {
       const relative = toRelativeWorkspacePath(root, absolutePath);
-      return (await (await rootPromise).read(relative)).buffer;
+      return (await (await getRoot()).read(relative)).buffer;
     },
     statFile: async (absolutePath: string) => {
       const relative = toRelativeWorkspacePath(root, absolutePath);
@@ -1079,7 +1128,10 @@ function createHostWriteOperations(root: string, options?: { workspaceOnly?: boo
   } as const;
 }
 
-function createHostEditOperations(root: string, options?: { workspaceOnly?: boolean }) {
+function createHostEditOperations(
+  root: string,
+  options?: { workspaceOnly?: boolean; memoryWriteProvenance?: MemoryWriteProvenanceObserver },
+) {
   const workspaceOnly = options?.workspaceOnly ?? false;
 
   if (!workspaceOnly) {
@@ -1095,16 +1147,20 @@ function createHostEditOperations(root: string, options?: { workspaceOnly?: bool
     } as const;
   }
 
-  // When workspaceOnly is true, enforce workspace boundary
-  const rootPromise = fsRoot(root);
+  // When workspaceOnly is true, enforce workspace boundary. Resolve the fs-safe
+  // root lazily on first use: constructing the tool (e.g. doctor projecting tool
+  // schemas) must not open an fs handle, and a missing workspace dir must not
+  // orphan a rejecting promise as "Unhandled promise rejection: root dir not found".
+  let rootPromise: ReturnType<typeof fsRoot> | undefined;
+  const getRoot = () => (rootPromise ??= fsRoot(root));
   return {
     readFile: async (absolutePath: string) => {
       const relative = toRelativeWorkspacePath(root, absolutePath);
-      const safeRead = await (await rootPromise).read(relative);
+      const safeRead = await (await getRoot()).read(relative);
       return safeRead.buffer;
     },
     writeFile: (absolutePath: string, content: string) =>
-      writeWorkspaceFile(root, rootPromise, absolutePath, content),
+      writeWorkspaceFile(root, getRoot, absolutePath, content),
     access: async (absolutePath: string) => {
       let relative: string;
       try {
@@ -1118,7 +1174,7 @@ function createHostEditOperations(root: string, options?: { workspaceOnly?: bool
         return;
       }
       try {
-        const opened = await (await rootPromise).open(relative);
+        const opened = await (await getRoot()).open(relative);
         await opened.handle.close().catch(() => {});
       } catch (error) {
         if (error instanceof FsSafeError && error.code === "not-found") {

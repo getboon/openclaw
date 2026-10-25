@@ -6,12 +6,19 @@ import {
   resolveProviderRequestHeaders,
 } from "openclaw/plugin-sdk/provider-http";
 import { captureWsEvent } from "openclaw/plugin-sdk/proxy-capture";
-import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
+import { fetchWithSsrFGuard, type SsrFPolicy } from "openclaw/plugin-sdk/ssrf-runtime";
 import {
   asFiniteNumber,
   asOptionalRecord as asObjectRecord,
   normalizeOptionalString,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
+
+const OPENAI_REALTIME_API_BASE_URL = "https://api.openai.com/v1";
+const OPENAI_REALTIME_SSRF_POLICY = {
+  allowRfc2544BenchmarkRange: true,
+  allowIpv6UniqueLocalRange: true,
+  hostnameAllowlist: [new URL(OPENAI_REALTIME_API_BASE_URL).hostname],
+} satisfies SsrFPolicy;
 
 export const trimToUndefined = normalizeOptionalString;
 export { asFiniteNumber, asObjectRecord };
@@ -108,6 +115,7 @@ async function createOpenAIRealtimeSecret(
       body: JSON.stringify(params.body),
     },
     timeoutMs: OPENAI_REALTIME_CLIENT_SECRET_REQUEST_TIMEOUT_MS,
+    policy: OPENAI_REALTIME_SSRF_POLICY,
     auditContext: params.auditContext,
   });
   const payload = await (async () => {
@@ -148,7 +156,7 @@ export async function createOpenAIRealtimeClientSecret(params: {
   auditContext: string;
   session: Record<string, unknown>;
 }): Promise<OpenAIRealtimeClientSecretResult> {
-  const url = "https://api.openai.com/v1/realtime/client_secrets";
+  const url = `${OPENAI_REALTIME_API_BASE_URL}/realtime/client_secrets`;
   return createOpenAIRealtimeSecret({
     ...params,
     url,
@@ -164,7 +172,10 @@ export async function createOpenAIRealtimeTranscriptionClientSecret(params: {
   session: Record<string, unknown>;
   authRejectedMessage?: string;
 }): Promise<OpenAIRealtimeClientSecretResult> {
-  const url = "https://api.openai.com/v1/realtime/client_secrets";
+  // Realtime transcription sessions are minted through the same unified
+  // client_secrets endpoint as regular sessions (session.type distinguishes
+  // them); the standalone transcription_sessions endpoint is deprecated.
+  const url = `${OPENAI_REALTIME_API_BASE_URL}/realtime/client_secrets`;
   return createOpenAIRealtimeSecret({
     ...params,
     url,

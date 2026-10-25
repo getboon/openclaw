@@ -5,7 +5,7 @@ import { resolveMainSessionKey } from "../../config/sessions.js";
 import { mintAttachGrant, revokeAttachGrant } from "../mcp-grant-store.js";
 import { ensureMcpLoopbackServer } from "../mcp-http.js";
 import {
-  createMcpLoopbackServerConfig,
+  createMcpAttachGrantServerConfig,
   getActiveMcpLoopbackRuntime,
 } from "../mcp-http.loopback-runtime.js";
 import type { GatewayRequestHandlers } from "./types.js";
@@ -47,7 +47,9 @@ export const attachHandlers: GatewayRequestHandlers = {
       expiresAtMs: grant.expiresAtMs,
       // The harness writes mcpConfig to its MCP client config and sets env so the ${...} placeholders
       // resolve. Loopback today; node/app conduits reuse the same client config over their channel.
-      mcpConfig: createMcpLoopbackServerConfig(runtime.port),
+      // Auth-only config: an attach grant has no client-grant capture to resolve, and must not be
+      // able to present a capture-key header for a different runtime's capture.
+      mcpConfig: createMcpAttachGrantServerConfig(runtime.port),
       env: {
         OPENCLAW_MCP_TOKEN: grant.token,
         OPENCLAW_MCP_SESSION_KEY: grant.sessionKey,

@@ -14,6 +14,7 @@ const TRUTHY_ENV = new Set(["1", "true", "yes", "on"]);
 const DEBUG_PROXY_DIRECT_CONNECT_OVERRIDE =
   "OPENCLAW_DEBUG_PROXY_ALLOW_DIRECT_CONNECT_WITH_MANAGED_PROXY";
 const CAPTURE_BODY_PREVIEW_BYTES = 8192;
+const BAD_GATEWAY_BODY = "Bad Gateway\n";
 
 type BodyPreviewCapture = {
   chunks: Buffer[];
@@ -148,6 +149,24 @@ function finishBodyPreviewCapture(capture: BodyPreviewCapture): {
   };
 }
 
+function finishProxyResponseAfterUpstreamError(res: ServerResponse): void {
+  if (res.destroyed || res.writableEnded) {
+    return;
+  }
+  // HTTP status cannot be replaced after forwarding upstream headers. Closing
+  // the downstream prevents a partial 2xx body from looking complete.
+  if (res.headersSent) {
+    res.destroy();
+    return;
+  }
+  res.writeHead(502, {
+    Connection: "close",
+    "Content-Type": "text/plain; charset=utf-8",
+    "Content-Length": Buffer.byteLength(BAD_GATEWAY_BODY),
+  });
+  res.end(BAD_GATEWAY_BODY);
+}
+
 export async function startDebugProxyServer(params: {
   host?: string;
   port?: number;
@@ -225,12 +244,37 @@ export async function startDebugProxyServer(params: {
         },
         (upstreamRes) => {
           const responseCapture = createBodyPreviewCapture();
-          upstreamRes.on("data", (chunk) => {
-            const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-            appendBodyPreviewCapture(responseCapture, buffer);
-            res.write(buffer);
-          });
-          upstreamRes.on("end", () => {
+          let upstreamFinished = false;
+          let upstreamFailed = false;
+          let responseFinished = false;
+          let downstreamFailed = false;
+          let pausedForDownstream = false;
+          const resumeUpstreamResponse = () => {
+            pausedForDownstream = false;
+            if (!res.destroyed && !res.writableEnded && !upstreamRes.destroyed) {
+              upstreamRes.resume();
+            }
+          };
+          const handleDownstreamFailure = (error?: Error) => {
+            if (downstreamFailed || responseFinished || upstreamFailed) {
+              return;
+            }
+            downstreamFailed = true;
+            res.off("drain", resumeUpstreamResponse);
+            recordTargetEvent({
+              direction: "local",
+              kind: "error",
+              errorText: error?.message ?? "Downstream response closed before completion",
+            });
+            upstream.destroy();
+            upstreamRes.destroy();
+          };
+          res.on("finish", () => {
+            if (!upstreamFinished || downstreamFailed || upstreamFailed) {
+              return;
+            }
+            responseFinished = true;
+            res.off("drain", resumeUpstreamResponse);
             recordTargetEvent({
               direction: "inbound",
               kind: "response",
@@ -238,7 +282,47 @@ export async function startDebugProxyServer(params: {
               headersJson: JSON.stringify(upstreamRes.headers),
               ...finishBodyPreviewCapture(responseCapture),
             });
-            res.end();
+          });
+          res.on("error", handleDownstreamFailure);
+          res.on("close", () => handleDownstreamFailure());
+          upstreamRes.on("data", (chunk) => {
+            const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            appendBodyPreviewCapture(responseCapture, buffer);
+            if (res.destroyed || res.writableEnded) {
+              handleDownstreamFailure();
+              return;
+            }
+            try {
+              if (!res.write(buffer) && !pausedForDownstream) {
+                pausedForDownstream = true;
+                upstreamRes.pause();
+                res.once("drain", resumeUpstreamResponse);
+              }
+            } catch (error) {
+              handleDownstreamFailure(error instanceof Error ? error : new Error(String(error)));
+            }
+          });
+          upstreamRes.on("end", () => {
+            upstreamFinished = true;
+            res.off("drain", resumeUpstreamResponse);
+            if (!res.destroyed && !res.writableEnded) {
+              res.end();
+            } else if (!res.writableFinished) {
+              handleDownstreamFailure();
+            }
+          });
+          upstreamRes.on("error", (error) => {
+            if (downstreamFailed || responseFinished || upstreamFailed) {
+              return;
+            }
+            upstreamFailed = true;
+            res.off("drain", resumeUpstreamResponse);
+            recordTargetEvent({
+              direction: "inbound",
+              kind: "error",
+              errorText: error.message,
+            });
+            finishProxyResponseAfterUpstreamError(res);
           });
           res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
         },
@@ -268,8 +352,7 @@ export async function startDebugProxyServer(params: {
           kind: "error",
           errorText: error.message,
         });
-        res.statusCode = 502;
-        res.end(error.message);
+        finishProxyResponseAfterUpstreamError(res);
       });
       req.pipe(upstream);
     })();

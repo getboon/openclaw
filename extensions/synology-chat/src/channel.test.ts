@@ -4,11 +4,22 @@ import { createPluginSetupWizardStatus } from "openclaw/plugin-sdk/plugin-test-r
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedSynologyChatAccount } from "./types.js";
 
+const { prepareSynologyHostedMediaMock } = vi.hoisted(() => ({
+  prepareSynologyHostedMediaMock: vi.fn(async () => ({
+    url: "https://gateway.example.com/w?capability=secret",
+    cleanup: vi.fn(async () => {}),
+  })),
+}));
+vi.mock("./outbound-media.js", () => ({
+  prepareSynologyHostedMedia: prepareSynologyHostedMediaMock,
+}));
+
 const securityAccountDefaults: ResolvedSynologyChatAccount = {
   accountId: "default",
   enabled: true,
   token: "t",
   incomingUrl: "https://nas/incoming",
+  webhookUrl: "https://gateway.example.com/w",
   nasHost: "h",
   webhookPath: "/w",
   webhookPathSource: "default" as const,
@@ -41,7 +52,9 @@ function mockStringMessages(mock: { mock: { calls: unknown[][] } }): string[] {
 const clientModule = await import("./client.js");
 const gatewayRuntimeModule = await import("./gateway-runtime.js");
 const mockSendMessage = vi.spyOn(clientModule, "sendMessage").mockResolvedValue(true);
-const mockSendFileUrl = vi.spyOn(clientModule, "sendFileUrl").mockResolvedValue(true);
+const mockSendHostedFileUrl = vi
+  .spyOn(clientModule, "sendHostedFileUrl")
+  .mockResolvedValue({ status: "accepted" });
 const registerSynologyWebhookRouteMock = vi
   .spyOn(gatewayRuntimeModule, "registerSynologyWebhookRoute")
   .mockImplementation(() => vi.fn());
@@ -58,10 +71,10 @@ describe("createSynologyChatPlugin", () => {
     vi.stubEnv("SYNOLOGY_CHAT_TOKEN", "");
     vi.stubEnv("SYNOLOGY_CHAT_INCOMING_URL", "");
     mockSendMessage.mockClear();
-    mockSendFileUrl.mockClear();
+    mockSendHostedFileUrl.mockClear();
     registerSynologyWebhookRouteMock.mockClear();
     mockSendMessage.mockResolvedValue(true);
-    mockSendFileUrl.mockResolvedValue(true);
+    mockSendHostedFileUrl.mockResolvedValue({ status: "accepted" });
     registerSynologyWebhookRouteMock.mockImplementation(() => vi.fn());
   });
 
@@ -75,6 +88,65 @@ describe("createSynologyChatPlugin", () => {
       expect(plugin.meta.id).toBe("synology-chat");
       expect(plugin.meta.label).toBe("Synology Chat");
       expect(plugin.meta.docsPath).toBe("/channels/synology-chat");
+    });
+  });
+
+  describe("messaging", () => {
+    it("isolates stable Chat API recipients from inbound webhook identities", async () => {
+      const plugin = createSynologyChatPlugin();
+      const route = await plugin.messaging?.resolveOutboundSessionRoute?.({
+        cfg: {},
+        agentId: "ops",
+        accountId: "work",
+        target: "synology-chat:42",
+      });
+
+      expect(route).toEqual({
+        sessionKey: "agent:ops:synology-chat:work:direct:chat-api-42",
+        baseSessionKey: "agent:ops:synology-chat:work:direct:chat-api-42",
+        recipientSessionExact: "delivery-identity",
+        peer: { kind: "direct", id: "chat-api-42" },
+        chatType: "direct",
+        from: "synology-chat:chat-api:42",
+        to: "42",
+      });
+    });
+
+    it("rejects non-numeric Chat API recipients for session routing", async () => {
+      const plugin = createSynologyChatPlugin();
+      const route = await plugin.messaging?.resolveOutboundSessionRoute?.({
+        cfg: {},
+        agentId: "ops",
+        target: "synology-chat:alice",
+      });
+
+      expect(route).toBeNull();
+    });
+
+    it("canonicalizes safe Chat API recipient IDs", async () => {
+      const plugin = createSynologyChatPlugin();
+      const route = await plugin.messaging?.resolveOutboundSessionRoute?.({
+        cfg: {},
+        agentId: "ops",
+        target: "synology_chat:+00042",
+      });
+
+      expect(route).toMatchObject({
+        sessionKey: "agent:ops:synology-chat:default:direct:chat-api-42",
+        peer: { kind: "direct", id: "chat-api-42" },
+        to: "42",
+      });
+    });
+
+    it("rejects Chat API recipient IDs beyond the safe integer range", async () => {
+      const plugin = createSynologyChatPlugin();
+      const route = await plugin.messaging?.resolveOutboundSessionRoute?.({
+        cfg: {},
+        agentId: "ops",
+        target: "9007199254740992",
+      });
+
+      expect(route).toBeNull();
     });
   });
 
@@ -188,6 +260,7 @@ describe("createSynologyChatPlugin", () => {
         token: "t",
         incomingUrl: "u",
         nasHost: "h",
+        webhookUrl: "",
         webhookPath: "/w",
         webhookPathSource: "default" as const,
         dangerouslyAllowNameMatching: false,
@@ -225,6 +298,7 @@ describe("createSynologyChatPlugin", () => {
             "synology-chat": {
               token: "t",
               incomingUrl: "https://nas/incoming",
+              webhookUrl: "https://gateway.example.com/w",
               allowInsecureSsl: true,
             },
           },
@@ -401,6 +475,7 @@ describe("createSynologyChatPlugin", () => {
             enabled: true,
             token: "t",
             incomingUrl: "https://nas/incoming",
+            webhookUrl: "https://gateway.example.com/w",
             allowInsecureSsl: true,
           },
         },
@@ -467,6 +542,7 @@ describe("createSynologyChatPlugin", () => {
               enabled: true,
               token: "t",
               incomingUrl: "https://nas/incoming",
+              webhookUrl: "https://gateway.example.com/w",
               allowInsecureSsl: true,
             },
           },
@@ -611,6 +687,7 @@ describe("createSynologyChatPlugin", () => {
         enabled: true,
         token: "t",
         incomingUrl: "https://nas/incoming",
+        webhookUrl: "https://gateway.example.com/w",
         dmPolicy: "allowlist",
         allowedUserIds: [],
       });
@@ -629,6 +706,7 @@ describe("createSynologyChatPlugin", () => {
         enabled: true,
         token: "t",
         incomingUrl: "https://nas/incoming",
+        webhookUrl: "https://gateway.example.com/w",
         dmPolicy: "open",
         allowedUserIds: [],
       });
@@ -687,6 +765,7 @@ describe("createSynologyChatPlugin", () => {
               enabled: true,
               token: "t",
               incomingUrl: "https://nas/incoming",
+              webhookUrl: "https://gateway.example.com/w",
               webhookPath: "/webhook/synology",
               dmPolicy: "allowlist",
               allowedUserIds: ["123"],

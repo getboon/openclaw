@@ -32,10 +32,12 @@ export type GatewayMaintenanceHandles = NonNullable<
 /** Starts cron without making gateway startup wait for cron initialization. */
 export function startGatewayCronWithLogging(params: {
   cron: { start: () => Promise<void> };
+  afterStart?: () => Promise<void>;
   logCron: { error: (message: string) => void };
 }): void {
   void params.cron
     .start()
+    .then(() => params.afterStart?.())
     .catch((err: unknown) => params.logCron.error(`failed to start: ${String(err)}`));
 }
 
@@ -48,9 +50,11 @@ function clearGatewayMaintenanceHandles(maintenance: GatewayMaintenanceHandles |
   clearInterval(maintenance.tickInterval);
   clearInterval(maintenance.healthInterval);
   clearInterval(maintenance.dedupeCleanup);
+  clearInterval(maintenance.worktreeCleanup);
   if (maintenance.mediaCleanup) {
     clearInterval(maintenance.mediaCleanup);
   }
+  maintenance.skillCuratorCleanup();
 }
 
 /** Runs maintenance that is intentionally delayed until after the gateway is ready. */
@@ -248,7 +252,10 @@ export function activateGatewayScheduledServices(params: {
     // production starts without launching background loops.
     return { heartbeatRunner: createNoopHeartbeatRunner(), stopModelPricingRefresh: () => {} };
   }
-  const heartbeatRunnerHandle = startHeartbeatRunner({ cfg: params.cfgAtStart });
+  const heartbeatRunnerHandle = startHeartbeatRunner({
+    cfg: params.cfgAtStart,
+    readCurrentConfig: getRuntimeConfig,
+  });
   // The progress-nudge and session-maintenance-sweep runners are sibling
   // gateway-scheduled background loops with the same lifecycle as the
   // heartbeat runner (start together, stop on close, updateConfig on

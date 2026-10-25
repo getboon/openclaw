@@ -1,3 +1,4 @@
+import { prependSystemPromptAdditionAfterCacheBoundary } from "@openclaw/ai/internal/shared";
 /**
  * Builds and repairs prompt inputs for embedded-agent attempts.
  */
@@ -8,6 +9,7 @@ import type {
 } from "../../../context-engine/types.js";
 import { drainPluginNextTurnInjectionContext } from "../../../plugins/host-hook-state.js";
 import { buildPluginAgentTurnPrepareContext } from "../../../plugins/host-hooks.js";
+import type { PromptToolAuthorityInput } from "../../../plugins/prompt-tool-authority.js";
 import type {
   PluginAgentTurnPrepareResult,
   PluginNextTurnInjectionRecord,
@@ -17,15 +19,15 @@ import type {
 } from "../../../plugins/types.js";
 import { isCronSessionKey, isSubagentSessionKey } from "../../../routing/session-key.js";
 import { joinPresentTextSegments } from "../../../shared/text/join-segments.js";
+import { truncateUtf16Safe } from "../../../utils.js";
 import { resolveProcessToolScopeKey } from "../../agent-tools.js";
 import { listActiveProcessSessionReferences } from "../../bash-process-references.js";
 import { resolveHeartbeatPromptForSystemPrompt } from "../../heartbeat-system-prompt.js";
 import { wrapPluginSystemContextSection } from "../../hook-system-context-boundary.js";
 import { buildActiveImageGenerationTaskPromptContextForSession } from "../../image-generation-task-status.js";
 import { buildActiveMusicGenerationTaskPromptContextForSession } from "../../music-generation-task-status.js";
-import { prependSystemPromptAdditionAfterCacheBoundary } from "../../system-prompt-cache-boundary.js";
 import { resolveEffectiveToolFsWorkspaceOnly } from "../../tool-fs-policy.js";
-import { derivePromptTokens, type NormalizedUsage } from "../../usage.js";
+import { deriveContextPromptTokens, type NormalizedUsage } from "../../usage.js";
 import { buildActiveVideoGenerationTaskPromptContextForSession } from "../../video-generation-task-status.js";
 import { buildEmbeddedCompactionRuntimeContext } from "../compaction-runtime-context.js";
 import { resolveContextEngineCapabilities } from "../context-engine-capabilities.js";
@@ -56,6 +58,7 @@ type PromptBuildHookRunner = {
   runBeforePromptBuild: (
     event: { prompt: string; messages: unknown[] },
     ctx: PluginHookAgentContext,
+    toolAuthority?: PromptToolAuthorityInput,
   ) => Promise<PluginHookBeforePromptBuildResult | undefined>;
   runBeforeAgentStart: (
     event: { prompt: string; messages: unknown[] },
@@ -106,21 +109,31 @@ export async function resolvePromptBuildHookResult(params: {
   prompt: string;
   messages: unknown[];
   hookCtx: PluginHookAgentContext;
+  toolAuthority?: PromptToolAuthorityInput;
   hookRunner?: PromptBuildHookRunner | null;
   beforeAgentStartResult?: PluginHookBeforeAgentStartResult;
+  bootstrapContextRunKind?: EmbeddedRunAttemptParams["bootstrapContextRunKind"];
 }): Promise<PluginHookBeforePromptBuildResult> {
   const runId = params.hookCtx.runId;
   const cachedInjections = runId ? promptBuildDrainCache.get(runId) : undefined;
-  const queuedContext = cachedInjections
+  const commitmentOnly = params.bootstrapContextRunKind === "commitment-only";
+  // Commitment fan-out must leave global queued context intact for the next
+  // normal turn and must not inherit heartbeat-wide prompt policy.
+  const queuedContext = commitmentOnly
     ? {
-        queuedInjections: cachedInjections,
-        ...buildPluginAgentTurnPrepareContext({ queuedInjections: cachedInjections }),
+        queuedInjections: [],
+        ...buildPluginAgentTurnPrepareContext({ queuedInjections: [] }),
       }
-    : await drainPluginNextTurnInjectionContext({
-        cfg: params.config,
-        sessionKey: params.hookCtx.sessionKey,
-      });
-  if (runId && !cachedInjections) {
+    : cachedInjections
+      ? {
+          queuedInjections: cachedInjections,
+          ...buildPluginAgentTurnPrepareContext({ queuedInjections: cachedInjections }),
+        }
+      : await drainPluginNextTurnInjectionContext({
+          cfg: params.config,
+          sessionKey: params.hookCtx.sessionKey,
+        });
+  if (runId && !commitmentOnly && !cachedInjections) {
     rememberDrainedInjections(runId, queuedContext.queuedInjections);
   }
   // Hook ordering mirrors the prompt assembly boundary: queued injections first,
@@ -143,6 +156,7 @@ export async function resolvePromptBuildHookResult(params: {
       : undefined;
   const heartbeatContribution =
     params.hookCtx.trigger === "heartbeat" &&
+    !commitmentOnly &&
     params.hookRunner?.runHeartbeatPromptContribution &&
     params.hookRunner.hasHooks("heartbeat_prompt_contribution")
       ? await params.hookRunner
@@ -167,6 +181,7 @@ export async function resolvePromptBuildHookResult(params: {
             messages: params.messages,
           },
           params.hookCtx,
+          params.toolAuthority,
         )
         .catch((hookErr: unknown) => {
           log.warn(`before_prompt_build hook failed: ${String(hookErr)}`);
@@ -236,9 +251,11 @@ export function shouldInjectHeartbeatPrompt(params: {
   defaultAgentId?: string;
   isDefaultAgent: boolean;
   trigger?: EmbeddedRunAttemptParams["trigger"];
+  bootstrapContextRunKind?: EmbeddedRunAttemptParams["bootstrapContextRunKind"];
 }): boolean {
   return (
     params.isDefaultAgent &&
+    params.bootstrapContextRunKind !== "commitment-only" &&
     shouldInjectHeartbeatPromptForTrigger(params.trigger) &&
     Boolean(
       resolveHeartbeatPromptForSystemPrompt({
@@ -325,7 +342,7 @@ function summarizeStructuredMediaRef(label: string, value: unknown): string | un
     return `[${label}] inline data URI (${mimeType}, ${trimmed.length} chars)`;
   }
   if (trimmed.length > MAX_STRUCTURED_MEDIA_REF_CHARS) {
-    return `[${label}] ${trimmed.slice(0, MAX_STRUCTURED_MEDIA_REF_CHARS)}... (${trimmed.length} chars)`;
+    return `[${label}] ${truncateUtf16Safe(trimmed, MAX_STRUCTURED_MEDIA_REF_CHARS)}... (${trimmed.length} chars)`;
   }
   return `[${label}] ${trimmed}`;
 }
@@ -337,7 +354,7 @@ function summarizeStructuredJsonString(value: string): string {
   }
   const trimmed = value.trim();
   if (trimmed.length > MAX_STRUCTURED_JSON_STRING_CHARS) {
-    return `${trimmed.slice(0, MAX_STRUCTURED_JSON_STRING_CHARS)}... (${trimmed.length} chars)`;
+    return `${truncateUtf16Safe(trimmed, MAX_STRUCTURED_JSON_STRING_CHARS)}... (${trimmed.length} chars)`;
   }
   return value;
 }
@@ -406,7 +423,7 @@ function stringifyStructuredJsonFallback(part: unknown): string | undefined {
       (match) => `[inline data URI: ${match.length} chars]`,
     );
     return withoutInlineData.length > 1_000
-      ? `${withoutInlineData.slice(0, 1_000)}... (${withoutInlineData.length} chars)`
+      ? `${truncateUtf16Safe(withoutInlineData, 1_000)}... (${withoutInlineData.length} chars)`
       : withoutInlineData;
   } catch {
     return undefined;
@@ -643,6 +660,6 @@ export function buildAfterTurnRuntimeContextFromUsage(
 ): ContextEngineRuntimeContext {
   return buildAfterTurnRuntimeContext({
     ...params,
-    currentTokenCount: derivePromptTokens(params.lastCallUsage),
+    currentTokenCount: deriveContextPromptTokens({ lastCallUsage: params.lastCallUsage }),
   });
 }

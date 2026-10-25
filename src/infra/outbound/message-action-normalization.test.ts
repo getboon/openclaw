@@ -176,6 +176,32 @@ describe("normalizeMessageActionInput", () => {
     },
     {
       input: {
+        action: "poll",
+        args: {
+          channel: "imessage",
+          chatGuid: "iMessage;+;chat0000",
+        },
+      },
+      expectedFields: {
+        target: "chat_guid:iMessage;+;chat0000",
+        to: "chat_guid:iMessage;+;chat0000",
+        chatGuid: "iMessage;+;chat0000",
+      },
+      expectedTargetSource: "agent",
+    },
+    {
+      input: {
+        action: "poll-vote",
+        args: {
+          channel: "imessage",
+          chatId: 42,
+        },
+      },
+      expectedFields: { target: "chat_id:42", to: "chat_id:42", chatId: 42 },
+      expectedTargetSource: "agent",
+    },
+    {
+      input: {
         action: "read",
         args: {
           channel: "workspace",
@@ -223,5 +249,18 @@ describe("normalizeMessageActionInput", () => {
         args: {},
       }),
     ).toThrow(/requires a target/);
+  });
+
+  it("rejects conflicting canonical and plugin delivery targets", () => {
+    expect(() =>
+      normalizeMessageActionInput({
+        action: "poll-vote",
+        args: {
+          channel: "imessage",
+          target: "chat_guid:iMessage;-;+15550001111",
+          chatGuid: "iMessage;-;+15559998888",
+        },
+      }),
+    ).toThrow(/conflicting target and delivery alias/);
   });
 });

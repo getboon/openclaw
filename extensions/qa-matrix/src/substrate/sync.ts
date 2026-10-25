@@ -1,6 +1,7 @@
 // Qa Matrix plugin module implements sync behavior.
 import {
   findMatrixQaObservedEventMatch,
+  inheritMatrixQaReplacementRelation,
   normalizeMatrixQaObservedEvent,
   type MatrixQaObservedEvent,
   type MatrixQaRoomEvent,
@@ -56,7 +57,8 @@ export type MatrixQaRoomObserver = {
 };
 
 type MatrixQaRoomObserverState = {
-  cursorIndex: number;
+  cursorIndexes: Map<string, number>;
+  eventsById: Map<string, MatrixQaObservedEvent>;
   events: MatrixQaObservedEvent[];
   pollPromise?: Promise<void>;
   since?: string;
@@ -108,8 +110,15 @@ async function pollMatrixQaRoomObserver(
         if (!normalized) {
           continue;
         }
-        params.observedEvents.push(normalized);
-        params.roomObserver.events.push(normalized);
+        const observed = inheritMatrixQaReplacementRelation({
+          event: normalized,
+          replacedEvent: normalized.replacesEventId
+            ? params.roomObserver.eventsById.get(normalized.replacesEventId)
+            : undefined,
+        });
+        params.roomObserver.eventsById.set(observed.eventId, observed);
+        params.observedEvents.push(observed);
+        params.roomObserver.events.push(observed);
       }
     }
   })();
@@ -128,7 +137,8 @@ export function createMatrixQaRoomObserver(
   },
 ): MatrixQaRoomObserver {
   const roomObserver: MatrixQaRoomObserverState = {
-    cursorIndex: 0,
+    cursorIndexes: new Map(),
+    eventsById: new Map(),
     events: [],
     since: params.since,
   };
@@ -144,7 +154,7 @@ export function createMatrixQaRoomObserver(
     async waitForOptionalRoomEvent(waitParams) {
       const startSince = await this.prime();
       const startedAt = Date.now();
-      let cursorIndex = roomObserver.cursorIndex;
+      let cursorIndex = roomObserver.cursorIndexes.get(waitParams.roomId) ?? 0;
       let didPoll = false;
       while (true) {
         const matched = findMatrixQaObservedEventMatch({
@@ -154,7 +164,13 @@ export function createMatrixQaRoomObserver(
           roomId: waitParams.roomId,
         });
         if (matched) {
-          roomObserver.cursorIndex = Math.max(roomObserver.cursorIndex, matched.nextCursorIndex);
+          roomObserver.cursorIndexes.set(
+            waitParams.roomId,
+            Math.max(
+              roomObserver.cursorIndexes.get(waitParams.roomId) ?? 0,
+              matched.nextCursorIndex,
+            ),
+          );
           return {
             event: matched.event,
             matched: true,
@@ -164,7 +180,10 @@ export function createMatrixQaRoomObserver(
 
         const elapsedMs = Date.now() - startedAt;
         if (elapsedMs >= waitParams.timeoutMs && (didPoll || waitParams.timeoutMs <= 0)) {
-          roomObserver.cursorIndex = Math.max(roomObserver.cursorIndex, cursorIndex);
+          roomObserver.cursorIndexes.set(
+            waitParams.roomId,
+            Math.max(roomObserver.cursorIndexes.get(waitParams.roomId) ?? 0, cursorIndex),
+          );
           return {
             matched: false,
             since: roomObserver.since ?? startSince,

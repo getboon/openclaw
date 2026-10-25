@@ -12,6 +12,9 @@ describe("sanitizeEnvVars", () => {
     const result = sanitizeEnvVars({
       NODE_ENV: "test",
       OPENAI_API_KEY: "sk-live-xxx", // pragma: allowlist secret
+      OPENAI_ADMIN_KEY: "sk-admin-live-xxx", // pragma: allowlist secret
+      ANTHROPIC_ADMIN_KEY: "sk-ant-admin-live-xxx", // pragma: allowlist secret
+      ANTHROPIC_ADMIN_API_KEY: "sk-ant-admin-api-live-xxx", // pragma: allowlist secret
       FOO: "bar",
       GITHUB_TOKEN: "gh-token", // pragma: allowlist secret
     });
@@ -20,7 +23,13 @@ describe("sanitizeEnvVars", () => {
       NODE_ENV: "test",
       FOO: "bar",
     });
-    expect(result.blocked).toStrictEqual(["OPENAI_API_KEY", "GITHUB_TOKEN"]);
+    expect(result.blocked).toStrictEqual([
+      "OPENAI_API_KEY",
+      "OPENAI_ADMIN_KEY",
+      "ANTHROPIC_ADMIN_KEY",
+      "ANTHROPIC_ADMIN_API_KEY",
+      "GITHUB_TOKEN",
+    ]);
   });
 
   it("blocks credentials even when suffix pattern matches", () => {

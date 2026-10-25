@@ -9,6 +9,9 @@ actor MacNodeRuntime {
     private let cameraCapture = CameraCaptureService()
     private let makeMainActorServices: () async -> any MacNodeRuntimeMainActorServices
     private let browserProxyRequest: @Sendable (String?) async throws -> String
+    // Injectable so tests can pin the gate instead of racing on process-global
+    // OPENCLAW_CONFIG_PATH; config parsing is covered by OpenClawConfigFileTests.
+    private let browserControlEnabled: @Sendable () -> Bool
     private let canvasSurfaceUrl: @Sendable () async -> String?
     private let refreshCanvasSurfaceUrl: @Sendable () async -> String?
     private var cachedMainActorServices: (any MacNodeRuntimeMainActorServices)?
@@ -22,6 +25,9 @@ actor MacNodeRuntime {
         browserProxyRequest: @escaping @Sendable (String?) async throws -> String = { paramsJSON in
             try await MacNodeBrowserProxy.shared.request(paramsJSON: paramsJSON)
         },
+        browserControlEnabled: @escaping @Sendable () -> Bool = {
+            OpenClawConfigFile.browserControlEnabled()
+        },
         canvasSurfaceUrl: @escaping @Sendable () async -> String? = {
             await GatewayConnection.shared.canvasPluginSurfaceUrl()
         },
@@ -29,6 +35,7 @@ actor MacNodeRuntime {
     {
         self.makeMainActorServices = makeMainActorServices
         self.browserProxyRequest = browserProxyRequest
+        self.browserControlEnabled = browserControlEnabled
         self.canvasSurfaceUrl = canvasSurfaceUrl
         self.refreshCanvasSurfaceUrl = refreshCanvasSurfaceUrl
     }
@@ -185,7 +192,7 @@ actor MacNodeRuntime {
     }
 
     private func handleBrowserProxyInvoke(_ req: BridgeInvokeRequest) async throws -> BridgeInvokeResponse {
-        guard OpenClawConfigFile.browserControlEnabled() else {
+        guard self.browserControlEnabled() else {
             return BridgeInvokeResponse(
                 id: req.id,
                 ok: false,
@@ -589,10 +596,17 @@ actor MacNodeRuntime {
                 code: .invalidRequest,
                 message: "SYSTEM_RUN_DENIED: environment override rejected (\(details.joined(separator: "; ")))")
         }
+        let effectiveCwd = ExecCommandResolution.canonicalApprovalCwd(params.cwd)
+        guard let cwdSnapshot = ExecCommandResolution.captureApprovalCwdSnapshot(effectiveCwd) else {
+            return Self.errorResponse(
+                req,
+                code: .unavailable,
+                message: "SYSTEM_RUN_DENIED: approval requires an existing canonical cwd")
+        }
         let evaluation = await ExecApprovalEvaluator.evaluate(
             command: command,
             rawCommand: params.rawCommand,
-            cwd: params.cwd,
+            cwd: effectiveCwd,
             envOverrides: params.env,
             agentId: params.agentId)
 
@@ -673,7 +687,8 @@ actor MacNodeRuntime {
             env: evaluation.env,
             sessionKey: sessionKey,
             runId: runId,
-            displayCommand: evaluation.displayCommand)
+            displayCommand: evaluation.displayCommand,
+            cwdSnapshot: cwdSnapshot)
     }
 
     private func handleSystemWhich(_ req: BridgeInvokeRequest) async throws -> BridgeInvokeResponse {
@@ -937,12 +952,16 @@ extension MacNodeRuntime {
         persistAllowlist: Bool,
         security: ExecSecurity,
         agentId: String?,
-        allowAlwaysPatterns: [String])
+        allowAlwaysPatterns: [ExecAllowAlwaysPattern])
     {
         guard persistAllowlist, security == .allowlist else { return }
-        var seenPatterns = Set<String>()
+        var seenPatterns = Set<ExecAllowAlwaysPattern>()
         for pattern in allowAlwaysPatterns where seenPatterns.insert(pattern).inserted {
-            ExecApprovalsStore.addAllowlistEntry(agentId: agentId, pattern: pattern)
+            ExecApprovalsStore.addAllowlistEntry(
+                agentId: agentId,
+                pattern: pattern.pattern,
+                source: "allow-always",
+                argPattern: pattern.argPattern)
         }
     }
 
@@ -1003,7 +1022,8 @@ extension MacNodeRuntime {
         env: [String: String],
         sessionKey: String,
         runId: String,
-        displayCommand: String) async throws -> BridgeInvokeResponse
+        displayCommand: String,
+        cwdSnapshot: ExecApprovalCwdSnapshot) async throws -> BridgeInvokeResponse
     {
         let timeoutSec = params.timeoutMs.flatMap { Double($0) / 1000.0 }
         await self.emitExecEvent(
@@ -1015,9 +1035,15 @@ extension MacNodeRuntime {
                 command: displayCommand))
         let result = await ShellExecutor.runDetailed(
             command: command,
-            cwd: params.cwd,
+            cwd: cwdSnapshot.path,
             env: env,
-            timeout: timeoutSec)
+            timeout: timeoutSec,
+            beforeSpawn: { ExecCommandResolution.revalidateApprovalCwdSnapshot(cwdSnapshot)
+                ? nil : ExecCommandResolution.approvalCwdDriftDeniedMessage
+            })
+        if let message = result.preflightError {
+            return Self.errorResponse(req, code: .unavailable, message: message)
+        }
         let combined = [result.stdout, result.stderr, result.errorMessage]
             .compactMap(\.self)
             .filter { !$0.isEmpty }

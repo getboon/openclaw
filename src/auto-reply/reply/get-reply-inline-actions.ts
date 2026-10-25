@@ -179,6 +179,8 @@ export async function handleInlineActions(params: {
   agentId: string;
   agentDir?: string;
   sessionEntry?: SessionEntry;
+  initialSessionEntry?: SessionEntry;
+  allowCreateSessionEntry?: boolean;
   previousSessionEntry?: SessionEntry;
   sessionStore?: Record<string, SessionEntry>;
   sessionKey: string;
@@ -221,6 +223,8 @@ export async function handleInlineActions(params: {
     agentId,
     agentDir,
     sessionEntry,
+    initialSessionEntry,
+    allowCreateSessionEntry,
     previousSessionEntry,
     sessionStore,
     sessionKey,
@@ -374,6 +378,9 @@ export async function handleInlineActions(params: {
         groupId: extractExplicitGroupId(ctx.From),
         skillCommand: {
           name: skillInvocation.command.name,
+          ...(skillInvocation.command.skillFile
+            ? { skillFile: skillInvocation.command.skillFile }
+            : {}),
           skillName: skillInvocation.command.skillName,
           ...(skillInvocation.command.skillSource
             ? { skillSource: skillInvocation.command.skillSource }
@@ -519,6 +526,8 @@ export async function handleInlineActions(params: {
         failures: elevatedFailures,
       },
       sessionEntry: targetSessionEntry,
+      initialSessionEntry,
+      allowCreateSessionEntry,
       previousSessionEntry,
       sessionStore,
       sessionKey,

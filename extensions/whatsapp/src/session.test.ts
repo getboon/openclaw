@@ -41,6 +41,7 @@ const useMultiFileAuthStateMock = vi.mocked(baileys.useMultiFileAuthState);
 let createWaSocket: typeof import("./session.js").createWaSocket;
 let formatError: typeof import("./session.js").formatError;
 let logWebSelfId: typeof import("./session.js").logWebSelfId;
+let OPENCLAW_WHATSAPP_WEB_SOCKET_URL_ENV: typeof import("./session.js").OPENCLAW_WHATSAPP_WEB_SOCKET_URL_ENV;
 let renderQrTerminalMock: ReturnType<typeof vi.fn>;
 let waitForWaConnection: typeof import("./session.js").waitForWaConnection;
 let waitForCredsSaveQueue: typeof import("./session.js").waitForCredsSaveQueue;
@@ -153,6 +154,7 @@ function readLastSocketOptions(): {
   fetchAgent?: unknown;
   keepAliveIntervalMs?: number;
   printQRInTerminal?: boolean;
+  waWebSocketUrl?: string | URL;
   logger?: { level?: string; trace?: unknown };
 } {
   const [options] = firstMockCall(
@@ -169,6 +171,7 @@ function readLastSocketOptions(): {
     fetchAgent?: unknown;
     keepAliveIntervalMs?: number;
     printQRInTerminal?: boolean;
+    waWebSocketUrl?: string | URL;
     logger?: { level?: string; trace?: unknown };
   };
 }
@@ -224,6 +227,7 @@ describe("web session", () => {
       createWaSocket,
       formatError,
       logWebSelfId,
+      OPENCLAW_WHATSAPP_WEB_SOCKET_URL_ENV,
       waitForWaConnection,
       waitForCredsSaveQueue,
       writeCredsJsonAtomically,
@@ -274,6 +278,22 @@ describe("web session", () => {
     expect(write.options.mode).toBe(0o600);
     expect(write.options.flag).toBe("wx");
     openMock.restore();
+  });
+
+  it("rejects credential updates after login authority is revoked", async () => {
+    const authDir = createTempAuthDir("openclaw-wa-revoked");
+    let active = true;
+    await createWaSocket(false, false, {
+      authDir,
+      beforeCredentialPersistence: async () => {
+        if (!active) {
+          throw new Error("login revoked");
+        }
+      },
+    });
+    active = false;
+    await emitCredsUpdate(authDir);
+    expect(fsSync.existsSync(path.join(authDir, "creds.json"))).toBe(false);
   });
 
   it("prints compact terminal QR output when requested", async () => {
@@ -409,6 +429,59 @@ describe("web session", () => {
     expect(passed.keepAliveIntervalMs).toBe(10_000);
     expect(passed.connectTimeoutMs).toBe(90_000);
     expect(passed.defaultQueryTimeoutMs).toBe(120_000);
+  });
+
+  it("passes explicit Baileys WebSocket URL overrides", async () => {
+    await createWaSocket(false, false, {
+      waWebSocketUrl: " ws://127.0.0.1:49152/ws/chat ",
+    });
+
+    expect(readLastSocketOptions().waWebSocketUrl).toBe("ws://127.0.0.1:49152/ws/chat");
+  });
+
+  it("uses OPENCLAW_WHATSAPP_WEB_SOCKET_URL as the default Baileys WebSocket URL", async () => {
+    vi.stubEnv(OPENCLAW_WHATSAPP_WEB_SOCKET_URL_ENV, " ws://127.0.0.1:49153/ws/chat ");
+
+    await createWaSocket(false, false);
+
+    expect(readLastSocketOptions().waWebSocketUrl).toBe("ws://127.0.0.1:49153/ws/chat");
+  });
+
+  it("preserves explicit Baileys WebSocket URL options over environment", async () => {
+    vi.stubEnv(OPENCLAW_WHATSAPP_WEB_SOCKET_URL_ENV, "ws://127.0.0.1:49153/ws/chat");
+
+    await createWaSocket(false, false, {
+      waWebSocketUrl: "ws://127.0.0.1:49154/ws/chat",
+    });
+
+    expect(readLastSocketOptions().waWebSocketUrl).toBe("ws://127.0.0.1:49154/ws/chat");
+  });
+
+  it("ignores blank Baileys WebSocket URL environment overrides", async () => {
+    vi.stubEnv(OPENCLAW_WHATSAPP_WEB_SOCKET_URL_ENV, " ");
+
+    await createWaSocket(false, false);
+
+    expect(readLastSocketOptions().waWebSocketUrl).toBeUndefined();
+  });
+
+  it("rejects invalid OPENCLAW_WHATSAPP_WEB_SOCKET_URL values", async () => {
+    vi.stubEnv(OPENCLAW_WHATSAPP_WEB_SOCKET_URL_ENV, "http://127.0.0.1:14567/ws");
+
+    await expect(createWaSocket(false, false)).rejects.toThrow(
+      "OPENCLAW_WHATSAPP_WEB_SOCKET_URL must use ws:// or wss://.",
+    );
+    expect(baileys.makeWASocket).not.toHaveBeenCalled();
+  });
+
+  it("preserves explicit Baileys WebSocket URL options over invalid environment", async () => {
+    vi.stubEnv(OPENCLAW_WHATSAPP_WEB_SOCKET_URL_ENV, "http://127.0.0.1:49153/ws/chat");
+
+    await createWaSocket(false, false, {
+      waWebSocketUrl: "ws://127.0.0.1:49154/ws/chat",
+    });
+
+    expect(readLastSocketOptions().waWebSocketUrl).toBe("ws://127.0.0.1:49154/ws/chat");
   });
 
   it("uses ambient env proxy agent when HTTPS_PROXY is configured", async () => {

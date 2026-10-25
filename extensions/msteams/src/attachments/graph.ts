@@ -1,4 +1,8 @@
 // Msteams plugin module implements graph behavior.
+import {
+  readProviderJsonArrayFieldResponse,
+  readProviderJsonResponse,
+} from "openclaw/plugin-sdk/provider-http";
 import { fetchWithSsrFGuard, type SsrFPolicy } from "openclaw/plugin-sdk/ssrf-runtime";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -14,13 +18,13 @@ import {
   applyAuthorizationHeaderForUrl,
   encodeGraphShareId,
   GRAPH_ROOT,
-  estimateBase64DecodedBytes,
   inferPlaceholder,
   readNestedString,
   isUrlAllowed,
   type MSTeamsAttachmentDownloadLogger,
   type MSTeamsAttachmentFetchPolicy,
   type MSTeamsAttachmentResolveFn,
+  estimateBase64DecodedBytes,
   normalizeContentType,
   resolveMediaSsrfPolicy,
   resolveAttachmentFetchPolicy,
@@ -152,8 +156,12 @@ async function fetchGraphCollection(params: {
       return { status, items: [] };
     }
     try {
-      const data = (await response.json()) as { value?: unknown[] };
-      return { status, items: Array.isArray(data.value) ? data.value : [] };
+      const items = await readProviderJsonArrayFieldResponse(
+        response,
+        "MS Teams Graph collection",
+        "value",
+      );
+      return { status, items };
     } catch {
       return { status, items: [] };
     }
@@ -401,7 +409,10 @@ export async function downloadMSTeamsGraphMedia(params: {
           attachments?: GraphAttachment[];
         };
         try {
-          msgData = (await msgRes.json()) as typeof msgData;
+          msgData = await readProviderJsonResponse<typeof msgData>(
+            msgRes,
+            "MS Teams Graph message",
+          );
         } catch (err) {
           debugLog?.debug?.("graph media message parse failed", {
             messageUrl,

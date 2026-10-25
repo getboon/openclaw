@@ -44,7 +44,7 @@ function resolveGoogleMeetTokenExpiresAt(value: unknown, nowMs = Date.now()): nu
   );
 }
 
-export type GoogleMeetOAuthTokens = {
+type GoogleMeetOAuthTokens = {
   accessToken: string;
   expiresAt: number;
   refreshToken?: string;

@@ -4,6 +4,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 const fetchWithSsrFGuardMock = vi.fn();
 const convertHeicToJpegMock = vi.fn();
 const detectMimeMock = vi.fn();
+const extractPdfContentMock = vi.fn();
 
 vi.mock("../infra/net/fetch-guard.js", () => ({
   fetchWithSsrFGuard: (...args: unknown[]) => fetchWithSsrFGuardMock(...args),
@@ -17,6 +18,10 @@ vi.mock("./media-services.js", () => ({
 
 vi.mock("@openclaw/media-core/mime", () => ({
   detectMime: (...args: unknown[]) => detectMimeMock(...args),
+}));
+
+vi.mock("./pdf-extract.js", () => ({
+  extractPdfContent: (...args: unknown[]) => extractPdfContentMock(...args),
 }));
 
 async function waitForMicrotaskTurn(): Promise<void> {
@@ -36,6 +41,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  extractPdfContentMock.mockResolvedValue({ text: "", images: [] });
 });
 
 function createImageSourceLimits(allowedMimes: string[], allowUrl = false) {
@@ -430,6 +436,31 @@ describe("input file MIME sniffing", () => {
         limits: createFileSourceLimits(["text/plain"]),
       }),
     ).rejects.toThrow("Unsupported file MIME type: application/zip");
+  });
+
+  it("times out local PDF extraction with the input file timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      detectMimeMock.mockResolvedValueOnce("application/pdf");
+      extractPdfContentMock.mockReturnValueOnce(new Promise(() => {}));
+
+      const pending = expect(
+        extractFileContentFromSource({
+          source: {
+            type: "base64",
+            data: Buffer.from("%PDF-1.4\n").toString("base64"),
+            mediaType: "application/pdf",
+            filename: "scan.pdf",
+          },
+          limits: createFileSourceLimits(["application/pdf"]),
+        }),
+      ).rejects.toThrow("PDF extraction timed out after 1ms");
+
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

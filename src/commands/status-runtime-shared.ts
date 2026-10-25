@@ -1,14 +1,14 @@
 // Shared runtime probes used by status text and JSON commands.
 // Heavy modules stay lazily loaded so fast status output avoids security/provider/gateway costs.
 
-import { resolveDefaultAgentDir } from "../agents/agent-scope.js";
 import type { OpenClawConfig } from "../config/types.js";
 import type { HeartbeatEventPayload } from "../infra/heartbeat-events.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import type { HealthSummary } from "./health.js";
+import type { StatusUsageSummaryOptions } from "./status-usage.runtime.js";
 import { getDaemonStatusSummary, getNodeDaemonStatusSummary } from "./status.daemon.js";
 
-const providerUsageLoader = createLazyImportLoader(() => import("../infra/provider-usage.js"));
+const statusUsageModuleLoader = createLazyImportLoader(() => import("./status-usage.runtime.js"));
 const securityAuditModuleLoader = createLazyImportLoader(
   () => import("../security/audit.runtime.js"),
 );
@@ -16,10 +16,6 @@ const readOnlyChannelPluginsModuleLoader = createLazyImportLoader(
   () => import("../channels/plugins/read-only.js"),
 );
 const gatewayCallModuleLoader = createLazyImportLoader(() => import("../gateway/call.js"));
-
-function loadProviderUsage() {
-  return providerUsageLoader.load();
-}
 
 function loadSecurityAuditModule() {
   return securityAuditModuleLoader.load();
@@ -60,25 +56,14 @@ export async function resolveStatusSecurityAudit(params: {
   });
 }
 
-type StatusUsageSummaryOptions = {
-  config: OpenClawConfig;
-  timeoutMs?: number;
-  agentDir?: string;
-};
-
-/** Loads provider usage for status output, defaulting to the config's default agent directory. */
+/** Loads optional usage and its credential resolver only when requested. */
 export async function resolveStatusUsageSummary(params: StatusUsageSummaryOptions) {
-  const { loadProviderUsageSummary } = await loadProviderUsage();
-  return await loadProviderUsageSummary({
-    timeoutMs: params.timeoutMs,
-    config: params.config,
-    agentDir: params.agentDir ?? resolveDefaultAgentDir(params.config),
-  });
+  return (await statusUsageModuleLoader.load()).resolveStatusUsageSummary(params);
 }
 
-/** Exposes the lazily loaded provider-usage module for callers that need its helpers. */
+/** Exposes provider-usage formatting for callers that requested usage. */
 export async function loadStatusProviderUsageModule() {
-  return await loadProviderUsage();
+  return (await statusUsageModuleLoader.load()).loadStatusProviderUsageModule();
 }
 
 /** Calls gateway health and lets errors propagate to deep status callers. */

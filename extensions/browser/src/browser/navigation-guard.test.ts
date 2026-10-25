@@ -96,6 +96,20 @@ describe("browser navigation guard", () => {
     expect(lookupFn).toHaveBeenCalledWith("agent.internal", { all: true });
   });
 
+  it("allows explicitly trusted hostnames that resolve to private addresses", async () => {
+    const lookupFn = createLookupFn("10.0.0.1");
+    await expect(
+      assertBrowserNavigationAllowed({
+        url: "http://agent.internal:3000",
+        ssrfPolicy: {
+          allowedHostnames: ["agent.internal"],
+        },
+        lookupFn,
+      }),
+    ).resolves.toBeUndefined();
+    expect(lookupFn).toHaveBeenCalledWith("agent.internal", { all: true });
+  });
+
   it("blocks hostnames that resolve to private addresses by default", async () => {
     const lookupFn = createLookupFn("127.0.0.1");
     await expect(

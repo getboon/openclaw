@@ -40,7 +40,7 @@ function createRegistryWithRoute(path: string) {
 
 function createRegistryWithSessionExtension(pluginId = "demo-plugin", namespace = "demo") {
   const registry = createEmptyPluginRegistry();
-  registry.sessionExtensions?.push({
+  registry.sessionExtensions.push({
     pluginId,
     extension: {
       namespace,
@@ -182,7 +182,7 @@ describe("plugin runtime route registry", () => {
 
     expect(getActivePluginSessionExtensionRegistry()).toBe(startupRegistry);
     expect(
-      getActivePluginSessionExtensionRegistry()?.sessionExtensions?.map((entry) => entry.pluginId),
+      getActivePluginSessionExtensionRegistry()?.sessionExtensions.map((entry) => entry.pluginId),
     ).toEqual(["startup"]);
     expect(isPluginRegistryRetired(startupRegistry)).toBe(false);
   });

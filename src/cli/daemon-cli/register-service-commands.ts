@@ -47,10 +47,19 @@ function resolveRpcOptions(cmdOpts: GatewayRpcOpts, command?: Command): GatewayR
 
 function resolveRestartOptions(cmdOpts: DaemonLifecycleOptions, command?: Command) {
   const parentForce = inheritOptionFromParent<boolean>(command, "force");
+  const force = Boolean(cmdOpts.force || parentForce);
+  const serviceKind = process.env.OPENCLAW_SERVICE_KIND?.trim();
+  const safeFromGateway =
+    process.platform === "win32" &&
+    process.env.OPENCLAW_SERVICE_MARKER?.trim() === "openclaw" &&
+    (!serviceKind || serviceKind === "gateway") &&
+    !force &&
+    cmdOpts.wait === undefined &&
+    !cmdOpts.skipDeferral;
   return {
     ...cmdOpts,
-    force: Boolean(cmdOpts.force || parentForce),
-    safe: Boolean(cmdOpts.safe),
+    force,
+    safe: cmdOpts.safe || safeFromGateway,
   };
 }
 
@@ -84,7 +93,7 @@ export function addGatewayServiceCommands(parent: Command, opts?: { statusDescri
     .command("install")
     .description("Install the Gateway service (launchd/systemd/schtasks)")
     .option("--port <port>", "Gateway port")
-    .option("--runtime <runtime>", "Daemon runtime (node|bun). Default: node")
+    .option("--runtime <runtime>", "Daemon runtime (node). Default: node")
     .option("--token <token>", "Gateway token (token auth)")
     .option("--wrapper <path>", "Executable wrapper for generated service ProgramArguments")
     .option("--force", "Reinstall/overwrite if already installed", false)
@@ -130,11 +139,18 @@ export function addGatewayServiceCommands(parent: Command, opts?: { statusDescri
     .command("restart")
     .description("Restart the Gateway service (launchd/systemd/schtasks)")
     .option("--force", "Restart immediately without waiting for active gateway work", false)
-    .option("--safe", "Request an OpenClaw-aware restart after active work drains", false)
+    .option(
+      "--safe",
+      "Request an OpenClaw-aware restart after active work drains " +
+        "(bounded wait; may force after gateway.reload.deferralTimeoutMs expires; " +
+        "set deferralTimeoutMs=0 for indefinite wait)",
+      false,
+    )
     .option("--skip-deferral", "Bypass the safe-restart deferral gate; requires --safe", false)
     .option(
       "--wait <duration>",
-      "Wait duration before forcing restart (ms, 10s, 5m; 0 waits indefinitely)",
+      "Wait duration before restart (ms, 10s, 5m; 0 waits indefinitely). " +
+        "For non-safe restarts (plain restart); not compatible with --force or --safe",
     )
     .option("--json", "Output JSON", false)
     .action(async (cmdOpts, command) => {

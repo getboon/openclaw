@@ -64,6 +64,14 @@ describe("cross-OS release checks workflow", () => {
     expect(workflow).toContain("timeout --preserve-status 300s npm pack --ignore-scripts");
   });
 
+  it("resolves the upgrade baseline from the checked-out workflow tree", () => {
+    const workflow = readFileSync(WORKFLOW_PATH, "utf8");
+
+    expect(workflow).toContain(
+      "node workflow/scripts/lib/release-upgrade-baseline.mjs --candidate-version",
+    );
+  });
+
   it("keeps release artifact tarball filenames local before upload paths use them", () => {
     const workflow = readFileSync(WORKFLOW_PATH, "utf8");
 
@@ -339,6 +347,7 @@ describe("cross-OS release checks workflow", () => {
     expect(wrapper).toContain('loader_arg="$(cygpath -w "${loader_path}")"');
     expect(wrapper).toContain('"${node_cmd}" "${npm_cli_arg}" install --prefix "${npm_tool_dir}"');
     expect(wrapper).toContain('"${npm_cmd}" install --prefix "${npm_tool_dir}"');
+    expect(wrapper.match(/--ignore-scripts/g)).toHaveLength(2);
     expect(wrapper).toContain('exec "${node_cmd}" --import "${loader_url}"');
   });
 });

@@ -43,6 +43,9 @@ function createSynologySetupPrompter(params: { allowedUserIds?: string } = {}) {
       if (message === "Incoming webhook URL") {
         return "https://nas.example.com/webapi/entry.cgi?token=incoming";
       }
+      if (message === "Public attachment webhook URL (optional)") {
+        return "";
+      }
       if (message === "Outgoing webhook path (optional)") {
         return "";
       }
@@ -138,6 +141,7 @@ describe("synology-chat core", () => {
       options: {},
     });
 
+    expect(result.cfg.channels?.["synology-chat"]?.webhookUrl).toBeUndefined();
     expect(result.accountId).toBe("default");
     expect(result.cfg.channels?.["synology-chat"]?.enabled).toBe(true);
     expect(result.cfg.channels?.["synology-chat"]?.token).toBe("synology-token");
@@ -431,6 +435,31 @@ describe("synology-chat security helpers", () => {
     const result = sanitizeInput(longText);
     expect(result.length).toBeLessThan(5000);
     expect(result).toContain("[truncated]");
+  });
+
+  it("truncates long inputs without splitting a surrogate pair", () => {
+    const loneSurrogatePattern =
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+    const input = "a".repeat(3999) + "\u{1F600}" + "b".repeat(2000);
+
+    const result = sanitizeInput(input);
+
+    expect(result).toContain("[truncated]");
+    expect(result).not.toMatch(loneSurrogatePattern);
+    expect(result).toBe(`${"a".repeat(3999)}... [truncated]`);
+  });
+
+  it("keeps complete supplementary-plane characters that fit before truncation", () => {
+    const loneSurrogatePattern =
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+    const emoji = "\u{1F600}";
+    const input = "a".repeat(3998) + emoji + "b".repeat(2000);
+
+    const result = sanitizeInput(input);
+
+    expect(result).toContain("[truncated]");
+    expect(result.startsWith(`${"a".repeat(3998)}${emoji}`)).toBe(true);
+    expect(result).not.toMatch(loneSurrogatePattern);
   });
 
   it("rate limits per user and caps tracked state", () => {

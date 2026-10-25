@@ -24,6 +24,7 @@ import { readSessionMessagesAsync } from "../gateway/session-transcript-readers.
 import { getAgentEventLifecycleGeneration } from "../infra/agent-events.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { truncateUtf16Safe } from "../utils.js";
 import { resolveInternalSessionEffectsTranscriptPath } from "./internal-session-effects.js";
 import {
   evaluateSubagentRecoveryGate,
@@ -82,7 +83,8 @@ function reclassifyLegacyRestartInterruptedRun(runRecord: SubagentRunRecord): vo
  */
 function buildResumeMessage(task: string, lastHumanMessage?: string): string {
   const maxTaskLen = 2000;
-  const truncatedTask = task.length > maxTaskLen ? `${task.slice(0, maxTaskLen)}...` : task;
+  const truncatedTask =
+    task.length > maxTaskLen ? `${truncateUtf16Safe(task, maxTaskLen)}...` : task;
 
   let message =
     `[System] Your previous turn was interrupted by a gateway reload. ` +
@@ -147,12 +149,18 @@ function remapToResumedRun(params: {
   originalRunId: string;
   originalRun: SubagentRunRecord;
   runId: string;
+  task?: string;
 }): boolean {
   return replaceSubagentRunAfterSteer({
     previousRunId: params.originalRunId,
     nextRunId: params.runId,
     fallback: params.originalRun,
     transcriptFile: resolveInternalSessionEffectsTranscriptPath(params.runId),
+    // Persist the stable original task (not the synthetic resume wrapper) so
+    // that any further post-restart redispatch reconstructs the same
+    // canonical task. Persisting `resumeMessage` instead would accumulate a
+    // wrapped-resume-of-resume cascade across repeated restarts.
+    task: params.task ?? params.originalRun.task,
   });
 }
 
@@ -199,6 +207,7 @@ async function resumeOrphanedSession(params: {
       originalRunId: params.originalRunId,
       originalRun: params.originalRun,
       runId: result.runId,
+      task: params.task,
     });
     if (!remapped) {
       log.warn(
