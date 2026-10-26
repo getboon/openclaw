@@ -473,11 +473,24 @@ jobs:
             local ref="$1"
             local fetch_status
             for attempt in 1 2 3; do
+              # depth=2 (not 1): the later "Ensure security base commit" step
+              # needs the PR base SHA already materialized as a real commit
+              # object, and a PR's test-merge commit's second parent is the base
+              # tip by construction — depth=2 almost always satisfies that via
+              # the action's "already present" fast path, instead of falling
+              # through to its branch-name --deepen fallback, which has proven
+              # unreliable against this fork's boon ref right after a merge
+              # (observed 2026-10-26: 4x30s timeouts fetching boon's own
+              # just-merged tip). That fallback has no hard-fail path of its
+              # own, so when it can't resolve the base commit it degrades
+              # silently (exit 0) — this job's own next step then hard-fails,
+              # since it needs the base commit's zizmor.yml for a real security
+              # reason: a PR must not be able to supply its own trust policy.
               timeout --signal=TERM --kill-after=10s 120s git -C "$GITHUB_WORKSPACE" \
               -c protocol.version=2 \
               -c "http.https://github.com/${CHECKOUT_REPO}.git.extraheader=AUTHORIZATION: basic ${auth_header}" \
               -c "http.https://github.com/${CHECKOUT_REPO}.git.followRedirects=false" \
-              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              fetch --no-tags --prune --no-recurse-submodules --depth=2 origin \
                 "+${ref}:refs/remotes/origin/checkout" && return 0
               fetch_status="$?"
               if [ "$fetch_status" != "124" ] && [ "$fetch_status" != "137" ]; then
@@ -694,11 +707,19 @@ jobs:
             git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
             git -C "$workdir" config gc.auto 0
 
+            # depth=2 (not 1): this checkout is followed by "Ensure secrets base
+            # commit", which needs the PR base SHA already materialized as a real
+            # commit object. A PR's test-merge commit's second parent is the base
+            # tip by construction, so depth=2 almost always satisfies it via the
+            # action's own "already present" fast path, instead of falling through
+            # to its branch-name --deepen fallback, which has proven unreliable
+            # against this fork's boon ref right after a merge (observed
+            # 2026-10-26: 4x30s timeouts fetching boon's own just-merged tip).
             timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
               -c protocol.version=2 \
               -c "http.https://github.com/${CHECKOUT_REPO}.git.extraheader=AUTHORIZATION: basic ${auth_header}" \
               -c "http.https://github.com/${CHECKOUT_REPO}.git.followRedirects=false" \
-              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              fetch --no-tags --prune --no-recurse-submodules --depth=2 origin \
               "+${CHECKOUT_SHA}:refs/remotes/origin/ci-target" || return 1
 
             git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
