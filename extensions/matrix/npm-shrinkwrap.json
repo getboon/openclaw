@@ -15,7 +15,7 @@
         "matrix-js-sdk": "41.6.0",
         "music-metadata": "11.16.0",
         "typebox": "1.1.39",
-        "zod": "4.4.3"
+        "zod": "4.6.7"
       },
       "peerDependencies": {
         "openclaw": ">=2026.6.35-boon.2"
@@ -569,9 +569,9 @@
       "license": "MIT"
     },
     "node_modules/zod": {
-      "version": "4.4.3",
-      "resolved": "https://registry.npmjs.org/zod/-/zod-4.4.3.tgz",
-      "integrity": "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==",
+      "version": "4.6.7",
+      "resolved": "https://registry.npmjs.org/zod/-/zod-4.6.7.tgz",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
       "license": "MIT",
       "funding": {
         "url": "https://github.com/sponsors/colinhacks"
