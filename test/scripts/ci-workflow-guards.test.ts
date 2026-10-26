@@ -461,7 +461,12 @@ describe("ci workflow guards", () => {
       expect(checkoutStep.run, jobName).toContain("timed out on attempt $attempt; retrying");
       expect(checkoutStep.run, jobName).not.toContain("if timeout --signal=TERM");
       expect(checkoutStep.run, jobName).toContain("-c protocol.version=2");
-      const expectedDepth = jobName === "preflight" ? 2 : 1;
+      // preflight and security-fast both feed ensure-base-commit, whose fast
+      // path needs the PR base SHA already present as a real commit object;
+      // depth=2 includes it directly (a PR test-merge commit's second parent
+      // is the base tip), so only skills-python (no base-commit lookup) stays
+      // at depth=1.
+      const expectedDepth = jobName === "preflight" || jobName === "security-fast" ? 2 : 1;
       expect(checkoutStep.run, jobName).toContain(
         `fetch --no-tags --prune --no-recurse-submodules --depth=${expectedDepth} origin`,
       );
