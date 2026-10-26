@@ -194,7 +194,10 @@ const defaultPublicDeprecatedExportsByEntrypointBudget = Object.freeze({
   "webhook-ingress": 2,
   "webhook-path": 2,
   zalouser: 5,
-  zod: 282,
+  // zod 4.4.3 -> 4.6.7 (GHSA-mrhx-c7xc-m3w5 security fix) added 21 new
+  // deprecated-marked exports to the package itself, all surfaced through
+  // src/plugin-sdk/zod.ts's `export * from "zod"` wildcard re-export.
+  zod: 303,
 });
 
 let budgets;
@@ -207,12 +210,19 @@ try {
     // A new outbound-media type plus its resolver function are each counted
     // once per reachable entrypoint subpath (direct + the media-runtime
     // re-export), for a measured +3 total / +2 callable — bumped to match.
+    //
+    // Re-measured again for the zod 4.4.3 -> 4.6.7 security bump
+    // (GHSA-mrhx-c7xc-m3w5): zod's own package added 21 new exports (14
+    // callable, 21 deprecated), all surfaced through src/plugin-sdk/zod.ts's
+    // `export * from "zod"` wildcard re-export. publicWildcardReexports is
+    // unaffected (same number of wildcard re-export sites, just a larger
+    // surface behind the existing zod one).
     publicEntrypoints: readBudgetEnv("OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_ENTRYPOINTS", 324),
-    publicExports: readBudgetEnv("OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_EXPORTS", 10418),
-    publicFunctionExports: readBudgetEnv("OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_FUNCTION_EXPORTS", 5222),
+    publicExports: readBudgetEnv("OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_EXPORTS", 10439),
+    publicFunctionExports: readBudgetEnv("OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_FUNCTION_EXPORTS", 5236),
     publicDeprecatedExports: readBudgetEnv(
       "OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_DEPRECATED_EXPORTS",
-      3253,
+      3274,
     ),
     publicWildcardReexports: readBudgetEnv(
       "OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_WILDCARD_REEXPORTS",
