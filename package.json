@@ -2017,12 +2017,12 @@
     "tslog": "4.10.2",
     "typebox": "1.1.39",
     "typescript": "6.0.3",
-    "undici": "8.10.2",
+    "undici": "8.12.3",
     "web-push": "3.6.7",
     "web-tree-sitter": "0.26.9",
     "ws": "8.21.0",
     "yaml": "2.9.0",
-    "zod": "4.4.3"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@a2ui/lit": "0.10.0",
