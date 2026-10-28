@@ -3967,7 +3967,20 @@ function extractGoogleThoughtSignature(toolCall: unknown): string | undefined {
   return typeof fromFunction === "string" && fromFunction.length > 0 ? fromFunction : undefined;
 }
 
+function hasGoogleThoughtSignaturesCompatFlag(model: { compat?: unknown }): boolean {
+  if (!model.compat || typeof model.compat !== "object" || Array.isArray(model.compat)) {
+    return false;
+  }
+  return (
+    (model.compat as { requiresGoogleThoughtSignatures?: unknown })
+      .requiresGoogleThoughtSignatures === true
+  );
+}
+
 function isGoogleOpenAICompatModel(model: OpenAIModeModel): boolean {
+  if (hasGoogleThoughtSignaturesCompatFlag(model)) {
+    return true;
+  }
   const endpointClass = detectOpenAICompletionsCompat(model as Model<"openai-completions">)
     .capabilities.endpointClass;
   return (
