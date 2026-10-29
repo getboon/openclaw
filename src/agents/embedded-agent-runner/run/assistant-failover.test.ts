@@ -522,6 +522,33 @@ describe("handleAssistantFailover", () => {
         modelId: "claude-haiku-4-5-20251001",
       });
     });
+
+    it("does not switch to a fallback model after the run deadline when rotation fails", async () => {
+      const logAssistantFailoverDecision = vi.fn();
+
+      const outcome = await handleAssistantFailover(
+        makeParams({
+          initialDecision: { action: "rotate_profile", reason: "timeout" },
+          aborted: true,
+          fallbackConfigured: true,
+          failoverFailure: false,
+          failoverReason: "timeout",
+          timedOut: true,
+          timedOutByRunDeadline: true,
+          billingFailure: false,
+          lastProfileId: "profile-only",
+          advanceAuthProfile: vi.fn(async () => false),
+          logAssistantFailoverDecision,
+        }),
+      );
+
+      expect(outcome.action).not.toBe("throw");
+      expect(logAssistantFailoverDecision).not.toHaveBeenCalledWith(
+        "fallback_model",
+        expect.anything(),
+      );
+      expect(logAssistantFailoverDecision).toHaveBeenCalledWith("surface_error");
+    });
   });
 
   describe("surface_error branch (openclaw#70124)", () => {

@@ -1,8 +1,10 @@
 // Tool-result context guard tests cover live replay truncation, mid-turn
 // prechecks, and context-engine loop hooks for oversized tool outputs.
 import type { AgentMessage } from "openclaw/plugin-sdk/agent-core";
+import { SessionManager } from "openclaw/plugin-sdk/agent-sessions";
 import { describe, expect, it, vi } from "vitest";
 import type { ContextEngine, ContextEngineRuntimeSettings } from "../../context-engine/types.js";
+import { installSessionToolResultGuard } from "../session-tool-result-guard.js";
 import { sanitizeToolUseResultPairing } from "../session-transcript-repair.js";
 import { castAgentMessage } from "../test-helpers/agent-message-fixtures.js";
 import {
@@ -418,6 +420,142 @@ describe("installToolResultContextGuard", () => {
     const transformed = (await applyGuardToContext(agent, contextForNextCall)) as AgentMessage[];
 
     expect(transformed).toBe(contextForNextCall);
+  });
+
+  describe("live tool-result text cap", () => {
+    const WINDOW = 500_000;
+    const LIVE_CAP = 64_000;
+    const RAW_FIRST = 653_399;
+    const RAW_SECOND = 284_323;
+
+    function rows(total: number, seed: string): string {
+      const line = `${seed} ${"row-data ".repeat(10)}\n`;
+      return line.repeat(Math.ceil(total / line.length)).slice(0, total);
+    }
+
+    function textLength(msg: AgentMessage): number {
+      const content = (msg as { content?: Array<{ type: string; text?: string }> }).content;
+      return Array.isArray(content)
+        ? content.reduce(
+            (n, block) => n + (block.type === "text" ? (block.text?.length ?? 0) : 0),
+            0,
+          )
+        : 0;
+    }
+
+    async function guardLargeResult(liveToolResultMaxChars?: number) {
+      const agent = makeGuardableAgent();
+      const original = makeToolResult("call_a", rows(RAW_FIRST, "rec"));
+      installToolResultContextGuard({
+        agent,
+        contextWindowTokens: WINDOW,
+        ...(liveToolResultMaxChars !== undefined ? { liveToolResultMaxChars } : {}),
+      });
+      const transformed = (await agent.transformContext?.(
+        [makeUser("list the records"), original],
+        new AbortController().signal,
+      )) as AgentMessage[];
+      return { original, guarded: transformed[1] };
+    }
+
+    it("caps a tool result's text to the live cap in the guard clone only", async () => {
+      const { original, guarded } = await guardLargeResult(LIVE_CAP);
+
+      expect(textLength(guarded)).toBeLessThanOrEqual(LIVE_CAP);
+      expect(textLength(guarded)).toBeGreaterThan(60_000);
+      expect(textLength(original)).toBe(RAW_FIRST);
+    });
+
+    it("keeps today's estimate cap when no live cap is given", async () => {
+      const { guarded } = await guardLargeResult();
+
+      expect(textLength(guarded)).toBeGreaterThan(LIVE_CAP);
+    });
+
+    it("matches the persisted tool-result content", async () => {
+      const { guarded } = await guardLargeResult(LIVE_CAP);
+      const sm = SessionManager.inMemory();
+      installSessionToolResultGuard(sm, { maxToolResultChars: LIVE_CAP });
+      sm.appendMessage(
+        castAgentMessage({
+          role: "assistant",
+          content: [{ type: "toolCall", id: "call_a", name: "grep", arguments: {} }],
+        }) as never,
+      );
+      sm.appendMessage(makeToolResult("call_a", rows(RAW_FIRST, "rec")) as never);
+      const persisted = sm
+        .buildSessionContext()
+        .messages.find((message) => (message as { role?: string }).role === "toolResult");
+
+      expect((guarded as { content?: unknown }).content).toEqual(
+        (persisted as { content?: unknown } | undefined)?.content,
+      );
+    });
+
+    it("keeps image blocks while capping the text", async () => {
+      const agent = makeGuardableAgent();
+      const image = { type: "image", data: "aGVsbG8=", mimeType: "image/png" };
+      const original = castAgentMessage({
+        role: "toolResult",
+        toolCallId: "call_pdf",
+        toolName: "read",
+        content: [{ type: "text", text: rows(70_000, "page") }, image, image, image],
+        isError: false,
+        timestamp: Date.now(),
+      });
+      installToolResultContextGuard({
+        agent,
+        contextWindowTokens: WINDOW,
+        liveToolResultMaxChars: LIVE_CAP,
+      });
+
+      const transformed = (await agent.transformContext?.(
+        [makeUser("read the drawings"), original],
+        new AbortController().signal,
+      )) as AgentMessage[];
+      const content = (transformed[1] as { content: Array<{ type: string }> }).content;
+
+      expect(content.filter((block) => block.type === "image")).toHaveLength(3);
+      expect(textLength(transformed[1])).toBeLessThanOrEqual(LIVE_CAP);
+    });
+
+    it("does not raise a mid-turn precheck for results the persisted cap already fits", async () => {
+      const buildMessages = () => [
+        makeUser(rows(520_000, "history")),
+        makeUser("list the records"),
+        makeAssistant("", {
+          content: [
+            { type: "toolCall", id: "call_a", name: "exec", arguments: {} },
+            { type: "toolCall", id: "call_b", name: "exec", arguments: {} },
+          ],
+          stopReason: "toolUse",
+        }),
+        makeToolResult("call_a", rows(RAW_FIRST, "rec"), "exec"),
+        makeToolResult("call_b", rows(RAW_SECOND, "item"), "exec"),
+      ];
+      const runGuard = async (liveToolResultMaxChars?: number) => {
+        const agent = makeGuardableAgent();
+        installToolResultContextGuard({
+          agent,
+          contextWindowTokens: WINDOW,
+          ...(liveToolResultMaxChars !== undefined ? { liveToolResultMaxChars } : {}),
+          midTurnPrecheck: {
+            enabled: true,
+            contextTokenBudget: WINDOW,
+            reserveTokens: () => 16_384,
+            toolResultMaxChars: LIVE_CAP,
+            getSystemPrompt: () => "s".repeat(102_784),
+            getPrePromptMessageCount: () => 3,
+          },
+        });
+        return await agent.transformContext?.(buildMessages(), new AbortController().signal);
+      };
+
+      await expect(runGuard(LIVE_CAP)).resolves.toBeDefined();
+      const error = await runGuard().catch((err: unknown) => err);
+      expect(error).toBeInstanceOf(MidTurnPrecheckSignal);
+      expect((error as MidTurnPrecheckSignal).request.route).toBe("truncate_tool_results_only");
+    });
   });
 });
 

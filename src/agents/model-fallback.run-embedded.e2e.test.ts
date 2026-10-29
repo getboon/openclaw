@@ -483,6 +483,39 @@ describe("runWithModelFallback + runEmbeddedAgent failover behavior", () => {
     });
   });
 
+  it("does not start the next model candidate after the run deadline timer aborted the attempt", async () => {
+    const runDeadlineCase = async (timedOutByRunDeadline: boolean) =>
+      await withAgentWorkspace(async ({ agentDir, workspaceDir }) => {
+        runEmbeddedAttemptMock.mockReset();
+        await writeAuthStore(agentDir);
+        mockPrimaryFailureThenFallbackSuccess(() =>
+          makeEmbeddedRunnerAttempt({
+            aborted: true,
+            timedOut: true,
+            ...(timedOutByRunDeadline ? { timedOutByRunDeadline: true } : {}),
+            assistantTexts: [],
+            lastAssistant: buildEmbeddedRunnerAssistant({
+              provider: "openai",
+              model: "mock-1",
+              stopReason: "aborted",
+            }),
+          }),
+        );
+
+        await runEmbeddedFallback({
+          agentDir,
+          workspaceDir,
+          sessionKey: `agent:test:run-deadline-${timedOutByRunDeadline}`,
+          runId: `run:run-deadline-${timedOutByRunDeadline}`,
+        }).catch(() => undefined);
+
+        return countProviderAttempts("groq");
+      });
+
+    expect(await runDeadlineCase(true)).toBe(0);
+    expect(await runDeadlineCase(false)).toBe(1);
+  });
+
   it("falls back across providers after overloaded primary failure and persists transient cooldown", async () => {
     await withAgentWorkspace(async ({ agentDir, workspaceDir }) => {
       await writeAuthStore(agentDir);

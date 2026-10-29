@@ -26,6 +26,7 @@ type FailoverDecisionLoggerInput = {
   profileId?: string;
   fallbackConfigured: boolean;
   timedOut?: boolean;
+  timedOutByRunDeadline?: boolean;
   aborted?: boolean;
   status?: number;
 };
@@ -96,6 +97,7 @@ export function createFailoverDecisionLogger(
       profileId: safeProfileId,
       fallbackConfigured: normalizedBase.fallbackConfigured,
       timedOut: normalizedBase.timedOut,
+      ...(normalizedBase.timedOutByRunDeadline ? { timedOutByRunDeadline: true } : {}),
       aborted: normalizedBase.aborted,
       status: extra?.status,
       ...observedError,

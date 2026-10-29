@@ -50,33 +50,6 @@ const unconfirmedResumes = new Map<
   { idempotencyKey: string; originalRunId: string; attempt: number }
 >();
 
-function isLegacyRestartInterruptedTimeout(
-  runRecord: SubagentRunRecord,
-  entry: SessionEntry | undefined,
-): boolean {
-  return (
-    entry?.abortedLastRun === true &&
-    runRecord.outcome?.status === "timeout" &&
-    typeof runRecord.endedAt === "number" &&
-    runRecord.endedAt > 0
-  );
-}
-
-function reclassifyLegacyRestartInterruptedRun(runRecord: SubagentRunRecord): void {
-  const interruptedAt = runRecord.endedAt;
-  runRecord.execution = {
-    ...runRecord.execution,
-    status: "interrupted",
-    interruptedAt,
-    interruptionReason: "gateway-restart",
-    endedAt: undefined,
-    outcome: undefined,
-  };
-  runRecord.endedAt = undefined;
-  runRecord.endedReason = undefined;
-  runRecord.outcome = undefined;
-}
-
 /**
  * Build the resume message for an orphaned subagent.
  */
@@ -282,10 +255,6 @@ export async function recoverOrphanedSubagentSessions(params: {
         if (!entry) {
           result.skipped++;
           continue;
-        }
-
-        if (isLegacyRestartInterruptedTimeout(runRecord, entry)) {
-          reclassifyLegacyRestartInterruptedRun(runRecord);
         }
 
         // Terminal child outcomes are immutable. Restart resume only applies to

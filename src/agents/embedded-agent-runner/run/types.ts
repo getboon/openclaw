@@ -117,6 +117,8 @@ export type EmbeddedRunAttemptResult = {
   /** True when the abort originated from the caller-provided abortSignal. */
   externalAbort: boolean;
   timedOut: boolean;
+  /** True when the attempt's own run deadline timer aborted the attempt. */
+  timedOutByRunDeadline?: boolean;
   /** True when the no-response LLM idle watchdog caused the timeout. */
   idleTimedOut: boolean;
   /** True if the timeout occurred while compaction was in progress or pending. */

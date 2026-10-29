@@ -247,7 +247,7 @@ describe("subagent-orphan-recovery", () => {
     expect(gateway.callGateway).not.toHaveBeenCalled();
   });
 
-  it("recovers restart-aborted timeout runs even when the registry marked them ended", async () => {
+  it("does not resume a timed-out run that the registry already ended, even when the session has abortedLastRun", async () => {
     vi.mocked(sessions.loadSessionStore).mockReturnValue({
       "agent:main:subagent:test-session-1": {
         sessionId: "session-abc",
@@ -256,23 +256,60 @@ describe("subagent-orphan-recovery", () => {
       },
     });
 
-    const activeRuns = createActiveRuns(
-      createTestRunRecord({
-        endedAt: Date.now() - 1_000,
-        outcome: {
-          status: "timeout",
-        },
-      }),
-    );
+    const endedAt = Date.now() - 1_000;
+    const run = createTestRunRecord({
+      endedAt,
+      outcome: {
+        status: "timeout",
+      },
+    });
+    const activeRuns = createActiveRuns(run);
 
     const result = await recoverOrphanedSubagentSessions({
       getActiveRuns: () => activeRuns,
     });
 
-    expect(result.recovered).toBe(1);
-    expect(result.failed).toBe(0);
-    expect(result.skipped).toBe(0);
-    expect(gateway.callGateway).toHaveBeenCalledOnce();
+    expect(result.recovered).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(gateway.callGateway).not.toHaveBeenCalled();
+    expect(run.endedAt).toBe(endedAt);
+    expect(run.outcome).toEqual({ status: "timeout" });
+  });
+
+  it("does not resume a subagent run that hit its run timeout before a later scan", async () => {
+    const startedAt = Date.parse("2026-10-27T15:22:09.184Z");
+    const deadline = startedAt + 900_000;
+    const childSessionKey = "agent:main:subagent:4643ce36-8e47-44ff-8038-11b68bce2fdf";
+    vi.setSystemTime(Date.parse("2026-10-27T15:54:36.133Z"));
+    vi.mocked(sessions.loadSessionStore).mockReturnValue({
+      [childSessionKey]: {
+        sessionId: "4089480c-ea8a-4a42-8ace-904dff31c4d5",
+        updatedAt: Date.parse("2026-10-27T15:39:40.000Z"),
+        status: "timeout",
+        abortedLastRun: true,
+      },
+    });
+    const run = createTestRunRecord({
+      runId: "e366561c-bd98-4379-97e5-d8bce38f8b8c",
+      childSessionKey,
+      cleanup: "keep",
+      spawnMode: "run",
+      runTimeoutSeconds: 900,
+      createdAt: Date.parse("2026-10-27T15:22:08.193Z"),
+      startedAt,
+      endedAt: deadline,
+      outcome: { status: "timeout" },
+    });
+
+    const result = await recoverOrphanedSubagentSessions({
+      getActiveRuns: () => createActiveRuns(run),
+    });
+
+    expect(result.recovered).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(gateway.callGateway).not.toHaveBeenCalled();
+    expect(run.endedAt).toBe(deadline);
+    expect(run.outcome).toEqual({ status: "timeout" });
   });
 
   it("does not resume a user-killed run whose session still has abortedLastRun=true", async () => {

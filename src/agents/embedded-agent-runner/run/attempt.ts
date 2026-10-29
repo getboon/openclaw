@@ -978,6 +978,7 @@ export async function runEmbeddedAttempt(
   let idleTimedOut = false;
   let timedOutDuringCompaction = false;
   let timedOutDuringToolExecution = false;
+  let timedOutByRunDeadline = false;
   // Set once the prompt catch classifies a rejection as a clean external
   // timeout abort. Guards the completion-required async-task wait below:
   // that wait's own deadline collapses to ~now once the run is already
@@ -2771,6 +2772,7 @@ export async function runEmbeddedAttempt(
         const removeGuard = installToolResultContextGuard({
           agent: activeSession.agent,
           contextWindowTokens: contextTokenBudgetForGuard,
+          liveToolResultMaxChars: toolResultMaxCharsForGuard,
           ...midTurnPrecheckOptions,
         });
         removeToolResultContextGuard = () => {
@@ -2781,6 +2783,7 @@ export async function runEmbeddedAttempt(
         removeToolResultContextGuard = installToolResultContextGuard({
           agent: activeSession.agent,
           contextWindowTokens: contextTokenBudgetForGuard,
+          liveToolResultMaxChars: toolResultMaxCharsForGuard,
           ...midTurnPrecheckOptions,
         });
       }
@@ -3868,6 +3871,7 @@ export async function runEmbeddedAttempt(
             ) {
               timedOutDuringCompaction = true;
             }
+            timedOutByRunDeadline = true;
             abortRun(true);
             if (!abortWarnTimer) {
               abortWarnTimer = setTimeout(() => {
@@ -5704,6 +5708,7 @@ export async function runEmbeddedAttempt(
         aborted,
         externalAbort,
         timedOut,
+        timedOutByRunDeadline,
         idleTimedOut,
         timedOutDuringCompaction,
         timedOutDuringToolExecution,
