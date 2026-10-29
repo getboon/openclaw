@@ -195,6 +195,7 @@ describe("production lint suppressions", () => {
         "extensions/matrix/src/onboarding.test-harness.ts|typescript/no-unnecessary-type-parameters|1",
         "extensions/slack/src/monitor/provider-support.ts|typescript/no-unnecessary-type-parameters|1",
         "src/agents/embedded-agent-runner/run.ts|eslint/no-warning-comments|1",
+        "src/agents/embedded-agent-runner/run/attempt.ts|eslint/no-warning-comments|1",
         "src/agents/main-session-restart-recovery.ts|eslint/no-warning-comments|1",
         "src/agents/subagent-orphan-recovery.ts|eslint/no-warning-comments|1",
         "src/channels/plugins/channel-runtime-surface.types.ts|typescript/no-unnecessary-type-parameters|1",
