@@ -11,6 +11,11 @@
 // control flow — it observes the registry, so it can never leak a timer onto
 // the abort/restart paths.
 import { resolveDefaultAgentId } from "../agents/agent-scope.js";
+import {
+  countActiveDescendantRuns,
+  listDescendantRunsForRequester,
+} from "../agents/subagent-registry-read.js";
+import { isLiveUnendedSubagentRun } from "../agents/subagent-run-liveness.js";
 import { BOON_EXEC_BINARIES } from "../agents/tool-display-exec-boon.js";
 import { replaceGenericExternalRunFailureText } from "../auto-reply/reply/agent-runner-failure-copy.js";
 import {
@@ -21,9 +26,11 @@ import {
   resolveActiveReplyRunThreadId,
   type ReplyRunTerminalEvent,
 } from "../auto-reply/reply/reply-run-registry.js";
+import { messageOriginCodeCopy } from "../channels/message/message-origin.js";
 import { sendDurableMessageBatch } from "../channels/message/runtime.js";
 import { channelDeclaresMessageAction } from "../channels/plugins/message-action-discovery.js";
 import { dispatchChannelMessageAction } from "../channels/plugins/message-action-dispatch.js";
+import { getChannelPlugin } from "../channels/plugins/registry.js";
 import { getRuntimeConfig } from "../config/config.js";
 import { resolveStorePath } from "../config/sessions/paths.js";
 import { loadSessionStore } from "../config/sessions/store-load.js";
@@ -94,6 +101,18 @@ export type ProgressNudgeDeps = {
    * anychat-boon-web, which only declares the "send" action).
    */
   channelSupportsEdit?: (params: { cfg: OpenClawConfig; channel: string }) => boolean;
+  /**
+   * Whether the target channel posts its own outcome for every turn it
+   * dispatches. Such a channel already told the user how a failed turn ended,
+   * so a terminal failure nudge would duplicate or contradict it.
+   */
+  channelReportsTurnOutcome?: (params: { cfg: OpenClawConfig; channel: string }) => boolean;
+  /**
+   * Live sub-agent work spawned by the failed turn. A failed parent turn with
+   * such work is still working in the background, so it must not tell the
+   * user to resend.
+   */
+  countActiveChildRuns?: (params: { sessionKey: string; spawnedSinceMs: number }) => number;
   sendMessage?: typeof sendDurableMessageBatch;
   editMessage?: (params: {
     cfg: OpenClawConfig;
@@ -196,6 +215,19 @@ function renderErrorText(): string {
   return `${text}\n\nYou can send the request again, or narrow it into a smaller batch.`;
 }
 
+function countLiveChildRunsSpawnedSince(params: {
+  sessionKey: string;
+  spawnedSinceMs: number;
+}): number {
+  const requesterSessionKey = params.sessionKey.trim();
+  return listDescendantRunsForRequester(requesterSessionKey).filter(
+    (run) =>
+      run.requesterSessionKey === requesterSessionKey &&
+      run.createdAt >= params.spawnedSinceMs &&
+      (isLiveUnendedSubagentRun(run) || countActiveDescendantRuns(run.childSessionKey) > 0),
+  ).length;
+}
+
 function loadSessionEntryForKey(
   cfg: OpenClawConfig,
   agentId: string,
@@ -236,6 +268,11 @@ export function startProgressNudgeRunner(opts: {
     deps.channelSupportsEdit ??
     ((params: { cfg: OpenClawConfig; channel: string }) =>
       channelDeclaresMessageAction({ cfg: params.cfg, channel: params.channel, action: "edit" }));
+  const channelReportsTurnOutcome =
+    deps.channelReportsTurnOutcome ??
+    ((params: { cfg: OpenClawConfig; channel: string }) =>
+      getChannelPlugin(params.channel)?.capabilities?.reportsTurnOutcome === true);
+  const countActiveChildRuns = deps.countActiveChildRuns ?? countLiveChildRunsSpawnedSince;
   const sendMessage = deps.sendMessage ?? sendDurableMessageBatch;
   const editMessage =
     deps.editMessage ??
@@ -322,12 +359,22 @@ export function startProgressNudgeRunner(opts: {
       log.info("progress-nudge: no deliverable target", { sessionKey, reason: delivery.reason });
       return;
     }
+    if (
+      kind === "failure" &&
+      channelReportsTurnOutcome({ cfg: state.cfg, channel: delivery.channel })
+    ) {
+      log.info("progress-nudge: channel reports its own turn outcome; skipping failure notice", {
+        sessionKey,
+        channel: delivery.channel,
+      });
+      return;
+    }
     // A progress nudge only works as a single self-updating line. A channel
     // that cannot edit turns every repeat into a brand-new persisted message
     // (ENG-18950) — suppress it entirely rather than let it accumulate.
     // The one-shot terminal failure nudge is exempt: it is real content, not
-    // a repeated placeholder, and it is the guarantee a failed long run never
-    // ends in silence.
+    // a repeated placeholder, and it keeps a failed long run from ending in
+    // silence on channels that do not report their own turn outcome.
     if (
       kind === "progress" &&
       !channelSupportsEdit({ cfg: state.cfg, channel: delivery.channel })
@@ -520,6 +567,20 @@ export function startProgressNudgeRunner(opts: {
     state.timer.unref?.();
   };
 
+  const renderTerminalFailureText = (sessionKey: string, spawnedSinceMs: number): string => {
+    try {
+      if (countActiveChildRuns({ sessionKey, spawnedSinceMs }) > 0) {
+        return messageOriginCodeCopy("subagent_still_working");
+      }
+    } catch (err) {
+      log.debug("progress-nudge: active child run count failed", {
+        sessionKey,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return renderErrorText();
+  };
+
   const handleTerminal = (evt: ReplyRunTerminalEvent): void => {
     const entry = getOrCreateNudgeState(
       evt.sessionKey,
@@ -559,7 +620,7 @@ export function startProgressNudgeRunner(opts: {
       void deliverNudge({
         sessionKey: evt.sessionKey,
         kind: "failure",
-        text: renderErrorText(),
+        text: renderTerminalFailureText(evt.sessionKey, evt.startedAt),
         threadIdOverride: evt.routeThreadId,
         nudgeState: entry,
       }).catch((err: unknown) => {

@@ -1902,6 +1902,64 @@ describe("runAgentTurnWithFallback", () => {
     expect(lifecyclePhases).not.toContain("error");
   });
 
+  it("ends a yielded run that recovered from a mid-turn precheck", async () => {
+    state.runEmbeddedAgentMock.mockImplementationOnce(async (params: EmbeddedAgentParams) => {
+      await params.onAgentEvent?.({
+        stream: "lifecycle",
+        data: {
+          phase: "finishing",
+          error: "Context overflow: prompt too large for the model (precheck).",
+        },
+      });
+      await params.onAgentEvent?.({
+        stream: "lifecycle",
+        data: {
+          phase: "finishing",
+          yielded: true,
+          stopReason: "end_turn",
+          livenessState: "paused",
+        },
+      });
+      return {
+        payloads: undefined,
+        meta: { yielded: true, stopReason: "end_turn", livenessState: "paused" },
+        didSendViaMessagingTool: true,
+        messagingToolSentTexts: ["Kicked off the leveling pass; results follow shortly."],
+      };
+    });
+    state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => ({
+      outcome: "completed",
+      result: await params.run("anthropic", "claude"),
+      provider: "anthropic",
+      model: "claude",
+      attempts: [],
+    }));
+    const { replyOperation, failMock } = createMockReplyOperation();
+    const emitAgentEvent = vi.mocked((await import("../../infra/agent-events.js")).emitAgentEvent);
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback(
+      createMinimalRunAgentTurnParams({
+        replyOperation,
+        opts: { runId: "run-yielded-recovered-precheck" },
+      }),
+    );
+
+    expect(result.kind).toBe("success");
+    expect(failMock).not.toHaveBeenCalled();
+    const lifecycleEvents = emitAgentEvent.mock.calls
+      .map((call) => call[0])
+      .filter(
+        (event) => event.runId === "run-yielded-recovered-precheck" && event.stream === "lifecycle",
+      );
+    const lifecyclePhases = lifecycleEvents.map((event) => event.data.phase);
+    expect(lifecyclePhases).toContain("end");
+    expect(lifecyclePhases).not.toContain("error");
+    expect(lifecycleEvents.find((event) => event.data.phase === "end")?.data).toMatchObject({
+      yielded: true,
+    });
+  });
+
   it("fails a run whose last finishing event still carries an error", async () => {
     const precheckError = "Context overflow: prompt too large for the model (precheck).";
     state.runEmbeddedAgentMock.mockImplementationOnce(async (params: EmbeddedAgentParams) => {
