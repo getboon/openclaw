@@ -1859,6 +1859,117 @@ describe("runAgentTurnWithFallback", () => {
     expect(JSON.stringify(lifecycleEvents)).not.toContain("raw provider detail");
   });
 
+  it("ends a run whose last finishing event recovered from an earlier precheck error", async () => {
+    state.runEmbeddedAgentMock.mockImplementationOnce(async (params: EmbeddedAgentParams) => {
+      await params.onAgentEvent?.({
+        stream: "lifecycle",
+        data: {
+          phase: "finishing",
+          error: "Context overflow: prompt too large for the model (precheck).",
+        },
+      });
+      await params.onAgentEvent?.({
+        stream: "lifecycle",
+        data: { phase: "finishing" },
+      });
+      return { payloads: [{ text: "Recovered reply" }], meta: {} };
+    });
+    state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => ({
+      outcome: "completed",
+      result: await params.run("anthropic", "claude"),
+      provider: "anthropic",
+      model: "claude",
+      attempts: [],
+    }));
+    const { replyOperation, failMock } = createMockReplyOperation();
+    const emitAgentEvent = vi.mocked((await import("../../infra/agent-events.js")).emitAgentEvent);
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    const result = await runAgentTurnWithFallback(
+      createMinimalRunAgentTurnParams({
+        replyOperation,
+        opts: { runId: "run-recovered-precheck" },
+      }),
+    );
+
+    expect(result.kind).toBe("success");
+    expect(failMock).not.toHaveBeenCalled();
+    const lifecyclePhases = emitAgentEvent.mock.calls
+      .map((call) => call[0])
+      .filter((event) => event.runId === "run-recovered-precheck" && event.stream === "lifecycle")
+      .map((event) => event.data.phase);
+    expect(lifecyclePhases).toContain("end");
+    expect(lifecyclePhases).not.toContain("error");
+  });
+
+  it("fails a run whose last finishing event still carries an error", async () => {
+    const precheckError = "Context overflow: prompt too large for the model (precheck).";
+    state.runEmbeddedAgentMock.mockImplementationOnce(async (params: EmbeddedAgentParams) => {
+      await params.onAgentEvent?.({
+        stream: "lifecycle",
+        data: { phase: "finishing", error: precheckError },
+      });
+      await params.onAgentEvent?.({
+        stream: "lifecycle",
+        data: { phase: "finishing", error: precheckError },
+      });
+      return {
+        payloads: [{ text: "Context overflow", isError: true }],
+        meta: { error: { kind: "context_overflow", message: precheckError } },
+      };
+    });
+    state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => ({
+      outcome: "completed",
+      result: await params.run("anthropic", "claude"),
+      provider: "anthropic",
+      model: "claude",
+      attempts: [],
+    }));
+    const { replyOperation, failMock } = createMockReplyOperation();
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    await runAgentTurnWithFallback(
+      createMinimalRunAgentTurnParams({
+        replyOperation,
+        opts: { runId: "run-unrecovered-precheck" },
+      }),
+    );
+
+    expect(failMock).toHaveBeenCalledWith("run_failed", expect.anything());
+  });
+
+  it("fails a run whose last finishing event carries an error without an embedded error", async () => {
+    state.runEmbeddedAgentMock.mockImplementationOnce(async (params: EmbeddedAgentParams) => {
+      await params.onAgentEvent?.({
+        stream: "lifecycle",
+        data: { phase: "finishing" },
+      });
+      await params.onAgentEvent?.({
+        stream: "lifecycle",
+        data: { phase: "finishing", error: "provider failed" },
+      });
+      return { payloads: [{ text: "Partial reply" }], meta: {} };
+    });
+    state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => ({
+      outcome: "completed",
+      result: await params.run("anthropic", "claude"),
+      provider: "anthropic",
+      model: "claude",
+      attempts: [],
+    }));
+    const { replyOperation, failMock } = createMockReplyOperation();
+
+    const runAgentTurnWithFallback = await getRunAgentTurnWithFallback();
+    await runAgentTurnWithFallback(
+      createMinimalRunAgentTurnParams({
+        replyOperation,
+        opts: { runId: "run-deferred-error-only" },
+      }),
+    );
+
+    expect(failMock).toHaveBeenCalledWith("run_failed", expect.anything());
+  });
+
   it("reports exhausted CLI results without a success lifecycle terminal", async () => {
     state.isCliProviderMock.mockReturnValue(true);
     state.runWithModelFallbackMock.mockImplementationOnce(async (params: FallbackRunnerParams) => ({

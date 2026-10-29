@@ -28,6 +28,9 @@ import {
 
 export type SentryLevel = "fatal" | "error" | "warning" | "info" | "debug";
 
+export const PRECHECK_OVERFLOW_ERROR_TEXT =
+  "Context overflow: prompt too large for the model (precheck).";
+
 type CaptureFields = {
   tags: Record<string, string>;
   // Explicit grouping key. Required: every capture is thrown from the same
@@ -145,6 +148,18 @@ export function buildAgentEndCapture(
       level: "warning",
       tags,
       fingerprint: fingerprintOf("agent_end", "aborted-no-error"),
+      contexts,
+      extra,
+    };
+  }
+  if (event.error === PRECHECK_OVERFLOW_ERROR_TEXT) {
+    // The runner compacts and retries after this precheck, so it ends one attempt, not the turn.
+    return {
+      kind: "message",
+      message: event.error,
+      level: "warning",
+      tags,
+      fingerprint: fingerprintOf("agent_end", normalizeFingerprintText(event.error)),
       contexts,
       extra,
     };
