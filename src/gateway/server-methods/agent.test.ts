@@ -2214,53 +2214,60 @@ describe("gateway agent handler", () => {
     resetTimeConfig();
   });
 
-  it("suppresses persisted prompts for subagent announce task-completion handoffs", async () => {
-    primeMainAgentRun({ cfg: mocks.loadConfigReturn });
-    mocks.agentCommand.mockClear();
+  it.each([
+    { requested: undefined, persisted: true },
+    { requested: true, persisted: false },
+  ])(
+    "persists subagent announce task-completion handoff prompts unless the caller suppresses them (requested=$requested)",
+    async ({ requested, persisted }) => {
+      primeMainAgentRun({ cfg: mocks.loadConfigReturn });
+      mocks.agentCommand.mockClear();
 
-    await invokeAgent(
-      {
-        message: "runtime-only announce bookkeeping",
-        agentId: "main",
-        sessionKey: "agent:main:main",
-        inputProvenance: {
-          kind: "inter_session",
-          sourceSessionKey: "agent:main:subagent:child",
-          sourceTool: "subagent_announce",
-        },
-        internalEvents: [
-          {
-            type: "task_completion",
-            source: "subagent",
-            childSessionKey: "agent:main:subagent:child",
-            childSessionId: "child-session-id",
-            announceType: "completion",
-            taskLabel: "child task",
-            status: "ok",
-            statusLabel: "completed",
-            result: "child result",
-            statsLine: "tokens=10",
-            replyInstruction: "Deliver the child result.",
+      await invokeAgent(
+        {
+          message: "runtime-only announce bookkeeping",
+          agentId: "main",
+          sessionKey: "agent:main:main",
+          inputProvenance: {
+            kind: "inter_session",
+            sourceSessionKey: "agent:main:subagent:child",
+            sourceTool: "subagent_announce",
           },
-        ],
-        idempotencyKey: "test-subagent-announce-suppress-prompt",
-      },
-      {
-        reqId: "subagent-announce-suppress-prompt",
-        client: backendGatewayClient(),
-      },
-    );
+          internalEvents: [
+            {
+              type: "task_completion",
+              source: "subagent",
+              childSessionKey: "agent:main:subagent:child",
+              childSessionId: "child-session-id",
+              announceType: "completion",
+              taskLabel: "child task",
+              status: "ok",
+              statusLabel: "completed",
+              result: "child result",
+              statsLine: "tokens=10",
+              replyInstruction: "Deliver the child result.",
+            },
+          ],
+          ...(requested === undefined ? {} : { suppressPromptPersistence: requested }),
+          idempotencyKey: `test-subagent-announce-persist-prompt-${String(requested)}`,
+        },
+        {
+          reqId: `subagent-announce-persist-prompt-${String(requested)}`,
+          client: backendGatewayClient(),
+        },
+      );
 
-    const callArgs = await waitForAgentCommandCall<{
-      suppressPromptPersistence?: boolean;
-      preserveUserFacingSessionModelState?: boolean;
-      message?: string;
-    }>();
-    expect(callArgs.suppressPromptPersistence).toBe(true);
-    expect(callArgs.preserveUserFacingSessionModelState).toBe(true);
-    expect(callArgs.message).toMatch(/^\[Inter-session message\]/);
-    expect(callArgs.message).toContain("sourceTool=subagent_announce");
-  });
+      const callArgs = await waitForAgentCommandCall<{
+        suppressPromptPersistence?: boolean;
+        preserveUserFacingSessionModelState?: boolean;
+        message?: string;
+      }>();
+      expect(callArgs.suppressPromptPersistence).toBe(!persisted);
+      expect(callArgs.preserveUserFacingSessionModelState).toBe(true);
+      expect(callArgs.message).toMatch(/^\[Inter-session message\]/);
+      expect(callArgs.message).toContain("sourceTool=subagent_announce");
+    },
+  );
 
   it("does not let public provenance suppress visible session accounting", async () => {
     primeMainAgentRun({ cfg: mocks.loadConfigReturn });

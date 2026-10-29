@@ -38,7 +38,6 @@ import {
   resolveAgentAvatar,
   resolvePublicAgentAvatarSource,
 } from "../../agents/identity-avatar.js";
-import { AGENT_INTERNAL_EVENT_TYPE_TASK_COMPLETION } from "../../agents/internal-event-contract.js";
 import type { AgentInternalEvent } from "../../agents/internal-events.js";
 import { resolveProviderIdForAuth } from "../../agents/provider-auth-aliases.js";
 import {
@@ -980,24 +979,6 @@ function dispatchAgentRunFromGateway(params: {
       clearAgentRunContext(params.runId, params.ingressOpts.lifecycleGeneration);
       params.cleanupAbortController();
     });
-}
-
-function shouldSuppressAgentPromptPersistence(params: {
-  inputProvenance?: InputProvenance;
-  internalEvents?: AgentInternalEvent[];
-}): boolean {
-  if (
-    params.inputProvenance?.kind !== "inter_session" ||
-    params.inputProvenance.sourceTool !== "subagent_announce"
-  ) {
-    return false;
-  }
-  return (
-    params.internalEvents?.some(
-      (event) =>
-        event.type === AGENT_INTERNAL_EVENT_TYPE_TASK_COMPLETION && event.source === "subagent",
-    ) === true
-  );
 }
 
 function yieldAfterAgentAcceptedAck(): Promise<void> {
@@ -2720,12 +2701,7 @@ export const agentHandlers: GatewayRequestHandlers = {
               preserveUserFacingSessionModelState,
               sourceReplyDeliveryMode: request.sourceReplyDeliveryMode,
               disableMessageTool: request.disableMessageTool,
-              suppressPromptPersistence:
-                requestedPromptPersistenceSuppression ||
-                shouldSuppressAgentPromptPersistence({
-                  inputProvenance,
-                  internalEvents: request.internalEvents,
-                }),
+              suppressPromptPersistence: requestedPromptPersistenceSuppression,
               cleanupBundleMcpOnRunEnd: request.cleanupBundleMcpOnRunEnd,
               abortSignal: activeRunAbort.controller.signal,
               lifecycleGeneration,
