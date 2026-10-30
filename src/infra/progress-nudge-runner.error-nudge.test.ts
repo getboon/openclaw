@@ -1,8 +1,16 @@
 // Tests the error/stall nudge: fires once for a run that went long then failed,
 // never for user-abort or completed runs, and never for a fast failure.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  addSubagentRunForTests,
+  resetSubagentRegistryForTests,
+} from "../agents/subagent-registry.js";
+import type { SubagentRunRecord } from "../agents/subagent-registry.types.js";
 import type { ReplyRunTerminalEvent } from "../auto-reply/reply/reply-run-registry.js";
+import { messageOriginCodeCopy } from "../channels/message/message-origin.js";
 import type { OpenClawConfig } from "../config/config.js";
+import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../plugins/runtime.js";
+import { createChannelTestPluginBase, createTestRegistry } from "../test-utils/channel-plugins.js";
 import { startProgressNudgeRunner, type ProgressNudgeDeps } from "./progress-nudge-runner.js";
 
 describe("startProgressNudgeRunner error nudge", () => {
@@ -25,7 +33,7 @@ describe("startProgressNudgeRunner error nudge", () => {
     } as OpenClawConfig;
   }
 
-  function makeDeps() {
+  function makeDeps(over?: Partial<ProgressNudgeDeps>) {
     const sendMessage = vi.fn().mockResolvedValue({ status: "sent" });
     const resolveDeliveryTarget = vi.fn().mockResolvedValue({
       channel: "slack",
@@ -54,11 +62,15 @@ describe("startProgressNudgeRunner error nudge", () => {
       // the edit-support gate); default to "supports edit" so the terminal
       // failure-nudge path is unaffected by it.
       channelSupportsEdit: () => true,
+      channelReportsTurnOutcome: () => false,
+      countActiveChildRuns: () => 0,
       sendMessage: sendMessage as unknown as ProgressNudgeDeps["sendMessage"],
+      ...over,
     };
     return {
       deps,
       sendMessage,
+      resolveDeliveryTarget,
       startedAt,
       active,
       phase,
@@ -182,6 +194,253 @@ describe("startProgressNudgeRunner error nudge", () => {
     await vi.advanceTimersByTimeAsync(1000);
     expect(sendMessage).not.toHaveBeenCalled();
     runner.stop();
+  });
+
+  async function emitLongFailure(
+    emitTerminal: (evt: ReplyRunTerminalEvent) => void,
+    startedAt = 0,
+  ): Promise<void> {
+    await vi.advanceTimersByTimeAsync(startedAt + 50_000);
+    emitTerminal({
+      sessionKey: SESSION,
+      sessionId: "s1",
+      result: { kind: "failed", code: "run_failed" },
+      startedAt,
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+  }
+
+  describe("turn outcome ownership", () => {
+    it("skips the failure notice on a channel that reports its own turn outcome", async () => {
+      const { deps, sendMessage, resolveDeliveryTarget, active, emitTerminal } = makeDeps({
+        channelReportsTurnOutcome: ({ channel }) => channel === "slack",
+      });
+      active.keys = [];
+      const runner = startProgressNudgeRunner({ cfg: config(), deps });
+      await emitLongFailure(emitTerminal);
+      expect(resolveDeliveryTarget).toHaveBeenCalled();
+      expect(sendMessage).not.toHaveBeenCalled();
+      runner.stop();
+    });
+
+    it("still sends the failure notice on a channel that does not report its turn outcome", async () => {
+      const { deps, sendMessage, active, emitTerminal } = makeDeps({
+        channelReportsTurnOutcome: () => false,
+      });
+      active.keys = [];
+      const runner = startProgressNudgeRunner({ cfg: config(), deps });
+      await emitLongFailure(emitTerminal);
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect(sendMessage.mock.calls[0][0].payloads[0].text.toLowerCase()).toContain("again");
+      runner.stop();
+    });
+
+    it("uses the background copy when sub-agent runs are still live", async () => {
+      const countActiveChildRuns = vi.fn(({ sessionKey }: { sessionKey: string }) =>
+        sessionKey === SESSION ? 1 : 0,
+      );
+      const { deps, sendMessage, active, emitTerminal } = makeDeps({
+        channelReportsTurnOutcome: () => false,
+        countActiveChildRuns,
+      });
+      active.keys = [];
+      const runner = startProgressNudgeRunner({ cfg: config(), deps });
+      await emitLongFailure(emitTerminal, 2_000);
+      expect(countActiveChildRuns).toHaveBeenCalledWith({
+        sessionKey: SESSION,
+        spawnedSinceMs: 2_000,
+      });
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      const text = sendMessage.mock.calls[0][0].payloads[0].text;
+      expect(text).toBe(messageOriginCodeCopy("subagent_still_working"));
+      expect(text).not.toContain("send the request again");
+      runner.stop();
+    });
+
+    it("keeps the failure copy when no sub-agent runs are live", async () => {
+      const { deps, sendMessage, active, emitTerminal } = makeDeps({
+        countActiveChildRuns: () => 0,
+      });
+      active.keys = [];
+      const runner = startProgressNudgeRunner({ cfg: config(), deps });
+      await emitLongFailure(emitTerminal);
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect(sendMessage.mock.calls[0][0].payloads[0].text).toContain("send the request again");
+      runner.stop();
+    });
+
+    it("keeps the failure copy when counting sub-agent runs throws", async () => {
+      const { deps, sendMessage, active, emitTerminal } = makeDeps({
+        countActiveChildRuns: () => {
+          throw new Error("registry unavailable");
+        },
+      });
+      active.keys = [];
+      const runner = startProgressNudgeRunner({ cfg: config(), deps });
+      await emitLongFailure(emitTerminal);
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect(sendMessage.mock.calls[0][0].payloads[0].text).toContain("send the request again");
+      runner.stop();
+    });
+
+    it("skips on a reporting channel even when sub-agent runs are live", async () => {
+      const { deps, sendMessage, active, emitTerminal } = makeDeps({
+        channelReportsTurnOutcome: () => true,
+        countActiveChildRuns: () => 1,
+      });
+      active.keys = [];
+      const runner = startProgressNudgeRunner({ cfg: config(), deps });
+      await emitLongFailure(emitTerminal);
+      expect(sendMessage).not.toHaveBeenCalled();
+      runner.stop();
+    });
+
+    it("does not edit the progress anchor into a failure notice on a reporting channel", async () => {
+      const sendMessage = vi.fn().mockResolvedValue({
+        status: "sent",
+        results: [],
+        receipt: { primaryPlatformMessageId: "nudge-1" },
+      });
+      const editMessage = vi.fn().mockResolvedValue(true);
+      const { deps, active, emitTerminal } = makeDeps({
+        channelReportsTurnOutcome: () => true,
+        sendMessage: sendMessage as unknown as ProgressNudgeDeps["sendMessage"],
+        editMessage,
+      });
+      const runner = startProgressNudgeRunner({ cfg: config(), deps });
+      await vi.advanceTimersByTimeAsync(46_000);
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      active.keys = [];
+      emitTerminal({
+        sessionKey: SESSION,
+        sessionId: "s1",
+        result: { kind: "failed", code: "run_failed" },
+        startedAt: 0,
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect(editMessage).not.toHaveBeenCalled();
+      runner.stop();
+    });
+  });
+
+  describe("turn outcome ownership from the channel plugin registry", () => {
+    afterEach(() => {
+      resetPluginRuntimeStateForTest();
+    });
+
+    function installSlackPlugin(reportsTurnOutcome: boolean | undefined) {
+      const plugin = createChannelTestPluginBase({
+        id: "slack",
+        capabilities: {
+          chatTypes: ["direct"],
+          ...(reportsTurnOutcome === undefined ? {} : { reportsTurnOutcome }),
+        },
+      });
+      setActivePluginRegistry(createTestRegistry([{ pluginId: "slack", plugin, source: "test" }]));
+    }
+
+    function makeRegistryDeps() {
+      const fixture = makeDeps();
+      delete fixture.deps.channelReportsTurnOutcome;
+      fixture.active.keys = [];
+      return fixture;
+    }
+
+    it("skips the failure notice when the registered plugin declares reportsTurnOutcome", async () => {
+      installSlackPlugin(true);
+      const { deps, sendMessage, emitTerminal } = makeRegistryDeps();
+      const runner = startProgressNudgeRunner({ cfg: config(), deps });
+      await emitLongFailure(emitTerminal);
+      expect(sendMessage).not.toHaveBeenCalled();
+      runner.stop();
+    });
+
+    it("sends the failure notice when the registered plugin does not declare it", async () => {
+      installSlackPlugin(undefined);
+      const { deps, sendMessage, emitTerminal } = makeRegistryDeps();
+      const runner = startProgressNudgeRunner({ cfg: config(), deps });
+      await emitLongFailure(emitTerminal);
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      runner.stop();
+    });
+  });
+
+  describe("live sub-agent work from the sub-agent registry", () => {
+    const TURN_STARTED_AT = 10_000;
+
+    afterEach(() => {
+      resetSubagentRegistryForTests({ persist: false });
+    });
+
+    function addChildRun(
+      run: Pick<SubagentRunRecord, "runId" | "childSessionKey" | "createdAt"> &
+        Partial<SubagentRunRecord>,
+    ) {
+      addSubagentRunForTests({
+        requesterSessionKey: SESSION,
+        requesterDisplayKey: "main",
+        task: "child task",
+        cleanup: "keep",
+        startedAt: run.createdAt,
+        ...run,
+      });
+    }
+
+    async function failedTurnText(): Promise<string> {
+      const { deps, sendMessage, active, emitTerminal } = makeDeps();
+      delete deps.countActiveChildRuns;
+      active.keys = [];
+      const runner = startProgressNudgeRunner({ cfg: config(), deps });
+      await emitLongFailure(emitTerminal, TURN_STARTED_AT);
+      runner.stop();
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      return sendMessage.mock.calls[0][0].payloads[0].text;
+    }
+
+    it("uses the background copy for a live child spawned during the failed turn", async () => {
+      addChildRun({
+        runId: "run-child",
+        childSessionKey: "agent:main:subagent:child",
+        createdAt: TURN_STARTED_AT + 5_000,
+      });
+      expect(await failedTurnText()).toBe(messageOriginCodeCopy("subagent_still_working"));
+    });
+
+    it("keeps the failure copy for a live child spawned before the failed turn", async () => {
+      addChildRun({
+        runId: "run-earlier-child",
+        childSessionKey: "agent:main:subagent:earlier",
+        createdAt: TURN_STARTED_AT - 5_000,
+      });
+      expect(await failedTurnText()).toContain("send the request again");
+    });
+
+    it("keeps the failure copy for an ended child with no live descendants", async () => {
+      addChildRun({
+        runId: "run-ended-child",
+        childSessionKey: "agent:main:subagent:ended",
+        createdAt: TURN_STARTED_AT + 5_000,
+        endedAt: TURN_STARTED_AT + 20_000,
+      });
+      expect(await failedTurnText()).toContain("send the request again");
+    });
+
+    it("uses the background copy for an ended child that waits on a live grandchild", async () => {
+      addChildRun({
+        runId: "run-ended-parent-child",
+        childSessionKey: "agent:main:subagent:parent-child",
+        createdAt: TURN_STARTED_AT + 5_000,
+        endedAt: TURN_STARTED_AT + 20_000,
+      });
+      addChildRun({
+        runId: "run-grandchild",
+        childSessionKey: "agent:main:subagent:parent-child:subagent:grandchild",
+        requesterSessionKey: "agent:main:subagent:parent-child",
+        createdAt: TURN_STARTED_AT + 10_000,
+      });
+      expect(await failedTurnText()).toBe(messageOriginCodeCopy("subagent_still_working"));
+    });
   });
 
   it("does not error-nudge a fast failure that never went long", async () => {
