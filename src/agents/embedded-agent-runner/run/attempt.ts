@@ -4918,6 +4918,8 @@ export async function runEmbeddedAttempt(
             releaseLeasedSteering(promptError ?? "prompt submission skipped");
           }
         } catch (err) {
+          // oxlint-disable-next-line eslint/no-warning-comments -- deferred gap, kept visible until fixed
+          // TODO(okka): a sessions_yield abort lands here, so leased steering items return to the queue although this turn's persisted prompt already holds them. Each later wake replays and persists them again.
           releaseLeasedSteering(err);
           yieldAborted =
             yieldDetected &&
