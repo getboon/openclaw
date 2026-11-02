@@ -120,12 +120,10 @@ overrides:
   # authority-injection bug via unvalidated port and host-confusion via an
   # unclosed bracket in serialize(). Fixed at 4.1.4.
   fast-uri: 4.1.4
-  # GHSA-q3jh-wrc6-jgq8 / GHSA-8r9p-f939-6h3c: follow-redirects <1.16.1 allows
-  # array-form headers to bypass cross-origin credential stripping and has a
-  # sensitiveHeaders regex that can expose credential headers. Fixed at 1.16.1.
-  # GHSA-mrwp-f3q8-3g9p: follow-redirects <=1.16.1 discards cross-realm
-  # sensitiveHeaders arrays, so custom credentials can follow redirects.
-  # Fixed at 1.16.2.
+  # GHSA-q3jh-wrc6-jgq8 / GHSA-8r9p-f939-6h3c / GHSA-mrwp-f3q8-3g9p:
+  # follow-redirects <=1.16.1 can send credential headers across origins on
+  # redirect (array-form headers, sensitiveHeaders regex escaping, cross-realm
+  # sensitiveHeaders arrays). Fixed at 1.16.2.
   follow-redirects: 1.16.2
   defu: 6.1.5
   fast-xml-parser: 5.7.0
