@@ -123,7 +123,10 @@ overrides:
   # GHSA-q3jh-wrc6-jgq8 / GHSA-8r9p-f939-6h3c: follow-redirects <1.16.1 allows
   # array-form headers to bypass cross-origin credential stripping and has a
   # sensitiveHeaders regex that can expose credential headers. Fixed at 1.16.1.
-  follow-redirects: 1.16.1
+  # GHSA-mrwp-f3q8-3g9p: follow-redirects <=1.16.1 discards cross-realm
+  # sensitiveHeaders arrays, so custom credentials can follow redirects.
+  # Fixed at 1.16.2.
+  follow-redirects: 1.16.2
   defu: 6.1.5
   fast-xml-parser: 5.7.0
   request: "npm:@cypress/request@3.0.10"
@@ -132,7 +135,7 @@ overrides:
   file-type: 22.0.1
   form-data: 2.5.6
   # CVE-2026-111997: ip-address <10.7.4 (Medium, Amazon Inspector on the
-  # boon-agent-signup-container image, ENG-22074). Fixed at 10.7.4.
+  # boon-agent-signup-container image). Fixed at 10.7.4.
   ip-address: 10.7.5
   minimatch: 10.2.5
   path-to-regexp: 8.4.0
