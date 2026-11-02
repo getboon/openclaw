@@ -13,7 +13,6 @@ minimumReleaseAgeExclude:
   # Current fast-uri security baseline; remove after 2026-09-09.
   - "fast-uri@4.1.4"
   - "@openclaw/crabline@0.1.6"
-  - "@openclaw/fs-safe@0.3.0"
   - "@openclaw/proxyline@0.3.3"
   - "acpx"
   - "tokenjuice"

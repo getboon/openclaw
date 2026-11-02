@@ -1971,7 +1971,7 @@
     "@mistralai/mistralai": "2.2.5",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@mozilla/readability": "0.6.0",
-    "@openclaw/fs-safe": "0.3.0",
+    "@openclaw/fs-safe": "0.8.5",
     "@openclaw/proxyline": "0.3.3",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/api-logs": "0.219.0",

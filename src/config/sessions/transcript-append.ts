@@ -6,6 +6,7 @@ import { resolveTimestampMsToIsoString } from "@openclaw/normalization-core/numb
 import type { AgentMessage } from "../../agents/runtime/index.js";
 import {
   acquireSessionWriteLock,
+  resolveSessionTranscriptWriteLockOwner,
   resolveSessionWriteLockOptions,
 } from "../../agents/session-write-lock.js";
 import { redactTranscriptMessage } from "../../agents/transcript-redact.js";
@@ -616,7 +617,8 @@ async function withSessionTranscriptWriteLock<T>(
   const lock = await acquireSessionWriteLock({
     sessionFile: params.transcriptPath,
     ...resolveSessionWriteLockOptions(params.config),
-    allowReentrant: true,
+    // Join this process's current holder (the enclosing operation) or contend with a fresh owner.
+    reentrantOwner: await resolveSessionTranscriptWriteLockOwner(params.transcriptPath),
   });
   try {
     return await run();

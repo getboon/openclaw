@@ -10,7 +10,7 @@ import { getProcessStartTime } from "../shared/pid-alive.js";
 
 /** Retry and stale-recovery policy for acquiring a filesystem lock. */
 export type FileLockOptions = {
-  /** Retry policy used while waiting for another process or re-entrant holder to release. */
+  /** Retry policy used while waiting for another process or logical holder to release. */
   retries: {
     retries: number;
     factor: number;
@@ -20,7 +20,24 @@ export type FileLockOptions = {
   };
   /** Milliseconds after which a dead-owner or expired sidecar lock may be reclaimed. */
   stale: number;
+  /**
+   * Logical owner for nested acquisition. Acquisitions with the same owner share one
+   * reference-counted lock; different owners contend normally.
+   *
+   * Omitted: the process-wide default owner, which keeps this helper's documented re-entrant
+   * contract (any nested or concurrent acquisition of the same file in this process reuses the
+   * held lock; other processes contend). Pass a per-operation key (for example
+   * `my-plugin:refresh:<uuid>`) to serialize independent in-process work on the same file.
+   */
+  reentrantOwner?: string;
 };
+
+/**
+ * Owner used when a caller does not pass `reentrantOwner`. fs-safe 0.5+ replaced the
+ * process-scoped `allowReentrant: true` with owner-scoped re-entry; one process-wide owner is the
+ * exact equivalent of the re-entrant behaviour this SDK helper has always documented.
+ */
+const PROCESS_FILE_LOCK_OWNER = `openclaw.plugin-sdk.file-lock:process:${process.pid}`;
 
 /** Live file-lock handle returned after successful acquisition. */
 export type FileLockHandle = {
@@ -53,14 +70,20 @@ export type FileLockStaleError = Error & {
 
 const FILE_LOCK_MANAGER_KEY = "openclaw.plugin-sdk.file-lock";
 
+function asLockPayloadRecord(payload: unknown): Record<string, unknown> | null {
+  return payload !== null && typeof payload === "object" && !Array.isArray(payload)
+    ? (payload as Record<string, unknown>)
+    : null;
+}
+
 async function shouldReclaimPluginLock(params: {
   lockPath: string;
-  payload: Record<string, unknown> | null;
+  payload: unknown;
   staleMs: number;
   nowMs: number;
 }): Promise<boolean> {
   return shouldRemoveDeadOwnerOrExpiredLock({
-    payload: params.payload,
+    payload: asLockPayloadRecord(params.payload),
     staleMs: params.staleMs,
     nowMs: params.nowMs,
   });
@@ -92,7 +115,10 @@ export async function drainFileLockStateForTest(): Promise<void> {
   await drainFileLockManagerForTest(FILE_LOCK_MANAGER_KEY, FILE_LOCK_MANAGER_KEY);
 }
 
-/** Acquire a re-entrant process-local file lock backed by a `.lock` sidecar file. */
+/**
+ * Acquire a re-entrant process-local file lock backed by a `.lock` sidecar file.
+ * Re-entry is owner-scoped: see `FileLockOptions.reentrantOwner`.
+ */
 export async function acquireFileLock(
   filePath: string,
   options: FileLockOptions,
@@ -103,7 +129,7 @@ export async function acquireFileLock(
       staleMs: options.stale,
       retry: options.retries,
       staleRecovery: "remove-if-unchanged",
-      allowReentrant: true,
+      reentrantOwner: options.reentrantOwner ?? PROCESS_FILE_LOCK_OWNER,
       payload: () => {
         const payload: Record<string, unknown> = {
           pid: process.pid,
@@ -118,7 +144,7 @@ export async function acquireFileLock(
       shouldReclaim: shouldReclaimPluginLock,
       shouldRemoveStaleLock: (snapshot) =>
         shouldRemoveDeadOwnerOrExpiredLock({
-          payload: snapshot.payload,
+          payload: asLockPayloadRecord(snapshot.payload),
           staleMs: options.stale,
         }),
     });

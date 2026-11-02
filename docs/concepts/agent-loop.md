@@ -52,9 +52,12 @@ wired end-to-end.
   process-aware and file-based, so it catches writers that bypass the in-process queue or come from
   another process. Session transcript writers wait up to `session.writeLock.acquireTimeoutMs`
   before reporting the session as busy; the default is `60000` ms.
-- Session write locks are non-reentrant by default. If a helper intentionally nests acquisition of
-  the same lock while preserving one logical writer, it must opt in explicitly with
-  `allowReentrant: true`.
+- Session write locks are non-reentrant by default: every acquisition gets its own logical owner,
+  and different owners contend. A helper that intentionally nests acquisition of the same lock
+  within one logical operation passes that operation's `reentrantOwner`. Transcript writers use
+  `resolveSessionTranscriptWriteLockOwner`, which joins the operation that currently holds the
+  session lock in this process (agent attempt, compaction, transcript rewrite) or contends with a
+  fresh owner when there is none.
 
 ## Session + workspace preparation
 

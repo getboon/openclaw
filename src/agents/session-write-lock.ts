@@ -4,6 +4,7 @@
  * Uses lock files with owner metadata, stale detection, signal cleanup, and watchdog checks to serialize writes.
  */
 import "../infra/fs-safe-defaults.js";
+import { randomUUID } from "node:crypto";
 import type fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -87,6 +88,8 @@ type LockInspectionDetails = Pick<
 >;
 
 const SESSION_LOCKS = createFileLockManager("openclaw.session-write-lock");
+/** Held-entry metadata key recording the logical owner of each session lock acquisition. */
+const SESSION_WRITE_LOCK_OWNER_METADATA_KEY = "reentrantOwner";
 let resolveProcessStartTimeForLock = getProcessStartTime;
 
 function isFileLockError(error: unknown, code: string): boolean {
@@ -701,6 +704,40 @@ function sessionLockHeldByThisProcess(normalizedSessionFile: string): boolean {
   );
 }
 
+function createSessionWriteLockOwner(): string {
+  return `session-write-lock:${process.pid}:${randomUUID()}`;
+}
+
+/**
+ * Logical owner key of the session write lock this process currently holds for `sessionFile`,
+ * if any. Every acquisition records its owner in the held entry's metadata so nested writers
+ * can join the holding operation through fs-safe's owner-scoped `reentrantOwner`.
+ */
+export async function resolveSessionWriteLockHolderOwner(
+  sessionFile: string,
+): Promise<string | undefined> {
+  const normalizedSessionFile = await resolveNormalizedSessionFile(sessionFile);
+  const owner = SESSION_LOCKS.heldEntries().find(
+    (entry) => entry.normalizedTargetPath === normalizedSessionFile,
+  )?.metadata[SESSION_WRITE_LOCK_OWNER_METADATA_KEY];
+  return typeof owner === "string" && owner ? owner : undefined;
+}
+
+/**
+ * Owner key for transcript writers (transcript append/event/transaction and session-accessor
+ * transcript turns).
+ *
+ * A transcript write issued while this process already holds the session write lock (an agent
+ * attempt, compaction, transcript rewrite or tool-result truncation) belongs to that holder's
+ * logical operation, so it joins the holder's owner and nests instead of waiting behind it.
+ * With no in-process holder the write gets a fresh owner and contends normally. This keeps the
+ * nesting the fork shipped with fs-safe 0.3.0's `allowReentrant: true`, while every other
+ * acquisition is owner-scoped and serialized.
+ */
+export async function resolveSessionTranscriptWriteLockOwner(sessionFile: string): Promise<string> {
+  return (await resolveSessionWriteLockHolderOwner(sessionFile)) ?? createSessionWriteLockOwner();
+}
+
 function shouldTreatAsOrphanSelfLock(params: {
   payload: LockFilePayload | null;
   heldByThisProcess: boolean;
@@ -884,12 +921,22 @@ export async function acquireSessionWriteLock(params: {
   timeoutMs?: number;
   staleMs?: number;
   maxHoldMs?: number;
-  allowReentrant?: boolean;
+  /**
+   * Logical operation identity for intentional nested acquisition. An acquisition that passes
+   * the owner of the current in-process holder shares its lock (reference-counted until the
+   * final release); omitted or different owners contend normally.
+   * See `resolveSessionTranscriptWriteLockOwner`.
+   */
+  reentrantOwner?: string;
+  /** Removed with fs-safe 0.5+ (process-scoped re-entry); use `reentrantOwner`. */
+  allowReentrant?: never;
 }): Promise<{
   release: () => Promise<void>;
 }> {
   registerCleanupHandlers();
-  const allowReentrant = params.allowReentrant ?? false;
+  // Every acquisition carries an owner so nested writers can join it; an omitted owner is a
+  // fresh one, so independent acquisitions never share the lock.
+  const reentrantOwner = params.reentrantOwner ?? createSessionWriteLockOwner();
   const defaultOptions = resolveSessionWriteLockOptions();
   const timeoutMs = resolvePositiveMs(params.timeoutMs, defaultOptions.timeoutMs, {
     allowInfinity: true,
@@ -928,8 +975,8 @@ export async function acquireSessionWriteLock(params: {
         timeoutMs: remainingTimeoutMs,
         retry: { minTimeout: 50, maxTimeout: 1000, factor: 1 },
         staleRecovery: "remove-if-unchanged",
-        allowReentrant,
-        metadata: { maxHoldMs },
+        reentrantOwner,
+        metadata: { maxHoldMs, [SESSION_WRITE_LOCK_OWNER_METADATA_KEY]: reentrantOwner },
         payload: () => {
           const createdAt = new Date().toISOString();
           const starttime = resolveProcessStartTimeForLock(process.pid);

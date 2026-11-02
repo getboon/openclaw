@@ -387,7 +387,10 @@ export async function writeCliSystemPromptFile(params: {
   );
   return {
     filePath,
-    cleanup: async () => await workspace.cleanup(),
+    cleanup: async () => {
+      // fs-safe 0.5+ returns a cleanup receipt; callers only need completion.
+      await workspace.cleanup();
+    },
   };
 }
 
