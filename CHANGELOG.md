@@ -2,6 +2,18 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.35-boon.3
+
+Removes the vulnerable nested `tar` 7.5.13 that every global install carried under `@openclaw/fs-safe`, migrates the fork's session and plugin file locks to fs-safe's owner-scoped re-entry, and ships the sub-agent, gateway, and progress-notice fixes merged since boon.2.
+
+- **ENG-22031:** `@openclaw/fs-safe` 0.3.0 → 0.8.5. 0.3.0 pinned an exact optional `tar: 7.5.13`, and because `npm i -g` ignores overrides, every host had a vulnerable `openclaw/node_modules/@openclaw/fs-safe/node_modules/tar`. fs-safe 0.8.2+ drops `tar` entirely; the only `tar` left is the top-level 7.5.22. 0.8.5 ships prebuilt native helpers as optional dependencies, including `@openclaw/fs-safe-linux-arm64-gnu` for the fleet. fs-safe 0.5 removed the process-scoped `allowReentrant` lock option. Session write locks now give every acquisition a logical owner, so independent holders still serialize. Transcript writers (transcript append and the session-accessor transcript turn) join the owner of the operation that already holds the session lock in this process, so nesting behaves as before. `openclaw/plugin-sdk/file-lock` gains an optional `reentrantOwner` and, when it is omitted, keeps its documented process-wide re-entrant behaviour, so existing plugin callers do not change. Archive extraction now reports traversal as `ArchiveSecurityError` code `entry-path` and rejects under-declared ZIP central directories as invalid metadata; both are still refused before anything is written.
+- **#311:** `qs` override 6.15.2 → 6.16.1 (CVE-2026-82417), mirrored into the root and `acpx`/`feishu`/`msteams`/`slack` shrinkwraps.
+- **#312:** Docker `node:24-bookworm` base digests bumped to Node 24.22.1.
+- **#313:** a sub-agent that hits its own run deadline surfaces the timeout instead of falling back to another model with a fresh timeout, orphan recovery no longer resumes runs that already timed out, and a recovered mid-turn context precheck no longer shows a false "run hit an error" notice.
+- **#314:** a parent agent that yields to sub-agents now keeps their completion results in its transcript, so it no longer waits forever for children that already finished.
+- **#315:** the progress-nudge failure notice is skipped for channels that report their own turn outcome (Boon web), and uses the "sub-agents still working" copy instead of resend advice when the failed turn's sub-agents are still running.
+- Base = `2026.6.35-boon.2`. Fork gateway and every bundled plugin bumped to `2026.6.35-boon.3` in lockstep; `discord` also carries a one-line fs-safe cleanup-type fix, everything else in plugins is version-only.
+
 ## 2026.6.35-boon.2
 
 Fixes a stuck-generation death spiral, two message-tool delivery gaps that misled Feishu/Slack/WhatsApp users, a media-path bug that made channel plugins reject the agent's own attachments, missing sub-agent usage attribution, and clears 14 high/critical dependency advisories across two rounds.
