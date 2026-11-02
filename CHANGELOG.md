@@ -2,6 +2,18 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.35-boon.3
+
+Fixes false "the run hit an error" notices after a recovered context overflow, late sub-agent replies after a timeout, parents that forget finished sub-agent results after yielding, and a duplicate failure notice in Boon web chat. Clears two high-severity dependency advisories.
+
+- **#313 (ENG-21904, ENG-21905):** after its own run deadline fires, the embedded runner surfaces the timeout instead of rotating the auth profile or switching to a fallback model; an idle model stall still falls back. Orphan recovery no longer reopens a run that the registry already ended as a timeout, so a timed-out sub-agent no longer sends its parent late corrections. A turn that recovers from the mid-turn context precheck now ends normally instead of showing "The run hit an error before it could finish" next to the answer, and the sentry-monitor plugin reports that recovered precheck as a warning. The request copy of a large tool result is capped with the same rule as the persisted copy, so the precheck stops firing when it does not need to. Trade-off: callers with no outer deadline (cron, queued follow-ups, heartbeat, local CLI) no longer get a fallback attempt after the run deadline.
+- **#314 (ENG-21269):** a sub-agent completion turn now saves its prompt to the parent transcript as a user row with `inter_session` / `subagent_announce` provenance. A parent that yielded keeps every finished child result on later wakes, instead of waiting for children that already ended. Chat display already hides these rows. Trade-off: a completion delivery that stays pending replays through the steering queue on each wake, and that replay is now saved in each wake row.
+- **#315 (ENG-21129):** a channel can set `capabilities.reportsTurnOutcome: true` to skip the progress-nudge failure notice when it posts its own outcome for every turn; the Boon web plugin sets it, so Boon web chat no longer shows the core notice on top of its own failure row. On channels without the flag, the failure notice says the work continues in the background when a sub-agent spawned by the failed turn is still running, instead of asking the user to send the request again.
+- **#311:** bumps the `qs` override 6.15.2 → 6.16.1 (CVE-2026-82417) in the root, `acpx`, `feishu`, `msteams`, and `slack` shrinkwraps.
+- **#317:** bumps the `follow-redirects` override 1.16.1 → 1.16.2 (GHSA-mrwp-f3q8-3g9p) in the lockfile and the `slack`, `msteams`, and `feishu` shrinkwraps, where it comes in through `axios`.
+- **#312:** bumps the pinned `node:24-bookworm` and `node:24-bookworm-slim` Docker base digests to Node 24.22.1. Docker images only; no effect on npm-installed gateways.
+- Base = `2026.6.35-boon.2`. Fork gateway and every bundled plugin bumped to `2026.6.35-boon.3` in lockstep; `acpx`, `feishu`, `msteams`, `slack`, and `sentry-monitor` also carry real source or dependency changes from #311, #313, and #317, everything else is version-only.
+
 ## 2026.6.35-boon.2
 
 Fixes a stuck-generation death spiral, two message-tool delivery gaps that misled Feishu/Slack/WhatsApp users, a media-path bug that made channel plugins reject the agent's own attachments, missing sub-agent usage attribution, and clears 14 high/critical dependency advisories across two rounds.
