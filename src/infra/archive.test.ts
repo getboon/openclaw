@@ -1,4 +1,5 @@
 // Tests archive creation and extraction helpers.
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import JSZip from "jszip";
@@ -389,6 +390,92 @@ describe("archive utils", () => {
       ).rejects.toThrow("archive entry count exceeds limit");
     });
   });
+
+  // Pins npm-pack style extraction through the public facade using the system `tar`
+  // binary, so the @openclaw/fs-safe tar backend can change without silently changing
+  // what lands on disk for plugin/package installs.
+  it.runIf(process.platform !== "win32")(
+    "installs an npm-pack tarball with nested dirs, a symlink-free tree and a PAX long path",
+    async () => {
+      const workDir = await makeTempDir("npm-pack");
+      const srcRoot = path.join(workDir, "src");
+      const longName = `${"l".repeat(117)}.js`;
+      expect(longName).toHaveLength(120);
+      const files: Record<string, string> = {
+        "package/package.json": '{"name":"fixture","version":"1.0.0"}\n',
+        "package/dist/a/b/c.js": "export const c = 1;\n",
+        [`package/${longName}`]: "export const long = true;\n",
+      };
+      for (const [rel, content] of Object.entries(files)) {
+        const abs = path.join(srcRoot, rel);
+        await fs.mkdir(path.dirname(abs), { recursive: true });
+        await fs.writeFile(abs, content);
+        await fs.chmod(abs, 0o644);
+      }
+      const tarEnv = { ...process.env, COPYFILE_DISABLE: "1" };
+      const archivePath = path.join(workDir, "fixture-1.0.0.tgz");
+      execFileSync("tar", ["--format=pax", "-czf", archivePath, "-C", srcRoot, "package"], {
+        env: tarEnv,
+      });
+      const listing = execFileSync("tar", ["-tzf", archivePath], { encoding: "utf8" });
+      expect(listing).toContain(`package/${longName}`);
+
+      const extractDir = path.join(workDir, "extract");
+      await fs.mkdir(extractDir, { recursive: true });
+      await extractArchive({
+        archivePath,
+        destDir: extractDir,
+        timeoutMs: ARCHIVE_EXTRACT_TIMEOUT_MS,
+      });
+
+      for (const [rel, content] of Object.entries(files)) {
+        const extracted = path.join(extractDir, rel);
+        const stat = await fs.lstat(extracted);
+        expect(stat.isFile(), rel).toBe(true);
+        expect(stat.mode & 0o777, rel).toBe(0o644);
+        await expect(fs.readFile(extracted, "utf8")).resolves.toBe(content);
+      }
+      const walk = async (dir: string): Promise<string[]> => {
+        const out: string[] = [];
+        for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+          const abs = path.join(dir, entry.name);
+          expect(entry.isSymbolicLink(), abs).toBe(false);
+          if (entry.isDirectory()) {
+            out.push(...(await walk(abs)));
+          } else {
+            out.push(path.relative(extractDir, abs).split(path.sep).join("/"));
+          }
+        }
+        return out;
+      };
+      expect((await walk(extractDir)).toSorted()).toEqual(Object.keys(files).toSorted());
+
+      const escapeRoot = path.join(workDir, "escape-root");
+      const escapeCwd = path.join(escapeRoot, "inner");
+      await fs.mkdir(escapeCwd, { recursive: true });
+      await fs.writeFile(path.join(escapeRoot, "escape.js"), "pwnd\n");
+      const escapeArchive = path.join(workDir, "escape-1.0.0.tgz");
+      execFileSync("tar", ["--format=pax", "-czPf", escapeArchive, "../escape.js"], {
+        cwd: escapeCwd,
+        env: tarEnv,
+      });
+      expect(execFileSync("tar", ["-tzf", escapeArchive], { encoding: "utf8" })).toContain(
+        "../escape.js",
+      );
+      const escapeExtractDir = path.join(workDir, "escape-extract");
+      await fs.mkdir(escapeExtractDir, { recursive: true });
+      await expect(
+        extractArchive({
+          archivePath: escapeArchive,
+          destDir: escapeExtractDir,
+          timeoutMs: ARCHIVE_EXTRACT_TIMEOUT_MS,
+        }),
+      ).rejects.toThrow(/escapes destination/i);
+      // "../escape.js" relative to escapeExtractDir would land here.
+      await expectPathMissing(path.join(workDir, "escape.js"));
+      await expect(fs.readdir(escapeExtractDir)).resolves.toEqual([]);
+    },
+  );
 
   it("rejects tar entries with absolute extraction paths", async () => {
     await withArchiveCase("tar", async ({ workDir, archivePath, extractDir }) => {
