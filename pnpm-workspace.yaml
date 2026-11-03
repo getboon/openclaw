@@ -22,7 +22,6 @@ minimumReleaseAgeExclude:
   - "axios"
   - "basic-ftp"
   - "baileys@7.0.0-rc13"
-  - "brace-expansion@5.0.9"
   - "hono"
   - "libopus-wasm@0.2.0"
   - "libsignal@6.0.0"
@@ -135,7 +134,11 @@ overrides:
   # CVE-2026-111997: ip-address <10.7.4 (Medium, Amazon Inspector on the
   # boon-agent-signup-container image). Fixed at 10.7.4.
   ip-address: 10.7.5
-  minimatch: 10.2.5
+  # CVE-2026-118764: minimatch <11.0.1 CPU/memory blowup on `**/..` patterns, and
+  # CVE-2026-118773: glob <14.0.2 (Medium, Amazon Inspector on the paid fleet and
+  # the boon-agent-signup-container image). Fixed at 11.0.1 / 14.0.2.
+  glob: 14.0.3
+  minimatch: 11.0.3
   path-to-regexp: 8.4.0
   # CVE-2026-82417: qs <6.16.0 (High, Amazon Inspector on the
   # boon-agent-signup-container image, ENG-21880). Fixed at 6.16.0.
@@ -156,8 +159,9 @@ overrides:
   # GHSA-rgw5-rvv9-x895: brace-expansion <5.0.9 DoS via unbounded intermediate arrays.
   # GHSA-qhr7-859c-m2p7: brace-expansion <5.0.11 DoS via uncontrolled recursion
   # on nested brace groups. GHSA-6j4f-fj2g-mc7p: brace-expansion <5.0.10 DoS
-  # via uncontrolled recursion in parseCommaParts.
-  brace-expansion: 5.0.11
+  # via uncontrolled recursion in parseCommaParts. 5.0.12 is the floor minimatch
+  # 11 requires.
+  brace-expansion: 5.0.12
   # GHSA-r28c-9q8g-f849: postcss <=8.5.17 path traversal in source-map auto-load.
   postcss: 8.5.22
   # GHSA-jqcg-44mw-7w3h: proxy-addr <2.0.8 IP spoofing via IPv4-mapped IPv6 trust subnet.
