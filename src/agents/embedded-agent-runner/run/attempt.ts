@@ -269,8 +269,10 @@ import {
 } from "../../workspace.js";
 import {
   classifyAsyncTaskWaitTimeout,
+  classifyCompactionRetryWaitAbort,
   isExternalTimeoutAbortRejection,
   isRunnerAbortError,
+  resolveAgentEndErrorText,
 } from "../abort.js";
 import { isCacheTtlEligibleProvider, readLastCacheTtlTimestamp } from "../cache-ttl.js";
 import { resolveCompactionTimeoutMs } from "../compaction-safety-timeout.js";
@@ -5102,7 +5104,25 @@ export async function runEmbeddedAttempt(
             }
           }
         } catch (err) {
-          if (isRunnerAbortError(err)) {
+          const compactionAbortOutcome = classifyCompactionRetryWaitAbort({
+            err,
+            externalAbort,
+            timedOut,
+          });
+          if (compactionAbortOutcome.kind === "rethrow") {
+            throw err;
+          }
+          if (compactionAbortOutcome.kind === "externalTimeoutClassified") {
+            // Same caller-driven stop already in progress, not a new failure:
+            // leave promptError untouched (classification above already
+            // handles reporting) instead of repopulating it from this wait.
+            externalTimeoutAbortClassified = true;
+            if (!isProbeSession) {
+              log.debug(
+                `compaction wait aborted by caller's external timeout: runId=${params.runId} sessionId=${params.sessionId}`,
+              );
+            }
+          } else {
             if (!promptError) {
               promptError = err;
               promptErrorSource = "compaction";
@@ -5112,8 +5132,6 @@ export async function runEmbeddedAttempt(
                 `compaction wait aborted: runId=${params.runId} sessionId=${params.sessionId}`,
               );
             }
-          } else {
-            throw err;
           }
         }
 
@@ -5355,7 +5373,7 @@ export async function runEmbeddedAttempt(
             event: {
               messages: messagesSnapshot,
               success: !aborted && !promptError,
-              error: promptError ? formatErrorMessage(promptError) : undefined,
+              error: resolveAgentEndErrorText({ promptError, externalTimeoutAbortClassified }),
               durationMs: Date.now() - promptStartedAt,
             },
             ctx: {
