@@ -25,7 +25,7 @@ import { streamOpenAIResponses } from "../../../llm/providers/openai-responses.j
 import type { Context, Model } from "../../../llm/types.js";
 import {
   OPENCLAW_RUNTIME_CONTEXT_CUSTOM_TYPE,
-  relocateCurrentRuntimeContextCarrierToTail,
+  relocateCurrentRuntimeContextCarrierAfterActiveUser,
 } from "../../internal-runtime-context.js";
 import {
   installModelPromptTransform,
@@ -400,15 +400,15 @@ function textOf(message: unknown): string | undefined {
   return undefined;
 }
 
-describe("prompt-cache tail carrier for current-turn metadata (issue #100271)", () => {
+describe("prompt-cache runtime-context carrier for current-turn metadata (issue #100271)", () => {
   const wire = (messages: AgentMsg[]) =>
-    relocateCurrentRuntimeContextCarrierToTail(
+    relocateCurrentRuntimeContextCarrierAfterActiveUser(
       normalizeMessagesForLlmBoundary(messages, { timezone: TZ }),
     ) as unknown as Array<Record<string, unknown>>;
 
   const META = "Conversation info (untrusted metadata):\nsender=Bob";
 
-  it("keeps the active user turn bare, tail-places the carrier, and drops it from replayed history", () => {
+  it("keeps the active user turn bare, places the carrier after it, and drops it from replayed history", () => {
     // The runner installs the carrier immediately BEFORE the active user turn;
     // the user turn itself is bare.
     const active: AgentMsg[] = [
@@ -419,7 +419,7 @@ describe("prompt-cache tail carrier for current-turn metadata (issue #100271)", 
     ];
     const wireActive = wire(active);
 
-    // Carrier relocated to the ABSOLUTE tail (the append-only slot).
+    // Carrier relocated right after the active user turn.
     expect(isCarrier(wireActive[wireActive.length - 1])).toBe(true);
     // The active user turn sits just before it, BARE and stamped — no metadata.
     const activeUser = wireActive[wireActive.length - 2];
@@ -465,8 +465,48 @@ describe("prompt-cache tail carrier for current-turn metadata (issue #100271)", 
     // byte-identical in request N+1 — only the trailing carrier differs.
     const sharedPrefixLen = 3;
     expect(wireN1.slice(0, sharedPrefixLen)).toEqual(wireN.slice(0, sharedPrefixLen));
-    // In request N the carrier occupies the append-only slot right after q2.
+    // In request N the carrier sits right after q2.
     expect(isCarrier(wire(turnN)[3])).toBe(true);
+  });
+
+  it("keeps the carrier right after the active user turn on every tool-loop call", () => {
+    const toolCall = {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "call_1", name: "message", arguments: { text: "4" } }],
+      stopReason: "toolUse",
+      timestamp: TS_TURN2 + 1000,
+    } as unknown as AgentMsg;
+    const toolResult = {
+      role: "toolResult",
+      toolCallId: "call_1",
+      toolName: "message",
+      content: [{ type: "text", text: "delivered" }],
+      isError: false,
+      timestamp: TS_TURN2 + 2000,
+    } as unknown as AgentMsg;
+    const prefix: AgentMsg[] = [storedUserMsg("q1", TS_TURN1 - 2000), ASSISTANT_MSG];
+
+    const call1 = wire([...prefix, runtimeCarrier(META, TS_TURN2), currentUserMsg("q2", TS_TURN2)]);
+    const call2 = wire([
+      ...prefix,
+      runtimeCarrier(META, TS_TURN2),
+      currentUserMsg("q2", TS_TURN2),
+      toolCall,
+      toolResult,
+    ]);
+
+    expect(call1.map((m) => m.role)).toEqual(["user", "assistant", "user", "custom"]);
+    expect(call2.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "custom",
+      "assistant",
+      "toolResult",
+    ]);
+    expect(call2.slice(0, 4).map((m) => JSON.stringify(m))).toEqual(
+      call1.map((m) => JSON.stringify(m)),
+    );
   });
 
   it("runtime-only (room-event) inline context is not strip-eligible, so it stays byte-stable in both positions", () => {
@@ -499,7 +539,7 @@ describe("prompt-cache tail carrier for current-turn metadata (issue #100271)", 
   });
 });
 
-describe("prompt-cache tail carrier for before_prompt_build prompt context", () => {
+describe("prompt-cache runtime-context carrier for before_prompt_build prompt context", () => {
   const INBOUND = [
     "Conversation info (untrusted metadata):",
     "```json",
@@ -544,7 +584,7 @@ describe("prompt-cache tail carrier for before_prompt_build prompt context", () 
       const transformed = session.agent.transformContext
         ? await session.agent.transformContext(messages)
         : messages;
-      return relocateCurrentRuntimeContextCarrierToTail(
+      return relocateCurrentRuntimeContextCarrierAfterActiveUser(
         normalizeMessagesForLlmBoundary(transformed, { timezone: TZ }),
       ) as unknown as Array<Record<string, unknown>>;
     } finally {
@@ -581,12 +621,12 @@ describe("prompt-cache tail carrier for before_prompt_build prompt context", () 
       wireN.slice(0, 3).map((m) => JSON.stringify(m)),
     );
 
-    const tailN = wireN[wireN.length - 1];
-    expect(isCarrier(tailN)).toBe(true);
-    expect(textOf(tailN)).toContain("Conversation info (untrusted metadata):");
-    expect(textOf(tailN)).toContain(hookN);
-    expect(textOf(tailN)!.indexOf(hookN)).toBeGreaterThan(
-      textOf(tailN)!.indexOf("Sender (untrusted metadata):"),
+    const carrierN = wireN[wireN.indexOf(activeUser) + 1];
+    expect(isCarrier(carrierN)).toBe(true);
+    expect(textOf(carrierN)).toContain("Conversation info (untrusted metadata):");
+    expect(textOf(carrierN)).toContain(hookN);
+    expect(textOf(carrierN)!.indexOf(hookN)).toBeGreaterThan(
+      textOf(carrierN)!.indexOf("Sender (untrusted metadata):"),
     );
     expect(wireN.filter((m) => !isCarrier(m)).some((m) => textOf(m)?.includes(hookN))).toBe(false);
 

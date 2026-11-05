@@ -175,7 +175,7 @@ import { runAgentEndSideEffects } from "../../harness/agent-end-side-effects.js"
 import { runAgentHarnessBeforeAgentFinalizeHook } from "../../harness/lifecycle-hook-helpers.js";
 import { resolveHeartbeatPromptForSystemPrompt } from "../../heartbeat-system-prompt.js";
 import { resolveImageSanitizationLimits } from "../../image-sanitization.js";
-import { relocateCurrentRuntimeContextCarrierToTail } from "../../internal-runtime-context.js";
+import { relocateCurrentRuntimeContextCarrierAfterActiveUser } from "../../internal-runtime-context.js";
 import {
   applyLocalModelLeanToolSearchDefaults,
   filterLocalModelLeanTools,
@@ -2639,13 +2639,12 @@ export async function runEmbeddedAttempt(
         const baseConvertToLlm = activeSession.agent.convertToLlm.bind(activeSession.agent);
         activeSession.agent.convertToLlm = async (messages) =>
           await baseConvertToLlm(
-            // Wire-only: move the current-turn runtime-context carrier to the
-            // absolute tail so the request is an append-only prefix-extension
-            // through the active user turn (see the function's cache rationale).
+            // Wire-only: the carrier follows the active user turn, not the tail, so the
+            // model does not reread it after each tool result and repeat its answer.
             // Applied here, not inside normalizeMessagesForLlmBoundary, because
             // normalizeMessagesForCurrentPromptBoundary slices off its appended
             // prompt by position and must not see the carrier relocated past it.
-            relocateCurrentRuntimeContextCarrierToTail(
+            relocateCurrentRuntimeContextCarrierAfterActiveUser(
               normalizeMessagesForLlmBoundary(messages, buildBoundaryOptions()),
             ),
           );

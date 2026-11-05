@@ -310,6 +310,32 @@ export function stripHistoricalRuntimeContextCustomMessages<T>(messages: T[]): T
 }
 
 /**
+ * Moves current-turn runtime-context carrier messages to immediately after the
+ * active user turn. The model then reads the carrier once per turn, next to the
+ * request it describes; a carrier trailing tool results made models re-answer.
+ *
+ * Runs after {@link stripHistoricalRuntimeContextCustomMessages}. Returns the
+ * same array when there is no user turn or the carriers are already in place.
+ */
+export function relocateCurrentRuntimeContextCarrierAfterActiveUser<T>(messages: T[]): T[] {
+  if (!messages.some(isOpenClawRuntimeContextCustomMessage)) {
+    return messages;
+  }
+  const rest = messages.filter((message) => !isOpenClawRuntimeContextCustomMessage(message));
+  const activeUserIndex = rest.findLastIndex(isUserMessage);
+  if (activeUserIndex === -1) {
+    return messages;
+  }
+  const carriers = messages.filter(isOpenClawRuntimeContextCustomMessage);
+  const relocated = [
+    ...rest.slice(0, activeUserIndex + 1),
+    ...carriers,
+    ...rest.slice(activeUserIndex + 1),
+  ];
+  return relocated.every((message, index) => message === messages[index]) ? messages : relocated;
+}
+
+/**
  * Moves current-turn runtime-context carrier messages to the absolute tail of
  * the request (after the active user turn and any tool-call scaffolding).
  *

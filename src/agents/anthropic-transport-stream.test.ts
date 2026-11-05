@@ -2896,8 +2896,8 @@ describe("anthropic transport stream", () => {
     function expectCachedPrefixReused(
       before: Array<Record<string, unknown>>,
       after: Array<Record<string, unknown>>,
+      marker: BlockPosition = lastMarker(before),
     ) {
-      const marker = lastMarker(before);
       for (let message = 0; message <= marker.message; message += 1) {
         expect(after[message]?.role).toBe(before[message]?.role);
         const beforeBlocks = contentBlocks(before[message]);
@@ -2933,11 +2933,14 @@ describe("anthropic transport stream", () => {
         content: [{ type: "text", text: "Read a.txt" }],
         timestamp: 0,
       };
-      const toolLoop = [assistantToolCall("tool_1"), toolResult("tool_1", "file body")];
+      const userNText = { message: 2, block: 0 };
+      const toolStep1 = [assistantToolCall("tool_1"), toolResult("tool_1", "file body")];
+      const toolStep2 = [assistantToolCall("tool_2"), toolResult("tool_2", "more body")];
       const turnN1 = [
         ...history,
         userN,
-        ...toolLoop,
+        ...toolStep1,
+        ...toolStep2,
         assistantText("a.txt says hello"),
         { role: "user", content: [{ type: "text", text: "Thanks" }], timestamp: 0 },
       ];
@@ -2946,39 +2949,76 @@ describe("anthropic transport stream", () => {
       const turnNCall2 = await serializeMessages([
         ...history,
         userN,
-        ...toolLoop,
         carrierMessage(),
+        ...toolStep1,
+      ]);
+      const turnNCall3 = await serializeMessages([
+        ...history,
+        userN,
+        carrierMessage(),
+        ...toolStep1,
+        ...toolStep2,
       ]);
       const turnN1Call1 = await serializeMessages([...turnN1, carrierMessage()]);
 
-      expect(lastMarker(turnNCall1)).toEqual({ message: 2, block: 0 });
-      expect(contentBlocks(turnNCall1[2])).toHaveLength(2);
-      expect(lastMarker(turnNCall2)).toEqual({ message: 4, block: 0 });
-      expect(contentBlocks(turnNCall2[2])).toEqual([
+      const userNWithCarrier = [
         { type: "text", text: "Read a.txt", cache_control: ephemeral },
+        { type: "text", text: carrierText },
+      ];
+      expect(lastMarker(turnNCall1)).toEqual(userNText);
+      expect(contentBlocks(turnNCall1[2])).toEqual(userNWithCarrier);
+      expect(lastMarker(turnNCall2)).toEqual({ message: 4, block: 0 });
+      expect(contentBlocks(turnNCall2[2])).toEqual(userNWithCarrier);
+      expect(contentBlocks(turnNCall2[4])).toEqual([
+        expect.objectContaining({ type: "tool_result", cache_control: ephemeral }),
       ]);
-      expect(contentBlocks(turnNCall2[4])).toHaveLength(2);
-      for (const request of [turnNCall1, turnNCall2, turnN1Call1]) {
+      expect(lastMarker(turnNCall3)).toEqual({ message: 6, block: 0 });
+      expect(contentBlocks(turnNCall3[2])).toEqual(userNWithCarrier);
+      expect(contentBlocks(turnNCall3[4])).toEqual([
+        expect.not.objectContaining({ cache_control: expect.anything() }),
+      ]);
+      expect(contentBlocks(turnNCall3[6])).toEqual([
+        expect.objectContaining({ type: "tool_result", cache_control: ephemeral }),
+      ]);
+      expect(contentBlocks(turnN1Call1[2])).toEqual([{ type: "text", text: "Read a.txt" }]);
+
+      const carrierIndexes = [
+        [turnNCall1, 2],
+        [turnNCall2, 2],
+        [turnNCall3, 2],
+        [turnN1Call1, turnN1Call1.length - 1],
+      ] as const;
+      for (const [request, carrierIndex] of carrierIndexes) {
         const carrierBlocks = request.flatMap((message, index) =>
           contentBlocks(message)
             .map((block) => ({ index, block: requireRecord(block, "block") }))
             .filter(({ block }) => block.text === carrierText),
         );
         expect(carrierBlocks).toEqual([
-          { index: request.length - 1, block: { type: "text", text: carrierText } },
+          { index: carrierIndex, block: { type: "text", text: carrierText } },
         ]);
+        for (const message of request) {
+          const types = contentBlocks(message).map((block) => requireRecord(block, "block").type);
+          const firstToolResult = types.indexOf("tool_result");
+          if (firstToolResult !== -1) {
+            expect(types.slice(firstToolResult)).not.toContain("text");
+          }
+        }
       }
       expectCachedPrefixReused(turnNCall1, turnNCall2);
-      expectCachedPrefixReused(turnNCall2, turnN1Call1);
+      expectCachedPrefixReused(turnNCall2, turnNCall3);
+      expectCachedPrefixReused(turnNCall3, turnN1Call1, userNText);
 
       const noCarrier = [
         await serializeMessages([...history, userN]),
-        await serializeMessages([...history, userN, ...toolLoop]),
+        await serializeMessages([...history, userN, ...toolStep1]),
+        await serializeMessages([...history, userN, ...toolStep1, ...toolStep2]),
         await serializeMessages(turnN1),
       ];
       expect(stripCarrierBlocks(turnNCall1)).toEqual(noCarrier[0]);
       expect(stripCarrierBlocks(turnNCall2)).toEqual(noCarrier[1]);
-      expect(stripCarrierBlocks(turnN1Call1)).toEqual(noCarrier[2]);
+      expect(stripCarrierBlocks(turnNCall3)).toEqual(noCarrier[2]);
+      expect(stripCarrierBlocks(turnN1Call1)).toEqual(noCarrier[3]);
     });
   });
 

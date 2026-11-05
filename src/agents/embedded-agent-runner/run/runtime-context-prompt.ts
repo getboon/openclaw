@@ -177,7 +177,7 @@ export function resolveCurrentTurnPromptParts(params: {
     });
   const submissionWithoutBuildContext = resolveSubmission(undefined);
   // A persisted user turn replays bare next turn, so its hook prompt context rides the
-  // tail carrier to keep the active user message byte-identical for prompt caching.
+  // runtime-context carrier to keep the user message byte-identical for prompt caching.
   const promptBuildContextInCarrier =
     hasPromptBuildContext &&
     params.suppressUserMessagePersistence !== true &&

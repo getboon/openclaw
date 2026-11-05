@@ -13,6 +13,7 @@ import {
   OPENCLAW_RUNTIME_CONTEXT_CUSTOM_TYPE,
   OPENCLAW_RUNTIME_CONTEXT_NOTICE,
   OPENCLAW_RUNTIME_EVENT_HEADER,
+  relocateCurrentRuntimeContextCarrierAfterActiveUser,
   relocateCurrentRuntimeContextCarrierToTail,
   stripInternalRuntimeContext,
 } from "./internal-runtime-context.js";
@@ -221,5 +222,62 @@ describe("relocateCurrentRuntimeContextCarrierToTail", () => {
   it("leaves a carrier in place when there is no active user turn to anchor after", () => {
     const messages = [carrier("meta"), assistant("reply")];
     expect(relocateCurrentRuntimeContextCarrierToTail(messages)).toBe(messages);
+  });
+});
+
+describe("relocateCurrentRuntimeContextCarrierAfterActiveUser", () => {
+  it("moves a before-user carrier right after the active user turn", () => {
+    const messages = [user("older"), assistant("reply"), carrier("meta"), user("active")];
+    expect(relocateCurrentRuntimeContextCarrierAfterActiveUser(messages)).toEqual([
+      user("older"),
+      assistant("reply"),
+      user("active"),
+      carrier("meta"),
+    ]);
+  });
+
+  it("keeps the carrier right after the active user turn during the tool loop", () => {
+    const messages = [
+      user("older"),
+      assistant("reply"),
+      carrier("meta"),
+      user("active"),
+      assistant("tool call"),
+      toolResult("tool output"),
+    ];
+    expect(relocateCurrentRuntimeContextCarrierAfterActiveUser(messages)).toEqual([
+      user("older"),
+      assistant("reply"),
+      user("active"),
+      carrier("meta"),
+      assistant("tool call"),
+      toolResult("tool output"),
+    ]);
+  });
+
+  it("moves a contiguous carrier run in order", () => {
+    const messages = [carrier("first"), carrier("second"), user("active"), assistant("tool")];
+    expect(relocateCurrentRuntimeContextCarrierAfterActiveUser(messages)).toEqual([
+      user("active"),
+      carrier("first"),
+      carrier("second"),
+      assistant("tool"),
+    ]);
+  });
+
+  it("is idempotent and returns the same reference once placed", () => {
+    const messages = [carrier("meta"), user("active"), assistant("tool call"), toolResult("out")];
+    const once = relocateCurrentRuntimeContextCarrierAfterActiveUser(messages);
+    expect(relocateCurrentRuntimeContextCarrierAfterActiveUser(once)).toBe(once);
+  });
+
+  it("is a no-op when there is no carrier", () => {
+    const messages = [user("active"), assistant("reply")];
+    expect(relocateCurrentRuntimeContextCarrierAfterActiveUser(messages)).toBe(messages);
+  });
+
+  it("leaves messages unchanged when there is no user turn", () => {
+    const messages = [carrier("meta"), assistant("reply"), toolResult("out")];
+    expect(relocateCurrentRuntimeContextCarrierAfterActiveUser(messages)).toBe(messages);
   });
 });
