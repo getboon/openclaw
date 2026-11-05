@@ -291,6 +291,122 @@ describe("acquireSessionWriteLock", () => {
     });
   });
 
+  it("joinInProcessHolder joins the current holder, including via symlinks", async () => {
+    await withSymlinkedSessionPaths(async ({ sessionReal, sessionLink, realLockPath }) => {
+      const outer = await acquireSessionWriteLock({ sessionFile: sessionReal, timeoutMs: 500 });
+      const nested = await acquireSessionWriteLock({
+        sessionFile: sessionLink,
+        timeoutMs: 50,
+        joinInProcessHolder: true,
+      });
+      await expectLockRemovedOnlyAfterFinalRelease({
+        lockPath: realLockPath,
+        firstLock: outer,
+        secondLock: nested,
+      });
+    });
+  });
+
+  it("joinInProcessHolder without a holder takes a fresh owner, so two such writers contend", async () => {
+    await withTempSessionLockFile(async ({ sessionFile }) => {
+      const first = await acquireSessionWriteLock({
+        sessionFile,
+        timeoutMs: 500,
+        joinInProcessHolder: true,
+      });
+      // `first` is now the holder, so a later joiner nests under it...
+      const joined = await acquireSessionWriteLock({
+        sessionFile,
+        timeoutMs: 50,
+        joinInProcessHolder: true,
+      });
+      await joined.release();
+      await first.release();
+      // ...but an independent acquisition with its own owner still contends with a holder.
+      const holder = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500 });
+      await expect(
+        acquireSessionWriteLock({ sessionFile, timeoutMs: 5, staleMs: 60_000 }),
+      ).rejects.toThrow(/session file locked/);
+      await holder.release();
+    });
+  });
+
+  it("joinInProcessHolder resolves the holder after path setup, closing the pre-resolve window", async () => {
+    await withTempSessionLockFile(async ({ sessionFile }) => {
+      // An operation takes the lock while the joining writer is still preparing (the mkdir of
+      // the session dir). With a precomputed owner the writer would contend and time out; the
+      // late-resolved holder owner lets it nest.
+      let outer: Awaited<ReturnType<typeof acquireSessionWriteLock>> | undefined;
+      const realMkdir = fs.mkdir.bind(fs);
+      const mkdirSpy = vi.spyOn(fs, "mkdir").mockImplementation((async (
+        target: Parameters<typeof fs.mkdir>[0],
+        options?: Parameters<typeof fs.mkdir>[1],
+      ) => {
+        const result = await realMkdir(target, options);
+        if (!outer && String(target) === path.dirname(path.resolve(sessionFile))) {
+          mkdirSpy.mockRestore();
+          outer = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500 });
+        }
+        return result;
+      }) as typeof fs.mkdir);
+      try {
+        const nested = await acquireSessionWriteLock({
+          sessionFile,
+          timeoutMs: 100,
+          joinInProcessHolder: true,
+        });
+        expect(outer).toBeDefined();
+        await nested.release();
+      } finally {
+        mkdirSpy.mockRestore();
+        await outer?.release();
+      }
+    });
+  });
+
+  it("rejects reentrantOwner combined with joinInProcessHolder", async () => {
+    await withTempSessionLockFile(async ({ sessionFile }) => {
+      await expect(
+        acquireSessionWriteLock({
+          sessionFile,
+          reentrantOwner: "explicit",
+          joinInProcessHolder: true,
+        }),
+      ).rejects.toThrow(TypeError);
+    });
+  });
+
+  it("rejects the removed allowReentrant option loudly for JS callers", async () => {
+    await withTempSessionLockFile(async ({ sessionFile }) => {
+      // Compiled plugins can still pass the fs-safe 0.3-era flag; silently
+      // ignoring it would turn intended nesting into a self-deadlock timeout.
+      const legacyParams = { sessionFile, timeoutMs: 500, allowReentrant: true } as unknown as {
+        sessionFile: string;
+      };
+      await expect(acquireSessionWriteLock(legacyParams)).rejects.toThrow(TypeError);
+      await expect(acquireSessionWriteLock(legacyParams)).rejects.toThrow(
+        /allowReentrant was removed.*reentrantOwner/,
+      );
+      // Nothing was acquired, so a normal acquisition still succeeds immediately.
+      const lock = await acquireSessionWriteLock({ sessionFile, timeoutMs: 5 });
+      await lock.release();
+    });
+  });
+
+  it("still accepts allowReentrant: false, which matches the default", async () => {
+    await withTempSessionLockFile(async ({ sessionFile }) => {
+      const lock = await acquireSessionWriteLock({
+        sessionFile,
+        timeoutMs: 500,
+        allowReentrant: false,
+      } as unknown as { sessionFile: string; timeoutMs: number });
+      await expect(
+        acquireSessionWriteLock({ sessionFile, timeoutMs: 5, staleMs: 60_000 }),
+      ).rejects.toThrow(/session file locked/);
+      await lock.release();
+    });
+  });
+
   it("does not reenter locks by default in the same process", async () => {
     await withTempSessionLockFile(async ({ sessionFile }) => {
       const lock = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500 });

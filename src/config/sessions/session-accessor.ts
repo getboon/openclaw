@@ -5,7 +5,6 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   acquireSessionWriteLock,
-  resolveSessionTranscriptWriteLockOwner,
   resolveSessionWriteLockOptions,
 } from "../../agents/session-write-lock.js";
 import {
@@ -2133,7 +2132,7 @@ async function appendTranscriptTurnMessages(
         sessionFile: target.sessionFile,
         ...resolveSessionWriteLockOptions(options.config),
         // Join this process's current holder (the enclosing operation) or contend with a fresh owner.
-        reentrantOwner: await resolveSessionTranscriptWriteLockOwner(target.sessionFile),
+        joinInProcessHolder: true,
       });
       try {
         await runBatchWithOwnedLock();

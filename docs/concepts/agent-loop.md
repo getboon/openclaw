@@ -54,10 +54,11 @@ wired end-to-end.
   before reporting the session as busy; the default is `60000` ms.
 - Session write locks are non-reentrant by default: every acquisition gets its own logical owner,
   and different owners contend. A helper that intentionally nests acquisition of the same lock
-  within one logical operation passes that operation's `reentrantOwner`. Transcript writers use
-  `resolveSessionTranscriptWriteLockOwner`, which joins the operation that currently holds the
-  session lock in this process (agent attempt, compaction, transcript rewrite) or contends with a
-  fresh owner when there is none.
+  within one logical operation passes that operation's `reentrantOwner`. Transcript writers pass
+  `joinInProcessHolder: true`, which joins the operation that currently holds the session lock in
+  this process (agent attempt, compaction, transcript rewrite) or contends with a fresh owner when
+  there is none. The holder is looked up immediately before each acquire attempt.
+  The removed `allowReentrant: true` option now throws a `TypeError`.
 
 ## Session + workspace preparation
 

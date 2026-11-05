@@ -68,14 +68,21 @@ describe("acquireFileLock", () => {
 
     const outer = await acquireFileLock(filePath, options);
     const inner = await acquireFileLock(filePath, options);
+    let innerReleased = false;
     try {
       expect(inner.lockPath).toBe(outer.lockPath);
       await inner.release();
+      innerReleased = true;
       await expect(fs.access(outer.lockPath)).resolves.toBeUndefined();
     } finally {
-      await inner.release();
-      await outer.release();
+      // Release each handle exactly once: fs-safe's release is not idempotent
+      // per handle, so a second inner.release() would drop the outer's
+      // reference and make the ENOENT check below pass without outer.release().
+      if (!innerReleased) {
+        await inner.release();
+      }
     }
+    await outer.release();
     await expect(fs.access(outer.lockPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
