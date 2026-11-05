@@ -1993,7 +1993,7 @@
     "dotenv": "17.4.2",
     "express": "5.2.1",
     "file-type": "22.0.1",
-    "glob": "13.0.6",
+    "glob": "14.0.3",
     "grammy": "1.43.0",
     "highlight.js": "11.11.1",
     "hosted-git-info": "10.1.1",
@@ -2003,7 +2003,7 @@
     "jszip": "3.10.1",
     "kysely": "0.29.2",
     "linkedom": "0.18.12",
-    "minimatch": "10.2.5",
+    "minimatch": "11.0.3",
     "node-edge-tts": "1.2.10",
     "openai": "6.39.1",
     "partial-json": "0.1.7",
@@ -2041,7 +2041,7 @@
     "@types/proper-lockfile": "4.1.4",
     "@types/ws": "8.18.1",
     "@typescript/native-preview": "7.0.0-dev.20260527.2",
-    "@vitest/coverage-v8": "4.1.11",
+    "@vitest/coverage-v8": "4.1.12",
     "esbuild": "0.28.1",
     "jscpd": "4.2.4",
     "jsdom": "29.1.1",
@@ -2055,7 +2055,7 @@
     "tsdown": "0.22.1",
     "tsx": "4.22.3",
     "unrun": "0.3.0",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   },
   "optionalDependencies": {
     "sqlite-vec": "0.1.9"

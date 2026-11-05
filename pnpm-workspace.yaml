@@ -10,8 +10,6 @@ minimumReleaseAgeExclude:
   # GHSA-vp8m-p9jh-q5pm / GHSA-w293-vg96-wgc3 security fix; remove after 2026-09-12.
   - "undici@8.10.2"
   - "undici@7.29.1"
-  # Current fast-uri security baseline; remove after 2026-09-09.
-  - "fast-uri@4.1.4"
   - "@openclaw/crabline@0.1.6"
   - "@openclaw/proxyline@0.3.3"
   - "acpx"
@@ -21,7 +19,6 @@ minimumReleaseAgeExclude:
   - "axios"
   - "basic-ftp"
   - "baileys@7.0.0-rc13"
-  - "brace-expansion@5.0.9"
   - "hono"
   - "libopus-wasm@0.2.0"
   - "libsignal@6.0.0"
@@ -105,8 +102,16 @@ overrides:
   "@aws-sdk/core": 3.974.13
   "@aws-sdk/credential-provider-node": 3.972.52
   "@aws-sdk/xml-builder": 3.972.25
-  hono: 4.12.25
-  "@hono/node-server": 1.19.14
+  # GHSA-5r4p-p66f-jhc7 / GHSA-hxh3-vqpv-xpqv / GHSA-gqvv-2mrq-wpjv /
+  # GHSA-g6gw-c38x-mqfc / GHSA-crvj-82cr-hjcx / GHSA-8j4g-w8fx-2239 and
+  # earlier: hono <4.13.11 (serveStatic double-decode, JSX XSS, toSSG path
+  # escape, parseBody/query-parser/CORS DoS + differentials). Fixed at 4.13.11.
+  hono: 4.13.14
+  # GHSA-rmxm-3fg6-px4f: @hono/node-server <2.1.3 serveStatic double-decode
+  # middleware bypass; no 1.x fix exists. Major bump: the only consumer,
+  # @modelcontextprotocol/sdk, declares "^1.19.9 || ^2.0.5" and only imports
+  # getRequestListener, so 2.x is inside its declared range.
+  "@hono/node-server": 2.1.5
   # GHSA-c29m-xwm3-cm6r / GHSA-mghh-pgcx-3jjj / GHSA-x97p-jq2g-jp4f /
   # GHSA-3pq3-5fj3-cg6v / GHSA-542g-h47m-68v8: axios <1.20.0 — ReDoS in the
   # data: URL parser and proxy-bypass host normalization, prototype pollution
@@ -118,11 +123,16 @@ overrides:
   # GHSA-qw65-cvwx-89v3 / GHSA-58mr-gqgx-xq4g: fast-uri <4.1.4 has an
   # authority-injection bug via unvalidated port and host-confusion via an
   # unclosed bracket in serialize(). Fixed at 4.1.4.
-  fast-uri: 4.1.4
-  # GHSA-q3jh-wrc6-jgq8 / GHSA-8r9p-f939-6h3c: follow-redirects <1.16.1 allows
-  # array-form headers to bypass cross-origin credential stripping and has a
-  # sensitiveHeaders regex that can expose credential headers. Fixed at 1.16.1.
-  follow-redirects: 1.16.1
+  # GHSA-hrr3-gc8f-f4qj / GHSA-jvvf-x445-j334 (fixed 4.1.5) and
+  # GHSA-w74x-v6f9-j3xg / GHSA-xhq7-xmqj-769h / GHSA-wjr9-j795-jxcr /
+  # GHSA-333x-w4r6-6crp (fixed 4.2.3): host-case, mailto header, scheme
+  # spoofing/injection, and path-equivalence normalization bugs.
+  fast-uri: 4.2.3
+  # GHSA-q3jh-wrc6-jgq8 / GHSA-8r9p-f939-6h3c / GHSA-mrwp-f3q8-3g9p:
+  # follow-redirects <=1.16.1 can send credential headers across origins on
+  # redirect (array-form headers, sensitiveHeaders regex escaping, cross-realm
+  # sensitiveHeaders arrays). Fixed at 1.16.2.
+  follow-redirects: 1.16.2
   defu: 6.1.5
   fast-xml-parser: 5.7.0
   request: "npm:@cypress/request@3.0.10"
@@ -130,8 +140,14 @@ overrides:
   basic-ftp: 6.0.1
   file-type: 22.0.1
   form-data: 2.5.6
-  ip-address: 10.3.1
-  minimatch: 10.2.5
+  # CVE-2026-111997: ip-address <10.7.4 (Medium, Amazon Inspector on the
+  # boon-agent-signup-container image). Fixed at 10.7.4.
+  ip-address: 10.7.5
+  # CVE-2026-118764: minimatch <11.0.1 CPU/memory blowup on `**/..` patterns, and
+  # CVE-2026-118773: glob <14.0.2 (Medium, Amazon Inspector on the paid fleet and
+  # the boon-agent-signup-container image). Fixed at 11.0.1 / 14.0.2.
+  glob: 14.0.3
+  minimatch: 11.0.3
   path-to-regexp: 8.4.0
   # CVE-2026-82417: qs <6.16.0 (High, Amazon Inspector on the
   # boon-agent-signup-container image, ENG-21880). Fixed at 6.16.0.
@@ -152,10 +168,14 @@ overrides:
   # GHSA-rgw5-rvv9-x895: brace-expansion <5.0.9 DoS via unbounded intermediate arrays.
   # GHSA-qhr7-859c-m2p7: brace-expansion <5.0.11 DoS via uncontrolled recursion
   # on nested brace groups. GHSA-6j4f-fj2g-mc7p: brace-expansion <5.0.10 DoS
-  # via uncontrolled recursion in parseCommaParts.
-  brace-expansion: 5.0.11
+  # via uncontrolled recursion in parseCommaParts. GHSA-q2hr-2g5m-vwhr:
+  # brace-expansion <5.0.12 quadratic-time `{a},b}` rewrite DoS. 5.0.12 is
+  # also the floor minimatch 11 requires.
+  brace-expansion: 5.0.12
   # GHSA-r28c-9q8g-f849: postcss <=8.5.17 path traversal in source-map auto-load.
-  postcss: 8.5.22
+  # GHSA-fxqj-rqcc-2cmp: postcss <=8.5.22 reads arbitrary .map files via
+  # sourceMappingURL when `from` is unset. Fixed at 8.5.23.
+  postcss: 8.5.32
   # GHSA-jqcg-44mw-7w3h: proxy-addr <2.0.8 IP spoofing via IPv4-mapped IPv6 trust subnet.
   proxy-addr: 2.0.8
   # GHSA-68fv-2mgg-jv7q: source-map-js <1.2.2 event-loop DoS via indexed
@@ -233,7 +253,10 @@ overrides:
   # quotes. Both fixed at 14.3.3; staying on the 14.x line (no major bump).
   markdown-it: 14.3.3
   ws: 8.21.0
-  "@vitest/browser": 4.1.11
+  # GHSA-qxg6-89mg-rqv8 / GHSA-xp26-3454-mjgp: @vitest/mocker <4.1.12 manual
+  # mock code injection and Windows redirect-allowlist bypass. Keep every
+  # vitest/@vitest/* package on the same 4.1.x patch.
+  "@vitest/browser": 4.1.12
 
 allowBuilds:
   "@openclaw/fs-safe": true
