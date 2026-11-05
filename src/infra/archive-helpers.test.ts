@@ -106,8 +106,8 @@ describe("archive helpers", () => {
   });
 
   it("preflights tar entries for blocked link types, path escapes, and size budgets", () => {
-    // fs-safe >= 0.5 counts a rejected entry against maxEntries, so each rejection case gets a
-    // fresh checker (same change as upstream openclaw#113705).
+    // fs-safe counts a rejected entry against maxEntries, so each rejection case gets a fresh
+    // checker.
     const createChecker = () =>
       createTarEntryPreflightChecker({
         rootDir: "/tmp/dest",

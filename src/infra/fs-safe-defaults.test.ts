@@ -31,6 +31,8 @@ async function importDefaults(env: Record<string, string | undefined> = {}) {
 
 describe("fs-safe defaults", () => {
   afterEach(() => {
+    // Restores the process.platform getter spy so later tests see the real platform.
+    vi.restoreAllMocks();
     configureFsSafeNative.mockReset();
   });
 
@@ -57,6 +59,10 @@ describe("fs-safe defaults", () => {
     await importDefaults({ openclaw_fs_safe_native_mode: "require" });
 
     expect(configureFsSafeNative).not.toHaveBeenCalled();
+  });
+
+  it("restores the real platform after the Windows case", () => {
+    expect(Object.getOwnPropertyDescriptor(process, "platform")?.get).toBeUndefined();
   });
 
   it("lets fs-safe migrate legacy require mode without overriding it", async () => {

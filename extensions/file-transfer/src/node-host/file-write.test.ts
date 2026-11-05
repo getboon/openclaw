@@ -164,9 +164,8 @@ describe("handleFileWrite — parent directory handling", () => {
 });
 
 describe("handleFileWrite — symlink protection", () => {
-  // fs-safe 0.5+ reports a final symlink during path resolution, so with the
-  // default followSymlinks=false it is refused as a redirect (upstream
-  // 9094e10c11c0); with followSymlinks=true the lstat guard still denies it.
+  // With the default followSymlinks=false a final symlink is refused as a
+  // redirect; with followSymlinks=true the lstat guard still denies it.
   it("rejects a final symlink by default with the canonical target", async () => {
     const real = path.join(tmpRoot, "real.txt");
     const link = path.join(tmpRoot, "link.txt");

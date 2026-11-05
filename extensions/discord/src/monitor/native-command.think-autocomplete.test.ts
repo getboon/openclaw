@@ -12,7 +12,7 @@ import {
   saveSessionStore,
   type SessionEntry,
 } from "openclaw/plugin-sdk/session-store-runtime";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChannelType, type AutocompleteInteraction } from "../internal/discord.js";
 import { createNoopThreadBindingManager } from "./thread-bindings.js";
 
@@ -127,10 +127,12 @@ vi.mock("openclaw/plugin-sdk/models-provider-runtime", () => ({
 
 // fs-safe 0.8 pins and chmods the store directory, so keep the store in a
 // private temp dir rather than directly in the shared OS temp root.
-const STORE_PATH = path.join(
-  fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-discord-think-autocomplete-")),
-  "sessions.json",
-);
+const STORE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-discord-think-autocomplete-"));
+const STORE_PATH = path.join(STORE_DIR, "sessions.json");
+
+afterAll(() => {
+  fs.rmSync(STORE_DIR, { recursive: true, force: true });
+});
 const SESSION_KEY = "agent:main:main";
 let findCommandByNativeName: typeof import("openclaw/plugin-sdk/command-auth-native").findCommandByNativeName;
 let resolveCommandArgChoices: typeof import("openclaw/plugin-sdk/command-auth-native").resolveCommandArgChoices;

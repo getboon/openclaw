@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { saveSessionStore } from "openclaw/plugin-sdk/session-store-runtime";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { slackApprovalCapability, testing } from "./approval-native.js";
 
 function buildConfig(
@@ -28,10 +28,12 @@ function buildConfig(
 
 // fs-safe 0.8 pins and chmods the store directory, so keep the store in a
 // private temp dir rather than directly in the shared OS temp root.
-const STORE_PATH = path.join(
-  fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-slack-approval-native-")),
-  "sessions.json",
-);
+const STORE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-slack-approval-native-"));
+const STORE_PATH = path.join(STORE_DIR, "sessions.json");
+
+afterAll(() => {
+  fs.rmSync(STORE_DIR, { recursive: true, force: true });
+});
 
 async function writeStore(store: Parameters<typeof saveSessionStore>[1]) {
   await saveSessionStore(STORE_PATH, store, { skipMaintenance: true });

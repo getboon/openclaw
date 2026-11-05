@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelCatalogEntry } from "../../agents/model-catalog.js";
 
 vi.hoisted(() => {
@@ -351,10 +351,12 @@ vi.mock("./queue.js", () => ({
 const TEST_AGENT_DIR = "/tmp/agent";
 // fs-safe 0.8 pins and chmods the session store directory on write, so the
 // store lives in a private temp dir rather than directly under /tmp.
-const TEST_SESSION_STORE_PATH = path.join(
-  fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-directive-model-")),
-  "sessions.json",
-);
+const TEST_SESSION_STORE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-directive-model-"));
+const TEST_SESSION_STORE_PATH = path.join(TEST_SESSION_STORE_DIR, "sessions.json");
+
+afterAll(() => {
+  fs.rmSync(TEST_SESSION_STORE_DIR, { recursive: true, force: true });
+});
 const OPENAI_DATE_PROFILE_ID = "20251001";
 
 type ApiKeyProfile = { type: "api_key"; provider: string; key: string };

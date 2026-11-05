@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -51,6 +51,10 @@ const {
 // fs-safe 0.8 pins and chmods the session store directory on write, so keep
 // per-test stores in a private dir instead of directly under /tmp.
 const TELEGRAM_TEST_STORE_DIR = mkdtempSync(path.join(os.tmpdir(), "openclaw-telegram-bot-test-"));
+
+afterAll(() => {
+  rmSync(TELEGRAM_TEST_STORE_DIR, { recursive: true, force: true });
+});
 
 let createTelegramBotBase: typeof import("./bot-core.js").createTelegramBotCore;
 let setTelegramBotRuntimeForTest: typeof import("./bot-core.js").setTelegramBotRuntimeForTest;

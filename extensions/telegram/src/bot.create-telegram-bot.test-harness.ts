@@ -5,7 +5,7 @@ import { buildChannelInboundEventContext } from "openclaw/plugin-sdk/channel-inb
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { MockFn } from "openclaw/plugin-sdk/plugin-test-runtime";
 import type { GetReplyOptions, MsgContext } from "openclaw/plugin-sdk/reply-runtime";
-import { beforeEach, vi } from "vitest";
+import { afterAll, beforeEach, vi } from "vitest";
 import type { TelegramBotDeps } from "./bot-deps.js";
 
 type AnyMock = ReturnType<typeof vi.fn>;
@@ -560,6 +560,11 @@ function clearTelegramDispatchDedupeFilesForTest(): void {
     }
   }
 }
+
+// The store directory is private to this module instance; remove it, not just its files.
+afterAll(() => {
+  rmSync(path.dirname(sessionStorePath), { recursive: true, force: true });
+});
 
 beforeEach(() => {
   getRuntimeConfig.mockReset();
