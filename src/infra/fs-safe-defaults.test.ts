@@ -62,7 +62,7 @@ describe("fs-safe defaults", () => {
   });
 
   it("restores the real platform after the Windows case", () => {
-    expect(Object.getOwnPropertyDescriptor(process, "platform")?.get).toBeUndefined();
+    expect(Object.getOwnPropertyDescriptor(process, "platform")).not.toHaveProperty("get");
   });
 
   it("lets fs-safe migrate legacy require mode without overriding it", async () => {
