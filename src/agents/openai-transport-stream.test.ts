@@ -8659,7 +8659,7 @@ describe("openai transport stream", () => {
         );
       });
 
-      it("keeps the thought_signature on the first of parallel streamed tool calls", async () => {
+      it("replays parallel streamed tool calls with the first signature and the skip sentinel", async () => {
         const output = makeAssistantOutput(proxiedGeminiModel);
         const chunks = [
           {
@@ -8728,6 +8728,50 @@ describe("openai transport stream", () => {
           arguments: { city: "Rome" },
         });
         expect(output.content[1]).not.toHaveProperty("thoughtSignature");
+
+        const params = buildOpenAICompletionsParams(
+          proxiedGeminiModel,
+          {
+            messages: [
+              { role: "user", content: "weather" },
+              output,
+              {
+                role: "toolResult",
+                toolCallId: "call_1",
+                toolName: "get_weather",
+                content: [{ type: "text", text: "sunny" }],
+                isError: false,
+              },
+              {
+                role: "toolResult",
+                toolCallId: "call_2",
+                toolName: "get_weather",
+                content: [{ type: "text", text: "rain" }],
+                isError: false,
+              },
+            ],
+            tools: [],
+          } as never,
+          undefined,
+        ) as { messages: Array<Record<string, unknown>> };
+        const assistant = params.messages.find((message) => message.role === "assistant") as
+          | {
+              tool_calls?: Array<{
+                id?: string;
+                extra_content?: { google?: { thought_signature?: string } };
+              }>;
+            }
+          | undefined;
+
+        expect(
+          assistant?.tool_calls?.map((toolCall) => [
+            toolCall.id,
+            toolCall.extra_content?.google?.thought_signature,
+          ]),
+        ).toEqual([
+          ["call_1", "SIG-OPAQUE-ABC=="],
+          ["call_2", "skip_thought_signature_validator"],
+        ]);
       });
     });
   });
