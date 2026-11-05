@@ -904,6 +904,9 @@ function convertMessages(
   }
 
   // Add cache point to the last user message for supported Claude models when caching is enabled
+  // oxlint-disable-next-line eslint/no-warning-comments -- deferred gap, kept visible until fixed
+  // TODO(ENG-22237): skip the runtime-context carrier when choosing the cachePoint message.
+  // The carrier is the last user message now, so the cache point moves on every tool-loop call.
   if (cacheRetention !== "none" && supportsPromptCaching(model) && result.length > 0) {
     const lastMessage = result[result.length - 1];
     if (lastMessage.role === ConversationRole.USER && lastMessage.content) {

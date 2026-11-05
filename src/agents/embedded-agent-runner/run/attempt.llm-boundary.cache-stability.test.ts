@@ -27,13 +27,21 @@ import {
   OPENCLAW_RUNTIME_CONTEXT_CUSTOM_TYPE,
   relocateCurrentRuntimeContextCarrierToTail,
 } from "../../internal-runtime-context.js";
-import { normalizeMessagesForLlmBoundary } from "./attempt.llm-boundary.js";
+import {
+  installModelPromptTransform,
+  normalizeMessagesForLlmBoundary,
+} from "./attempt.llm-boundary.js";
+import {
+  buildRuntimeContextCustomMessage,
+  resolveCurrentTurnPromptParts,
+} from "./runtime-context-prompt.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 type AgentMsg = Parameters<typeof normalizeMessagesForLlmBoundary>[0][number];
+type TransformContext = (messages: AgentMsg[], signal?: AbortSignal) => Promise<AgentMsg[]>;
 
 const TZ = "UTC";
 // Payload capture stops before transport, but the provider helper still
@@ -488,5 +496,103 @@ describe("prompt-cache tail carrier for current-turn metadata (issue #100271)", 
     expect(JSON.stringify(cur[0]?.content)).toBe(JSON.stringify(hist[0]?.content));
     // ...and the room context is preserved in both (the strip does not touch it).
     expect(JSON.stringify(hist[0]?.content)).toContain("inbound_event_kind: room_event");
+  });
+});
+
+describe("prompt-cache tail carrier for before_prompt_build prompt context", () => {
+  const INBOUND = [
+    "Conversation info (untrusted metadata):",
+    "```json",
+    JSON.stringify({ conversation_label: "Boon Web" }, null, 2),
+    "```",
+    "",
+    "Sender (untrusted metadata):",
+    "```json",
+    JSON.stringify({ label: "Bob" }, null, 2),
+    "```",
+  ].join("\n");
+
+  function resolveTurn(prompt: string, appendContext: string) {
+    const parts = resolveCurrentTurnPromptParts({
+      effectivePrompt: prompt,
+      transcriptPrompt: prompt,
+      modelPromptWithBuildContext: `${prompt}\n\n${appendContext}`,
+      promptBuildContext: { appendContext },
+      currentInboundContext: { text: INBOUND },
+    });
+    const carrier = buildRuntimeContextCustomMessage(parts.runtimeContext);
+    if (!carrier) {
+      throw new Error("expected runtime-context carrier");
+    }
+    return { parts, carrier: carrier as unknown as AgentMsg };
+  }
+
+  async function wireWithModelPromptTransform(
+    parts: ReturnType<typeof resolveCurrentTurnPromptParts>,
+    messages: AgentMsg[],
+  ) {
+    const session = { agent: {} as { transformContext?: TransformContext } };
+    const cleanup = installModelPromptTransform({
+      session,
+      transcriptPrompt: parts.promptForSession,
+      modelPrompt: parts.promptForModel,
+      prependContext: parts.inlinePromptBuildContext?.prependContext,
+      appendContext: parts.inlinePromptBuildContext?.appendContext,
+      shouldCapturePrompt: () => true,
+    });
+    try {
+      const transformed = session.agent.transformContext
+        ? await session.agent.transformContext(messages)
+        : messages;
+      return relocateCurrentRuntimeContextCarrierToTail(
+        normalizeMessagesForLlmBoundary(transformed, { timezone: TZ }),
+      ) as unknown as Array<Record<string, unknown>>;
+    } finally {
+      cleanup();
+    }
+  }
+
+  it("keeps the hook-decorated user turn byte-identical when it ages into history", async () => {
+    const hookN = "User is on page: Estimates\nIntegrations: procore=connected";
+    const hookN1 = "User is on page: Projects\nIntegrations: procore=syncing";
+    const turnN = resolveTurn("what does this mean?", hookN);
+    const turnN1 = resolveTurn("and then?", hookN1);
+
+    const wireN = await wireWithModelPromptTransform(turnN.parts, [
+      storedUserMsg("earlier", TS_TURN1 - 2000),
+      ASSISTANT_MSG,
+      turnN.carrier,
+      currentUserMsg(turnN.parts.promptForSession, TS_TURN2),
+    ]);
+    const wireN1 = await wireWithModelPromptTransform(turnN1.parts, [
+      storedUserMsg("earlier", TS_TURN1 - 2000),
+      ASSISTANT_MSG,
+      storedUserMsg(turnN.parts.promptForSession, TS_TURN2),
+      ASSISTANT_MSG,
+      turnN1.carrier,
+      currentUserMsg(turnN1.parts.promptForSession, TS_TURN2 + 60000),
+    ]);
+
+    const activeUser = wireN[wireN.length - 2];
+    expect(textOf(activeUser)).toBe(`${requiredTimestampPrefix(TS_TURN2)}what does this mean?`);
+    const agedUser = wireN1.find((m) => textOf(m)?.endsWith("what does this mean?"));
+    expect(JSON.stringify(agedUser)).toBe(JSON.stringify(activeUser));
+    expect(wireN1.slice(0, 3).map((m) => JSON.stringify(m))).toEqual(
+      wireN.slice(0, 3).map((m) => JSON.stringify(m)),
+    );
+
+    const tailN = wireN[wireN.length - 1];
+    expect(isCarrier(tailN)).toBe(true);
+    expect(textOf(tailN)).toContain("Conversation info (untrusted metadata):");
+    expect(textOf(tailN)).toContain(hookN);
+    expect(textOf(tailN)!.indexOf(hookN)).toBeGreaterThan(
+      textOf(tailN)!.indexOf("Sender (untrusted metadata):"),
+    );
+    expect(wireN.filter((m) => !isCarrier(m)).some((m) => textOf(m)?.includes(hookN))).toBe(false);
+
+    expect(wireN1.filter(isCarrier)).toHaveLength(1);
+    expect(isCarrier(wireN1[wireN1.length - 1])).toBe(true);
+    expect(JSON.stringify(wireN1)).not.toContain(hookN);
+    expect(textOf(wireN1[wireN1.length - 1])).toContain(hookN1);
   });
 });

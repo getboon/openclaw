@@ -2736,6 +2736,252 @@ describe("anthropic transport stream", () => {
     expect(toolResult.is_error).toBe(false);
   });
 
+  describe("runtime-context carrier", () => {
+    const carrierText = "OpenClaw runtime context\nSender: Ada\nUser is on page /projects";
+    const ephemeral = { type: "ephemeral" };
+
+    function carrierMessage(text = carrierText) {
+      return {
+        role: "user",
+        content: [{ type: "text", text }],
+        timestamp: 0,
+        runtimeContextCarrier: true,
+      };
+    }
+
+    function assistantToolCall(id: string) {
+      return {
+        role: "assistant",
+        provider: "anthropic",
+        api: "anthropic-messages",
+        model: "claude-sonnet-4-6",
+        stopReason: "toolUse",
+        timestamp: 0,
+        content: [{ type: "toolCall", id, name: "read", arguments: { path: "a.txt" } }],
+      };
+    }
+
+    function assistantText(text: string) {
+      return {
+        role: "assistant",
+        provider: "anthropic",
+        api: "anthropic-messages",
+        model: "claude-sonnet-4-6",
+        stopReason: "stop",
+        timestamp: 0,
+        content: [{ type: "text", text }],
+      };
+    }
+
+    function toolResult(id: string, text: string) {
+      return {
+        role: "toolResult",
+        toolCallId: id,
+        toolName: "read",
+        content: [{ type: "text", text }],
+        isError: false,
+        timestamp: 0,
+      };
+    }
+
+    async function serializeMessages(messages: unknown[]) {
+      await runTransportStream(
+        makeAnthropicTransportModel(),
+        { systemPrompt: "Follow policy.", messages } as AnthropicStreamContext,
+        { apiKey: "sk-ant-api", cacheRetention: "short" } as AnthropicStreamOptions,
+      );
+      return requireArray(latestAnthropicRequest().payload.messages, "messages") as Array<
+        Record<string, unknown>
+      >;
+    }
+
+    it("merges a carrier into the preceding user turn as a trailing uncached text block", async () => {
+      const messages = await serializeMessages([
+        { role: "user", content: [{ type: "text", text: "earlier question" }], timestamp: 0 },
+        assistantText("earlier answer"),
+        { role: "user", content: "What is 17*23?", timestamp: 0 },
+        carrierMessage(),
+      ]);
+
+      expect(messages).toEqual([
+        { role: "user", content: [{ type: "text", text: "earlier question" }] },
+        { role: "assistant", content: [{ type: "text", text: "earlier answer" }] },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "What is 17*23?", cache_control: ephemeral },
+            { type: "text", text: carrierText },
+          ],
+        },
+      ]);
+    });
+
+    it("merges a carrier into the preceding tool_result user turn", async () => {
+      const messages = await serializeMessages([
+        { role: "user", content: [{ type: "text", text: "Read a.txt" }], timestamp: 0 },
+        assistantToolCall("tool_1"),
+        toolResult("tool_1", "file body"),
+        carrierMessage(),
+      ]);
+
+      expect(messages).toHaveLength(3);
+      expect(messages[0]).toEqual({
+        role: "user",
+        content: [{ type: "text", text: "Read a.txt", cache_control: ephemeral }],
+      });
+      expect(messages[2]).toEqual({
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool_1",
+            content: "file body",
+            is_error: false,
+            cache_control: ephemeral,
+          },
+          { type: "text", text: carrierText },
+        ],
+      });
+    });
+
+    it.each([
+      {
+        name: "after an assistant turn",
+        history: [
+          { role: "user", content: [{ type: "text", text: "hello" }], timestamp: 0 },
+          assistantText("hi"),
+        ],
+      },
+      { name: "as the first message", history: [] },
+    ])("keeps a carrier as a separate uncached user turn $name", async ({ history }) => {
+      const messages = await serializeMessages([...history, carrierMessage()]);
+
+      expect(messages.at(-1)).toEqual({
+        role: "user",
+        content: [{ type: "text", text: carrierText }],
+      });
+      expect(messages).toHaveLength(history.length + 1);
+    });
+
+    type BlockPosition = { message: number; block: number };
+
+    function contentBlocks(message: Record<string, unknown> | undefined): unknown[] {
+      const content = message?.content;
+      return typeof content === "string" ? [{ type: "text", text: content }] : (content as []);
+    }
+
+    function lastMarker(messages: Array<Record<string, unknown>>): BlockPosition {
+      for (let message = messages.length - 1; message >= 0; message -= 1) {
+        const blocks = contentBlocks(messages[message]);
+        for (let block = blocks.length - 1; block >= 0; block -= 1) {
+          if (requireRecord(blocks[block], "block").cache_control !== undefined) {
+            return { message, block };
+          }
+        }
+      }
+      throw new Error("expected a cache marker");
+    }
+
+    function comparableBlocks(before: unknown, after: unknown): [string, string] {
+      const beforeRecord = requireRecord(before, "before block");
+      const afterRecord = requireRecord(after, "after block");
+      if (beforeRecord.cache_control !== undefined && afterRecord.cache_control !== undefined) {
+        return [JSON.stringify(beforeRecord), JSON.stringify(afterRecord)];
+      }
+      const { cache_control: _beforeMarker, ...beforeRest } = beforeRecord;
+      const { cache_control: _afterMarker, ...afterRest } = afterRecord;
+      return [JSON.stringify(beforeRest), JSON.stringify(afterRest)];
+    }
+
+    function expectCachedPrefixReused(
+      before: Array<Record<string, unknown>>,
+      after: Array<Record<string, unknown>>,
+    ) {
+      const marker = lastMarker(before);
+      for (let message = 0; message <= marker.message; message += 1) {
+        expect(after[message]?.role).toBe(before[message]?.role);
+        const beforeBlocks = contentBlocks(before[message]);
+        const afterBlocks = contentBlocks(after[message]);
+        const blockCount = message === marker.message ? marker.block + 1 : beforeBlocks.length;
+        for (let block = 0; block < blockCount; block += 1) {
+          const [beforeJson, afterJson] = comparableBlocks(beforeBlocks[block], afterBlocks[block]);
+          expect(afterJson).toBe(beforeJson);
+        }
+      }
+    }
+
+    function stripCarrierBlocks(messages: Array<Record<string, unknown>>) {
+      return messages.map((message) =>
+        Array.isArray(message.content)
+          ? {
+              ...message,
+              content: message.content.filter(
+                (block) => requireRecord(block, "block").text !== carrierText,
+              ),
+            }
+          : message,
+      );
+    }
+
+    it("keeps turn-N cache prefixes byte-stable across the tool loop and the next turn", async () => {
+      const history = [
+        { role: "user", content: [{ type: "text", text: "earlier question" }], timestamp: 0 },
+        assistantText("earlier answer"),
+      ];
+      const userN = {
+        role: "user",
+        content: [{ type: "text", text: "Read a.txt" }],
+        timestamp: 0,
+      };
+      const toolLoop = [assistantToolCall("tool_1"), toolResult("tool_1", "file body")];
+      const turnN1 = [
+        ...history,
+        userN,
+        ...toolLoop,
+        assistantText("a.txt says hello"),
+        { role: "user", content: [{ type: "text", text: "Thanks" }], timestamp: 0 },
+      ];
+
+      const turnNCall1 = await serializeMessages([...history, userN, carrierMessage()]);
+      const turnNCall2 = await serializeMessages([
+        ...history,
+        userN,
+        ...toolLoop,
+        carrierMessage(),
+      ]);
+      const turnN1Call1 = await serializeMessages([...turnN1, carrierMessage()]);
+
+      expect(lastMarker(turnNCall1)).toEqual({ message: 2, block: 0 });
+      expect(contentBlocks(turnNCall1[2])).toHaveLength(2);
+      expect(lastMarker(turnNCall2)).toEqual({ message: 4, block: 0 });
+      expect(contentBlocks(turnNCall2[2])).toEqual([
+        { type: "text", text: "Read a.txt", cache_control: ephemeral },
+      ]);
+      expect(contentBlocks(turnNCall2[4])).toHaveLength(2);
+      for (const request of [turnNCall1, turnNCall2, turnN1Call1]) {
+        const carrierBlocks = request.flatMap((message, index) =>
+          contentBlocks(message)
+            .map((block) => ({ index, block: requireRecord(block, "block") }))
+            .filter(({ block }) => block.text === carrierText),
+        );
+        expect(carrierBlocks).toEqual([
+          { index: request.length - 1, block: { type: "text", text: carrierText } },
+        ]);
+      }
+      expectCachedPrefixReused(turnNCall1, turnNCall2);
+      expectCachedPrefixReused(turnNCall2, turnN1Call1);
+
+      const noCarrier = [
+        await serializeMessages([...history, userN]),
+        await serializeMessages([...history, userN, ...toolLoop]),
+        await serializeMessages(turnN1),
+      ];
+      expect(stripCarrierBlocks(turnNCall1)).toEqual(noCarrier[0]);
+      expect(stripCarrierBlocks(turnNCall2)).toEqual(noCarrier[1]);
+      expect(stripCarrierBlocks(turnN1Call1)).toEqual(noCarrier[2]);
+    });
+  });
+
   it("cancels stalled SSE body reads when the abort signal fires mid-stream", async () => {
     const controller = new AbortController();
     const abortReason = new Error("anthropic test abort");

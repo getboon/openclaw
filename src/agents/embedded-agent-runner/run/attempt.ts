@@ -524,9 +524,8 @@ import {
 } from "./preemptive-compaction.js";
 import { resolveRunPromptPolicy } from "./prompt-policy.js";
 import {
-  buildCurrentInboundPrompt,
   buildRuntimeContextCustomMessage,
-  resolveRuntimeContextPromptParts,
+  resolveCurrentTurnPromptParts,
 } from "./runtime-context-prompt.js";
 import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
 
@@ -4059,8 +4058,6 @@ export async function runEmbeddedAttempt(
         const promptBeforePromptBuildHooks = effectivePrompt;
         const promptBuildPrependContext = hookResult?.prependContext;
         const promptBuildAppendContext = hookResult?.appendContext;
-        const hasPromptBuildContext =
-          Boolean(promptBuildPrependContext?.trim()) || Boolean(promptBuildAppendContext?.trim());
         {
           if (hookResult?.prependContext) {
             effectivePrompt = `${hookResult.prependContext}\n\n${effectivePrompt}`;
@@ -4304,45 +4301,19 @@ export async function runEmbeddedAttempt(
             );
           }
 
-          const promptSubmission = resolveRuntimeContextPromptParts({
+          const currentTurnPrompt = resolveCurrentTurnPromptParts({
             effectivePrompt: promptForRuntimeContextSplit,
             transcriptPrompt: transcriptPromptForRuntimeSplit,
-            modelPrompt: hasPromptBuildContext
-              ? promptForModelBeforeRuntimeContextSplit
-              : undefined,
-            emptyTranscriptMode: params.suppressNextUserMessagePersistence
-              ? "model-prompt"
-              : "runtime-event",
+            modelPromptWithBuildContext: promptForModelBeforeRuntimeContextSplit,
+            promptBuildContext: {
+              prependContext: promptBuildPrependContext,
+              appendContext: promptBuildAppendContext,
+            },
+            currentInboundContext: params.currentInboundContext,
+            suppressUserMessagePersistence: params.suppressNextUserMessagePersistence,
           });
-          const isRuntimeOnlyTurn = promptSubmission.runtimeOnly === true;
-          const currentInboundContextText = isRuntimeOnlyTurn
-            ? undefined
-            : params.currentInboundContext?.text?.trim() || undefined;
-          // Normal user turns keep the user prompt BARE and route current-turn
-          // inbound metadata into the runtime-context carrier (relocated after the
-          // active user turn on the wire), so the persisted/replayed user message
-          // is byte-identical whether active or historical — the cache-stability
-          // fix. Runtime-only turns (room events, etc.) have no bare user turn to
-          // protect, so their inbound context stays inline exactly as before. That
-          // inline path stays byte-stable because a runtime-only turn only ever
-          // carries room-event/system context, which is NOT strip-eligible: the
-          // historical strip only removes the `buildInboundUserContextPrefix`
-          // blocks (Conversation info / Reply target / Sender / …), and those are
-          // produced only for non-room turns — which always have a non-empty body
-          // and so are never runtime-only. So inline-active and inline-historical
-          // serialize identically (verified in the cache-stability tests).
-          const promptForSession = isRuntimeOnlyTurn
-            ? buildCurrentInboundPrompt({
-                context: params.currentInboundContext,
-                prompt: promptSubmission.prompt,
-              })
-            : promptSubmission.prompt;
-          const promptForModel = isRuntimeOnlyTurn
-            ? buildCurrentInboundPrompt({
-                context: params.currentInboundContext,
-                prompt: promptSubmission.modelPrompt ?? promptSubmission.prompt,
-              })
-            : (promptSubmission.modelPrompt ?? promptSubmission.prompt);
+          const promptSubmission = currentTurnPrompt.submission;
+          const { promptForSession, promptForModel } = currentTurnPrompt;
           currentUserTimestampOverride =
             !isRawModelRun && typeof preparedUserTurnMessage?.timestamp === "number"
               ? {
@@ -4361,11 +4332,7 @@ export async function runEmbeddedAttempt(
               setActiveSessionSystemPrompt(runtimeSystemPrompt);
             }
           }
-          const runtimeContextForHook = isRuntimeOnlyTurn
-            ? undefined
-            : [currentInboundContextText, promptSubmission.runtimeContext?.trim()]
-                .filter((value): value is string => Boolean(value))
-                .join("\n\n") || undefined;
+          const runtimeContextForHook = currentTurnPrompt.runtimeContext;
           const runtimeContextMessageForCurrentTurn =
             buildRuntimeContextCustomMessage(runtimeContextForHook);
           const messagesForCurrentPrompt = runtimeContextMessageForCurrentTurn
@@ -4902,8 +4869,8 @@ export async function runEmbeddedAttempt(
               session: activeSession,
               transcriptPrompt: promptForSession,
               modelPrompt: promptForModel,
-              prependContext: promptBuildPrependContext,
-              appendContext: promptBuildAppendContext,
+              prependContext: currentTurnPrompt.inlinePromptBuildContext?.prependContext,
+              appendContext: currentTurnPrompt.inlinePromptBuildContext?.appendContext,
               shouldCapturePrompt: () => captureCurrentPromptForModel,
             });
             const armModelPromptTransform = (submitted: boolean) => {

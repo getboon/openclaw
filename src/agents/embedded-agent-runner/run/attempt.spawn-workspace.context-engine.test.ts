@@ -1172,7 +1172,7 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     });
   });
 
-  it("keeps before_prompt_build context in the model prompt and out of transcript messages", async () => {
+  it("routes before_prompt_build context into the runtime-context carrier and out of transcript messages", async () => {
     const runBeforePromptBuild = vi.fn(async () => ({
       prependContext: "dynamic hook context",
       appendContext: "dynamic hook tail",
@@ -1226,15 +1226,24 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
 
     expect(seen.prompt).toBe("visible ask");
     expect(result.finalPromptText).toBe("visible ask");
-    expect(JSON.stringify(seen.modelMessages)).toContain("dynamic hook context");
-    expect(JSON.stringify(seen.modelMessages)).toContain("dynamic hook tail");
-    expect(JSON.stringify(seen.preprocessedModelMessages)).toContain("dynamic hook context");
-    expect(JSON.stringify(seen.preprocessedModelMessages)).toContain("session preprocessed");
-    expect(JSON.stringify(seen.preprocessedModelMessages)).toContain("dynamic hook tail");
+    // Carrier turns install no model prompt transform, so the active user message stays bare.
+    expect(seen.modelMessages).toBeUndefined();
+    expect(seen.preprocessedModelMessages).toBeUndefined();
     expect(seen.systemPrompt).not.toContain("dynamic hook context");
     expect(seen.systemPrompt).not.toContain("dynamic hook tail");
-    expect(JSON.stringify(seen.messages)).not.toContain("dynamic hook context");
-    expect(JSON.stringify(seen.messages)).not.toContain("dynamic hook tail");
+    const runtimeContext = findRecord(
+      requireRecords(seen.messages, "seen messages"),
+      (message) => message.customType === "openclaw.runtime-context",
+      "runtime context message",
+    );
+    expect(String(runtimeContext.content)).toContain("dynamic hook context\n\ndynamic hook tail");
+    expect(
+      JSON.stringify(
+        requireRecords(seen.messages, "seen messages").filter(
+          (message) => message.customType !== "openclaw.runtime-context",
+        ),
+      ),
+    ).not.toContain("dynamic hook");
     expect(JSON.stringify(result.messagesSnapshot)).not.toContain("dynamic hook context");
     expect(JSON.stringify(result.messagesSnapshot)).not.toContain("dynamic hook tail");
   });
@@ -1287,10 +1296,15 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     expect(seen.prompt).not.toContain("dynamic hook context");
     expect(seen.prompt).not.toContain("dynamic hook tail");
     expect(result.finalPromptText).toBe(seen.prompt);
-    expect(JSON.stringify(seen.modelMessages)).toContain("dynamic hook context");
-    expect(JSON.stringify(seen.modelMessages)).toContain("orphaned ask");
-    expect(JSON.stringify(seen.modelMessages)).toContain("dynamic hook tail");
-    expect(JSON.stringify(seen.messages)).not.toContain("dynamic hook context");
+    expect(seen.modelMessages).toBeUndefined();
+    const runtimeContext = findRecord(
+      requireRecords(seen.messages, "seen messages"),
+      (message) => message.customType === "openclaw.runtime-context",
+      "runtime context message",
+    );
+    expect(String(runtimeContext.content)).toContain("dynamic hook context\n\ndynamic hook tail");
+    expect(String(runtimeContext.content)).not.toContain("orphaned ask");
+    expect(JSON.stringify(result.messagesSnapshot)).not.toContain("dynamic hook context");
     expect(JSON.stringify(result.messagesSnapshot)).not.toContain("dynamic hook tail");
     expect(hoisted.sessionManager.branch).toHaveBeenCalledWith("parent-leaf");
   });
@@ -1603,7 +1617,7 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     expect(promptSubmitted?.data?.prompt).not.toContain("secret runtime context");
   });
 
-  it("keeps hook prompt context visible while hiding inter-session provenance", async () => {
+  it("carries hook prompt context with hidden inter-session provenance", async () => {
     const runBeforePromptBuild = vi.fn(async () => ({
       prependContext: "dynamic hook context",
       appendContext: "dynamic hook tail",
@@ -1662,10 +1676,7 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     expect(result.finalPromptText).toBe("visible ask");
     expect(seen.prompt).not.toContain("[Inter-session message]");
     expect(seen.prompt).not.toContain("secret runtime context");
-    expect(JSON.stringify(seen.modelMessages)).toContain("dynamic hook context");
-    expect(JSON.stringify(seen.modelMessages)).toContain("dynamic hook tail");
-    expect(JSON.stringify(seen.modelMessages)).not.toContain("[Inter-session message]");
-    expect(JSON.stringify(seen.modelMessages)).not.toContain("secret runtime context");
+    expect(seen.modelMessages).toBeUndefined();
     const runtimeContext = findRecord(
       requireRecords(seen.messages, "seen messages"),
       (message) => message.customType === "openclaw.runtime-context",
@@ -1676,8 +1687,9 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     expect(runtimeContext.content).toContain("isUser=false");
     expect(runtimeContext.content).not.toContain("visible ask");
     expect(runtimeContext.content).toContain("secret runtime context");
-    expect(runtimeContext.content).not.toContain("dynamic hook context");
-    expect(runtimeContext.content).not.toContain("dynamic hook tail");
+    expect(String(runtimeContext.content)).toContain(
+      "secret runtime context\n<<<END_OPENCLAW_INTERNAL_CONTEXT>>>\n\ndynamic hook context\n\ndynamic hook tail",
+    );
     expect(JSON.stringify(result.messagesSnapshot)).not.toContain("dynamic hook context");
     expect(JSON.stringify(result.messagesSnapshot)).not.toContain("dynamic hook tail");
   });

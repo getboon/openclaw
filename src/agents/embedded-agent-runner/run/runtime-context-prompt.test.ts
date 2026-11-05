@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCurrentInboundPrompt,
   buildRuntimeContextCustomMessage,
+  resolveCurrentTurnPromptParts,
   resolveRuntimeContextPromptParts,
 } from "./runtime-context-prompt.js";
 
@@ -330,6 +331,86 @@ describe("runtime context prompt submission", () => {
       display: false,
       details: { source: "openclaw-runtime-context" },
     });
+  });
+
+  it("moves hook prompt context of persisted user turns into the runtime-context carrier", () => {
+    const effectivePrompt = [
+      "visible ask",
+      "",
+      "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>",
+      "secret runtime context",
+      "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>",
+    ].join("\n");
+    const parts = resolveCurrentTurnPromptParts({
+      effectivePrompt,
+      transcriptPrompt: "visible ask",
+      modelPromptWithBuildContext: `dynamic hook context\n\n${effectivePrompt}\n\ndynamic hook tail`,
+      promptBuildContext: {
+        prependContext: "  dynamic hook context  ",
+        appendContext: "dynamic hook tail\n",
+      },
+      currentInboundContext: { text: "Conversation info (untrusted metadata):\nsender=Bob" },
+    });
+
+    expect(parts.promptForSession).toBe("visible ask");
+    expect(parts.promptForModel).toBe("visible ask");
+    expect(parts.inlinePromptBuildContext).toBeUndefined();
+    expect(parts.runtimeContext).toBe(
+      [
+        "Conversation info (untrusted metadata):\nsender=Bob",
+        "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>\nsecret runtime context\n<<<END_OPENCLAW_INTERNAL_CONTEXT>>>",
+        "dynamic hook context",
+        "dynamic hook tail",
+      ].join("\n\n"),
+    );
+    expect(parts.submission.runtimeContext).not.toContain("dynamic hook");
+  });
+
+  it("keeps runtime-only hook context inline", () => {
+    const promptBuildContext = {
+      prependContext: "dynamic hook context",
+      appendContext: "dynamic hook tail",
+    };
+    const parts = resolveCurrentTurnPromptParts({
+      effectivePrompt: "internal event",
+      transcriptPrompt: "",
+      modelPromptWithBuildContext: "dynamic hook context\n\ninternal event\n\ndynamic hook tail",
+      promptBuildContext,
+      currentInboundContext: { text: "Reply target:\nAlice" },
+    });
+
+    expect(parts.submission.runtimeOnly).toBe(true);
+    expect(parts.promptForSession).toBe(
+      "Reply target:\nAlice\n\nContinue the OpenClaw runtime event.",
+    );
+    expect(parts.promptForModel).toBe(
+      "Reply target:\nAlice\n\ndynamic hook context\n\ninternal event\n\ndynamic hook tail",
+    );
+    expect(parts.runtimeContext).toBeUndefined();
+    expect(parts.inlinePromptBuildContext).toBe(promptBuildContext);
+  });
+
+  it("keeps hook context inline when user message persistence is suppressed", () => {
+    const promptBuildContext = {
+      prependContext: "dynamic hook context",
+      appendContext: "dynamic hook tail",
+    };
+    const parts = resolveCurrentTurnPromptParts({
+      effectivePrompt: "[OpenClaw room event]",
+      transcriptPrompt: "",
+      modelPromptWithBuildContext:
+        "dynamic hook context\n\n[OpenClaw room event]\n\ndynamic hook tail",
+      promptBuildContext,
+      currentInboundContext: { text: "inbound_event_kind: room_event" },
+      suppressUserMessagePersistence: true,
+    });
+
+    expect(parts.promptForSession).toBe("[OpenClaw room event]");
+    expect(parts.promptForModel).toBe(
+      "dynamic hook context\n\n[OpenClaw room event]\n\ndynamic hook tail",
+    );
+    expect(parts.runtimeContext).toBe("inbound_event_kind: room_event");
+    expect(parts.inlinePromptBuildContext).toBe(promptBuildContext);
   });
 
   it("labels runtime-only events as system context", () => {
