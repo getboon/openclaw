@@ -389,10 +389,11 @@ describe("archive utils", () => {
 
   it("rejects zip archives whose actual central directory exceeds the entry limit before parsing", async () => {
     await withArchiveCase("zip", async ({ archivePath, extractDir }) => {
+      // The fixture carries valid local records (upstream v2026.9.4), so fs-safe 0.8's
+      // metadata checks pass and the physical central-directory scan must trip the limit.
       const archiveBytes = createZipCentralDirectoryArchive({
         actualEntryCount: 2,
         declaredEntryCount: 1,
-        declaredCentralDirectorySize: 0,
       });
       await fs.writeFile(archivePath, archiveBytes);
 
@@ -403,10 +404,7 @@ describe("archive utils", () => {
           timeoutMs: ARCHIVE_EXTRACT_TIMEOUT_MS,
           limits: { maxEntries: 1 },
         }),
-        // fs-safe >= 0.5 rejects the under-declared central directory as inconsistent ZIP
-        // metadata before the entry-limit check; 0.3.0 reported the entry limit. Either way the
-        // archive must be refused before any entry is parsed or written.
-      ).rejects.toThrow(/archive entry count exceeds limit|invalid ZIP metadata/);
+      ).rejects.toThrow("archive entry count exceeds limit");
       await expect(fs.readdir(extractDir)).resolves.toEqual([]);
     });
   });
