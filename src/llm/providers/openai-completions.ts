@@ -627,7 +627,11 @@ function buildParams(
   cacheRetention: CacheRetention = resolveCacheRetention(options?.cacheRetention),
 ) {
   const cacheControl = getCompatCacheControl(compat, cacheRetention);
+  // Transient runtime-context carrier indexes skip cache anchoring so the breakpoint
+  // stays on the last stable user turn; conversion-to-policy must not splice messages.
+  const cacheOptOutIndexes = new Set<number>();
   const messages = convertMessages(model, context, compat, {
+    cacheOptOutIndexes,
     preserveSystemPromptCacheBoundary: cacheControl !== undefined,
   });
 
@@ -708,7 +712,7 @@ function buildParams(
   }
 
   if (cacheControl) {
-    applyAnthropicCacheControl(messages, params.tools, cacheControl);
+    applyAnthropicCacheControl(messages, params.tools, cacheControl, cacheOptOutIndexes);
   }
 
   if (options?.toolChoice) {
@@ -815,20 +819,15 @@ function getCompatCacheControl(
   return { type: "ephemeral", ...(ttl ? { ttl } : {}) };
 }
 
-// Params built from transient runtime-context carrier user messages — excluded
-// from cache_control breakpoint selection so anchoring stays on the last stable
-// user turn, not the volatile carrier appended after it. Keyed by object
-// identity so concurrent conversions never collide, and never serialized.
-const runtimeContextCarrierParams = new WeakSet<object>();
-
 function applyAnthropicCacheControl(
   messages: ChatCompletionMessageParam[],
   tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined,
   cacheControl: OpenAICompatCacheControl,
+  cacheOptOutIndexes: ReadonlySet<number>,
 ): void {
   addCacheControlToSystemPrompt(messages, cacheControl);
   addCacheControlToLastTool(tools, cacheControl);
-  addCacheControlToLastConversationMessage(messages, cacheControl);
+  addCacheControlToLastConversationMessage(messages, cacheControl, cacheOptOutIndexes);
 }
 
 function addCacheControlToSystemPrompt(
@@ -846,10 +845,11 @@ function addCacheControlToSystemPrompt(
 function addCacheControlToLastConversationMessage(
   messages: ChatCompletionMessageParam[],
   cacheControl: OpenAICompatCacheControl,
+  cacheOptOutIndexes: ReadonlySet<number>,
 ): void {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
-    if (runtimeContextCarrierParams.has(message)) {
+    if (cacheOptOutIndexes.has(i)) {
       continue;
     }
     if (message.role === "user" || message.role === "assistant") {
@@ -948,7 +948,10 @@ export function convertMessages(
   model: Model<"openai-completions">,
   context: Context,
   compat: ResolvedOpenAICompletionsCompat,
-  options: { preserveSystemPromptCacheBoundary?: boolean } = {},
+  options: {
+    cacheOptOutIndexes?: Set<number>;
+    preserveSystemPromptCacheBoundary?: boolean;
+  } = {},
 ): ChatCompletionMessageParam[] {
   const params: ChatCompletionMessageParam[] = [];
 
@@ -1010,7 +1013,7 @@ export function convertMessages(
           content: sanitizeSurrogates(msg.content),
         };
         if (isRuntimeContextCarrier) {
-          runtimeContextCarrierParams.add(userParam);
+          options.cacheOptOutIndexes?.add(params.length);
         }
         params.push(userParam);
       } else {
@@ -1038,7 +1041,7 @@ export function convertMessages(
           content,
         };
         if (isRuntimeContextCarrier) {
-          runtimeContextCarrierParams.add(userParam);
+          options.cacheOptOutIndexes?.add(params.length);
         }
         params.push(userParam);
       }
