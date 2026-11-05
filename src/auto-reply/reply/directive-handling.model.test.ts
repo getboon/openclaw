@@ -349,6 +349,12 @@ vi.mock("./queue.js", () => ({
 }));
 
 const TEST_AGENT_DIR = "/tmp/agent";
+// fs-safe 0.8 pins and chmods the session store directory on write, so the
+// store lives in a private temp dir rather than directly under /tmp.
+const TEST_SESSION_STORE_PATH = path.join(
+  fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-directive-model-")),
+  "sessions.json",
+);
 const OPENAI_DATE_PROFILE_ID = "20251001";
 
 type ApiKeyProfile = { type: "api_key"; provider: string; key: string };
@@ -559,7 +565,7 @@ async function persistInternalOperatorWriteDirective(
     sessionEntry,
     sessionStore,
     sessionKey: "agent:main:main",
-    storePath: "/tmp/sessions.json",
+    storePath: TEST_SESSION_STORE_PATH,
     elevatedEnabled: true,
     elevatedAllowed: true,
     defaultProvider: "anthropic",
@@ -1449,7 +1455,7 @@ describe("handleDirectiveOnly model persist behavior (fixes #1435)", () => {
     { provider: "openai", id: "gpt-4o", name: "GPT-4o" },
   ];
   const sessionKey = "agent:main:dm:1";
-  const storePath = "/tmp/sessions.json";
+  const storePath = TEST_SESSION_STORE_PATH;
 
   type HandleParams = Parameters<typeof handleDirectiveOnly>[0];
 

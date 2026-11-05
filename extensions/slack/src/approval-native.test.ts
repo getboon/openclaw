@@ -1,4 +1,5 @@
 // Slack tests cover approval native plugin behavior.
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
@@ -25,7 +26,12 @@ function buildConfig(
   } as OpenClawConfig;
 }
 
-const STORE_PATH = path.join(os.tmpdir(), "openclaw-slack-approval-native-test.json");
+// fs-safe 0.8 pins and chmods the store directory, so keep the store in a
+// private temp dir rather than directly in the shared OS temp root.
+const STORE_PATH = path.join(
+  fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-slack-approval-native-")),
+  "sessions.json",
+);
 
 async function writeStore(store: Parameters<typeof saveSessionStore>[1]) {
   await saveSessionStore(STORE_PATH, store, { skipMaintenance: true });

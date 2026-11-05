@@ -125,9 +125,11 @@ vi.mock("openclaw/plugin-sdk/models-provider-runtime", () => ({
   buildModelsProviderData: buildModelsProviderDataMock,
 }));
 
+// fs-safe 0.8 pins and chmods the store directory, so keep the store in a
+// private temp dir rather than directly in the shared OS temp root.
 const STORE_PATH = path.join(
-  os.tmpdir(),
-  `openclaw-discord-think-autocomplete-${process.pid}.json`,
+  fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-discord-think-autocomplete-")),
+  "sessions.json",
 );
 const SESSION_KEY = "agent:main:main";
 let findCommandByNativeName: typeof import("openclaw/plugin-sdk/command-auth-native").findCommandByNativeName;

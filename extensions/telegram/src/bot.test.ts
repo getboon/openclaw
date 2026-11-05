@@ -1,4 +1,6 @@
+import { mkdtempSync } from "node:fs";
 import { rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import {
@@ -45,6 +47,10 @@ const {
   telegramBotRuntimeForTest,
   wasSentByBot,
 } = await import("./bot.create-telegram-bot.test-harness.js");
+
+// fs-safe 0.8 pins and chmods the session store directory on write, so keep
+// per-test stores in a private dir instead of directly under /tmp.
+const TELEGRAM_TEST_STORE_DIR = mkdtempSync(path.join(os.tmpdir(), "openclaw-telegram-bot-test-"));
 
 let createTelegramBotBase: typeof import("./bot-core.js").createTelegramBotCore;
 let setTelegramBotRuntimeForTest: typeof import("./bot-core.js").setTelegramBotRuntimeForTest;
@@ -317,7 +323,7 @@ describe("createTelegramBot", () => {
     replySpy.mockClear();
     editMessageTextSpy.mockClear();
 
-    const storePath = `/tmp/openclaw-telegram-callback-authz-${process.pid}-${Date.now()}.json`;
+    const storePath = `${TELEGRAM_TEST_STORE_DIR}/openclaw-telegram-callback-authz-${process.pid}-${Date.now()}.json`;
 
     await rm(storePath, { force: true });
     try {
@@ -385,7 +391,7 @@ describe("createTelegramBot", () => {
     replySpy.mockClear();
     editMessageTextSpy.mockClear();
 
-    const storePath = `/tmp/openclaw-telegram-group-model-authz-${process.pid}-${Date.now()}.json`;
+    const storePath = `${TELEGRAM_TEST_STORE_DIR}/openclaw-telegram-group-model-authz-${process.pid}-${Date.now()}.json`;
 
     await rm(storePath, { force: true });
     try {
@@ -458,7 +464,7 @@ describe("createTelegramBot", () => {
     replySpy.mockClear();
     editMessageTextSpy.mockClear();
 
-    const storePath = `/tmp/openclaw-telegram-group-model-authz-runtime-${process.pid}-${Date.now()}.json`;
+    const storePath = `${TELEGRAM_TEST_STORE_DIR}/openclaw-telegram-group-model-authz-runtime-${process.pid}-${Date.now()}.json`;
 
     await rm(storePath, { force: true });
     try {
@@ -1329,7 +1335,7 @@ describe("createTelegramBot", () => {
     editMessageTextSpy.mockClear();
 
     const modelId = "us.anthropic.claude-3-5-sonnet-20240620-v1:0";
-    const storePath = `/tmp/openclaw-telegram-model-compact-${process.pid}-${Date.now()}.json`;
+    const storePath = `${TELEGRAM_TEST_STORE_DIR}/openclaw-telegram-model-compact-${process.pid}-${Date.now()}.json`;
     const config: OpenClawConfig = {
       agents: {
         defaults: {
@@ -1399,7 +1405,7 @@ describe("createTelegramBot", () => {
     replySpy.mockClear();
     editMessageTextSpy.mockClear();
 
-    const storePath = `/tmp/openclaw-telegram-model-display-names-${process.pid}-${Date.now()}.json`;
+    const storePath = `${TELEGRAM_TEST_STORE_DIR}/openclaw-telegram-model-display-names-${process.pid}-${Date.now()}.json`;
     const buildModelsProviderDataMock =
       telegramBotDepsForTest.buildModelsProviderData as unknown as ReturnType<typeof vi.fn>;
     buildModelsProviderDataMock.mockResolvedValueOnce({
@@ -1485,7 +1491,7 @@ describe("createTelegramBot", () => {
     replySpy.mockClear();
     editMessageTextSpy.mockClear();
 
-    const storePath = `/tmp/openclaw-telegram-model-default-${process.pid}-${Date.now()}.json`;
+    const storePath = `${TELEGRAM_TEST_STORE_DIR}/openclaw-telegram-model-default-${process.pid}-${Date.now()}.json`;
     const config: OpenClawConfig = {
       agents: {
         defaults: {
@@ -1558,7 +1564,7 @@ describe("createTelegramBot", () => {
     replySpy.mockClear();
     editMessageTextSpy.mockClear();
 
-    const storePath = `/tmp/openclaw-telegram-model-html-${process.pid}-${Date.now()}.json`;
+    const storePath = `${TELEGRAM_TEST_STORE_DIR}/openclaw-telegram-model-html-${process.pid}-${Date.now()}.json`;
 
     await rm(storePath, { force: true });
     try {
@@ -1642,7 +1648,7 @@ describe("createTelegramBot", () => {
     replySpy.mockClear();
     editMessageTextSpy.mockClear();
 
-    const storePath = `/tmp/openclaw-telegram-model-fresh-cfg-${process.pid}-${Date.now()}.json`;
+    const storePath = `${TELEGRAM_TEST_STORE_DIR}/openclaw-telegram-model-fresh-cfg-${process.pid}-${Date.now()}.json`;
 
     await rm(storePath, { force: true });
     try {
@@ -2086,7 +2092,7 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     replySpy.mockClear();
 
-    const storePath = `/tmp/openclaw-telegram-dm-media-context-${process.pid}-${Date.now()}.json`;
+    const storePath = `${TELEGRAM_TEST_STORE_DIR}/openclaw-telegram-dm-media-context-${process.pid}-${Date.now()}.json`;
     const config = {
       channels: {
         telegram: {
@@ -2174,7 +2180,7 @@ describe("createTelegramBot", () => {
     onSpy.mockClear();
     replySpy.mockClear();
 
-    const storePath = `/tmp/openclaw-telegram-dm-reset-context-${process.pid}-${Date.now()}.json`;
+    const storePath = `${TELEGRAM_TEST_STORE_DIR}/openclaw-telegram-dm-reset-context-${process.pid}-${Date.now()}.json`;
     const config = {
       channels: {
         telegram: {
