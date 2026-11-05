@@ -1,4 +1,5 @@
 // Covers descriptor-pinned tightening of OpenClaw-owned private directories.
+import fsSync from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,7 +16,7 @@ afterEach(async () => {
 });
 
 async function modeOf(dir: string): Promise<number> {
-  return (await fsPromises.stat(dir)).mode & 0o777;
+  return (await fsPromises.stat(dir)).mode & 0o7777;
 }
 
 describe("tightenPrivateDirChain", () => {
@@ -32,6 +33,15 @@ describe("tightenPrivateDirChain", () => {
     expect(await modeOf(root)).toBe(0o700);
     expect(await modeOf(path.join(root, "agents"))).toBe(0o700);
     expect(await modeOf(nested)).toBe(0o700);
+  });
+
+  posixOnly("clears special bits so a sticky 01700 directory becomes exactly 0700", async () => {
+    const root = await createTempDir();
+    await fsPromises.chmod(root, 0o1700);
+
+    await tightenPrivateDirChain(root, root, 0o700);
+
+    expect(await modeOf(root)).toBe(0o700);
   });
 
   posixOnly("stops at a missing component so fs-safe creates it at the private mode", async () => {
@@ -74,6 +84,32 @@ describe("tightenPrivateDirRootSync", () => {
     tightenPrivateDirRootSync(root, 0o700);
 
     expect(await modeOf(root)).toBe(0o700);
+  });
+
+  posixOnly("clears special bits so a sticky 01700 root becomes exactly 0700", async () => {
+    const root = await createTempDir();
+    await fsPromises.chmod(root, 0o1700);
+
+    tightenPrivateDirRootSync(root, 0o700);
+
+    expect(await modeOf(root)).toBe(0o700);
+  });
+
+  posixOnly("surfaces a failed chmod on an owned root instead of swallowing it", async () => {
+    const root = await createTempDir();
+    await fsPromises.chmod(root, 0o775);
+    vi.spyOn(fsSync, "fchmodSync").mockImplementation(() => {
+      throw Object.assign(new Error("EPERM: operation not permitted, fchmod"), { code: "EPERM" });
+    });
+
+    expect(() => tightenPrivateDirRootSync(root, 0o700)).toThrow(/EPERM/);
+    expect(await modeOf(root)).toBe(0o775);
+  });
+
+  posixOnly("skips a missing root for fs-safe to create", () => {
+    expect(() =>
+      tightenPrivateDirRootSync(path.join("/nonexistent-openclaw-root", "missing"), 0o700),
+    ).not.toThrow();
   });
 
   posixOnly("leaves a root owned by another user for fs-safe to reject on write", async () => {

@@ -1,26 +1,18 @@
-// Shared directory-permission tightening for OpenClaw-owned private roots.
-// fs-safe 0.8 no longer repairs existing directory modes; these helpers keep
-// OpenClaw's documented behavior of tightening its own directories before
-// writing secrets. Every component is opened no-follow and chmodded through
-// the pinned descriptor, so a swapped or symlinked directory is never
-// mutated — fs-safe rejects those itself.
-//
-// Residual bound: Node has no dirfd-relative open, so traversal between
-// components is by absolute pathname and an already-visited ancestor replaced
-// mid-walk by a same-principal process can redirect a later component open.
-// That actor already holds write access to the containing directory tree, so
-// no privilege boundary is crossed; the final secret write is still validated
-// by fs-safe against the real path.
+// Tightens OpenClaw-owned private directories before secret writes. Only
+// directories owned by the current user are chmodded, each through a no-follow
+// descriptor; fs-safe rejects symlinked, swapped, or foreign-owned paths itself.
 import fsSync, { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
 const OPEN_DIR_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_DIRECTORY;
+// Full POSIX permission bits, including setuid/setgid/sticky: fs-safe compares
+// these too, so a 02700 directory is not "already private".
+const PERMISSION_BITS = 0o7777;
 
-// Boon fork: only the directory owner may chmod it. A drifted directory that
-// belongs to someone else is never tightened here; it fails closed with a
-// message that says what to fix instead of a bare EPERM (secret writes) or is
-// left for fs-safe to reject on write (store factories, which also serve reads).
+// Only the directory owner may chmod it. A foreign-owned drifted directory fails
+// closed with an actionable message (secret writes) or is left for fs-safe to
+// reject on write (store factories, which also serve reads).
 function isOwnedByCurrentUser(stat: { uid: number }): boolean {
   const euid = process.geteuid?.();
   return euid === undefined || stat.uid === euid;
@@ -66,7 +58,7 @@ export async function tightenPrivateDirChain(
     }
     try {
       const stat = await handle.stat();
-      const actualMode = stat.mode & 0o777;
+      const actualMode = stat.mode & PERMISSION_BITS;
       if (actualMode !== mode) {
         if (!isOwnedByCurrentUser(stat)) {
           throw notOwnedError(dir, actualMode, stat.uid, mode);
@@ -79,27 +71,31 @@ export async function tightenPrivateDirChain(
   }
 }
 
-/** Tighten a single existing directory root. */
+/**
+ * Tighten a single existing directory root. Missing, symlinked, or
+ * non-directory roots are skipped (fs-safe creates or rejects them), as are
+ * roots owned by another user; a failed chmod on an owned root throws.
+ */
 export function tightenPrivateDirRootSync(rootDir: string, mode: number): void {
   if (process.platform === "win32") {
     return;
   }
-  let fd: number | undefined;
+  let fd: number;
   try {
     fd = fsSync.openSync(rootDir, OPEN_DIR_FLAGS);
+  } catch {
+    return;
+  }
+  try {
     const stat = fsSync.fstatSync(fd);
-    if ((stat.mode & 0o777) !== mode && isOwnedByCurrentUser(stat)) {
+    if ((stat.mode & PERMISSION_BITS) !== mode && isOwnedByCurrentUser(stat)) {
       fsSync.fchmodSync(fd, mode);
     }
-  } catch {
-    // Missing, symlinked, or non-directory roots are created or rejected by fs-safe.
   } finally {
-    if (fd !== undefined) {
-      try {
-        fsSync.closeSync(fd);
-      } catch {
-        // Best-effort close; the descriptor carries no further state.
-      }
+    try {
+      fsSync.closeSync(fd);
+    } catch {
+      // Best-effort close; the descriptor carries no further state.
     }
   }
 }
