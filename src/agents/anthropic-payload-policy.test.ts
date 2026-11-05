@@ -82,7 +82,7 @@ describe("anthropic payload policy", () => {
       ],
     };
 
-    applyAnthropicPayloadPolicyToParams(payload, policy);
+    applyAnthropicPayloadPolicyToParams(payload, policy, new Set());
 
     expect(payload.service_tier).toBe("standard_only");
     expect(payload.system).toEqual([
@@ -105,6 +105,119 @@ describe("anthropic payload policy", () => {
         },
       ],
     });
+  });
+
+  it("anchors the cache marker on the last stable user turn, skipping a trailing runtime-context carrier", () => {
+    const policy = resolveAnthropicPayloadPolicy({
+      provider: "anthropic",
+      api: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com/v1",
+      cacheRetention: "long",
+      enableCacheControl: true,
+    });
+    const stableUser = { role: "user", content: [{ type: "text", text: "stable question" }] };
+    const carrier = { role: "user", content: "volatile current-turn metadata" };
+    const payload: TestPayload = {
+      system: [{ type: "text", text: "system" }],
+      messages: [stableUser, carrier],
+    };
+
+    applyAnthropicPayloadPolicyToParams(payload, policy, new Set([1]));
+
+    // Deepest breakpoint anchors on the stable user turn...
+    expect(payload.messages[0]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "stable question", cache_control: { type: "ephemeral", ttl: "1h" } },
+      ],
+    });
+    // ...and NOT on the trailing volatile carrier (left uncached as a plain string).
+    expect(payload.messages[1]).toEqual({
+      role: "user",
+      content: "volatile current-turn metadata",
+    });
+  });
+
+  it("skips opted-out carrier blocks merged into the active user turn", () => {
+    const policy = resolveAnthropicPayloadPolicy({
+      provider: "anthropic",
+      api: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com/v1",
+      cacheRetention: "short",
+      enableCacheControl: true,
+    });
+    const carrierBlock = textBlock("volatile current-turn metadata");
+    const payload: TestPayload = {
+      system: [{ type: "text", text: "system" }],
+      messages: [{ role: "user", content: [textBlock("stable question"), carrierBlock] }],
+    };
+
+    applyAnthropicPayloadPolicyToParams(payload, policy, new Set(), new Set([carrierBlock]));
+
+    expect(payload.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          textBlock("stable question", { type: "ephemeral" }),
+          textBlock("volatile current-turn metadata"),
+        ],
+      },
+    ]);
+  });
+
+  it("keeps tool_result and user markers when a carrier block trails the tool results", () => {
+    const policy = resolveAnthropicPayloadPolicy({
+      provider: "anthropic",
+      api: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com/v1",
+      cacheRetention: "short",
+      enableCacheControl: true,
+    });
+    const buildPayload = (trailing: Array<Record<string, unknown>>): TestPayload => ({
+      system: [{ type: "text", text: "system" }],
+      messages: [
+        { role: "user", content: [textBlock("Investigate the cache writes.")] },
+        {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "tool_1", name: "read", input: {} }],
+        },
+        {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "tool_1", content: "log chunk" },
+            ...trailing,
+          ],
+        },
+      ],
+    });
+    const carrierBlock = textBlock("volatile current-turn metadata");
+    const withCarrier = buildPayload([carrierBlock]);
+    const withoutCarrier = buildPayload([]);
+
+    applyAnthropicPayloadPolicyToParams(withCarrier, policy, new Set(), new Set([carrierBlock]));
+    applyAnthropicPayloadPolicyToParams(withoutCarrier, policy, new Set());
+
+    expect(withCarrier.messages[2]?.content).toEqual([
+      {
+        type: "tool_result",
+        tool_use_id: "tool_1",
+        content: "log chunk",
+        cache_control: { type: "ephemeral" },
+      },
+      textBlock("volatile current-turn metadata"),
+    ]);
+    expect(withCarrier.messages[0]?.content).toEqual([
+      textBlock("Investigate the cache writes.", { type: "ephemeral" }),
+    ]);
+    expect(withCarrier.messages.slice(0, 2)).toEqual(withoutCarrier.messages.slice(0, 2));
+    expect(withoutCarrier.messages[2]?.content).toEqual([
+      {
+        type: "tool_result",
+        tool_use_id: "tool_1",
+        content: "log chunk",
+        cache_control: { type: "ephemeral" },
+      },
+    ]);
   });
 
   it("keeps a stable user marker while advancing through trailing tool results", () => {
@@ -141,7 +254,7 @@ describe("anthropic payload policy", () => {
       ],
     };
 
-    applyAnthropicPayloadPolicyToParams(payload, policy);
+    applyAnthropicPayloadPolicyToParams(payload, policy, new Set());
 
     expect(payload.messages[0]).toEqual({
       role: "user",
@@ -196,7 +309,7 @@ describe("anthropic payload policy", () => {
       ],
     };
 
-    applyAnthropicPayloadPolicyToParams(payload, policy);
+    applyAnthropicPayloadPolicyToParams(payload, policy, new Set());
 
     expect(payload.messages[0]).toEqual({
       role: "user",
@@ -245,7 +358,7 @@ describe("anthropic payload policy", () => {
       ],
     };
 
-    applyAnthropicPayloadPolicyToParams(payload, policy);
+    applyAnthropicPayloadPolicyToParams(payload, policy, new Set());
 
     expect(payload.messages[0]).toEqual({
       role: "user",
@@ -275,7 +388,7 @@ describe("anthropic payload policy", () => {
     });
     const payload = simpleTextPayload();
 
-    applyAnthropicPayloadPolicyToParams(payload, policy);
+    applyAnthropicPayloadPolicyToParams(payload, policy, new Set());
 
     expect(payload).not.toHaveProperty("service_tier");
     expect(payload.system).toEqual([textBlock("Follow policy.", { type: "ephemeral", ttl: "1h" })]);
@@ -297,7 +410,7 @@ describe("anthropic payload policy", () => {
       });
       const payload = simpleTextPayload();
 
-      applyAnthropicPayloadPolicyToParams(payload, policy);
+      applyAnthropicPayloadPolicyToParams(payload, policy, new Set());
 
       expectShortEphemeralTextPayload(payload);
     } finally {
@@ -319,7 +432,7 @@ describe("anthropic payload policy", () => {
     });
     const payload = simpleTextPayload();
 
-    applyAnthropicPayloadPolicyToParams(payload, policy);
+    applyAnthropicPayloadPolicyToParams(payload, policy, new Set());
 
     expectShortEphemeralTextPayload(payload);
   });
@@ -334,7 +447,7 @@ describe("anthropic payload policy", () => {
     });
     const payload = boundarySystemPayload();
 
-    applyAnthropicPayloadPolicyToParams(payload, policy);
+    applyAnthropicPayloadPolicyToParams(payload, policy, new Set());
 
     expect(payload.system).toEqual([
       textBlock("Stable prefix", { type: "ephemeral", ttl: "1h" }),
@@ -358,7 +471,7 @@ describe("anthropic payload policy", () => {
       messages: [{ role: "user", content: "Hello" }],
     };
 
-    applyAnthropicPayloadPolicyToParams(payload, policy);
+    applyAnthropicPayloadPolicyToParams(payload, policy, new Set());
 
     expect(payload.system).toEqual([
       textBlock("Follow policy.", { type: "ephemeral", ttl: "1h" }),
@@ -380,7 +493,7 @@ describe("anthropic payload policy", () => {
     });
     const payload = simpleTextPayload();
 
-    applyAnthropicPayloadPolicyToParams(payload, policy);
+    applyAnthropicPayloadPolicyToParams(payload, policy, new Set());
 
     expect(payload.system).toEqual([textBlock("Follow policy.", { type: "ephemeral" })]);
   });
@@ -395,7 +508,7 @@ describe("anthropic payload policy", () => {
     });
     const payload = boundarySystemPayload();
 
-    applyAnthropicPayloadPolicyToParams(payload, policy);
+    applyAnthropicPayloadPolicyToParams(payload, policy, new Set());
 
     expect(payload.system).toEqual([textBlock("Stable prefix\nDynamic lab suffix")]);
   });
