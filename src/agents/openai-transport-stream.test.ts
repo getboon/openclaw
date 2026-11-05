@@ -8567,6 +8567,11 @@ describe("openai transport stream", () => {
         ...proxiedGeminiModel,
         compat: {},
       } as Model<"openai-completions">;
+      const aliasedProxiedGeminiModel = {
+        ...proxiedGeminiModel,
+        id: "gateway-planner",
+        name: "Gateway Planner",
+      } as Model<"openai-completions">;
 
       function buildToolCallReplay(
         model: Model<"openai-completions">,
@@ -8659,120 +8664,138 @@ describe("openai transport stream", () => {
         );
       });
 
-      it("replays parallel streamed tool calls with the first signature and the skip sentinel", async () => {
-        const output = makeAssistantOutput(proxiedGeminiModel);
-        const chunks = [
-          {
-            choices: [
-              {
-                delta: {
-                  role: "assistant",
-                  tool_calls: [
-                    {
-                      extra_content: { google: { thought_signature: "SIG-OPAQUE-ABC==" } },
-                      function: { arguments: '{"city":"Paris"}', name: "get_weather" },
-                      id: "call_1",
-                      index: 0,
-                      type: "function",
-                    },
-                  ],
-                },
-                index: 0,
-              },
-            ],
-          },
-          {
-            choices: [
-              {
-                delta: {
-                  role: "assistant",
-                  tool_calls: [
-                    {
-                      function: { arguments: '{"city":"Rome"}', name: "get_weather" },
-                      id: "call_2",
-                      index: 1,
-                      type: "function",
-                    },
-                  ],
-                },
-                index: 0,
-              },
-            ],
-          },
-          {
-            choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }],
-            usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
-          },
-        ];
-        async function* mockStream() {
-          for (const chunk of chunks) {
-            yield chunk as never;
-          }
-        }
+      it("uses the skip-validator signature for a cross-route tool call on an alias id", () => {
+        const assistant = buildToolCallReplay(
+          aliasedProxiedGeminiModel,
+          { api: "openai-completions", provider: "openai", model: "gpt-5.5" },
+          { id: "call_1", thoughtSignature: "SIG-OTHER-ROUTE==" },
+        );
 
-        await testing.processOpenAICompletionsStream(mockStream(), output, proxiedGeminiModel, {
-          push() {},
-        });
-
-        expectRecordFields(output.content[0], {
-          type: "toolCall",
-          id: "call_1",
-          name: "get_weather",
-          arguments: { city: "Paris" },
-          thoughtSignature: "SIG-OPAQUE-ABC==",
-        });
-        expectRecordFields(output.content[1], {
-          type: "toolCall",
-          id: "call_2",
-          name: "get_weather",
-          arguments: { city: "Rome" },
-        });
-        expect(output.content[1]).not.toHaveProperty("thoughtSignature");
-
-        const params = buildOpenAICompletionsParams(
-          proxiedGeminiModel,
-          {
-            messages: [
-              { role: "user", content: "weather" },
-              output,
-              {
-                role: "toolResult",
-                toolCallId: "call_1",
-                toolName: "get_weather",
-                content: [{ type: "text", text: "sunny" }],
-                isError: false,
-              },
-              {
-                role: "toolResult",
-                toolCallId: "call_2",
-                toolName: "get_weather",
-                content: [{ type: "text", text: "rain" }],
-                isError: false,
-              },
-            ],
-            tools: [],
-          } as never,
-          undefined,
-        ) as { messages: Array<Record<string, unknown>> };
-        const assistant = params.messages.find((message) => message.role === "assistant") as
-          | {
-              tool_calls?: Array<{
-                id?: string;
-                extra_content?: { google?: { thought_signature?: string } };
-              }>;
-            }
-          | undefined;
-
-        expect(
-          assistant?.tool_calls?.map((toolCall) => [
-            toolCall.id,
-            toolCall.extra_content?.google?.thought_signature,
-          ]),
-        ).toEqual([
-          ["call_1", "SIG-OPAQUE-ABC=="],
-          ["call_2", "skip_thought_signature_validator"],
-        ]);
+        expect(assistant?.tool_calls?.[0]?.extra_content?.google?.thought_signature).toBe(
+          "skip_thought_signature_validator",
+        );
       });
+
+      it.each([
+        { label: "gemini-3 id", model: proxiedGeminiModel },
+        { label: "alias id", model: aliasedProxiedGeminiModel },
+      ])(
+        "replays parallel streamed tool calls with the first signature and the skip sentinel ($label)",
+        async ({ model }) => {
+          const output = makeAssistantOutput(model);
+          const chunks = [
+            {
+              choices: [
+                {
+                  delta: {
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        extra_content: { google: { thought_signature: "SIG-OPAQUE-ABC==" } },
+                        function: { arguments: '{"city":"Paris"}', name: "get_weather" },
+                        id: "call_1",
+                        index: 0,
+                        type: "function",
+                      },
+                    ],
+                  },
+                  index: 0,
+                },
+              ],
+            },
+            {
+              choices: [
+                {
+                  delta: {
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        function: { arguments: '{"city":"Rome"}', name: "get_weather" },
+                        id: "call_2",
+                        index: 1,
+                        type: "function",
+                      },
+                    ],
+                  },
+                  index: 0,
+                },
+              ],
+            },
+            {
+              choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }],
+              usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+            },
+          ];
+          async function* mockStream() {
+            for (const chunk of chunks) {
+              yield chunk as never;
+            }
+          }
+
+          await testing.processOpenAICompletionsStream(mockStream(), output, model, {
+            push() {},
+          });
+
+          expectRecordFields(output.content[0], {
+            type: "toolCall",
+            id: "call_1",
+            name: "get_weather",
+            arguments: { city: "Paris" },
+            thoughtSignature: "SIG-OPAQUE-ABC==",
+          });
+          expectRecordFields(output.content[1], {
+            type: "toolCall",
+            id: "call_2",
+            name: "get_weather",
+            arguments: { city: "Rome" },
+          });
+          expect(output.content[1]).not.toHaveProperty("thoughtSignature");
+
+          const params = buildOpenAICompletionsParams(
+            model,
+            {
+              messages: [
+                { role: "user", content: "weather" },
+                output,
+                {
+                  role: "toolResult",
+                  toolCallId: "call_1",
+                  toolName: "get_weather",
+                  content: [{ type: "text", text: "sunny" }],
+                  isError: false,
+                },
+                {
+                  role: "toolResult",
+                  toolCallId: "call_2",
+                  toolName: "get_weather",
+                  content: [{ type: "text", text: "rain" }],
+                  isError: false,
+                },
+              ],
+              tools: [],
+            } as never,
+            undefined,
+          ) as { messages: Array<Record<string, unknown>> };
+          const assistant = params.messages.find((message) => message.role === "assistant") as
+            | {
+                tool_calls?: Array<{
+                  id?: string;
+                  extra_content?: { google?: { thought_signature?: string } };
+                }>;
+              }
+            | undefined;
+
+          expect(
+            assistant?.tool_calls?.map((toolCall) => [
+              toolCall.id,
+              toolCall.extra_content?.google?.thought_signature,
+            ]),
+          ).toEqual([
+            ["call_1", "SIG-OPAQUE-ABC=="],
+            ["call_2", "skip_thought_signature_validator"],
+          ]);
+        },
+      );
     });
   });
 
