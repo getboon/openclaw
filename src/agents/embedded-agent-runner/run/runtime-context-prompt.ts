@@ -189,17 +189,8 @@ export function resolveCurrentTurnPromptParts(params: {
   const inlinePromptBuildContext = promptBuildContextInCarrier
     ? undefined
     : params.promptBuildContext;
-  // Normal user turns keep the user prompt BARE and route current-turn
-  // inbound metadata into the runtime-context carrier (relocated after the
-  // active user turn on the wire), so the persisted/replayed user message
-  // is byte-identical whether active or historical. Runtime-only turns (room
-  // events, etc.) have no bare user turn to protect, so their inbound context
-  // stays inline exactly as before. That inline path stays byte-stable because
-  // a runtime-only turn only ever carries room-event/system context, which is
-  // NOT strip-eligible: the historical strip only removes the
-  // `buildInboundUserContextPrefix` blocks (Conversation info / Reply target /
-  // Sender / …), and those are produced only for non-room turns, which always
-  // have a non-empty body and so are never runtime-only.
+  // Persisted user prompts stay bare and inbound metadata rides the carrier. Runtime-only
+  // turns keep it inline because they have no bare user turn to protect.
   if (submission.runtimeOnly === true) {
     return {
       submission,

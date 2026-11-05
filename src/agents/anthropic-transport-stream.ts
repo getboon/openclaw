@@ -376,11 +376,12 @@ function convertAnthropicMessages(
   },
 ): Array<Record<string, unknown>> {
   const params: Array<Record<string, unknown>> = [];
+  let previousUserMessageParam: Record<string, unknown> | undefined;
   const pushUserParam = (content: string | object[], isRuntimeContextCarrier: boolean) => {
-    const previous = params.at(-1);
+    const previous = previousUserMessageParam;
     // Claude 5.x on non-direct routes can answer a standalone trailing carrier turn instead of
     // the user, so the carrier rides the preceding user turn as uncached trailing text blocks.
-    if (isRuntimeContextCarrier && previous?.role === "user") {
+    if (isRuntimeContextCarrier && previous) {
       const carrierBlocks =
         typeof content === "string" ? [{ type: "text", text: content }] : content;
       const previousContent = previous.content as string | object[];
@@ -397,7 +398,8 @@ function convertAnthropicMessages(
     if (isRuntimeContextCarrier) {
       options.cacheBreakpointOptOutMessageIndexes.add(params.length);
     }
-    params.push({ role: "user", content });
+    previousUserMessageParam = { role: "user", content };
+    params.push(previousUserMessageParam);
   };
   const allowReasoningContentReplay = options.allowReasoningContentReplay === true;
   const replayThinkingEnabled = options.replayThinkingEnabled !== false;
@@ -533,6 +535,7 @@ function convertAnthropicMessages(
           });
         }
         params.push(assistantMsg);
+        previousUserMessageParam = undefined;
       }
       continue;
     }
@@ -565,6 +568,7 @@ function convertAnthropicMessages(
         role: "user",
         content: toolResults,
       });
+      previousUserMessageParam = undefined;
     }
   }
   return params;

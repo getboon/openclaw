@@ -2816,19 +2816,32 @@ describe("anthropic transport stream", () => {
       ]);
     });
 
-    it("merges a carrier into the preceding tool_result user turn", async () => {
+    it.each([
+      { name: "directly after the tool results", activeUser: [] },
+      {
+        name: "after a whitespace-only active user turn",
+        activeUser: [{ role: "user", content: [{ type: "text", text: "   " }], timestamp: 0 }],
+      },
+      {
+        name: "after an image-only active user turn on a text-only model",
+        activeUser: [
+          {
+            role: "user",
+            content: [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }],
+            timestamp: 0,
+          },
+        ],
+      },
+    ])("keeps a carrier out of the tool_result user turn $name", async ({ activeUser }) => {
       const messages = await serializeMessages([
         { role: "user", content: [{ type: "text", text: "Read a.txt" }], timestamp: 0 },
         assistantToolCall("tool_1"),
         toolResult("tool_1", "file body"),
+        ...activeUser,
         carrierMessage(),
       ]);
 
-      expect(messages).toHaveLength(3);
-      expect(messages[0]).toEqual({
-        role: "user",
-        content: [{ type: "text", text: "Read a.txt", cache_control: ephemeral }],
-      });
+      expect(messages).toHaveLength(4);
       expect(messages[2]).toEqual({
         role: "user",
         content: [
@@ -2839,8 +2852,11 @@ describe("anthropic transport stream", () => {
             is_error: false,
             cache_control: ephemeral,
           },
-          { type: "text", text: carrierText },
         ],
+      });
+      expect(messages[3]).toEqual({
+        role: "user",
+        content: [{ type: "text", text: carrierText }],
       });
     });
 
