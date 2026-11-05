@@ -709,36 +709,15 @@ function createSessionWriteLockOwner(): string {
 }
 
 /**
- * Logical owner key of the session write lock this process currently holds for `sessionFile`,
- * if any. Every acquisition records its owner in the held entry's metadata so nested writers
- * can join the holding operation through fs-safe's owner-scoped `reentrantOwner`.
+ * Logical owner key of the session write lock this process currently holds for the normalized
+ * session file, if any. Every acquisition records its owner in the held entry's metadata so
+ * `joinInProcessHolder` writers can nest under the holding operation.
  */
-export async function resolveSessionWriteLockHolderOwner(
-  sessionFile: string,
-): Promise<string | undefined> {
-  return heldSessionWriteLockOwner(await resolveNormalizedSessionFile(sessionFile));
-}
-
 function heldSessionWriteLockOwner(normalizedSessionFile: string): string | undefined {
   const owner = SESSION_LOCKS.heldEntries().find(
     (entry) => entry.normalizedTargetPath === normalizedSessionFile,
   )?.metadata[SESSION_WRITE_LOCK_OWNER_METADATA_KEY];
   return typeof owner === "string" && owner ? owner : undefined;
-}
-
-/**
- * Owner key for transcript writers (transcript append/event/transaction and session-accessor
- * transcript turns).
- *
- * A transcript write issued while this process already holds the session write lock (an agent
- * attempt, compaction, transcript rewrite or tool-result truncation) belongs to that holder's
- * logical operation, so it joins the holder's owner and nests instead of waiting behind it.
- * With no in-process holder the write gets a fresh owner and contends normally. This keeps the
- * nesting the fork shipped with fs-safe 0.3.0's `allowReentrant: true`, while every other
- * acquisition is owner-scoped and serialized.
- */
-export async function resolveSessionTranscriptWriteLockOwner(sessionFile: string): Promise<string> {
-  return (await resolveSessionWriteLockHolderOwner(sessionFile)) ?? createSessionWriteLockOwner();
 }
 
 function shouldTreatAsOrphanSelfLock(params: {
@@ -928,7 +907,6 @@ export async function acquireSessionWriteLock(params: {
    * Logical operation identity for intentional nested acquisition. An acquisition that passes
    * the owner of the current in-process holder shares its lock (reference-counted until the
    * final release); omitted or different owners contend normally.
-   * See `resolveSessionTranscriptWriteLockOwner`.
    */
   reentrantOwner?: string;
   /**

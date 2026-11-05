@@ -35,7 +35,7 @@ export type FileLockOptions = {
 /**
  * Owner used when a caller does not pass `reentrantOwner`. fs-safe 0.5+ replaced the
  * process-scoped `allowReentrant: true` with owner-scoped re-entry; one process-wide owner is the
- * exact equivalent of the re-entrant behaviour this SDK helper has always documented.
+ * exact equivalent of the re-entrant behavior this SDK helper has always documented.
  */
 const PROCESS_FILE_LOCK_OWNER = `openclaw.plugin-sdk.file-lock:process:${process.pid}`;
 

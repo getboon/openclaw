@@ -3,7 +3,7 @@
 // lock holders on the same session still serialize.
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acquireSessionWriteLock,
   resetSessionWriteLockStateForTest,
@@ -19,7 +19,8 @@ import {
 } from "./transcript-append.js";
 
 // Short acquire timeout: a nested writer that fails to join the held lock times out quickly
-// instead of hanging the suite for the 60s production default.
+// instead of hanging the suite for the 60s production default. The env override wins over
+// config, so the suite clears it (see beforeEach).
 const SHORT_LOCK_CONFIG = {
   session: { writeLock: { acquireTimeoutMs: 750 } },
 } as unknown as OpenClawConfig;
@@ -36,8 +37,13 @@ function readTranscriptLines(sessionFile: string): Array<{ type?: string }> {
 describe("session write lock nesting on transcript write paths", () => {
   const fixture = useTempSessionsFixture("session-write-lock-nesting-");
 
+  beforeEach(() => {
+    vi.stubEnv("OPENCLAW_SESSION_WRITE_LOCK_ACQUIRE_TIMEOUT_MS", "");
+  });
+
   afterEach(() => {
     resetSessionWriteLockStateForTest();
+    vi.unstubAllEnvs();
   });
 
   it("lets a transcript append inside an operation that holds the session lock complete", async () => {

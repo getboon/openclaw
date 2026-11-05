@@ -21,8 +21,6 @@ let resetSessionWriteLockStateForTest: typeof import("./session-write-lock.js").
 let resolveSessionLockMaxHoldFromTimeout: typeof import("./session-write-lock.js").resolveSessionLockMaxHoldFromTimeout;
 let resolveSessionWriteLockAcquireTimeoutMs: typeof import("./session-write-lock.js").resolveSessionWriteLockAcquireTimeoutMs;
 let resolveSessionWriteLockOptions: typeof import("./session-write-lock.js").resolveSessionWriteLockOptions;
-let resolveSessionWriteLockHolderOwner: typeof import("./session-write-lock.js").resolveSessionWriteLockHolderOwner;
-let resolveSessionTranscriptWriteLockOwner: typeof import("./session-write-lock.js").resolveSessionTranscriptWriteLockOwner;
 
 async function expectLockRemovedOnlyAfterFinalRelease(params: {
   lockPath: string;
@@ -175,8 +173,6 @@ describe("acquireSessionWriteLock", () => {
       resolveSessionLockMaxHoldFromTimeout,
       resolveSessionWriteLockAcquireTimeoutMs,
       resolveSessionWriteLockOptions,
-      resolveSessionWriteLockHolderOwner,
-      resolveSessionTranscriptWriteLockOwner,
     } = await import("./session-write-lock.js"));
   });
 
@@ -265,34 +261,9 @@ describe("acquireSessionWriteLock", () => {
     });
   });
 
-  it("lets transcript writers join the in-process holder's owner, including via symlinks", async () => {
+  it("joinInProcessHolder joins an ownerless holder, including via symlinks", async () => {
     await withSymlinkedSessionPaths(async ({ sessionReal, sessionLink, realLockPath }) => {
-      expect(await resolveSessionWriteLockHolderOwner(sessionReal)).toBeUndefined();
-      const fresh = await resolveSessionTranscriptWriteLockOwner(sessionReal);
-      expect(fresh).toMatch(/^session-write-lock:/);
-      expect(await resolveSessionTranscriptWriteLockOwner(sessionReal)).not.toBe(fresh);
-
-      // An ownerless (non-reentrant) holder still records a logical owner for nested writers.
-      const outer = await acquireSessionWriteLock({ sessionFile: sessionReal, timeoutMs: 500 });
-      const holderOwner = await resolveSessionWriteLockHolderOwner(sessionLink);
-      expect(holderOwner).toMatch(/^session-write-lock:/);
-      expect(await resolveSessionTranscriptWriteLockOwner(sessionLink)).toBe(holderOwner);
-      const nested = await acquireSessionWriteLock({
-        sessionFile: sessionLink,
-        timeoutMs: 50,
-        reentrantOwner: await resolveSessionTranscriptWriteLockOwner(sessionLink),
-      });
-      await expectLockRemovedOnlyAfterFinalRelease({
-        lockPath: realLockPath,
-        firstLock: outer,
-        secondLock: nested,
-      });
-      expect(await resolveSessionWriteLockHolderOwner(sessionReal)).toBeUndefined();
-    });
-  });
-
-  it("joinInProcessHolder joins the current holder, including via symlinks", async () => {
-    await withSymlinkedSessionPaths(async ({ sessionReal, sessionLink, realLockPath }) => {
+      // A holder acquired without reentrantOwner still records a logical owner for joiners.
       const outer = await acquireSessionWriteLock({ sessionFile: sessionReal, timeoutMs: 500 });
       const nested = await acquireSessionWriteLock({
         sessionFile: sessionLink,
@@ -307,7 +278,33 @@ describe("acquireSessionWriteLock", () => {
     });
   });
 
-  it("joinInProcessHolder without a holder takes a fresh owner, so two such writers contend", async () => {
+  it("joinInProcessHolder does not reuse a released holder's owner", async () => {
+    await withSymlinkedSessionPaths(async ({ sessionReal, sessionLink }) => {
+      const outer = await acquireSessionWriteLock({ sessionFile: sessionReal, timeoutMs: 500 });
+      await outer.release();
+      // With the holder gone, the joiner takes a fresh owner and becomes the holder itself, so an
+      // independent acquisition contends with it instead of sharing a stale owner.
+      const joiner = await acquireSessionWriteLock({
+        sessionFile: sessionLink,
+        timeoutMs: 500,
+        joinInProcessHolder: true,
+      });
+      try {
+        await expect(
+          acquireSessionWriteLock({
+            sessionFile: sessionReal,
+            timeoutMs: 5,
+            staleMs: 60_000,
+            reentrantOwner: "session:independent-operation",
+          }),
+        ).rejects.toThrow(/session file locked/);
+      } finally {
+        await joiner.release();
+      }
+    });
+  });
+
+  it("joinInProcessHolder takes a fresh owner with no holder; later joiners nest and independent acquisitions contend", async () => {
     await withTempSessionLockFile(async ({ sessionFile }) => {
       const first = await acquireSessionWriteLock({
         sessionFile,

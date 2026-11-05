@@ -457,7 +457,7 @@ releases.
 
     File-lock nesting is owner-scoped. Without `reentrantOwner`, every acquisition in the
     process uses one process-wide owner, so nested and concurrent in-process acquisitions of
-    the same file share the lock (the helper's long-standing re-entrant behaviour; other
+    the same file share the lock (the helper's long-standing re-entrant behavior; other
     processes contend). Pass a per-operation `reentrantOwner` to make independent in-process
     work on the same file contend instead; only acquisitions with the same owner share the lock.
 
