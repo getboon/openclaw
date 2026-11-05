@@ -26,6 +26,15 @@ import { retryTransientMemoryRead } from "./read-retry.js";
 
 // Secure markdown memory-file reader for workspace and configured extra paths.
 
+function isNonDirectoryParentError(err: unknown): boolean {
+  return Boolean(
+    err &&
+    typeof err === "object" &&
+    "code" in err &&
+    (err as { code?: unknown }).code === "not-file",
+  );
+}
+
 /** Check that an absolute path stays inside an allowed extra directory without symlink escapes. */
 async function isAllowedAdditionalDirectoryPath(
   additionalPath: string,
@@ -37,7 +46,9 @@ async function isAllowedAdditionalDirectoryPath(
   try {
     await assertNoSymlinkParents({ rootDir: additionalPath, targetPath: absPath });
   } catch (err) {
-    return isFileMissingError(err);
+    // fs-safe reports a regular-file parent component as "not-file"; nothing can exist below
+    // it, so it reads as missing like ENOTDIR. Symlinked components still fail closed.
+    return isFileMissingError(err) || isNonDirectoryParentError(err);
   }
   if (!isPathInsideWithRealpath(additionalPath, absPath)) {
     try {
