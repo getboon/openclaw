@@ -489,7 +489,7 @@ describe("deliverDiscordReply", () => {
       cfg,
       textLimit: 2000,
       replyToMode: "off",
-      mediaLocalRoots: ["/tmp/openclaw-media"],
+      mediaAccess: { localRoots: ["/tmp/openclaw-media"] },
       kind: "final",
     });
 
@@ -498,6 +498,28 @@ describe("deliverDiscordReply", () => {
     expect(params.replyToId).toBeUndefined();
     expect(params.replyToMode).toBe("off");
     expect(params.mediaAccess).toEqual({ localRoots: ["/tmp/openclaw-media"] });
+  });
+
+  it("forwards mediaAccess workspaceDir so relative attachment paths resolve against the agent workspace", async () => {
+    await deliverDiscordReply({
+      replies: [{ text: "reply", mediaUrl: "projects/lazo-lodge/estimate.pdf" }],
+      target: "channel:202",
+      token: "token",
+      runtime,
+      cfg,
+      textLimit: 2000,
+      mediaAccess: {
+        localRoots: ["/tmp/agent-root"],
+        workspaceDir: "/tmp/agent-root/workspace",
+      },
+      kind: "final",
+    });
+
+    const params = firstDeliverParams();
+    expect(params.mediaAccess).toEqual({
+      localRoots: ["/tmp/agent-root"],
+      workspaceDir: "/tmp/agent-root/workspace",
+    });
   });
 
   it("bridges Discord voice sends through the outbound dependency bag", async () => {

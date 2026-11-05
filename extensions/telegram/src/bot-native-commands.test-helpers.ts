@@ -24,8 +24,8 @@ type RecordInboundSessionMetaSafeFn =
 type ResolveChunkModeFn = typeof import("./bot-native-commands.runtime.js").resolveChunkMode;
 type EnsureConfiguredBindingRouteReadyFn =
   typeof import("./bot-native-commands.runtime.js").ensureConfiguredBindingRouteReady;
-type GetAgentScopedMediaLocalRootsFn =
-  typeof import("./bot-native-commands.runtime.js").getAgentScopedMediaLocalRoots;
+type ResolveAgentScopedOutboundMediaAccessFn =
+  typeof import("./bot-native-commands.runtime.js").resolveAgentScopedOutboundMediaAccess;
 type ResolveThreadSessionKeysFn =
   typeof import("./bot-native-commands.runtime.js").resolveThreadSessionKeys;
 type CreateChannelReplyPipelineFn =
@@ -71,7 +71,9 @@ const replyPipelineMocks = vi.hoisted(() => {
     ensureConfiguredBindingRouteReady: vi.fn((async () => ({
       ok: true,
     })) as unknown as EnsureConfiguredBindingRouteReadyFn),
-    getAgentScopedMediaLocalRoots: vi.fn<GetAgentScopedMediaLocalRootsFn>(() => []),
+    resolveAgentScopedOutboundMediaAccess: vi.fn<ResolveAgentScopedOutboundMediaAccessFn>(
+      () => ({}),
+    ),
     resolveThreadSessionKeys: vi.fn<ResolveThreadSessionKeysFn>(
       ({ baseSessionKey, threadId, parentSessionKey, useSuffix = true, normalizeThreadId }) => {
         const normalizedThreadId =
@@ -99,7 +101,7 @@ vi.mock("./bot-native-commands.runtime.js", () => ({
   recordInboundSessionMetaSafe: replyPipelineMocks.recordInboundSessionMetaSafe,
   resolveChunkMode: replyPipelineMocks.resolveChunkMode,
   ensureConfiguredBindingRouteReady: replyPipelineMocks.ensureConfiguredBindingRouteReady,
-  getAgentScopedMediaLocalRoots: replyPipelineMocks.getAgentScopedMediaLocalRoots,
+  resolveAgentScopedOutboundMediaAccess: replyPipelineMocks.resolveAgentScopedOutboundMediaAccess,
   resolveThreadSessionKeys: replyPipelineMocks.resolveThreadSessionKeys,
 }));
 vi.mock("./bot-native-commands.delivery.runtime.js", () => ({

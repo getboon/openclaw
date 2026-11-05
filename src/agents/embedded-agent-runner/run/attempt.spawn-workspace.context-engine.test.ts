@@ -2802,6 +2802,56 @@ describe("runEmbeddedAttempt context engine mid-turn precheck integration", () =
   });
 });
 
+describe("runEmbeddedAttempt run deadline flag", () => {
+  const sessionKey = "agent:main:guildchat:channel:run-deadline-flag";
+  const tempPaths: string[] = [];
+
+  beforeEach(() => {
+    resetEmbeddedAttemptHarness();
+    clearMemoryPluginState();
+  });
+
+  afterEach(async () => {
+    await cleanupTempPaths(tempPaths);
+    clearMemoryPluginState();
+    vi.restoreAllMocks();
+  });
+
+  it("marks an attempt aborted by its own run deadline timer", async () => {
+    const result = await createContextEngineAttemptRunner({
+      contextEngine: createContextEngineBootstrapAndAssemble(),
+      sessionKey,
+      tempPaths,
+      attemptOverrides: { timeoutMs: 50 },
+      sessionPrompt: () => new Promise<void>(() => {}),
+    });
+
+    expect(result.timedOut).toBe(true);
+    expect(result.externalAbort).toBe(false);
+    expect(result.timedOutByRunDeadline).toBe(true);
+  });
+
+  it("does not mark an attempt aborted by an external timeout signal", async () => {
+    const controller = new AbortController();
+    const result = await createContextEngineAttemptRunner({
+      contextEngine: createContextEngineBootstrapAndAssemble(),
+      sessionKey,
+      tempPaths,
+      attemptOverrides: { abortSignal: controller.signal },
+      sessionPrompt: () => {
+        const timeoutReason = new Error("caller deadline");
+        timeoutReason.name = "TimeoutError";
+        controller.abort(timeoutReason);
+        return new Promise<void>(() => {});
+      },
+    });
+
+    expect(result.timedOut).toBe(true);
+    expect(result.externalAbort).toBe(true);
+    expect(result.timedOutByRunDeadline).not.toBe(true);
+  });
+});
+
 describe("runEmbeddedAttempt tool-result guard budget wiring", () => {
   const sessionKey = "agent:main:guildchat:channel:tool-result-guard-budget";
   const tempPaths: string[] = [];
@@ -2834,10 +2884,40 @@ describe("runEmbeddedAttempt tool-result guard budget wiring", () => {
       },
     });
 
+    const guardParams = mockParams(
+      hoisted.installToolResultContextGuardMock,
+      0,
+      "tool-result guard params",
+    );
+    expect(guardParams.contextWindowTokens).toBe(1_000_000);
+    expect(guardParams.liveToolResultMaxChars).toBe(64_000);
+  });
+
+  it("passes the live tool-result cap to the guard when the context engine owns compaction", async () => {
+    await createContextEngineAttemptRunner({
+      contextEngine: {
+        ...createContextEngineBootstrapAndAssemble(),
+        info: { ownsCompaction: true },
+      },
+      sessionKey,
+      tempPaths,
+      attemptOverrides: {
+        contextTokenBudget: 1_000_000,
+        model: {
+          api: "openai-completions",
+          provider: "openai",
+          compat: {},
+          contextWindow: 200_000,
+          input: ["text"],
+        } as never,
+      },
+    });
+
+    expect(hoisted.installContextEngineLoopHookMock).toHaveBeenCalledTimes(1);
     expect(
       mockParams(hoisted.installToolResultContextGuardMock, 0, "tool-result guard params")
-        .contextWindowTokens,
-    ).toBe(1_000_000);
+        .liveToolResultMaxChars,
+    ).toBe(64_000);
   });
 
   it("preserves the cacheable prefix while bounding current prompt results", async () => {

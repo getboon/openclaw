@@ -56,10 +56,24 @@ export async function dispatchGatewayMethod(
       `Gateway method dispatch is reserved for plugin HTTP routes that declare contracts.gatewayMethodDispatch: ["authenticated-request"]${pluginLabel}.`,
     );
   }
-  return await dispatchGatewayMethodInProcessRaw(method, params, {
+  // Route params come from authenticated HTTP callers: never let them carry the
+  // in-process-only `agent` fields reserved for core-built dispatch.
+  return await dispatchGatewayMethodInProcessRaw(method, stripCoreOnlyParams(params), {
     disableSyntheticClient: true,
     requireScopedClient: true,
     ...(options?.expectFinal !== undefined ? { expectFinal: options.expectFinal } : {}),
     ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
   });
+}
+
+function stripCoreOnlyParams(params: unknown): unknown {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return params;
+  }
+  const {
+    usageAttribution: _usageAttribution,
+    oboToken: _oboToken,
+    ...rest
+  } = params as Record<string, unknown>;
+  return rest;
 }

@@ -10,8 +10,13 @@ import {
 } from "openclaw/plugin-sdk/reply-payload";
 import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { sleep } from "openclaw/plugin-sdk/text-utility-runtime";
-import { loadWebMedia } from "openclaw/plugin-sdk/web-media";
-import type { MarkdownTableMode, MSTeamsReplyStyle, OpenClawConfig } from "../runtime-api.js";
+import {
+  loadOutboundMediaFromUrl,
+  type MarkdownTableMode,
+  type MSTeamsReplyStyle,
+  type OpenClawConfig,
+  type OutboundMediaAccess,
+} from "../runtime-api.js";
 import type { MSTeamsAccessTokenProvider } from "./attachments/types.js";
 import type { MSTeamsSdkCloudOptions } from "./cloud.js";
 import type { StoredConversationReference } from "./conversation-store.js";
@@ -271,7 +276,7 @@ export async function buildActivity(
   tokenProvider?: MSTeamsAccessTokenProvider,
   sharePointSiteId?: string,
   mediaMaxBytes?: number,
-  options?: { feedbackLoopEnabled?: boolean },
+  options?: { feedbackLoopEnabled?: boolean; mediaAccess?: OutboundMediaAccess },
 ): Promise<Record<string, unknown>> {
   const activity: Record<string, unknown> = { type: "message" };
 
@@ -315,7 +320,10 @@ export async function buildActivity(
     // upload handling entirely and get attached raw, which Teams does not
     // render for non-image attachments.
     const maxBytes = mediaMaxBytes ?? MSTEAMS_MAX_MEDIA_BYTES;
-    const media = await loadWebMedia(msg.mediaUrl, maxBytes);
+    const media = await loadOutboundMediaFromUrl(msg.mediaUrl, {
+      maxBytes,
+      mediaAccess: options?.mediaAccess,
+    });
     const contentType = media.contentType ?? (await getMimeType(msg.mediaUrl));
     const fileName = media.fileName ?? (await extractFilename(msg.mediaUrl));
 
@@ -413,6 +421,8 @@ export async function sendMSTeamsMessages(params: {
   sharePointSiteId?: string;
   /** Max media size in bytes. Default: 100MB. */
   mediaMaxBytes?: number;
+  /** Host media access (roots/workspace) for resolving local attachment paths. */
+  mediaAccess?: OutboundMediaAccess;
   /** Enable the Teams feedback loop (thumbs up/down) on sent messages. */
   feedbackLoopEnabled?: boolean;
   serviceUrlBoundary?: MSTeamsSdkCloudOptions;
@@ -478,7 +488,7 @@ export async function sendMSTeamsMessages(params: {
           params.tokenProvider,
           params.sharePointSiteId,
           params.mediaMaxBytes,
-          { feedbackLoopEnabled: params.feedbackLoopEnabled },
+          { feedbackLoopEnabled: params.feedbackLoopEnabled, mediaAccess: params.mediaAccess },
         );
 
         // Extract and strip the internal-only pending upload tag before sending.

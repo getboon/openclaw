@@ -66,6 +66,7 @@ type AssistantDecisionParams = {
   idleTimedOut: boolean;
   timedOutDuringCompaction: boolean;
   timedOutDuringToolExecution: boolean;
+  timedOutByRunDeadline?: boolean;
   harnessOwnsTransport?: boolean;
   profileRotated: boolean;
 };
@@ -232,6 +233,23 @@ export function resolveRunFailoverDecision(params: RunFailoverDecisionParams): R
     };
   }
 
+  const decision = resolveAssistantFailoverDecision(params);
+  if (
+    params.timedOutByRunDeadline === true &&
+    (decision.action === "rotate_profile" || decision.action === "fallback_model")
+  ) {
+    // A new attempt would start a fresh timeout and outlive the run budget.
+    return {
+      action: "surface_error",
+      reason: decision.reason ?? params.failoverReason,
+    };
+  }
+  return decision;
+}
+
+function resolveAssistantFailoverDecision(
+  params: AssistantDecisionParams,
+): AssistantFailoverDecision {
   if (params.externalAbort) {
     return {
       action: "surface_error",

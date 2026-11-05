@@ -21,6 +21,7 @@ import {
   isGifMedia,
   kindFromMime,
   probeVideoDimensions,
+  type OutboundMediaAccess,
 } from "openclaw/plugin-sdk/media-runtime";
 import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
 import { chunkMarkdownTextWithMode, type ChunkMode } from "openclaw/plugin-sdk/reply-chunking";
@@ -522,6 +523,7 @@ async function deliverMediaReply(params: {
   thread?: TelegramThreadSpec | null;
   tableMode?: MarkdownTableMode;
   richMessages?: boolean;
+  mediaAccess?: OutboundMediaAccess;
   mediaLocalRoots?: readonly string[];
   mediaMaxBytes?: number;
   chunkText: ChunkTextFn;
@@ -547,6 +549,7 @@ async function deliverMediaReply(params: {
     const media = await params.mediaLoader(
       mediaUrl,
       buildOutboundMediaLoadOptions({
+        mediaAccess: params.mediaAccess,
         mediaLocalRoots: params.mediaLocalRoots,
         maxBytes: params.mediaMaxBytes,
       }),
@@ -899,6 +902,7 @@ export async function deliverReplies(params: {
   token: string;
   runtime: RuntimeEnv;
   bot: Bot;
+  mediaAccess?: OutboundMediaAccess;
   mediaLocalRoots?: readonly string[];
   mediaMaxBytes?: number;
   replyToMode: ReplyToMode;
@@ -1121,6 +1125,7 @@ export async function deliverReplies(params: {
           thread: params.thread,
           tableMode: params.tableMode,
           richMessages: params.richMessages,
+          mediaAccess: params.mediaAccess,
           mediaLocalRoots: params.mediaLocalRoots,
           mediaMaxBytes: params.mediaMaxBytes,
           chunkText,

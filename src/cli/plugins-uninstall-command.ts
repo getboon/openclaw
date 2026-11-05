@@ -182,8 +182,10 @@ export async function runPluginUninstallCommand(
         previousInstallRecords: installRecords,
         nextInstallRecords,
         nextConfig,
+        ...(keepFiles ? { retainRemovedNpmInstallRecord: pluginId } : {}),
         ...(snapshot.hash !== undefined ? { baseHash: snapshot.hash } : {}),
         writeOptions: {
+          allowConfigSizeDrop: true,
           afterWrite: { mode: "restart", reason: "plugin source changed" },
         },
       }),

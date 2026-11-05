@@ -12,9 +12,13 @@ import { mergeAlsoAllowPolicy, resolveToolProfilePolicy } from "./tool-policy.js
 
 export type { ToolFsPolicy } from "./tool-fs-policy.types.js";
 
-export function createToolFsPolicy(params: { workspaceOnly?: boolean }): ToolFsPolicy {
+export function createToolFsPolicy(params: {
+  workspaceOnly?: boolean;
+  rootExpansionAllowed?: boolean;
+}): ToolFsPolicy {
   return {
     workspaceOnly: params.workspaceOnly === true,
+    rootExpansionAllowed: params.rootExpansionAllowed === true,
   };
 }
 

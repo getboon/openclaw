@@ -857,4 +857,73 @@ describe("subagent announce seam flow", () => {
     );
     logSpy.mockRestore();
   });
+
+  describe("completion usage attribution", () => {
+    const childKey = "agent:main:subagent:attributed";
+    const childAttribution = { userId: "U-child", userName: "Ada", userSource: "slack" };
+    const requesterAttribution = { userId: "U-requester", userSource: "msteams" };
+
+    async function runOwnerCompletion() {
+      const deliver = vi.fn(async () => ({ status: "delivered" as const }));
+      registerSubagentCompletionOwner({
+        channel: "anychat-boon-web",
+        accepts: () => true,
+        deliver,
+      });
+      await runCompletionFixture({
+        childSessionKey: childKey,
+        requesterOrigin: { channel: "anychat-boon-web", to: "thread-1", threadId: "1" },
+      });
+      expect(deliver).toHaveBeenCalledOnce();
+      return (deliver.mock.calls[0] as unknown as [Record<string, unknown>])[0];
+    }
+
+    it("hands the owner the user the child was spawned for", async () => {
+      loadSessionStoreMock.mockImplementation(() => ({
+        [childKey]: { sessionId: "child-1", usageAttribution: childAttribution },
+        "agent:main:main": { sessionId: "main-1", usageAttribution: requesterAttribution },
+      }));
+
+      const request = await runOwnerCompletion();
+
+      expect(request.usageAttribution).toEqual(childAttribution);
+    });
+
+    it("falls back to the requester session's inherited user", async () => {
+      loadSessionStoreMock.mockImplementation(() => ({
+        [childKey]: { sessionId: "child-1" },
+        "agent:main:main": { sessionId: "main-1", usageAttribution: requesterAttribution },
+      }));
+
+      const request = await runOwnerCompletion();
+
+      expect(request.usageAttribution).toEqual(requesterAttribution);
+    });
+
+    it("invents no identity when neither session carries one", async () => {
+      loadSessionStoreMock.mockImplementation(() => ({
+        [childKey]: { sessionId: "child-1" },
+        "agent:main:main": { sessionId: "main-1" },
+      }));
+
+      const request = await runOwnerCompletion();
+
+      expect(request).not.toHaveProperty("usageAttribution");
+    });
+
+    it("passes the same user to built-in channel delivery", async () => {
+      loadSessionStoreMock.mockImplementation(() => ({
+        [childKey]: { sessionId: "child-1", usageAttribution: childAttribution },
+      }));
+
+      await runCompletionFixture({
+        childSessionKey: childKey,
+        requesterOrigin: { channel: "slack", to: "C123" },
+      });
+
+      expect(deliverSubagentAnnouncementArgsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ usageAttribution: childAttribution }),
+      );
+    });
+  });
 });

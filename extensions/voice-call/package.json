@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/voice-call",
-  "version": "2026.6.34-boon.6",
+  "version": "2026.6.35-boon.3",
   "description": "OpenClaw voice-call plugin for Twilio, Telnyx, and Plivo phone calls.",
   "repository": {
     "type": "git",
@@ -11,14 +11,14 @@
     "commander": "14.0.3",
     "typebox": "1.1.39",
     "ws": "8.21.0",
-    "zod": "4.4.3"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*",
     "openclaw": "workspace:*"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.6.34-boon.6"
+    "openclaw": ">=2026.6.35-boon.3"
   },
   "peerDependenciesMeta": {
     "openclaw": {
@@ -35,10 +35,10 @@
       "minHostVersion": ">=2026.4.10"
     },
     "compat": {
-      "pluginApi": ">=2026.6.34-boon.6"
+      "pluginApi": ">=2026.6.35-boon.3"
     },
     "build": {
-      "openclawVersion": "2026.6.34-boon.6"
+      "openclawVersion": "2026.6.35-boon.3"
     },
     "release": {
       "publishToClawHub": true,

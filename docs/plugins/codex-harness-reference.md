@@ -364,9 +364,18 @@ available timeout in this order:
 - For `image_generate` without a configured timeout, the 120 second
   image-generation default.
 - For the media-understanding `image` tool, `tools.media.image.timeoutSeconds`
-  converted to milliseconds, or the 60 second media default. For image
-  understanding, this applies to the request itself and is not reduced by
-  earlier preparation work.
+  converted to milliseconds, or the 150 second media default. For image
+  understanding, this is one end-to-end budget shared by model/auth setup
+  and the provider request, not a fresh window per phase (MiniMax VLM models
+  are the exception: each phase keeps the full configured budget). The outer
+  Codex watchdog for this tool adds a 30 second grace on top of that value.
+  It does not see a per-image-model `timeoutSeconds` override (`tools.media.image.models[].timeoutSeconds`):
+  set the capability-level `tools.media.image.timeoutSeconds` to at least
+  the longest per-model override in use, or that model's calls can still be
+  cut off by this watchdog before its own longer timeout fires. It also
+  covers only one candidate: a configured `agents.defaults.imageModel.fallbacks`
+  list gives each fallback its own fresh inner budget, so a slow first
+  candidate can still leave later fallbacks cut off by this same grace.
 - The 90 second dynamic-tool default.
 
 This watchdog is the outer dynamic `item/tool/call` budget. Provider-specific
@@ -427,7 +436,7 @@ If discovery fails or times out, OpenClaw uses a bundled fallback catalog for:
 - GPT-5.5
 - GPT-5.4 mini
 
-The current bundled harness is `@openai/codex` `0.146.0`. A `model/list` probe
+The current bundled harness is `@openai/codex` `0.153.4`. A `model/list` probe
 against that bundled app-server in a GPT-5.6-enabled workspace returned these
 public picker rows:
 

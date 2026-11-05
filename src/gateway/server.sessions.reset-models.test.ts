@@ -24,6 +24,7 @@ type ResetSessionEntry = {
   spawnedBy?: string;
   spawnedWorkspaceDir?: string;
   spawnedCwd?: string;
+  usageAttribution?: { userId: string; userName?: string; userSource?: string };
   parentSessionKey?: string;
   forkedFromParent?: boolean;
   spawnDepth?: number;
@@ -90,6 +91,7 @@ const ownedChildMetadata = {
   spawnedBy: "agent:main:main",
   spawnedWorkspaceDir: "/tmp/child-workspace",
   spawnedCwd: "/tmp/task-repo",
+  usageAttribution: { userId: "U-ALICE", userName: "Alice", userSource: "slack" },
   parentSessionKey: "agent:main:main",
   forkedFromParent: true,
   spawnDepth: 2,

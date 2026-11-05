@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { isInboundPathAllowed } from "@openclaw/media-core/inbound-path-policy";
+import { RastermillError } from "rastermill";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { ModelDefinitionConfig } from "../../config/types.models.js";
@@ -18,6 +19,7 @@ import { withEnvAsync } from "../../test-utils/env.js";
 import { withFetchPreconnect } from "../../test-utils/fetch-mock.js";
 import { createOpenClawCodingTools } from "../agent-tools.js";
 import type { AuthProfileCredential, AuthProfileStore } from "../auth-profiles/types.js";
+import { classifyToolCallErrorKind } from "../embedded-agent-subscribe.tools.js";
 import { minimaxUnderstandImage } from "../minimax-vlm.js";
 import type { SandboxFsBridge } from "../sandbox/fs-bridge.js";
 import { createHostSandboxFsBridge } from "../test-helpers/host-sandbox-fs-bridge.js";
@@ -1447,6 +1449,37 @@ describe("image tool implicit imageModel config", () => {
     });
   });
 
+  it("falls back to the raised 150s image default when no timeout is configured", async () => {
+    // Guards DEFAULT_TIMEOUT_SECONDS.image and
+    // CODEX_DYNAMIC_IMAGE_TOOL_TIMEOUT_MS (dynamic-tool-execution.ts)
+    // against silently drifting apart.
+    await withTempWorkspacePng(async ({ workspaceDir, imagePath }) => {
+      await withTempAgentDir(async (agentDir) => {
+        const describeImage = vi.fn(async (params: ImageDescriptionRequest) => ({
+          text: "ok",
+          model: params.model,
+        }));
+        installImageUnderstandingProviderStubs({
+          id: "ollama",
+          capabilities: ["image"],
+          describeImage,
+        });
+        const cfg: OpenClawConfig = {
+          agents: {
+            defaults: {
+              imageModel: { primary: "ollama/gemma4:26b-a4b-it-q4_K_M" },
+            },
+          },
+        };
+        const tool = createRequiredImageTool({ config: cfg, agentDir, workspaceDir });
+
+        await expectImageToolExecOk(tool, imagePath);
+
+        expect(firstImageRequest(describeImage).timeoutMs).toBe(150_000);
+      });
+    });
+  });
+
   it("passes the configured image timeout to provider calls", async () => {
     await withTempWorkspacePng(async ({ workspaceDir, imagePath }) => {
       await withTempAgentDir(async (agentDir) => {
@@ -1518,6 +1551,102 @@ describe("image tool implicit imageModel config", () => {
         await expectImageToolExecOk(tool, imagePath);
 
         expect(firstImageRequest(describeImage).timeoutMs).toBe(300_000);
+      });
+    });
+  });
+
+  // media-understanding/image.ts throws an `ImageDescriptionTimeoutError`
+  // (stable `.name`) when its shared deadline is exhausted; the image tool
+  // must turn that into a graceful `status: "timeout"` result so
+  // classifyToolCallErrorKind reports "timeout" instead of "upstream" and
+  // the after_tool_call Sentry capture doesn't page.
+  function makeImageDescriptionTimeoutError(): Error {
+    const err = new Error("image description request timed out after 150000ms");
+    err.name = "ImageDescriptionTimeoutError";
+    return err;
+  }
+
+  it("returns a graceful timeout result when the vision model doesn't respond in time", async () => {
+    await withTempWorkspacePng(async ({ workspaceDir, imagePath }) => {
+      await withTempAgentDir(async (agentDir) => {
+        const describeImage = vi.fn(async () => {
+          throw makeImageDescriptionTimeoutError();
+        });
+        installImageUnderstandingProviderStubs({
+          id: "ollama",
+          capabilities: ["image"],
+          describeImage,
+        });
+        const cfg: OpenClawConfig = {
+          agents: {
+            defaults: {
+              imageModel: { primary: "ollama/gemma4:26b-a4b-it-q4_K_M" },
+            },
+          },
+        };
+        const tool = createRequiredImageTool({ config: cfg, agentDir, workspaceDir });
+
+        const result = (await tool.execute("t1", {
+          prompt: "Describe the image.",
+          image: imagePath,
+        })) as ToolTextResult;
+
+        expect(result.details).toMatchObject({
+          error: "image_description_timeout",
+          status: "timeout",
+        });
+        expect(
+          result.content?.some(
+            (block) =>
+              block.type === "text" && (block.text ?? "").includes("did not respond in time"),
+          ),
+        ).toBe(true);
+        // Proves the full chain this fix depends on, not just the result
+        // shape: classifyToolCallErrorKind (embedded-agent-subscribe.tools.ts)
+        // must read this exact result as errorKind "timeout", or
+        // captures.ts's downgrade branch never fires and the fix is a no-op.
+        expect(
+          classifyToolCallErrorKind({ result, executionStarted: true, middlewareError: false }),
+        ).toBe("timeout");
+      });
+    });
+  });
+
+  it("still returns a graceful timeout result when every configured image-model fallback times out", async () => {
+    await withTempWorkspacePng(async ({ workspaceDir, imagePath }) => {
+      await withTempAgentDir(async (agentDir) => {
+        const describeImage = vi.fn(async () => {
+          throw makeImageDescriptionTimeoutError();
+        });
+        installImageUnderstandingProviderStubs(
+          { id: "ollama", capabilities: ["image"], describeImage },
+          { id: "anthropic", capabilities: ["image"], describeImage },
+        );
+        const cfg: OpenClawConfig = {
+          agents: {
+            defaults: {
+              imageModel: {
+                primary: "ollama/gemma4:26b-a4b-it-q4_K_M",
+                fallbacks: ["anthropic/claude-opus-4-6"],
+              },
+            },
+          },
+        };
+        const tool = createRequiredImageTool({ config: cfg, agentDir, workspaceDir });
+
+        // runWithImageModelFallback (model-fallback.ts) wraps the last
+        // attempt's error in FallbackSummaryError when more than one
+        // candidate is configured, so this proves the tool unwraps one
+        // level of `.cause` rather than only handling the single-model case.
+        const result = (await tool.execute("t1", {
+          prompt: "Describe the image.",
+          image: imagePath,
+        })) as ToolTextResult;
+
+        expect(result.details).toMatchObject({
+          error: "image_description_timeout",
+          status: "timeout",
+        });
       });
     });
   });
@@ -2074,9 +2203,12 @@ describe("image tool implicit imageModel config", () => {
         const cfg = createMinimaxImageConfig();
 
         const withoutWorkspace = createRequiredImageTool({ config: cfg, agentDir });
-        await expect(
-          withoutWorkspace.execute("t1", { prompt: "Describe.", image: imagePath }),
-        ).rejects.toThrow(/not under an allowed directory/i);
+        const deniedResult = (await withoutWorkspace.execute("t1", {
+          prompt: "Describe.",
+          image: imagePath,
+        })) as { details?: Record<string, unknown> };
+        expect(deniedResult.details?.status).toBe("denied");
+        expect(deniedResult.details?.error).toBe("media_path_not_allowed");
 
         const withWorkspace = createRequiredImageTool({ config: cfg, agentDir, workspaceDir });
 
@@ -2109,9 +2241,12 @@ describe("image tool implicit imageModel config", () => {
         const outsideImage = path.join(outsideDir, "secret.png");
         await fs.writeFile(outsideImage, Buffer.from(ONE_PIXEL_PNG_B64, "base64"));
         try {
-          await expect(
-            tool.execute("t2", { prompt: "Describe.", image: outsideImage }),
-          ).rejects.toThrow(/not under an allowed directory/i);
+          const deniedResult = (await tool.execute("t2", {
+            prompt: "Describe.",
+            image: outsideImage,
+          })) as { details?: Record<string, unknown> };
+          expect(deniedResult.details?.status).toBe("denied");
+          expect(deniedResult.details?.error).toBe("media_path_not_allowed");
         } finally {
           await fs.rm(outsideDir, { recursive: true, force: true });
         }
@@ -2133,10 +2268,39 @@ describe("image tool implicit imageModel config", () => {
           fsPolicy: { workspaceOnly: false },
         });
 
-        await expect(
-          tool.execute("t1", { prompt: "Describe.", image: outsideImage }),
-        ).rejects.toThrow(/not under an allowed directory/i);
+        const deniedResult = (await tool.execute("t1", {
+          prompt: "Describe.",
+          image: outsideImage,
+        })) as { details?: Record<string, unknown> };
+        expect(deniedResult.details?.status).toBe("denied");
+        expect(deniedResult.details?.error).toBe("media_path_not_allowed");
         expect(fetch).not.toHaveBeenCalled();
+      } finally {
+        await fs.rm(outsideDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("allows a non-workspace image path when fsPolicy.rootExpansionAllowed is set (ENG-21228)", async () => {
+    // Mirrors an agent that already renders a page/crop under /tmp with a
+    // host tool (python, pdf2image) and then hands that path to the image
+    // tool — the same file this agent may already read outside its workspace
+    // must not be blocked here just because it is not under a default root.
+    const fetch = stubMinimaxOkFetch();
+    await withTempAgentDir(async (agentDir) => {
+      const cfg = createMinimaxImageConfig();
+      const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-image-tmp-render-"));
+      const outsideImage = path.join(outsideDir, "crop.png");
+      await fs.writeFile(outsideImage, Buffer.from(ONE_PIXEL_PNG_B64, "base64"));
+      try {
+        const tool = createRequiredImageTool({
+          config: cfg,
+          agentDir,
+          fsPolicy: { workspaceOnly: false, rootExpansionAllowed: true },
+        });
+
+        await expectImageToolExecOk(tool, outsideImage);
+        expect(fetch).toHaveBeenCalledTimes(1);
       } finally {
         await fs.rm(outsideDir, { recursive: true, force: true });
       }
@@ -2805,6 +2969,75 @@ describe("image tool MiniMax VLM routing", () => {
         image: `data:image/png;base64,${ONE_PIXEL_PNG_B64}`,
       }),
     ).rejects.toThrow(/MiniMax VLM API error/i);
+  });
+
+  it("returns a graceful error instead of throwing when a source image is too large to decode even under the raised ceiling", async () => {
+    // Overrides this describe block's beforeEach-installed deps so
+    // optimizeImageBufferForWebMedia simulates a Rastermill input-too-large
+    // failure instead of hitting the real backend.
+    installImageUnderstandingProviderDeps([minimaxProvider], {
+      loadImageWebMediaRuntime: async () => ({
+        loadWebMedia: async () => {
+          throw new Error("loadWebMedia should not be called for a data: URL image");
+        },
+        optimizeImageBufferForWebMedia: async () => {
+          throw new RastermillError(
+            "RASTERMILL_INPUT_TOO_LARGE",
+            "Image dimensions exceed the 100,000,000 pixel input limit: 20000x20000 (400000000 pixels)",
+          );
+        },
+      }),
+    });
+    const { fetch, tool } = await createMinimaxVlmFixture({ status_code: 0, status_msg: "" });
+    const image = `data:image/png;base64,${ONE_PIXEL_PNG_B64}`;
+
+    const result = await tool.execute("t1", {
+      prompt: "Describe the image.",
+      image,
+    });
+
+    expect(fetch).not.toHaveBeenCalled();
+    // A data: URL is the full base64 payload — the message/details must
+    // never echo it back, regardless of how large that payload is.
+    expectToolText(
+      result,
+      "Image too large to process: the provided data URL image exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.",
+    );
+    const details = result.details as { error?: string; image?: string } | undefined;
+    expect(details?.error).toBe("image_too_large");
+    expect(details?.image).toBe("the provided data URL image");
+  });
+
+  it("returns a graceful error naming the file path when a local image is too large to decode", async () => {
+    installImageUnderstandingProviderDeps([minimaxProvider], {
+      loadImageWebMediaRuntime: async () => ({
+        loadWebMedia: async () => {
+          throw new RastermillError(
+            "RASTERMILL_INPUT_TOO_LARGE",
+            "Image dimensions exceed the 100,000,000 pixel input limit: 20000x20000 (400000000 pixels)",
+          );
+        },
+        optimizeImageBufferForWebMedia: async () => {
+          throw new Error("optimizeImageBufferForWebMedia should not be called for a file path");
+        },
+      }),
+    });
+    const { fetch, tool } = await createMinimaxVlmFixture({ status_code: 0, status_msg: "" });
+    const imagePath = "./fixtures/too-large.png";
+
+    const result = await tool.execute("t1", {
+      prompt: "Describe the image.",
+      image: imagePath,
+    });
+
+    expect(fetch).not.toHaveBeenCalled();
+    expectToolText(
+      result,
+      `Image too large to process: ${imagePath} exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.`,
+    );
+    const details = result.details as { error?: string; image?: string } | undefined;
+    expect(details?.error).toBe("image_too_large");
+    expect(details?.image).toBe(imagePath);
   });
 });
 

@@ -27,6 +27,11 @@ export function bindAbortRelay(controller: AbortController): () => void {
   return relayAbort.bind(controller);
 }
 
+/** Relays a parent abort while preserving its reason. */
+function relayAbortReason(this: AbortController, signal: AbortSignal) {
+  this.abort(signal.reason);
+}
+
 function sanitizeTimeoutLogUrl(rawUrl: string | undefined): string | undefined {
   const trimmed = rawUrl?.trim();
   if (!trimmed) {
@@ -134,10 +139,10 @@ export function buildTimeoutAbortSignal(params: TimeoutAbortSignalParams): {
     );
   };
   scheduleTimeout();
-  const onAbort = bindAbortRelay(controller);
-  if (signal) {
+  const onAbort = signal ? relayAbortReason.bind(controller, signal) : undefined;
+  if (signal && onAbort) {
     if (signal.aborted) {
-      controller.abort();
+      controller.abort(signal.reason);
     } else {
       signal.addEventListener("abort", onAbort, { once: true });
     }
@@ -159,7 +164,7 @@ export function buildTimeoutAbortSignal(params: TimeoutAbortSignalParams): {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
-      if (signal) {
+      if (signal && onAbort) {
         signal.removeEventListener("abort", onAbort);
       }
     },
@@ -182,11 +187,18 @@ export async function fetchWithTimeout(
   timeoutMs: number,
   fetchFn: typeof fetch = fetch,
 ): Promise<Response> {
-  const { signal, cleanup } = buildTimeoutAbortSignal({
+  const { signal: timeoutSignal, cleanup } = buildTimeoutAbortSignal({
     timeoutMs: Math.max(1, timeoutMs),
     operation: "fetchWithTimeout",
     url,
   });
+  const callerSignal = init.signal ?? undefined;
+  // The wrapper timeout ends once fetch returns headers, but the response body
+  // must keep following caller cancellation (and its reason) after that point.
+  const signal =
+    callerSignal && timeoutSignal
+      ? AbortSignal.any([callerSignal, timeoutSignal])
+      : (callerSignal ?? timeoutSignal);
   try {
     return await fetchFn(url, { ...init, signal });
   } finally {

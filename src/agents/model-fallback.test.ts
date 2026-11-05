@@ -18,6 +18,7 @@ import { CommandLaneTaskTimeoutError } from "../process/command-queue.js";
 import { AUTH_STORE_VERSION } from "./auth-profiles/constants.js";
 import type { AuthProfileStore } from "./auth-profiles/types.js";
 import { classifyEmbeddedAgentRunResultForModelFallback } from "./embedded-agent-runner/result-fallback-classifier.js";
+import { resolveStreamCutoffRetryBudget } from "./embedded-agent-runner/run/stream-cutoff-retry-budget.js";
 import type { EmbeddedAgentRunResult } from "./embedded-agent-runner/types.js";
 import { FailoverError } from "./failover-error.js";
 import { resetFallbackSkipCacheForTest } from "./fallback-skip-cache.js";
@@ -555,6 +556,26 @@ const INSUFFICIENT_QUOTA_PAYLOAD =
   '{"type":"error","error":{"type":"insufficient_quota","message":"Your account has insufficient quota balance to run this request."}}';
 
 describe("runWithModelFallback", () => {
+  it("shares one stream cut-off retry budget across the candidates of one execution", async () => {
+    const cfg = makeCfg();
+    const budgets: unknown[] = [];
+    const run = vi.fn(async () => {
+      budgets.push(resolveStreamCutoffRetryBudget());
+      if (budgets.length % 2 === 1) {
+        throw Object.assign(new Error("nope"), { status: 401 });
+      }
+      return "ok";
+    });
+
+    await runWithModelFallback({ cfg, provider: "openai", model: "gpt-4.1-mini", run });
+    await runWithModelFallback({ cfg, provider: "openai", model: "gpt-4.1-mini", run });
+
+    expect(run).toHaveBeenCalledTimes(4);
+    expect(budgets[0]).toBe(budgets[1]);
+    expect(budgets[2]).toBe(budgets[3]);
+    expect(budgets[0]).not.toBe(budgets[2]);
+  });
+
   it("uses the opt-in auth skip cache on the second turn for the same session", async () => {
     const previous = process.env.OPENCLAW_FALLBACK_SKIP_TTL_MS;
     process.env.OPENCLAW_FALLBACK_SKIP_TTL_MS = "60000";

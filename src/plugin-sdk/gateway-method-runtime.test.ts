@@ -60,4 +60,32 @@ describe("plugin-sdk/gateway-method-runtime", () => {
       },
     );
   });
+
+  it("never forwards in-process-only agent fields from route callers", async () => {
+    dispatchGatewayMethodInProcessRaw.mockResolvedValueOnce({ ok: true, payload: {} });
+
+    await withPluginRuntimeGatewayRequestScope(
+      {
+        pluginId: "admin-http-rpc",
+        gatewayMethodDispatchAllowed: true,
+        client: {
+          id: "plugin",
+          connect: { scopes: ["operator.admin"] },
+        } as never,
+        isWebchatConnect: () => false,
+      },
+      () =>
+        dispatchGatewayMethod("agent", {
+          message: "proxied body",
+          idempotencyKey: "idem",
+          usageAttribution: { userId: "U-SPOOF" },
+          oboToken: "eyJ.spoofed.obo",
+        }),
+    );
+
+    const [, params, options] = dispatchGatewayMethodInProcessRaw.mock.lastCall ?? [];
+    expect(params).toEqual({ message: "proxied body", idempotencyKey: "idem" });
+    // The scoped client must not be marked as trusted in-process dispatch either.
+    expect(options).not.toHaveProperty("inProcessDispatch");
+  });
 });

@@ -1356,6 +1356,112 @@ describe("gateway agent handler", () => {
     expect(capturedEntry?.pluginOwnerId).toBe("other-plugin");
   });
 
+  it.each([
+    { name: "an unauthenticated caller", client: null },
+    // The subagent lane is caller-supplied, so it must not unlock attribution.
+    { name: "a socket backend client on the subagent lane", client: backendGatewayClient() },
+  ])("drops usageAttribution from $name", async ({ client }) => {
+    primeMainAgentRun();
+
+    await invokeAgent(
+      {
+        message: "spoofed attribution",
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        lane: "subagent",
+        usageAttribution: { userId: "U-SPOOF", userName: "Mallory", userSource: "slack" },
+        idempotencyKey: "test-idem-usage-attribution-dropped",
+      },
+      { reqId: "test-idem-usage-attribution-dropped", client },
+    );
+
+    const call = await waitForAgentCommandCall();
+    expect(call).not.toHaveProperty("usageAttribution");
+  });
+
+  it("forwards usageAttribution from in-process dispatch callers", async () => {
+    primeMainAgentRun();
+
+    await invokeAgent(
+      {
+        message: "subagent task",
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        lane: "subagent",
+        usageAttribution: { userId: " U-ALICE ", userName: "Alice", userSource: "slack" },
+        idempotencyKey: "test-idem-usage-attribution-in-process",
+      },
+      {
+        reqId: "test-idem-usage-attribution-in-process",
+        client: { internal: { inProcessDispatch: true } } as AgentHandlerArgs["client"],
+      },
+    );
+
+    const call = await waitForAgentCommandCall();
+    expect(call.usageAttribution).toEqual({
+      userId: "U-ALICE",
+      userName: "Alice",
+      userSource: "slack",
+    });
+    // Billing identity only: it must never become the run's sender identity.
+    expect((call.runContext as Record<string, unknown> | undefined)?.senderId).toBeUndefined();
+  });
+
+  it.each([
+    { name: "an unauthenticated caller", client: null },
+    { name: "a socket backend client on the subagent lane", client: backendGatewayClient() },
+  ])("drops oboToken from $name", async ({ client }) => {
+    primeMainAgentRun();
+
+    await invokeAgent(
+      {
+        message: "spoofed obo",
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        lane: "subagent",
+        oboToken: "eyJ.spoofed.obo",
+        idempotencyKey: "test-idem-obo-dropped",
+      },
+      { reqId: "test-idem-obo-dropped", client },
+    );
+
+    const call = await waitForAgentCommandCall();
+    expect(call).not.toHaveProperty("oboToken");
+  });
+
+  it("forwards oboToken from in-process dispatch without persisting it on the session", async () => {
+    primeMainAgentRun();
+    const token = "eyJ.gateway-aud.in-process-obo";
+    const persisted: string[] = [];
+    mocks.updateSessionStore.mockImplementation(async (_path, updater) => {
+      const store: Record<string, unknown> = { "agent:main:main": {} };
+      const result = await updater(store);
+      persisted.push(JSON.stringify(store));
+      return result;
+    });
+
+    await invokeAgent(
+      {
+        message: "subagent task",
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        lane: "subagent",
+        oboToken: ` ${token} `,
+        idempotencyKey: "test-idem-obo-in-process",
+      },
+      {
+        reqId: "test-idem-obo-in-process",
+        client: { internal: { inProcessDispatch: true } } as AgentHandlerArgs["client"],
+      },
+    );
+
+    const call = await waitForAgentCommandCall();
+    expect(call.oboToken).toBe(token);
+    // Per-turn bearer: it must never reach the session store (which was written).
+    expect(persisted.length).toBeGreaterThan(0);
+    expect(persisted.join("\n")).not.toContain(token);
+  });
+
   it("forwards provider and model overrides for admin-scoped callers", async () => {
     primeMainAgentRun();
 
@@ -2108,53 +2214,60 @@ describe("gateway agent handler", () => {
     resetTimeConfig();
   });
 
-  it("suppresses persisted prompts for subagent announce task-completion handoffs", async () => {
-    primeMainAgentRun({ cfg: mocks.loadConfigReturn });
-    mocks.agentCommand.mockClear();
+  it.each([
+    { requested: undefined, persisted: true },
+    { requested: true, persisted: false },
+  ])(
+    "persists subagent announce task-completion handoff prompts unless the caller suppresses them (requested=$requested)",
+    async ({ requested, persisted }) => {
+      primeMainAgentRun({ cfg: mocks.loadConfigReturn });
+      mocks.agentCommand.mockClear();
 
-    await invokeAgent(
-      {
-        message: "runtime-only announce bookkeeping",
-        agentId: "main",
-        sessionKey: "agent:main:main",
-        inputProvenance: {
-          kind: "inter_session",
-          sourceSessionKey: "agent:main:subagent:child",
-          sourceTool: "subagent_announce",
-        },
-        internalEvents: [
-          {
-            type: "task_completion",
-            source: "subagent",
-            childSessionKey: "agent:main:subagent:child",
-            childSessionId: "child-session-id",
-            announceType: "completion",
-            taskLabel: "child task",
-            status: "ok",
-            statusLabel: "completed",
-            result: "child result",
-            statsLine: "tokens=10",
-            replyInstruction: "Deliver the child result.",
+      await invokeAgent(
+        {
+          message: "runtime-only announce bookkeeping",
+          agentId: "main",
+          sessionKey: "agent:main:main",
+          inputProvenance: {
+            kind: "inter_session",
+            sourceSessionKey: "agent:main:subagent:child",
+            sourceTool: "subagent_announce",
           },
-        ],
-        idempotencyKey: "test-subagent-announce-suppress-prompt",
-      },
-      {
-        reqId: "subagent-announce-suppress-prompt",
-        client: backendGatewayClient(),
-      },
-    );
+          internalEvents: [
+            {
+              type: "task_completion",
+              source: "subagent",
+              childSessionKey: "agent:main:subagent:child",
+              childSessionId: "child-session-id",
+              announceType: "completion",
+              taskLabel: "child task",
+              status: "ok",
+              statusLabel: "completed",
+              result: "child result",
+              statsLine: "tokens=10",
+              replyInstruction: "Deliver the child result.",
+            },
+          ],
+          ...(requested === undefined ? {} : { suppressPromptPersistence: requested }),
+          idempotencyKey: `test-subagent-announce-persist-prompt-${String(requested)}`,
+        },
+        {
+          reqId: `subagent-announce-persist-prompt-${String(requested)}`,
+          client: backendGatewayClient(),
+        },
+      );
 
-    const callArgs = await waitForAgentCommandCall<{
-      suppressPromptPersistence?: boolean;
-      preserveUserFacingSessionModelState?: boolean;
-      message?: string;
-    }>();
-    expect(callArgs.suppressPromptPersistence).toBe(true);
-    expect(callArgs.preserveUserFacingSessionModelState).toBe(true);
-    expect(callArgs.message).toMatch(/^\[Inter-session message\]/);
-    expect(callArgs.message).toContain("sourceTool=subagent_announce");
-  });
+      const callArgs = await waitForAgentCommandCall<{
+        suppressPromptPersistence?: boolean;
+        preserveUserFacingSessionModelState?: boolean;
+        message?: string;
+      }>();
+      expect(callArgs.suppressPromptPersistence).toBe(!persisted);
+      expect(callArgs.preserveUserFacingSessionModelState).toBe(true);
+      expect(callArgs.message).toMatch(/^\[Inter-session message\]/);
+      expect(callArgs.message).toContain("sourceTool=subagent_announce");
+    },
+  );
 
   it("does not let public provenance suppress visible session accounting", async () => {
     primeMainAgentRun({ cfg: mocks.loadConfigReturn });

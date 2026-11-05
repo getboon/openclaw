@@ -9,6 +9,7 @@ import {
   isSameMemoryDreamingDay,
 } from "openclaw/plugin-sdk/memory-core-host-status";
 import { appendMemoryHostEvent } from "openclaw/plugin-sdk/memory-host-events";
+import { replaceFileAtomic } from "openclaw/plugin-sdk/security-runtime";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeStringEntries,
@@ -2374,7 +2375,20 @@ export async function applyShortTermPromotions(
     DEFAULT_PROMOTION_MIN_UNIQUE_QUERIES,
   );
   const maxAgeDays = toFiniteNonNegativeInt(options.maxAgeDays, -1);
-  const memoryPath = path.join(workspaceDir, "MEMORY.md");
+  // replaceFileAtomic renames a temp file onto this path, which replaces a
+  // symlink itself rather than writing through to its target (standard
+  // POSIX rename semantics). Resolve to the real path first so a symlinked
+  // MEMORY.md (e.g. into a synced directory) gets updated at its actual
+  // location instead of promotion silently reporting success while the
+  // canonical file never changes.
+  const memoryPath = await fs
+    .realpath(path.join(workspaceDir, "MEMORY.md"))
+    .catch((err: unknown) => {
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+        return path.join(workspaceDir, "MEMORY.md");
+      }
+      throw err;
+    });
 
   return await withShortTermLock(workspaceDir, async () => {
     const store = await readStore(workspaceDir, nowIso);
@@ -2468,11 +2482,18 @@ export async function applyShortTermPromotions(
       compactedDates = compaction.droppedDates;
       const baseMemory = compaction.compacted;
       const header = baseMemory.trim().length > 0 ? "" : "# Long-Term Memory\n\n";
-      await fs.writeFile(
-        memoryPath,
-        `${header}${withTrailingNewline(baseMemory)}${section}`,
-        "utf-8",
-      );
+      const workspaceMode = (await fs.stat(workspaceDir)).mode & 0o7777;
+      await replaceFileAtomic({
+        filePath: memoryPath,
+        content: `${header}${withTrailingNewline(baseMemory)}${section}`,
+        dirMode: workspaceMode,
+        mode: 0o600,
+        preserveExistingMode: true,
+        tempPrefix: `${path.basename(memoryPath)}.promotion`,
+        syncTempFile: true,
+        syncParentDir: true,
+        throwOnCleanupError: true,
+      });
     }
 
     for (const candidate of rehydratedSelected) {

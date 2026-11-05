@@ -150,6 +150,28 @@ catalogs returned by the Gateway.
   </Accordion>
 </AccordionGroup>
 
+## Local file access for media tools
+
+`image`, `pdf`, `image_generate`, `video_generate`, and `music_generate` read
+local files from a fixed set of roots: the OpenClaw temp root
+(`/tmp/openclaw`, fallback `${os.tmpdir()}/openclaw-<uid>`), the state/config
+media directories, the state `canvas`/`workspace`/`sandboxes` directories, and
+the active agent workspace. A path outside those roots is normally rejected.
+A relative path (for example `projects/report.pdf`) is resolved against the
+active agent workspace first, the same way `read`/`write` treat relative
+paths.
+
+When an agent is otherwise permitted to read host files outside its
+workspace (no `tools.fs.workspaceOnly`, and the effective tool policy allows
+`read`), a media tool may additionally read from the directory of the file it
+was given — so a crop or page render an agent just wrote with `exec` (for
+example under `/tmp`) can be opened without first being copied into the
+workspace. `tools.fs.workspaceOnly: true` always restricts media tools to the
+workspace, regardless of this.
+
+A rejected path returns a tool result the agent can act on (write the file
+under the workspace and retry) instead of failing the turn.
+
 ## Related
 
 - [Image generation](/tools/image-generation)

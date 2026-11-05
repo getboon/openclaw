@@ -847,6 +847,7 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
                   filename:
                     readOptionalTrimmedString(ctx.params, "filename") ??
                     readOptionalTrimmedString(ctx.params, "title"),
+                  mediaAccess: ctx.mediaAccess,
                   mediaLocalRoots: ctx.mediaLocalRoots,
                   mediaReadFile: ctx.mediaReadFile,
                   replyStyleOverride,

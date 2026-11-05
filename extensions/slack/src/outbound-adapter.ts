@@ -26,6 +26,7 @@ import {
 } from "./blocks-render.js";
 import { compileSlackInteractiveReplies } from "./interactive-replies.js";
 import { SLACK_TEXT_LIMIT } from "./limits.js";
+import type { OutboundMediaAccess } from "./runtime-api.js";
 import type { SlackSendIdentity } from "./send.js";
 import { resolveSlackThreadTsValue } from "./thread-ts.js";
 
@@ -72,10 +73,7 @@ async function sendSlackOutboundMessage(params: {
   to: string;
   text: string;
   mediaUrl?: string;
-  mediaAccess?: {
-    localRoots?: readonly string[];
-    readFile?: (filePath: string) => Promise<Buffer>;
-  };
+  mediaAccess?: OutboundMediaAccess;
   mediaLocalRoots?: readonly string[];
   mediaReadFile?: (filePath: string) => Promise<Buffer>;
   blocks?: NonNullable<Parameters<SlackSendFn>[2]>["blocks"];

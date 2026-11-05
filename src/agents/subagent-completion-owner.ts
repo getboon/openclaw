@@ -1,5 +1,6 @@
 import { normalizeMessageChannel } from "../utils/message-channel-normalize.js";
 import type { AgentInternalEvent } from "./internal-events.js";
+import type { UsageAttribution } from "./usage-attribution.js";
 
 // Structural copy of SubagentRunOutcome: importing it from the announce output
 // module would route this leaf through the gateway barrel and form an import cycle.
@@ -39,6 +40,12 @@ export type SubagentCompletionRequest = {
    * still change the real outcome.
    */
   finalAttempt?: boolean;
+  /**
+   * Billing-only user the requester's completion turn is attributed to. That turn
+   * has no inbound sender, so owners set it on the turn context (`UsageAttribution`)
+   * rather than as sender identity; tool policy and auth stay unchanged.
+   */
+  usageAttribution?: UsageAttribution;
 };
 
 export type SubagentCompletionResult =

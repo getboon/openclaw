@@ -296,6 +296,7 @@ async function loadReferenceImages(params: {
   inputs: string[];
   workspaceDir?: string;
   sandboxConfig: { root: string; bridge: SandboxFsBridge; workspaceOnly: boolean } | null;
+  rootExpansionAllowed?: boolean;
   ssrfPolicy?: SsrFPolicy;
   timeoutMs?: number;
 }): Promise<
@@ -353,6 +354,7 @@ async function loadReferenceImages(params: {
       params.workspaceDir,
       {
         workspaceOnly: params.sandboxConfig?.workspaceOnly === true,
+        rootExpansionAllowed: params.rootExpansionAllowed === true,
       },
       resolvedPath ? [resolvedPath] : undefined,
     );
@@ -374,6 +376,9 @@ async function loadReferenceImages(params: {
             try {
               return await loadWebMedia(resolvedPath ?? resolvedInput, {
                 localRoots,
+                // Lets a relative ref resolve against the agent workspace instead of
+                // the gateway process cwd, matching the image tool.
+                ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
                 requestInit: signal ? { signal } : undefined,
                 ssrfPolicy: params.ssrfPolicy,
               });
@@ -713,6 +718,7 @@ export function createMusicGenerateTool(options?: {
         inputs: imageInputs,
         workspaceDir: options?.workspaceDir,
         sandboxConfig,
+        rootExpansionAllowed: options?.fsPolicy?.rootExpansionAllowed === true,
         ssrfPolicy: remoteMediaSsrfPolicy,
       });
       validateMusicGenerationCapabilities({

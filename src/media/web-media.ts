@@ -18,6 +18,7 @@ import { FsSafeError, readLocalFileSafely } from "../infra/fs-safe.js";
 import { assertNoWindowsNetworkPath, safeFileURLToPath } from "../infra/local-file-access.js";
 import type { PinnedDispatcherPolicy, SsrFPolicy } from "../infra/net/ssrf.js";
 import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getActivePluginRegistry } from "../plugins/runtime.js";
 import { resolveUserPath } from "../utils.js";
 import { readRemoteMediaBuffer } from "./fetch.js";
@@ -30,12 +31,15 @@ import {
 import { MediaReferenceError, resolveInboundMediaReference } from "./media-reference.js";
 import {
   createImageProcessor,
+  MAX_IMAGE_INPUT_PIXELS,
   readImageMetadataFromHeader,
   readImageProbeFromHeader,
 } from "./media-services.js";
 
 export { getDefaultLocalRoots, LocalMediaAccessError };
 export type { LocalMediaAccessErrorCode };
+
+const log = createSubsystemLogger("media/web-media");
 
 /** Loaded media bytes plus resolved MIME kind and filename metadata for outbound/plugin callers. */
 export type WebMediaResult = {
@@ -761,6 +765,7 @@ async function optimizeImageWithFallback(params: {
 }): Promise<OptimizedImage> {
   const { buffer, cap } = params;
   const grid = resolveImageCompressionGrid(params.imageCompression);
+  const sourceMeta = readImageMetadataFromHeader(buffer);
   const optimized = await createImageProcessor().encode(buffer, {
     format: "auto",
     maxBytes: cap,
@@ -772,6 +777,13 @@ async function optimizeImageWithFallback(params: {
     },
     transparency: "auto",
   });
+  // Unconditional (not verbose-gated): a source this large used to be
+  // rejected outright before the decode/output pixel budgets were split.
+  if (sourceMeta && sourceMeta.width * sourceMeta.height > MAX_IMAGE_INPUT_PIXELS) {
+    log.info(
+      `Downscaled oversized source image: ${sourceMeta.width}x${sourceMeta.height} exceeded the ${MAX_IMAGE_INPUT_PIXELS.toLocaleString("en-US")}px output limit`,
+    );
+  }
   if (optimized.chosen.transparency === "flattened" && shouldLogVerbose()) {
     logVerbose(`Image transparency flattened to fit ${formatMb(cap, 0)}MB optimization budget`);
   }

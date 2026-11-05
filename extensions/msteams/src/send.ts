@@ -10,6 +10,7 @@ import {
   loadOutboundMediaFromUrl,
   type MSTeamsReplyStyle,
   type OpenClawConfig,
+  type OutboundMediaAccess,
 } from "../runtime-api.js";
 import {
   classifyMSTeamsSendError,
@@ -47,6 +48,7 @@ type SendMSTeamsMessageParams = {
   mediaUrl?: string;
   /** Optional filename override for uploaded media/files */
   filename?: string;
+  mediaAccess?: OutboundMediaAccess;
   mediaLocalRoots?: readonly string[];
   mediaReadFile?: (filePath: string) => Promise<Buffer>;
   /**
@@ -145,8 +147,17 @@ type SendMSTeamsCardResult = {
 export async function sendMessageMSTeams(
   params: SendMSTeamsMessageParams,
 ): Promise<SendMSTeamsMessageResult> {
-  const { cfg, to, text, mediaUrl, filename, mediaLocalRoots, mediaReadFile, replyStyleOverride } =
-    params;
+  const {
+    cfg,
+    to,
+    text,
+    mediaUrl,
+    filename,
+    mediaAccess,
+    mediaLocalRoots,
+    mediaReadFile,
+    replyStyleOverride,
+  } = params;
   const tableMode = resolveMarkdownTableMode({
     cfg,
     channel: "msteams",
@@ -169,6 +180,7 @@ export async function sendMessageMSTeams(
   const mediaMaxBytes = ctx.mediaMaxBytes ?? MSTEAMS_MAX_MEDIA_BYTES;
   const media = await loadOutboundMediaFromUrl(mediaUrl, {
     maxBytes: mediaMaxBytes,
+    mediaAccess,
     mediaLocalRoots,
     mediaReadFile,
   });

@@ -1,4 +1,5 @@
 /** Shared inbound message context types used by prompt templating and reply dispatch. */
+import type { UsageAttribution } from "../agents/usage-attribution.js";
 import type { InboundEventKind } from "../channels/inbound-event/kind.js";
 import type {
   MediaUnderstandingDecision,
@@ -290,6 +291,12 @@ export type MsgContext = {
    * verify and skip metering internal-test traffic. Absent on other surfaces.
    */
   OboToken?: string;
+  /**
+   * Billing-only originating user for turns with no inbound sender (for example a
+   * subagent completion turn). Feeds the model-call user usage headers only when
+   * SenderId is absent; never sender identity, command auth, or tool policy.
+   */
+  UsageAttribution?: UsageAttribution;
   SenderUsername?: string;
   SenderTag?: string;
   SenderE164?: string;

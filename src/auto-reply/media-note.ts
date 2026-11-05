@@ -16,7 +16,9 @@ function normalizeManagedInboundMediaRef(value: string): string {
   const candidate = stripDarwinPrivatePrefix(path.resolve(value));
   const inboundDir = path.join(mediaDir, "inbound");
   const relativeToInbound = path.relative(inboundDir, candidate);
-  // Managed inbound media gets a stable URI so prompts do not leak host-specific temp paths.
+  // Keeps the per-turn note compact/deterministic and matches the exact
+  // scheme boon-pdf-prep's parsePdfRefs expects. The real directory this
+  // resolves to is named once, statically, in buildAttachmentsSection.
   if (
     !relativeToInbound ||
     relativeToInbound.startsWith("..") ||

@@ -107,13 +107,29 @@ export function summarizeBoonExecCommand(words: string[]): string | undefined {
     }
   }
 
+  if (bin === "boon-estimation") {
+    const positional = positionalArgs(words, 1);
+    const subcommand = positional[0];
+    switch (subcommand) {
+      case "line-items":
+        // Keep fee-loaded reads distinct from plain line-item reads so a regression
+        // eval can require the flag was actually used, not just that the estimate
+        // was read.
+        return words.includes("--fee-loaded")
+          ? "reading fee-loaded line prices"
+          : "reading the estimate lines";
+      case "fees":
+        return "checking the estimate fees";
+      default:
+        return "working on the estimate";
+    }
+  }
+
   switch (bin) {
     case "agent-config":
       return "updating agent settings";
     case "boon-conversations":
       return "reviewing past conversations";
-    case "boon-estimation":
-      return "working on the estimate";
     case "boon-file-host":
       return "preparing file downloads";
     case "boon-mep-design":

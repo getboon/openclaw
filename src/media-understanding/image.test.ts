@@ -248,6 +248,29 @@ describe("describeImageWithModel", () => {
     expect(completeMock).not.toHaveBeenCalled();
   });
 
+  it("normalizes MiniMax's own AbortSignal.timeout rejection into the shared timeout error", async () => {
+    const authStore = { version: 1, profiles: {} };
+    // AbortSignal.timeout() raises a DOMException named "TimeoutError" when
+    // it fires; minimaxUnderstandImage's fetch call never catches it, so it
+    // would otherwise escape unclassified as a raw, differently-named error.
+    fetchMock.mockRejectedValueOnce(new DOMException("The operation timed out.", "TimeoutError"));
+
+    await expect(
+      describeImageWithModel({
+        cfg: {},
+        agentDir: "/tmp/openclaw-agent",
+        provider: "minimax-portal",
+        model: "MiniMax-VL-01",
+        buffer: Buffer.from("png-bytes"),
+        fileName: "image.png",
+        mime: "image/png",
+        prompt: "Describe the image.",
+        timeoutMs: 1000,
+        authStore,
+      }),
+    ).rejects.toThrow("image description request timed out after 1000ms");
+  });
+
   it("uses generic completion for non-canonical minimax-portal image models", async () => {
     discoverModelsMock.mockReturnValue({
       find: vi.fn(() => ({
@@ -870,7 +893,14 @@ describe("describeImageWithModel", () => {
     });
     expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), MAX_TIMER_TIMEOUT_MS);
     const firstCall = requireFirstMockCall(completeMock, "image completion");
-    expect(firstCall[2].timeoutMs).toBe(MAX_TIMER_TIMEOUT_MS);
+    // The provider request now draws from the shared deadline, so by the
+    // time this phase computes its remaining budget a small, real-clock
+    // amount of time has already elapsed since the clamp was applied —
+    // exact equality to MAX_TIMER_TIMEOUT_MS is no longer guaranteed. The
+    // tolerance only needs to cover this test's own (mocked, near-instant)
+    // setup overhead, not a real provider timeout.
+    expect(firstCall[2].timeoutMs).toBeLessThanOrEqual(MAX_TIMER_TIMEOUT_MS);
+    expect(firstCall[2].timeoutMs).toBeGreaterThan(MAX_TIMER_TIMEOUT_MS - 5_000);
   });
 
   it("places OpenRouter image prompts in user content before images", async () => {
@@ -1138,7 +1168,97 @@ describe("describeImageWithModel", () => {
     expect(options.timeoutMs).toBe(25);
   });
 
-  it("keeps the full configured timeout for provider requests after slow setup", async () => {
+  it("normalizes a provider's own near-deadline timeout rejection into the shared timeout error", async () => {
+    vi.useFakeTimers();
+    discoverModelsMock.mockReturnValue({
+      find: vi.fn(() => ({
+        api: "openai-responses",
+        provider: "openai",
+        id: "gpt-5.4-mini",
+        input: ["text", "image"],
+        baseUrl: "https://api.openai.com/v1",
+      })),
+    });
+    completeMock.mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          // Simulates a provider SDK enforcing streamOptions.timeoutMs as
+          // its own internal HTTP timeout: this timer is registered (and so
+          // due to fire, on fake timers' same-deadline FIFO ordering)
+          // before the race's own timer below, so without normalization
+          // this raw, differently-worded error would win the race instead
+          // of the shared ImageDescriptionTimeoutError.
+          setTimeout(() => reject(new Error("Request timed out")), 1000);
+        }),
+    );
+
+    const result = describeImageWithModel({
+      cfg: {},
+      agentDir: "/tmp/openclaw-agent",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      buffer: Buffer.from("png-bytes"),
+      fileName: "image.png",
+      mime: "image/png",
+      prompt: "Describe the image.",
+      timeoutMs: 1000,
+    });
+
+    const assertion = expect(result).rejects.toThrow(
+      "image description request timed out after 1000ms",
+    );
+    await vi.advanceTimersByTimeAsync(1000);
+    await assertion;
+  });
+
+  it("does not normalize a late HTTP-status error into a timeout, even near the deadline", async () => {
+    vi.useFakeTimers();
+    discoverModelsMock.mockReturnValue({
+      find: vi.fn(() => ({
+        api: "openai-responses",
+        provider: "openai",
+        id: "gpt-5.4-mini",
+        input: ["text", "image"],
+        baseUrl: "https://api.openai.com/v1",
+      })),
+    });
+    completeMock.mockImplementation(
+      () =>
+        new Promise((_, reject) => {
+          // A response that actually arrived (even an error one) carries an
+          // HTTP status, unlike a request that never completed — this must
+          // stay a genuine 401, not get swallowed into "timed out", even
+          // though it lands in the race's last stretch.
+          setTimeout(() => {
+            const unauthorized = new Error("Unauthorized");
+            (unauthorized as Error & { status: number }).status = 401;
+            reject(unauthorized);
+          }, 1000);
+        }),
+    );
+
+    const result = describeImageWithModel({
+      cfg: {},
+      agentDir: "/tmp/openclaw-agent",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      buffer: Buffer.from("png-bytes"),
+      fileName: "image.png",
+      mime: "image/png",
+      prompt: "Describe the image.",
+      timeoutMs: 1000,
+    });
+
+    const assertion = expect(result).rejects.toThrow("Unauthorized");
+    await vi.advanceTimersByTimeAsync(1000);
+    await assertion;
+  });
+
+  it("shares the configured timeout across setup and the provider request after slow setup", async () => {
+    // Setup and the provider request now draw from one deadline instead of
+    // each independently getting the full configured budget — a slow setup
+    // leaves correspondingly less time for the request, rather than a fresh
+    // full window.
     vi.useFakeTimers();
     const slowSetupMs = 400;
     discoverModelsMock.mockReturnValue({
@@ -1191,12 +1311,22 @@ describe("describeImageWithModel", () => {
     if (!options?.signal) {
       throw new Error("Expected image completion abort signal");
     }
-    expect(options.timeoutMs).toBe(1000);
+    // The request phase gets what's left of the 1000ms budget after the
+    // 400ms slow setup (600ms), not a fresh 1000ms window.
+    const remainingMs = 1000 - slowSetupMs;
+    expect(options.timeoutMs).toBe(remainingMs);
 
+    // The message still reports the configured total (1000ms), not the
+    // smaller remaining slice that actually governs the race — an operator
+    // reading Sentry wants the configured budget, not an arithmetic
+    // remainder.
     const assertion = expect(result).rejects.toThrow(
       `image description request timed out after 1000ms (setup took ${slowSetupMs}ms before provider request started)`,
     );
-    await vi.advanceTimersByTimeAsync(1000);
+    // Advancing by exactly the remaining budget (not the full configured
+    // 1000ms) proves the request phase actually fires at 600ms; advancing
+    // further would mask a regression back to the old full-window behavior.
+    await vi.advanceTimersByTimeAsync(remainingMs);
     await assertion;
     expect(options.signal.aborted).toBe(true);
   });

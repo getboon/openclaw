@@ -102,6 +102,30 @@ describe("summarizeBoonExecCommand", () => {
   });
 
   it.each([
+    ["line-items", "reading the estimate lines"],
+    ["fees", "checking the estimate fees"],
+    ["versions", "working on the estimate"],
+  ])("maps boon-estimation %s", (subcommand, expected) => {
+    expect(summarizeBoonExecCommand(["boon-estimation", subcommand])).toBe(expected);
+  });
+
+  it("distinguishes line-items --fee-loaded from a plain line-items read", () => {
+    expect(
+      summarizeBoonExecCommand(["boon-estimation", "line-items", "164152", "9277", "9766"]),
+    ).toBe("reading the estimate lines");
+    expect(
+      summarizeBoonExecCommand([
+        "boon-estimation",
+        "line-items",
+        "164152",
+        "9277",
+        "9766",
+        "--fee-loaded",
+      ]),
+    ).toBe("reading fee-loaded line prices");
+  });
+
+  it.each([
     ["page-text", "extracting text from file.pdf"],
     ["pages-text", "extracting text from file.pdf"],
     ["page-to-image", "rendering a drawing from file.pdf"],

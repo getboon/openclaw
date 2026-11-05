@@ -3044,8 +3044,15 @@ export async function dispatchReplyFromConfig(
             typingPolicy: typing.typingPolicy,
             suppressTyping: typing.suppressTyping,
             onPartialReply: wrapProgressCallback(params.replyOptions?.onPartialReply),
-            onReasoningStream: wrapProgressCallback(params.replyOptions?.onReasoningStream),
-            onReasoningEnd: wrapProgressCallback(params.replyOptions?.onReasoningEnd),
+            // Reasoning callbacks share the suppressed-source escape hatch
+            // with the tool-lifecycle callbacks above, or a channel-owned
+            // progress UI silently never receives streamed content.
+            onReasoningStream: wrapProgressCallback(params.replyOptions?.onReasoningStream, {
+              forwardWhenSourceDeliverySuppressed: true,
+            }),
+            onReasoningEnd: wrapProgressCallback(params.replyOptions?.onReasoningEnd, {
+              forwardWhenSourceDeliverySuppressed: true,
+            }),
             onAssistantMessageStart: wrapProgressCallback(
               params.replyOptions?.onAssistantMessageStart,
             ),

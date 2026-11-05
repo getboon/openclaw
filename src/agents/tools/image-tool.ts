@@ -3,7 +3,6 @@
  *
  * Describes local, staged, web, and generated media through configured media-understanding providers.
  */
-import { resolve, isAbsolute } from "node:path";
 import { Type } from "typebox";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { MediaUnderstandingModelConfig } from "../../config/types.tools.js";
@@ -19,10 +18,12 @@ import {
   getMediaUnderstandingProvider,
 } from "../../media-understanding/provider-registry.js";
 import { resolveTimeoutMs } from "../../media-understanding/resolve.js";
+import { isLocalMediaPathNotAllowedError } from "../../media/local-media-access.js";
 import {
   classifyMediaReferenceSource,
   normalizeMediaReferenceSource,
 } from "../../media/media-reference.js";
+import { isImageTooLargeToDecodeError } from "../../media/media-services.js";
 import type {
   ImageCompressionModelPolicy,
   ImageCompressionPolicy,
@@ -633,6 +634,30 @@ type ImageSandboxConfig = {
   bridge: SandboxFsBridge;
 };
 
+// `ImageDescriptionTimeoutError` is checked by stable `.name`, not
+// `instanceof`: media-understanding/image.ts is only ever reached through
+// the lazy image-runtime.ts facade, so importing its class here would defeat
+// that. A configured fallback list also wraps the original error one or two
+// `.cause` hops down (FailoverError, then FallbackSummaryError when more
+// than one candidate is configured) before it reaches `runImagePrompt`, so
+// this walks the chain instead of checking a fixed depth.
+const IMAGE_DESCRIPTION_TIMEOUT_ERROR_NAME = "ImageDescriptionTimeoutError";
+const IMAGE_DESCRIPTION_TIMEOUT_CAUSE_CHAIN_LIMIT = 5;
+
+function isImageDescriptionTimeout(err: unknown): boolean {
+  let current: unknown = err;
+  for (let depth = 0; depth < IMAGE_DESCRIPTION_TIMEOUT_CAUSE_CHAIN_LIMIT; depth += 1) {
+    if (!(current instanceof Error)) {
+      return false;
+    }
+    if (current.name === IMAGE_DESCRIPTION_TIMEOUT_ERROR_NAME) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
+
 async function runImagePrompt(params: {
   cfg?: OpenClawConfig;
   agentDir: string;
@@ -931,7 +956,7 @@ export function createImageTool(options?: {
         // shared image registry here, so fail gracefully instead of attempting to
         // `fs.readFile("image:0")` and producing a noisy ENOENT.
         const refInfo = classifyMediaReferenceSource(normalizedRef);
-        const { isDataUrl, isFileUrl, isHttpUrl, isMediaStoreUrl } = refInfo;
+        const { isDataUrl, isHttpUrl } = refInfo;
         if (refInfo.hasUnsupportedScheme) {
           return {
             content: [
@@ -958,20 +983,6 @@ export function createImageTool(options?: {
           if (normalizedRef.startsWith("~")) {
             return resolveUserPath(normalizedRef);
           }
-          // Resolve relative paths against workspaceDir so agents can reference
-          // workspace-relative paths (e.g. "inbox/photo.png") without needing to
-          // know the absolute workspace location — matching the read tool behaviour.
-          if (
-            !isDataUrl &&
-            !isFileUrl &&
-            !isHttpUrl &&
-            !isMediaStoreUrl &&
-            !refInfo.looksLikeWindowsDrivePath &&
-            !isAbsolute(normalizedRef) &&
-            options?.workspaceDir
-          ) {
-            return resolve(options.workspaceDir, normalizedRef);
-          }
           return normalizedRef;
         })();
         const resolvedPathInfo: { resolved: string; rewrittenFrom?: string } = isDataUrl
@@ -992,6 +1003,7 @@ export function createImageTool(options?: {
           options?.workspaceDir,
           {
             workspaceOnly: options?.fsPolicy?.workspaceOnly === true,
+            rootExpansionAllowed: options?.fsPolicy?.rootExpansionAllowed === true,
             cfg: options?.config,
             channelId: options?.agentChannel ?? options?.currentChannelId,
             accountId: options?.agentAccountId,
@@ -1006,31 +1018,82 @@ export function createImageTool(options?: {
         });
         const imageWebMedia = await imageToolProviderDeps.loadImageWebMediaRuntime();
 
-        const media = isDataUrl
-          ? await (async () => {
-              const decoded = decodeDataUrl(resolvedImage, { maxBytes });
-              return await imageWebMedia.optimizeImageBufferForWebMedia({
-                buffer: decoded.buffer,
-                contentType: decoded.mimeType,
-                maxBytes,
-                imageCompression,
-              });
-            })()
-          : sandboxConfig
-            ? await imageWebMedia.loadWebMedia(resolvedPath ?? resolvedImage, {
-                maxBytes,
-                sandboxValidated: true,
-                readFile: createSandboxBridgeReadFile({ sandbox: sandboxConfig }),
-                imageCompression,
-              })
-            : await imageWebMedia.loadWebMedia(resolvedPath ?? resolvedImage, {
-                maxBytes,
-                localRoots: mediaLocalRoots,
-                inboundRoots: mediaInboundRoots,
-                ssrfPolicy: remoteMediaSsrfPolicy,
-                ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
-                imageCompression,
-              });
+        let media: WebMediaResult;
+        try {
+          media = isDataUrl
+            ? await (async () => {
+                const decoded = decodeDataUrl(resolvedImage, { maxBytes });
+                return await imageWebMedia.optimizeImageBufferForWebMedia({
+                  buffer: decoded.buffer,
+                  contentType: decoded.mimeType,
+                  maxBytes,
+                  imageCompression,
+                });
+              })()
+            : sandboxConfig
+              ? await imageWebMedia.loadWebMedia(resolvedPath ?? resolvedImage, {
+                  maxBytes,
+                  sandboxValidated: true,
+                  readFile: createSandboxBridgeReadFile({ sandbox: sandboxConfig }),
+                  imageCompression,
+                })
+              : await imageWebMedia.loadWebMedia(resolvedPath ?? resolvedImage, {
+                  maxBytes,
+                  localRoots: mediaLocalRoots,
+                  inboundRoots: mediaInboundRoots,
+                  // Lets a relative ref (e.g. "inbox/photo.png") resolve against the
+                  // agent workspace instead of the gateway process cwd. Previously
+                  // resolved inline here; centralized in the loader so every media
+                  // tool shares one resolution point.
+                  ...(options?.workspaceDir ? { workspaceDir: options.workspaceDir } : {}),
+                  ssrfPolicy: remoteMediaSsrfPolicy,
+                  ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
+                  imageCompression,
+                });
+        } catch (err) {
+          // A source too large even for the raised decode ceiling is a user
+          // input problem — return gracefully like the unsupported-reference
+          // case above instead of letting the raw error escape.
+          if (isImageTooLargeToDecodeError(err)) {
+            // A data: URL reference is the full base64 payload; never echo
+            // that back into a text/details field the model or logs can see.
+            const imageReference = isDataUrl ? "the provided data URL image" : imageRawInput;
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Image too large to process: ${imageReference} exceeds the maximum resolution this tool can decode. Try a lower-resolution export or crop the region you need.`,
+                },
+              ],
+              details: {
+                error: "image_too_large",
+                image: imageReference,
+              },
+            };
+          }
+          // A blocked path is a policy outcome, not a host defect: return a
+          // denial result the model can act on instead of throwing. `status:
+          // "denied"` routes this through classifyToolCallErrorKind as
+          // "denied" so the after_tool_call Sentry capture drops it instead
+          // of paging (details.denied is reserved for inline gateway exec
+          // approval denials, where `status` is already overloaded).
+          if (isLocalMediaPathNotAllowedError(err)) {
+            const imageReference = isDataUrl ? "the provided data URL image" : imageRawInput;
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Cannot read ${imageReference}: that path is outside the directories this agent may read media from. Write the file under the workspace and reference it again.`,
+                },
+              ],
+              details: {
+                error: "media_path_not_allowed",
+                status: "denied",
+              },
+            };
+          }
+          throw err;
+        }
         if (media.kind !== "image") {
           throw new Error(`Unsupported media type: ${media.kind}`);
         }
@@ -1053,16 +1116,44 @@ export function createImageTool(options?: {
       }
 
       // MARK: - Run image prompt with all loaded images
-      const result = await runImagePrompt({
-        cfg: options?.config,
-        agentDir,
-        authStore: options?.authProfileStore,
-        imageModelConfig,
-        modelOverride,
-        prompt: promptRaw,
-        images: loadedImages.map((img) => ({ buffer: img.buffer, mimeType: img.mimeType })),
-        workspaceDir: options?.workspaceDir,
-      });
+      let result: Awaited<ReturnType<typeof runImagePrompt>>;
+      try {
+        result = await runImagePrompt({
+          cfg: options?.config,
+          agentDir,
+          authStore: options?.authProfileStore,
+          imageModelConfig,
+          modelOverride,
+          prompt: promptRaw,
+          images: loadedImages.map((img) => ({ buffer: img.buffer, mimeType: img.mimeType })),
+          workspaceDir: options?.workspaceDir,
+        });
+      } catch (err) {
+        // A vision model that doesn't respond within its configured budget
+        // is a routine external latency outcome, not a host defect — return
+        // a result the model can retry or narrow instead of letting the raw
+        // timeout error end the turn. `status: "timeout"` routes this
+        // through classifyToolCallErrorKind as "timeout" so the
+        // after_tool_call Sentry capture downgrades it to a warning instead
+        // of paging.
+        if (isImageDescriptionTimeout(err)) {
+          const imageCountNote =
+            loadedImages.length > 1 ? ` for ${loadedImages.length} images` : "";
+          return {
+            content: [
+              {
+                type: "text",
+                text: `The vision model did not respond in time${imageCountNote}. Retry the request, or narrow it to a single sheet or a cropped region if the source is a large, dense plan set.`,
+              },
+            ],
+            details: {
+              error: "image_description_timeout",
+              status: "timeout",
+            },
+          };
+        }
+        throw err;
+      }
 
       const imageDetails =
         loadedImages.length === 1

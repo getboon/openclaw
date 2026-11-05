@@ -28,6 +28,9 @@ import {
 
 export type SentryLevel = "fatal" | "error" | "warning" | "info" | "debug";
 
+export const PRECHECK_OVERFLOW_ERROR_TEXT =
+  "Context overflow: prompt too large for the model (precheck).";
+
 type CaptureFields = {
   tags: Record<string, string>;
   // Explicit grouping key. Required: every capture is thrown from the same
@@ -110,39 +113,95 @@ export function buildAgentEndCapture(
   if (event.success) {
     return null;
   }
+  // run_id is a TAG, not just a context field. `contexts` is payload you can only
+  // read once you have already found the event; tags are indexed, so this is what
+  // makes an event findable BY the correlation id. run_id is boon-core's
+  // `dispatch_ref` — minted per turn, sent here as run_id / X-Request-Id, printed
+  // in the Slack stall alert, and tagged on boon-core's own Sentry events. Without
+  // it you could not SEARCH the fleet project for the box's side of a turn whose
+  // id you already had.
+  //
+  // pruneTags drops undefined/empty, so a run without these ids emits no empty
+  // facets. Tags do not affect grouping — `fingerprint` below is unchanged, so
+  // this cannot fragment existing issues.
+  const tags = pruneTags({
+    hook: "agent_end",
+    host,
+    run_id: event.runId,
+    session_id: ctx?.sessionId,
+    agent_id: ctx?.agentId,
+  });
+  // runContext has always taken a sessionId; every caller passed only runId, so
+  // the field was permanently undefined. It resolves the box's session file.
+  const contexts = { run: runContext(event.runId, ctx?.sessionId) };
+  const extra = {
+    duration_ms: event.durationMs,
+    message_count: Array.isArray(event.messages) ? event.messages.length : undefined,
+  };
+  if (!event.error) {
+    // The runner clears `error` only for a caller-timeout abort, but other
+    // causes may produce this same no-error shape — keep it visible as a
+    // warning for triage instead of dropping it to info.
+    return {
+      kind: "message",
+      message: "agent_end aborted (no error)",
+      level: "warning",
+      tags,
+      fingerprint: fingerprintOf("agent_end", "aborted-no-error"),
+      contexts,
+      extra,
+    };
+  }
+  if (event.error === PRECHECK_OVERFLOW_ERROR_TEXT) {
+    // The runner compacts and retries after this precheck, so it ends one attempt, not the turn.
+    return {
+      kind: "message",
+      message: event.error,
+      level: "warning",
+      tags,
+      fingerprint: fingerprintOf("agent_end", normalizeFingerprintText(event.error)),
+      contexts,
+      extra,
+    };
+  }
   return {
     kind: "exception",
-    message: event.error ?? "agent_end success=false",
-    // run_id is a TAG, not just a context field. `contexts` is payload you can only
-    // read once you have already found the event; tags are indexed, so this is what
-    // makes an event findable BY the correlation id. run_id is boon-core's
-    // `dispatch_ref` — minted per turn, sent here as run_id / X-Request-Id, printed
-    // in the Slack stall alert, and tagged on boon-core's own Sentry events. Without
-    // it you could not SEARCH the fleet project for the box's side of a turn whose
-    // id you already had.
-    //
-    // pruneTags drops undefined/empty, so a run without these ids emits no empty
-    // facets. Tags do not affect grouping — `fingerprint` below is unchanged, so
-    // this cannot fragment existing issues.
-    tags: pruneTags({
-      hook: "agent_end",
-      host,
-      run_id: event.runId,
-      session_id: ctx?.sessionId,
-      agent_id: ctx?.agentId,
-    }),
-    fingerprint: fingerprintOf(
-      "agent_end",
-      event.error ? normalizeFingerprintText(event.error) : "success=false",
-    ),
-    // runContext has always taken a sessionId; every caller passed only runId, so
-    // the field was permanently undefined. It resolves the box's session file.
-    contexts: { run: runContext(event.runId, ctx?.sessionId) },
-    extra: {
-      duration_ms: event.durationMs,
-      message_count: Array.isArray(event.messages) ? event.messages.length : undefined,
-    },
+    message: event.error,
+    tags,
+    fingerprint: fingerprintOf("agent_end", normalizeFingerprintText(event.error)),
+    contexts,
+    extra,
   };
+}
+
+// ENG-21225: a web_fetch target returning one of these is a routine external
+// outcome (blocked/missing/rate-limited), not a host defect — scoped to
+// exactly these three codes (the ticket's reproduction), not the whole
+// "upstream" bucket, which also covers web_fetch's own network/DNS/extraction
+// failures and every other tool's real dependency failures.
+const WEB_FETCH_ROUTINE_HTTP_ERROR_CODES = new Set(["http_403", "http_404", "http_429"]);
+
+// Exec treats these two exit codes as shell command lookup/exec failures —
+// the host draws the same line at `isShellFailure` in
+// bash-tools.exec-runtime.ts's buildExecExitOutcome — so they stay exceptions
+// while every other non-zero exit downgrades to a warning below.
+const SHELL_LOOKUP_FAILURE_EXIT_CODES = new Set([126, 127]);
+
+// Shell lookup failures report the exact token the user invoked, which may be
+// an absolute path (e.g. "/opt/tools/unzip"). normalizeFingerprintText's
+// generic path scrub would erase that down to "<path>", collapsing two
+// different missing binaries into one fingerprint — so for this one case,
+// extract just the basename instead.
+const SHELL_LOOKUP_FAILURE_COMMAND_RE =
+  /:\s*([^\s:]+):\s*(?:command not found|Permission denied)\s*$/;
+
+function shellLookupFailureBinaryName(error: string): string | undefined {
+  const match = SHELL_LOOKUP_FAILURE_COMMAND_RE.exec(error);
+  if (!match) {
+    return undefined;
+  }
+  const segments = match[1].split("/");
+  return segments[segments.length - 1];
 }
 
 export function buildAfterToolCallCapture(
@@ -170,6 +229,18 @@ export function buildAfterToolCallCapture(
     exit_code: typeof event.exitCode === "number" ? String(event.exitCode) : undefined,
     session_id: ctx?.sessionId,
   });
+  // A shell lookup failure (126/127) is one exit code shared by every missing
+  // or non-executable binary on the host — without the normalized message
+  // appended, "unzip: command not found" and "convert: command not found"
+  // would collapse into one issue, hiding that they're different missing
+  // packages. Every other exit code stays coarse (see below): the message
+  // text for an ordinary `exit 1` is the command's own incidental output,
+  // not a stable identity, so folding it in would shatter one real bucket
+  // into one issue per occurrence instead of disambiguating anything.
+  const isShellLookupFailure =
+    event.errorKind === "exit-error" &&
+    typeof event.exitCode === "number" &&
+    SHELL_LOOKUP_FAILURE_EXIT_CODES.has(event.exitCode);
   // tool + errorKind/errorCode/exitCode (falling back to normalized message)
   // so a recurring failure with a different path/id/timestamp lands in one
   // issue, different tools/causes never share a bucket (see file header),
@@ -181,13 +252,72 @@ export function buildAfterToolCallCapture(
     event.toolName,
     event.errorKind,
     event.errorCode ?? event.exitCode ?? normalizeFingerprintText(event.error),
+    isShellLookupFailure
+      ? (shellLookupFailureBinaryName(event.error) ?? normalizeFingerprintText(event.error))
+      : undefined,
   );
   const contexts = { run: runContext(event.runId, ctx?.sessionId) };
   const extra = { tool_call_id: event.toolCallId, duration_ms: event.durationMs };
+  // A web_fetch target returning 403/404/429 is the external site's call, not
+  // a host defect — downgrade instead of dropping, so "is a site blocking us
+  // a lot" stays visible without paging on it. Scoped narrowly (tool, kind,
+  // AND errorCode) so web_fetch's own network/SSRF/extraction failures, and
+  // every other tool's "upstream" failures, still report as full exceptions.
+  if (
+    event.toolName === "web_fetch" &&
+    event.errorKind === "upstream" &&
+    event.errorCode &&
+    WEB_FETCH_ROUTINE_HTTP_ERROR_CODES.has(event.errorCode)
+  ) {
+    return {
+      kind: "message",
+      level: "warning",
+      message: event.error,
+      tags,
+      fingerprint,
+      contexts,
+      extra,
+    };
+  }
+  // The image tool's vision-model request exhausting its configured
+  // timeout is a routine external latency outcome, not a host defect —
+  // downgrade instead of paging. Scoped to the image tool only: other
+  // producers of a "timeout" errorKind (e.g. sessions_send) are a different
+  // failure mode and still report as a full exception.
+  if (event.toolName === "image" && event.errorKind === "timeout") {
+    return {
+      kind: "message",
+      level: "warning",
+      message: event.error,
+      tags,
+      fingerprint,
+      contexts,
+      extra,
+    };
+  }
   // A validation/argument-preparation rejection is a model-input problem, not
   // a host exception, but it can still signal a real schema mismatch — so
   // downgrade to a non-paging warning instead of dropping it outright.
   if (event.errorKind === "invalid-input") {
+    return {
+      kind: "message",
+      level: "warning",
+      message: event.error,
+      tags,
+      fingerprint,
+      contexts,
+      extra,
+    };
+  }
+  // An exec-family process that ran and exited non-zero for its own reasons
+  // (a failing test, `grep` finding nothing, a script's own `exit 1`) is
+  // ordinary shell semantics, not a host defect — downgrade instead of
+  // paging, but keep it visible since a real regression can still show up as
+  // a new, persistent exit-code pattern. A shell lookup failure (126/127 —
+  // see SHELL_LOOKUP_FAILURE_EXIT_CODES) is excluded: that is a
+  // missing/non-executable binary, an actual host provisioning defect, and
+  // stays a full exception.
+  if (event.errorKind === "exit-error" && !isShellLookupFailure) {
     return {
       kind: "message",
       level: "warning",

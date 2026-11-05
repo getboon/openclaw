@@ -10,6 +10,7 @@ import {
 } from "../../agents/agent-scope.js";
 import { resolveContextTokensForModel } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
+import type { MessagingToolSend } from "../../agents/embedded-agent-messaging.types.js";
 import { hasVisibleAgentPayload } from "../../agents/embedded-agent-runner/delivery-evidence.js";
 import {
   formatEmbeddedAgentQueueFailureSummary,
@@ -39,6 +40,7 @@ import {
   freezeDiagnosticTraceContext,
 } from "../../infra/diagnostic-trace-context.js";
 import { measureDiagnosticsTimelineSpan } from "../../infra/diagnostics-timeline.js";
+import { sourceDeliveryTargetsMatch } from "../../infra/outbound/source-delivery-plan.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import type { PluginHookReplyUsageState } from "../../plugins/hook-types.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
@@ -213,17 +215,12 @@ function resolveSourceReplyPolicy(params: {
   });
 }
 
-function resolveReplyRunDeliveryContext(params: {
-  cfg: OpenClawConfig;
+/** Resolves this turn's current channel/thread target, ignoring delivery suppression. */
+function resolveCurrentSourceDeliveryTarget(params: {
   sessionCtx: TemplateContext;
   sessionEntry?: SessionEntry;
   sessionKey: string;
-  runtimePolicySessionKey?: string;
-  opts?: GetReplyOptions;
 }): DeliveryContext | undefined {
-  if (resolveSourceReplyPolicy(params).suppressDelivery) {
-    return undefined;
-  }
   const threadId =
     normalizeOptionalString(params.sessionCtx.MessageThreadId) ??
     normalizeOptionalString(params.sessionCtx.TransportThreadId) ??
@@ -239,8 +236,30 @@ function resolveReplyRunDeliveryContext(params: {
   });
 }
 
+function resolveReplyRunDeliveryContext(params: {
+  cfg: OpenClawConfig;
+  sessionCtx: TemplateContext;
+  sessionEntry?: SessionEntry;
+  sessionKey: string;
+  runtimePolicySessionKey?: string;
+  opts?: GetReplyOptions;
+}): DeliveryContext | undefined {
+  if (resolveSourceReplyPolicy(params).suppressDelivery) {
+    return undefined;
+  }
+  return resolveCurrentSourceDeliveryTarget(params);
+}
+
 function hasNonEmptyStringArray(value: unknown): boolean {
   return Array.isArray(value) && value.some((entry) => typeof entry === "string" && entry.trim());
+}
+
+/** True when a messaging-tool send entry carries user-visible text or media. */
+function hasVisibleMessagingContent(entry: { text?: unknown; mediaUrls?: unknown }): boolean {
+  return (
+    (typeof entry.text === "string" && entry.text.trim().length > 0) ||
+    hasNonEmptyStringArray(entry.mediaUrls)
+  );
 }
 
 function hasCommittedMessagingTargetDeliveryEvidence(value: unknown): boolean {
@@ -252,13 +271,7 @@ function hasCommittedMessagingTargetDeliveryEvidence(value: unknown): boolean {
       return false;
     }
     const record = entry as { text?: unknown; mediaUrls?: unknown };
-    if ("text" in record || "mediaUrls" in record) {
-      return (
-        (typeof record.text === "string" && record.text.trim().length > 0) ||
-        hasNonEmptyStringArray(record.mediaUrls)
-      );
-    }
-    return true;
+    return "text" in record || "mediaUrls" in record ? hasVisibleMessagingContent(record) : true;
   });
 }
 
@@ -293,6 +306,24 @@ function hasSuccessfulSourceReplyDelivery(params: {
     hasNonEmptyStringArray(params.messagingToolSentTexts) ||
     hasNonEmptyStringArray(params.messagingToolSentMediaUrls) ||
     hasCommittedMessagingTargetDeliveryEvidence(params.messagingToolSentTargets)
+  );
+}
+
+/**
+ * True only when a message-tool send both matches this turn's own delivery
+ * target and carries visible content — an outbound side-effect send to a
+ * different chat must not be mistaken for this turn's source reply.
+ */
+function hasVerifiedMessageToolSourceReplyDelivery(params: {
+  sentTargets?: MessagingToolSend[];
+  required?: DeliveryContext;
+}): boolean {
+  if (!params.required) {
+    return false;
+  }
+  const required = params.required;
+  return (params.sentTargets ?? []).some(
+    (target) => hasVisibleMessagingContent(target) && sourceDeliveryTargetsMatch(target, required),
   );
 }
 
@@ -2028,11 +2059,27 @@ export async function runReplyAgent(params: {
     const committedMessagingToolSourceReplyDelivery =
       runResult.didDeliverSourceReplyViaMessageTool === true ||
       hasVisibleAgentPayload({ payloads: runResult.messagingToolSourceReplyPayloads });
+    // Outside message_tool_only, nothing observes a message-tool send that
+    // satisfies this turn's reply. Gate on the mode directly: suppressDelivery
+    // also covers sendPolicy denials, which don't block the message tool itself.
+    const deliveredSourceReplyToCurrentChat =
+      opts?.sourceReplyDeliveryMode !== "message_tool_only" &&
+      hasVerifiedMessageToolSourceReplyDelivery({
+        sentTargets: runResult.messagingToolSentTargets,
+        required: sessionKey
+          ? resolveCurrentSourceDeliveryTarget({
+              sessionCtx,
+              sessionEntry: activeSessionEntry,
+              sessionKey,
+            })
+          : undefined,
+      });
     if (
-      opts?.sourceReplyDeliveryMode === "message_tool_only" &&
-      committedMessagingToolSourceReplyDelivery
+      (opts?.sourceReplyDeliveryMode === "message_tool_only" &&
+        committedMessagingToolSourceReplyDelivery) ||
+      deliveredSourceReplyToCurrentChat
     ) {
-      await opts.onObservedReplyDelivery?.();
+      await opts?.onObservedReplyDelivery?.();
     }
     const returnSilentFallbackFailureIfNeeded = async (): Promise<ReplyPayload | undefined> => {
       const silentFallbackFailurePayload = buildSilentFallbackFailurePayload({

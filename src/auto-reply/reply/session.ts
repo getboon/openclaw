@@ -352,6 +352,7 @@ async function initSessionStateAttemptLocked(
   let persistedSpawnedBy: SessionEntry["spawnedBy"];
   let persistedSpawnedWorkspaceDir: SessionEntry["spawnedWorkspaceDir"];
   let persistedSpawnedCwd: SessionEntry["spawnedCwd"];
+  let persistedUsageAttribution: SessionEntry["usageAttribution"];
   let persistedParentSessionKey: SessionEntry["parentSessionKey"];
   let persistedForkedFromParent: SessionEntry["forkedFromParent"];
   let persistedSpawnDepth: SessionEntry["spawnDepth"];
@@ -614,6 +615,10 @@ async function initSessionStateAttemptLocked(
       persistedReasoning = entry.reasoningLevel;
       persistedTtsAuto = entry.ttsAuto;
       persistedResponseUsage = entry.responseUsage;
+      // The originating user of a spawned session is lineage, not per-session state:
+      // dropping it on /new or an idle/daily rollover leaves later sender-less turns
+      // unattributed (session-reset-service.ts carries it the same way).
+      persistedUsageAttribution = entry.usageAttribution;
     }
     // When a reset trigger (/new, /reset) starts a new session, also rotate the
     // underlying CLI conversation and carry forward spawn lineage/label.
@@ -748,6 +753,7 @@ async function initSessionStateAttemptLocked(
     spawnedBy: persistedSpawnedBy ?? baseEntry?.spawnedBy,
     spawnedWorkspaceDir: persistedSpawnedWorkspaceDir ?? baseEntry?.spawnedWorkspaceDir,
     spawnedCwd: persistedSpawnedCwd ?? baseEntry?.spawnedCwd,
+    usageAttribution: persistedUsageAttribution ?? baseEntry?.usageAttribution,
     parentSessionKey: persistedParentSessionKey ?? baseEntry?.parentSessionKey,
     forkedFromParent: persistedForkedFromParent ?? baseEntry?.forkedFromParent,
     spawnDepth: persistedSpawnDepth ?? baseEntry?.spawnDepth,

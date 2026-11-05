@@ -11,7 +11,10 @@ import type {
   ChannelMessageActionName,
 } from "openclaw/plugin-sdk/channel-contract";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import { loadOutboundMediaFromUrl } from "openclaw/plugin-sdk/outbound-media";
+import {
+  loadOutboundMediaFromUrl,
+  type OutboundMediaAccess,
+} from "openclaw/plugin-sdk/outbound-media";
 import { extractToolSend } from "openclaw/plugin-sdk/tool-send";
 import { listEnabledGoogleChatAccounts, resolveGoogleChatAccount } from "./accounts.js";
 import {
@@ -49,10 +52,7 @@ function resolveAppUserNames(account: { config: { botUser?: string | null } }) {
 async function loadGoogleChatActionMedia(params: {
   mediaUrl: string;
   maxBytes: number;
-  mediaAccess?: {
-    localRoots?: readonly string[];
-    readFile?: (filePath: string) => Promise<Buffer>;
-  };
+  mediaAccess?: OutboundMediaAccess;
   mediaLocalRoots?: readonly string[];
   mediaReadFile?: (filePath: string) => Promise<Buffer>;
 }) {

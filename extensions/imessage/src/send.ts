@@ -13,7 +13,11 @@ import {
 } from "openclaw/plugin-sdk/channel-outbound";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/markdown-table-runtime";
-import { kindFromMime, resolveOutboundAttachmentFromUrl } from "openclaw/plugin-sdk/media-runtime";
+import {
+  kindFromMime,
+  resolveOutboundAttachmentFromUrl,
+  type OutboundMediaAccess,
+} from "openclaw/plugin-sdk/media-runtime";
 import { requireRuntimeConfig } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { convertMarkdownTables } from "openclaw/plugin-sdk/text-chunking";
 import { stripInlineDirectiveTagsForDelivery } from "openclaw/plugin-sdk/text-chunking";
@@ -54,6 +58,7 @@ type IMessageSendOpts = {
   accountId?: string;
   replyToId?: string;
   mediaUrl?: string;
+  mediaAccess?: OutboundMediaAccess;
   mediaLocalRoots?: readonly string[];
   mediaReadFile?: (filePath: string) => Promise<Buffer>;
   audioAsVoice?: boolean;
@@ -67,6 +72,7 @@ type IMessageSendOpts = {
     mediaUrl: string,
     maxBytes: number,
     options?: {
+      mediaAccess?: OutboundMediaAccess;
       localRoots?: readonly string[];
       readFile?: (filePath: string) => Promise<Buffer>;
     },
@@ -915,6 +921,7 @@ export async function sendMessageIMessage(
   if (opts.mediaUrl?.trim()) {
     const resolveAttachmentFn = opts.resolveAttachmentImpl ?? resolveOutboundAttachmentFromUrl;
     const resolved = await resolveAttachmentFn(opts.mediaUrl.trim(), maxBytes, {
+      mediaAccess: opts.mediaAccess,
       localRoots: opts.mediaLocalRoots,
       readFile: opts.mediaReadFile,
     });

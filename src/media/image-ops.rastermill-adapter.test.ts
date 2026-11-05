@@ -26,16 +26,22 @@ describe("image ops Rastermill adapter", () => {
       resolveSystemBin,
     }));
 
-    const { resizeToJpeg, MAX_IMAGE_INPUT_PIXELS } = await import("./image-ops.js");
+    const { resizeToJpeg, MAX_IMAGE_INPUT_PIXELS, MAX_IMAGE_DECODE_PIXELS } =
+      await import("./image-ops.js");
 
     await expect(
       resizeToJpeg({ buffer: Buffer.from("input"), maxSide: 1, quality: 80 }),
     ).resolves.toEqual(Buffer.from("jpeg"));
 
+    // Input (decode) and output (final-image) budgets must stay distinct: a
+    // shared value re-blocks downscaling any source image larger than the
+    // output cap, since Rastermill rejects over-budget input before any
+    // resize ever runs.
+    expect(MAX_IMAGE_DECODE_PIXELS).toBeGreaterThan(MAX_IMAGE_INPUT_PIXELS);
     expect(createRastermill).toHaveBeenCalledWith({
       execution: "auto",
       limits: {
-        inputPixels: MAX_IMAGE_INPUT_PIXELS,
+        inputPixels: MAX_IMAGE_DECODE_PIXELS,
         outputPixels: MAX_IMAGE_INPUT_PIXELS,
       },
       temp: expect.objectContaining({
@@ -99,6 +105,43 @@ describe("image ops Rastermill adapter", () => {
       format: "jpeg",
       autoOrient: true,
     });
+  });
+
+  it("recognizes a Rastermill input-too-large error as a decode-size failure", async () => {
+    class RastermillError extends Error {
+      readonly code: string;
+      constructor(code: string, message: string) {
+        super(message);
+        this.code = code;
+      }
+    }
+    vi.doMock("rastermill", () => ({
+      RastermillError,
+      RastermillUnavailableError: class RastermillUnavailableError extends Error {
+        causes = [];
+      },
+      createRastermill: vi.fn(() => ({ encode: vi.fn() })),
+      isRastermillUnavailableError: () => false,
+      readImageMetadataFromHeader: vi.fn(),
+      readImageProbeFromHeader: vi.fn(),
+    }));
+
+    const { isImageTooLargeToDecodeError } = await import("./image-ops.js");
+
+    // A source too large even for the raised MAX_IMAGE_DECODE_PIXELS ceiling.
+    // Callers that load media directly (src/agents/tools/image-tool.ts) use
+    // this to return a clear message instead of letting the raw dependency
+    // error escape.
+    const tooLarge = new RastermillError(
+      "RASTERMILL_INPUT_TOO_LARGE",
+      "Image dimensions exceed the 100,000,000 pixel input limit: 20000x20000 (400000000 pixels)",
+    );
+    expect(isImageTooLargeToDecodeError(tooLarge)).toBe(true);
+    // A different Rastermill error code is not a size failure.
+    expect(isImageTooLargeToDecodeError(new RastermillError("RASTERMILL_UNDECODABLE", "nope"))).toBe(
+      false,
+    );
+    expect(isImageTooLargeToDecodeError(new Error("unrelated"))).toBe(false);
   });
 
   it("leaves EXIF normalization best-effort when Rastermill is unavailable", async () => {

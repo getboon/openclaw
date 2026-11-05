@@ -11,6 +11,8 @@ vi.mock("../infra/net/fetch-guard.js", () => ({
 
 vi.mock("./media-services.js", () => ({
   convertHeicToJpeg: (...args: unknown[]) => convertHeicToJpegMock(...args),
+  MAX_IMAGE_INPUT_PIXELS: 25_000_000,
+  readImageMetadataFromHeader: () => null,
 }));
 
 vi.mock("@openclaw/media-core/mime", () => ({

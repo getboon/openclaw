@@ -1,6 +1,9 @@
 // Memory Core plugin module implements tools behavior.
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import type { MemorySource } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
+import type {
+  MemoryReadResult,
+  MemorySource,
+} from "openclaw/plugin-sdk/memory-core-host-engine-storage";
 import {
   asToolParamsRecord,
   jsonResult,
@@ -149,12 +152,18 @@ const PAUSED_MEMORY_INDEX_ACTION =
 
 function resolvePausedMemoryIndexIdentityReason(status: { custom?: unknown }): string | undefined {
   const indexIdentity = asRecord(asRecord(status.custom)?.indexIdentity);
-  if (indexIdentity?.status !== "mismatched" && indexIdentity?.status !== "missing") {
+  // Only "mismatched" (an index built for a different provider/model/scope) is an
+  // actionable pause worth surfacing to the agent. "missing" (no index built yet)
+  // is the ordinary state for the first moments of a new session/workspace and
+  // self-heals via the session-start background sync — pausing on it produces a
+  // misleading "different embedding provider" message and gets misclassified as
+  // a tool error upstream.
+  if (indexIdentity?.status !== "mismatched") {
     return undefined;
   }
   return typeof indexIdentity.reason === "string" && indexIdentity.reason.trim()
     ? indexIdentity.reason.trim()
-    : "memory index identity is missing or mismatched";
+    : "memory index identity is mismatched";
 }
 
 function buildPausedMemoryIndexUnavailableResult(reason: string) {
@@ -322,23 +331,41 @@ async function resolveMemoryReadFailureResult(params: {
   agentSessionKey?: string;
 }) {
   if (params.requestedCorpus === "all") {
-    const supplement = await getSupplementMemoryReadResult({
-      relPath: params.relPath,
-      from: params.from,
-      lines: params.lines,
-      agentSessionKey: params.agentSessionKey,
-      corpus: params.requestedCorpus,
-    });
-    if (supplement) {
-      return jsonResult(supplement);
+    try {
+      const supplement = await getSupplementMemoryReadResult({
+        relPath: params.relPath,
+        from: params.from,
+        lines: params.lines,
+        agentSessionKey: params.agentSessionKey,
+        corpus: params.requestedCorpus,
+      });
+      if (supplement) {
+        return jsonResult(supplement);
+      }
+    } catch {
+      // Supplement lookup is best-effort after the primary memory read failed.
+      // Preserve the original structured error instead of rejecting the tool call.
     }
   }
   const message = formatErrorMessage(params.error);
   return jsonResult({ path: params.relPath, text: "", disabled: true, error: message });
 }
 
-async function executeMemoryReadResult<T>(params: {
-  read: () => Promise<T>;
+function isMissingMemoryReadResult(result: MemoryReadResult, relPath: string): boolean {
+  const normalizePath = (value: string) =>
+    value
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/^(?:\.\/)+/, "");
+  return (
+    normalizePath(result.path) === normalizePath(relPath) &&
+    result.text === "" &&
+    result.from === undefined
+  );
+}
+
+async function executeMemoryReadResult(params: {
+  read: () => Promise<MemoryReadResult>;
   requestedCorpus?: "memory" | "wiki" | "all";
   relPath: string;
   from?: number;
@@ -346,7 +373,25 @@ async function executeMemoryReadResult<T>(params: {
   agentSessionKey?: string;
 }) {
   try {
-    return jsonResult(await params.read());
+    const result = await params.read();
+    if (params.requestedCorpus === "all" && isMissingMemoryReadResult(result, params.relPath)) {
+      try {
+        const supplement = await getSupplementMemoryReadResult({
+          relPath: params.relPath,
+          from: params.from,
+          lines: params.lines,
+          agentSessionKey: params.agentSessionKey,
+          corpus: params.requestedCorpus,
+        });
+        if (supplement) {
+          return jsonResult(supplement);
+        }
+      } catch {
+        // Supplement lookup is best-effort after a successful primary miss;
+        // the outer catch is for primary-read failures, not this.
+      }
+    }
+    return jsonResult(result);
   } catch (error) {
     return await resolveMemoryReadFailureResult({
       error,

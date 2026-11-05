@@ -126,6 +126,7 @@ async function runAction(params: {
   cfg?: Record<string, unknown>;
   params?: Record<string, unknown>;
   toolContext?: Record<string, unknown>;
+  mediaAccess?: { localRoots?: readonly string[]; workspaceDir?: string };
   mediaLocalRoots?: readonly string[];
   mediaReadFile?: (filePath: string) => Promise<Buffer>;
   requesterSenderId?: string | null;
@@ -138,6 +139,7 @@ async function runAction(params: {
     action: params.action,
     cfg: params.cfg ?? {},
     params: params.params ?? {},
+    mediaAccess: params.mediaAccess,
     mediaLocalRoots: params.mediaLocalRoots,
     mediaReadFile: params.mediaReadFile,
     toolContext: params.toolContext,
@@ -200,6 +202,7 @@ async function expectSuccessfulAction(params: {
   action: Parameters<typeof runAction>[0]["action"];
   actionParams?: Parameters<typeof runAction>[0]["params"];
   toolContext?: Parameters<typeof runAction>[0]["toolContext"];
+  mediaAccess?: Parameters<typeof runAction>[0]["mediaAccess"];
   mediaLocalRoots?: Parameters<typeof runAction>[0]["mediaLocalRoots"];
   mediaReadFile?: Parameters<typeof runAction>[0]["mediaReadFile"];
   requesterSenderId?: Parameters<typeof runAction>[0]["requesterSenderId"];
@@ -213,6 +216,7 @@ async function expectSuccessfulAction(params: {
   const result = await runAction({
     action: params.action,
     params: params.actionParams,
+    mediaAccess: params.mediaAccess,
     mediaLocalRoots: params.mediaLocalRoots,
     mediaReadFile: params.mediaReadFile,
     toolContext: params.toolContext,
@@ -310,6 +314,48 @@ describe("msteamsPlugin message actions", () => {
         action: "upload-file",
         messageId: "msg-upload-1",
         conversationId: "conv-upload-1",
+      },
+    });
+  });
+
+  it("forwards mediaAccess workspaceDir from upload-file to sendMessageMSTeams", async () => {
+    const mediaAccess = {
+      localRoots: ["/tmp/agent-root"],
+      workspaceDir: "/tmp/agent-root/workspace",
+    };
+    await expectSuccessfulAction({
+      mockFn: sendMessageMSTeamsMock,
+      mockResult: {
+        messageId: "msg-upload-2",
+        conversationId: "conv-upload-2",
+      },
+      action: "upload-file",
+      actionParams: {
+        target: padded(targetChannelId),
+        path: "projects/lazo-lodge/estimate.pdf",
+        message: "Estimate",
+      },
+      mediaAccess,
+      runtimeParams: {
+        to: targetChannelId,
+        text: "Estimate",
+        mediaUrl: "projects/lazo-lodge/estimate.pdf",
+        filename: undefined,
+        mediaAccess,
+        mediaLocalRoots: undefined,
+        mediaReadFile: undefined,
+      },
+      details: {
+        ok: true,
+        channel: "msteams",
+        messageId: "msg-upload-2",
+      },
+      contentDetails: {
+        ok: true,
+        channel: "msteams",
+        action: "upload-file",
+        messageId: "msg-upload-2",
+        conversationId: "conv-upload-2",
       },
     });
   });

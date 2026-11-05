@@ -58,7 +58,10 @@ export type {
   InboundMediaFailure,
   InboundMediaFailureReason,
 } from "openclaw/plugin-sdk/channel-inbound";
-export { loadOutboundMediaFromUrl } from "openclaw/plugin-sdk/outbound-media";
+export {
+  loadOutboundMediaFromUrl,
+  type OutboundMediaAccess,
+} from "openclaw/plugin-sdk/outbound-media";
 export { buildMediaPayload } from "openclaw/plugin-sdk/reply-payload";
 export type { ReplyPayload } from "openclaw/plugin-sdk/reply-payload";
 export type { PluginRuntime } from "openclaw/plugin-sdk/runtime-store";

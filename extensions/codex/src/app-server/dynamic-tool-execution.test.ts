@@ -171,7 +171,9 @@ describe("dynamic tool execution helpers", () => {
         },
         config: undefined,
       }),
-    ).toBe(CODEX_DYNAMIC_IMAGE_TOOL_TIMEOUT_MS);
+      // +30s grace over the inner media default — see
+      // CODEX_DYNAMIC_TOOL_TIMEOUT_SECONDS_GRACE_MS in the module under test.
+    ).toBe(CODEX_DYNAMIC_IMAGE_TOOL_TIMEOUT_MS + 30_000);
     expect(
       resolveDynamicToolCallTimeoutMs({
         call: {
@@ -225,7 +227,9 @@ describe("dynamic tool execution helpers", () => {
           },
         },
       }),
-    ).toBe(180_000);
+      // +30s: CODEX_DYNAMIC_TOOL_TIMEOUT_SECONDS_GRACE_MS, added so the outer
+      // Codex watchdog never sits at or below the configured inner budget.
+    ).toBe(210_000);
     expect(
       resolveDynamicToolCallTimeoutMs({
         call: {

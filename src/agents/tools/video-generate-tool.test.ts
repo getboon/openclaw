@@ -1578,6 +1578,44 @@ describe("createVideoGenerateTool", () => {
     expect(loadOptions?.ssrfPolicy).toEqual({ allowRfc2544BenchmarkRange: true });
   });
 
+  it("threads workspaceDir to loadWebMedia for a relative reference image", async () => {
+    // Regression test: a relative reference must resolve against the agent
+    // workspace in the loader, not the gateway process cwd.
+    mockVideoPluginProvider({
+      imageToVideo: { enabled: true, maxInputImages: 1 },
+    });
+    vi.spyOn(webMedia, "loadWebMedia").mockResolvedValue({
+      kind: "image",
+      buffer: Buffer.from("image"),
+      contentType: "image/png",
+    });
+    mockSavedVideoResult();
+    const workspaceDir = "/workspace/relative-ref";
+    const tool = createVideoGenerateTool({
+      config: asConfig({
+        agents: {
+          defaults: {
+            videoGenerationModel: { primary: "video-plugin/vid-v1" },
+          },
+        },
+      }),
+      workspaceDir,
+    });
+    if (!tool) {
+      throw new Error("expected video_generate tool");
+    }
+
+    await tool.execute("call-1", {
+      prompt: "lobster",
+      image: "inbox/reference.png",
+    });
+
+    const loadCall = firstMockCall(vi.mocked(webMedia.loadWebMedia));
+    expect(loadCall?.[0]).toBe("inbox/reference.png");
+    const loadOptions = loadCall?.[1] as { workspaceDir?: string } | undefined;
+    expect(loadOptions?.workspaceDir).toBe(workspaceDir);
+  });
+
   it("rejects audio data: URLs via the templated rejection branch", async () => {
     mockVideoPluginProvider({
       maxInputAudios: 1,

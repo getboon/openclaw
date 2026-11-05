@@ -1,4 +1,5 @@
 import type { SubagentCompletionOwner } from "../../agents/subagent-completion-owner.js";
+import type { UsageAttribution } from "../../agents/usage-attribution.js";
 // Plugin runtime types describe activated plugin capabilities exposed to core execution.
 import type { PluginRuntimeCore, RuntimeLogger } from "./types-core.js";
 
@@ -25,6 +26,11 @@ export type SubagentRunParams = {
   lightContext?: boolean;
   deliver?: boolean;
   idempotencyKey?: string;
+  /**
+   * Originating user for model-call usage attribution (billing only; does not
+   * change sender identity or tool policy for the run).
+   */
+  usageAttribution?: UsageAttribution;
 };
 
 export type SubagentRunResult = {

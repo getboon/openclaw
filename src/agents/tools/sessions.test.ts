@@ -38,6 +38,12 @@ vi.mock("../../config/config.js", async () => {
 vi.mock("./sessions-send-tool.a2a.js", () => ({
   runSessionsSendA2AFlow: vi.fn(),
 }));
+// Attributed sends dispatch in-process; tests inject that seam, so keep the plugin
+// loader/registry behind the real server-plugins module out of this unit test.
+vi.mock("../../gateway/server-plugins.js", () => ({
+  dispatchGatewayMethodInProcess: vi.fn(),
+  hasInProcessGatewayContext: () => false,
+}));
 
 let createSessionsListTool: typeof import("./sessions-list-tool.js").createSessionsListTool;
 let createSessionsSendTool: typeof import("./sessions-send-tool.js").createSessionsSendTool;
@@ -875,6 +881,55 @@ describe("sessions_send gating", () => {
       | undefined;
     const inputProvenance = requireRecord(params?.inputProvenance, "inputProvenance");
     expect(inputProvenance.sourceSessionKey).toBe(MAIN_AGENT_SESSION_KEY);
+  });
+
+  it("attributes the run it starts to the current turn's user, in-process only", async () => {
+    const { runSessionsSendA2AFlow } = await import("./sessions-send-tool.a2a.js");
+    vi.mocked(runSessionsSendA2AFlow).mockClear();
+    const { testing: dispatchTesting } = await import("../usage-attribution-dispatch.js");
+    const bob = { userId: "U-BOB", userName: "Bob", userSource: "slack" };
+    const dispatched: unknown[][] = [];
+    const tool = createSessionsSendTool({
+      agentSessionKey: MAIN_AGENT_SESSION_KEY,
+      agentChannel: MAIN_AGENT_CHANNEL,
+      requesterUsageAttribution: bob,
+    });
+    try {
+      // The target may carry another user's spawn-time attribution; this run is Bob's.
+      dispatchTesting.setDepsForTest({
+        hasInProcessGatewayContext: () => true,
+        dispatchGatewayMethodInProcess: (async (...args: unknown[]) => {
+          dispatched.push(args);
+          return { runId: "run-bob" };
+        }) as never,
+      });
+      await tool.execute("call-attributed", {
+        sessionKey: MAIN_AGENT_SESSION_KEY,
+        message: "hi",
+        timeoutSeconds: 0,
+      });
+      const [method, params, options] = dispatched[0] ?? [];
+      expect(method).toBe("agent");
+      expect(requireRecord(params, "agent params").usageAttribution).toEqual(bob);
+      expect(options).toMatchObject({ inProcessDispatch: true });
+      expect(vi.mocked(runSessionsSendA2AFlow).mock.calls[0]?.[0]?.usageAttribution).toEqual(bob);
+
+      // Without an in-process gateway the socket call omits the field entirely.
+      dispatchTesting.setDepsForTest({ hasInProcessGatewayContext: () => false });
+      callGatewayMock.mockClear();
+      await tool.execute("call-socket", {
+        sessionKey: MAIN_AGENT_SESSION_KEY,
+        message: "hi",
+        timeoutSeconds: 0,
+      });
+      const agentCall = callGatewayMock.mock.calls.find(
+        (call) => (call[0] as { method?: string })?.method === "agent",
+      );
+      const socketParams = requireRecord(agentCall?.[0], "agent gateway call").params;
+      expect(socketParams).not.toHaveProperty("usageAttribution");
+    } finally {
+      dispatchTesting.setDepsForTest();
+    }
   });
 
   it("does not disclose a resolved session key when sessionId access is denied", async () => {

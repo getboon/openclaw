@@ -457,9 +457,84 @@ describe("createPdfTool", () => {
         const outsidePdf = path.join(outsideDir, "secret.pdf");
         await fs.writeFile(outsidePdf, "%PDF-1.4 fake");
 
-        await expect(tool.execute("t1", { prompt: "test", pdf: outsidePdf })).rejects.toThrow(
-          /not under an allowed directory/i,
+        const deniedResult = (await tool.execute("t1", {
+          prompt: "test",
+          pdf: outsidePdf,
+        })) as { details?: Record<string, unknown> };
+        expect(deniedResult.details?.status).toBe("denied");
+        expect(deniedResult.details?.error).toBe("media_path_not_allowed");
+      } finally {
+        await fs.rm(workspaceDir, { recursive: true, force: true });
+        await fs.rm(outsideDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("resolves a relative pdf path against workspaceDir", async () => {
+    // Regression test: a relative path like "projects/doc.pdf" must resolve
+    // against the agent workspace instead of the gateway process cwd.
+    await withTempPdfAgentDir(async (agentDir) => {
+      const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-pdf-ws-"));
+      try {
+        const subdir = path.join(workspaceDir, "projects");
+        await fs.mkdir(subdir, { recursive: true });
+        await fs.writeFile(path.join(subdir, "doc.pdf"), FAKE_PDF_MEDIA.buffer);
+
+        const { loadSpy } = await stubPdfToolInfra(agentDir, {
+          mockLoad: false,
+          provider: "anthropic",
+          input: ["text", "document"],
+        });
+        vi.spyOn(pdfNativeProviders, "anthropicAnalyzePdf").mockResolvedValue("native summary");
+        const cfg = withPdfModel(ANTHROPIC_PDF_MODEL);
+        const tool = requirePdfTool(
+          (await loadCreatePdfTool())({
+            config: cfg,
+            agentDir,
+            workspaceDir,
+          }),
         );
+
+        const result = await tool.execute("t1", {
+          prompt: "summarize",
+          pdf: "projects/doc.pdf",
+        });
+
+        const [loadRef, loadOptions] = firstMockCall(loadSpy, "loadWebMediaRaw");
+        expect(loadRef).toBe("projects/doc.pdf");
+        expectFields(loadOptions, { workspaceDir });
+        expect(result.content).toEqual([{ type: "text", text: "native summary" }]);
+      } finally {
+        await fs.rm(workspaceDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("still rejects a relative pdf path that escapes the workspace", async () => {
+    await withTempPdfAgentDir(async (agentDir) => {
+      const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-pdf-ws-"));
+      const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-pdf-out-"));
+      try {
+        const outsidePdf = path.join(outsideDir, "secret.pdf");
+        await fs.writeFile(outsidePdf, "%PDF-1.4 fake");
+        const relativeEscape = path.relative(workspaceDir, outsidePdf);
+
+        const cfg = withPdfModel(ANTHROPIC_PDF_MODEL);
+        const tool = requirePdfTool(
+          (await loadCreatePdfTool())({
+            config: cfg,
+            agentDir,
+            workspaceDir,
+            fsPolicy: { workspaceOnly: true },
+          }),
+        );
+
+        const deniedResult = (await tool.execute("t1", {
+          prompt: "test",
+          pdf: relativeEscape,
+        })) as { details?: Record<string, unknown> };
+        expect(deniedResult.details?.status).toBe("denied");
+        expect(deniedResult.details?.error).toBe("media_path_not_allowed");
       } finally {
         await fs.rm(workspaceDir, { recursive: true, force: true });
         await fs.rm(outsideDir, { recursive: true, force: true });
@@ -656,6 +731,60 @@ describe("createPdfTool", () => {
       ).rejects.toThrow("pages is not supported with native PDF providers");
     });
   });
+
+  it("rejects explicit page ranges that resolve to no pages before native PDF analysis", async () => {
+    await withTempPdfAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, { provider: "anthropic", input: ["text", "document"] });
+      const nativeSpy = vi
+        .spyOn(pdfNativeProviders, "anthropicAnalyzePdf")
+        .mockResolvedValue("native summary");
+      const cfg = withPdfModel(ANTHROPIC_PDF_MODEL);
+      const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+
+      await expect(
+        tool.execute("t1", {
+          prompt: "summarize",
+          pdf: "/tmp/doc.pdf",
+          pages: "999",
+        }),
+      ).rejects.toThrow('No PDF pages matched requested range "999"');
+      expect(nativeSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([
+    ["1.5", "1.5"],
+    ["1,2.5", "2.5"],
+    [`1,${String(Number.MAX_SAFE_INTEGER + 1)}`, String(Number.MAX_SAFE_INTEGER + 1)],
+  ])(
+    "rejects invalid page selection %s before loading or fallback extraction",
+    async (pages, invalidPage) => {
+      await withTempPdfAgentDir(async (agentDir) => {
+        const { loadSpy } = await stubPdfToolInfra(agentDir, {
+          provider: "openai",
+          api: "openai-responses",
+          input: ["text"],
+        });
+        const extractSpy = vi.spyOn(pdfExtractModule, "extractPdfContent").mockResolvedValue({
+          text: "Extracted content",
+          images: [],
+        });
+        const cfg = withPdfModel(OPENAI_PDF_MODEL);
+        const tool = requirePdfTool((await loadCreatePdfTool())({ config: cfg, agentDir }));
+
+        await expect(
+          tool.execute("t1", {
+            prompt: "summarize",
+            pdf: "/tmp/doc.pdf",
+            pages,
+          }),
+        ).rejects.toThrow(`Invalid page number: "${invalidPage}"`);
+        expect(loadSpy).not.toHaveBeenCalled();
+        expect(extractSpy).not.toHaveBeenCalled();
+        expect(completeMock).not.toHaveBeenCalled();
+      });
+    },
+  );
 
   it("rejects password parameter for native PDF providers", async () => {
     await withTempPdfAgentDir(async (agentDir) => {

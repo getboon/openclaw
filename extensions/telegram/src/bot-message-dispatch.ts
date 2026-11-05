@@ -72,7 +72,7 @@ import {
 import { deduplicateBlockSentMedia } from "./bot-message-dispatch.media-dedup.js";
 import {
   generateTopicLabel,
-  getAgentScopedMediaLocalRoots,
+  resolveAgentScopedOutboundMediaAccess,
   loadSessionStore,
   resolveAutoTopicLabelConfig,
   resolveChunkMode,
@@ -982,7 +982,16 @@ export const dispatchTelegramMessage = async ({
       : undefined;
   const draftMinInitialChars = streamMode === "progress" ? 0 : DRAFT_MIN_INITIAL_CHARS;
   const progressSeed = `${route.accountId}:${chatId}:${threadSpec.id ?? ""}`;
-  const mediaLocalRoots = getAgentScopedMediaLocalRoots(cfg, route.agentId);
+  // Roots alone are not enough: a relative attachment path (e.g. from the
+  // message tool) must resolve against the agent workspace before the
+  // allowed-directory check runs, or it falls through to the gateway cwd and
+  // is rejected even though the workspace is an allowed root.
+  const mediaAccess = resolveAgentScopedOutboundMediaAccess({
+    cfg,
+    agentId: route.agentId,
+    sessionKey: route.sessionKey,
+    accountId: route.accountId,
+  });
   const createDraftLane = (laneName: LaneName, enabled: boolean): DraftLaneState => {
     const stream = enabled
       ? (telegramDeps.createTelegramDraftStream ?? createTelegramDraftStream)({
@@ -1512,7 +1521,7 @@ export const dispatchTelegramMessage = async ({
     token: opts.token,
     runtime,
     bot,
-    mediaLocalRoots,
+    mediaAccess,
     mediaMaxBytes: (opts.mediaMaxMb ?? telegramCfg.mediaMaxMb ?? 100) * 1024 * 1024,
     replyToMode: effectiveReplyToMode,
     textLimit,

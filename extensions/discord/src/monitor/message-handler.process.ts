@@ -26,7 +26,7 @@ import {
 } from "openclaw/plugin-sdk/channel-outbound";
 import { recordInboundSession } from "openclaw/plugin-sdk/conversation-runtime";
 import { resolveMarkdownTableMode } from "openclaw/plugin-sdk/markdown-table-runtime";
-import { getAgentScopedMediaLocalRoots } from "openclaw/plugin-sdk/media-runtime";
+import { resolveAgentScopedOutboundMediaAccess } from "openclaw/plugin-sdk/media-runtime";
 import { resolveChunkMode } from "openclaw/plugin-sdk/reply-chunking";
 import { createChannelHistoryWindow } from "openclaw/plugin-sdk/reply-history";
 import {
@@ -256,7 +256,16 @@ async function processDiscordMessageInner(
     accountId,
   });
   const removeAckAfterReply = cfg.messages?.removeAckAfterReply ?? false;
-  const mediaLocalRoots = getAgentScopedMediaLocalRoots(cfg, route.agentId);
+  // Roots alone are not enough: a relative attachment path (e.g. from the
+  // message tool) must resolve against the agent workspace before the
+  // allowed-directory check runs, or it falls through to the gateway cwd and
+  // is rejected even though the workspace is an allowed root.
+  const mediaAccess = resolveAgentScopedOutboundMediaAccess({
+    cfg,
+    agentId: route.agentId,
+    sessionKey: route.sessionKey,
+    accountId,
+  });
   const isRoomEvent = ctx.inboundEventKind === "room_event";
   const shouldAckReaction = () =>
     Boolean(
@@ -775,7 +784,7 @@ async function processDiscordMessageInner(
               chunkMode,
               sessionKey: ctxPayload.SessionKey,
               threadBindings,
-              mediaLocalRoots,
+              mediaAccess,
               kind: info.kind,
             });
             return true;
@@ -814,7 +823,7 @@ async function processDiscordMessageInner(
             chunkMode,
             sessionKey: ctxPayload.SessionKey,
             threadBindings,
-            mediaLocalRoots,
+            mediaAccess,
             kind: info.kind,
           });
           return true;
@@ -862,7 +871,7 @@ async function processDiscordMessageInner(
       chunkMode,
       sessionKey: ctxPayload.SessionKey,
       threadBindings,
-      mediaLocalRoots,
+      mediaAccess,
       kind: info.kind,
     });
     replyReference.markSent();

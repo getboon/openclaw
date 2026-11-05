@@ -252,6 +252,7 @@ function resolveRequestedFallbackModelRef(params: {
 function createSyntheticOperatorClient(params?: {
   allowModelOverride?: boolean;
   agentRunTracking?: "plugin_subagent";
+  inProcessDispatch?: boolean;
   pluginRuntimeOwnerId?: string;
   scopes?: string[];
 }): GatewayRequestOptions["client"] {
@@ -273,6 +274,7 @@ function createSyntheticOperatorClient(params?: {
       scopes: params?.scopes ?? [WRITE_SCOPE],
     },
     internal: {
+      ...(params?.inProcessDispatch ? { inProcessDispatch: true } : {}),
       allowModelOverride: params?.allowModelOverride === true,
       ...(params?.agentRunTracking ? { agentRunTracking: params.agentRunTracking } : {}),
       ...(params?.scopes?.includes(APPROVALS_SCOPE) ? { approvalRuntime: true } : {}),
@@ -306,12 +308,31 @@ function mergeGatewayClientInternal(
   };
 }
 
+// Request scopes flow through AsyncLocalStorage into the runs a handler starts, so a
+// nested dispatch would otherwise inherit an outer core-built request's trust flag.
+// The flag must describe only the params of the dispatch that sets it.
+function withoutInheritedInProcessDispatch(
+  client: GatewayRequestOptions["client"] | undefined,
+): GatewayRequestOptions["client"] | undefined {
+  if (!client?.internal?.inProcessDispatch) {
+    return client;
+  }
+  const { inProcessDispatch: _inherited, ...internal } = client.internal;
+  return { ...client, internal };
+}
+
 type DispatchGatewayMethodInProcessOptions = {
   allowSyntheticModelOverride?: boolean;
   agentRunTracking?: "plugin_subagent";
   disableSyntheticClient?: boolean;
   expectFinal?: boolean;
   forceSyntheticClient?: boolean;
+  /**
+   * Core-built params only: marks the client as trusted in-process dispatch so the
+   * `agent` method honors `usageAttribution`/`oboToken`. Never set for caller-supplied
+   * params (the plugin SDK `dispatchGatewayMethod` proxies authenticated HTTP bodies).
+   */
+  inProcessDispatch?: boolean;
   pluginRuntimeOwnerId?: string;
   requireScopedClient?: boolean;
   syntheticScopes?: string[];
@@ -417,14 +438,16 @@ export async function dispatchGatewayMethodInProcessRaw(
   const syntheticClient = createSyntheticOperatorClient({
     allowModelOverride: options?.allowSyntheticModelOverride === true,
     agentRunTracking: options?.agentRunTracking,
+    inProcessDispatch: options?.inProcessDispatch,
     ...(pluginRuntimeOwnerId ? { pluginRuntimeOwnerId } : {}),
     scopes: options?.syntheticScopes,
   });
   const scopedClient = mergeGatewayClientInternal(
-    scope?.client,
-    pluginRuntimeOwnerId || options?.agentRunTracking
+    withoutInheritedInProcessDispatch(scope?.client),
+    pluginRuntimeOwnerId || options?.agentRunTracking || options?.inProcessDispatch
       ? {
           ...(options?.agentRunTracking ? { agentRunTracking: options.agentRunTracking } : {}),
+          ...(options?.inProcessDispatch ? { inProcessDispatch: true } : {}),
           ...(pluginRuntimeOwnerId ? { pluginRuntimeOwnerId } : {}),
         }
       : undefined,
@@ -593,6 +616,7 @@ export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
           ...(params.extraSystemPrompt && { extraSystemPrompt: params.extraSystemPrompt }),
           ...(params.lane && { lane: params.lane }),
           ...(params.lightContext === true && { bootstrapContextMode: "lightweight" }),
+          ...(params.usageAttribution && { usageAttribution: params.usageAttribution }),
           // The gateway `agent` schema requires `idempotencyKey: NonEmptyString`,
           // so fall back to a generated UUID when the caller omits it. Without
           // this, plugin subagent runs (for example memory-core dreaming
@@ -602,6 +626,7 @@ export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
         {
           allowSyntheticModelOverride,
           agentRunTracking: "plugin_subagent",
+          inProcessDispatch: true,
           ...(pluginId ? { pluginRuntimeOwnerId: pluginId } : {}),
         },
       );

@@ -5264,6 +5264,16 @@
       "hasChildren": false
     },
     {
+      "path": "agents.defaults.subagents.maxConsecutiveFailures",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
       "path": "agents.defaults.subagents.maxSpawnDepth",
       "kind": "core",
       "type": "integer",

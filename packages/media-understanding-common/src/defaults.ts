@@ -24,7 +24,11 @@ export const DEFAULT_MAX_BYTES: Record<MediaUnderstandingCapability, number> = {
 };
 /** Default request timeout by capability. */
 export const DEFAULT_TIMEOUT_SECONDS: Record<MediaUnderstandingCapability, number> = {
-  image: 60,
+  // boon-llm-gateway bounds its whole provider fallback chain at
+  // MAX_FALLBACK_DURATION_SECONDS=120; 150s sits above that so the gateway
+  // finishes its own fallback and returns a real error instead of being cut
+  // off mid-flight.
+  image: 150,
   audio: 60,
   video: 120,
 };

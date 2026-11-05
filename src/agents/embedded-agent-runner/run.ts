@@ -44,7 +44,7 @@ import type { CommandQueueEnqueueOptions } from "../../process/command-queue.typ
 import { createAgentHarnessTaskRuntimeScope } from "../../tasks/agent-harness-task-runtime-scope.js";
 import { resolveUserPath } from "../../utils.js";
 import { isMarkdownCapableMessageChannel } from "../../utils/message-channel.js";
-import { hasAcceptedSessionSpawn } from "../accepted-session-spawn.js";
+import { hasAcceptedSessionSpawn, type AcceptedSessionSpawn } from "../accepted-session-spawn.js";
 import {
   retireSessionMcpRuntime,
   retireSessionMcpRuntimeForSessionKey,
@@ -144,6 +144,8 @@ import {
   suspendSession,
   type SessionSuspensionParams,
 } from "../session-suspension.js";
+import { getSubagentRunByChildSessionKey } from "../subagent-registry.js";
+import { isLiveUnendedSubagentRun } from "../subagent-run-liveness.js";
 import { classifyToolFailureReason, type ToolErrorSummary } from "../tool-error-summary.js";
 import { resolveToolLoopDetectionConfig } from "../tool-loop-detection-config.js";
 import { derivePromptTokens, normalizeUsage, type UsageLike } from "../usage.js";
@@ -221,8 +223,10 @@ import {
   hasAttemptTerminalState,
   resolveAttemptReplayMetadata,
   resolveEmptyResponseRetryInstruction,
+  resolveImplicitYieldContinuationInstruction,
   resolveIncompleteTurnPayloadText,
   resolveReasoningOnlyRetryInstruction,
+  resolveSettledToolContinuationInstruction,
   resolveSilentToolResultReplyPayload,
   resolveReplayInvalidFlag,
   resolveRunLivenessState,
@@ -239,6 +243,12 @@ import {
   resolveEffectiveRuntimeModel,
   resolveHookModelSelection,
 } from "./run/setup.js";
+import { resolveStreamCutoffRetryBudget } from "./run/stream-cutoff-retry-budget.js";
+import {
+  MAX_STREAM_CUTOFF_RETRIES,
+  shouldRetryCutOffGeneration,
+  STREAM_CUTOFF_RETRY_INSTRUCTION,
+} from "./run/stream-cutoff-retry.js";
 import { mergeAttemptToolMediaPayloads } from "./run/tool-media-payloads.js";
 import type { EmbeddedRunFastModeParam } from "./run/types.js";
 import {
@@ -486,6 +496,20 @@ function createScopedAuthProfileStore(
     : createEmptyAuthProfileStore();
 }
 
+// Scoped to this turn's own spawns so an already-settled descendant never
+// forces a continuation. A missing row means the run ended and was cleaned
+// up, not that registration raced: registerSubagentRun always runs before
+// sessions_spawn returns "accepted".
+function hasLivePendingAcceptedSessionSpawn(spawns: AcceptedSessionSpawn[] | undefined): boolean {
+  if (!spawns?.length) {
+    return false;
+  }
+  return spawns.some((spawn) => {
+    const run = getSubagentRunByChildSessionKey(spawn.childSessionKey);
+    return run !== null && isLiveUnendedSubagentRun(run);
+  });
+}
+
 export function buildTraceToolSummary(params: {
   toolMetas?: Array<{
     toolName: string;
@@ -694,17 +718,23 @@ export function runEmbeddedAgent(
     (needsConfiguredDefault ? (getRuntimeConfigSnapshot() ?? undefined) : undefined);
   const lifecycleGeneration =
     paramsInput.lifecycleGeneration ?? captureAgentRunLifecycleGeneration(paramsInput.runId);
+  // Read in the caller's context, before any lane queueing can switch async context.
+  const streamCutoffRetryBudget = resolveStreamCutoffRetryBudget();
   return withAgentRunLifecycleGeneration(lifecycleGeneration, () =>
-    runEmbeddedAgentInternal({
-      ...paramsInput,
-      config,
-      lifecycleGeneration,
-    }),
+    runEmbeddedAgentInternal(
+      {
+        ...paramsInput,
+        config,
+        lifecycleGeneration,
+      },
+      streamCutoffRetryBudget,
+    ),
   );
 }
 
 async function runEmbeddedAgentInternal(
   paramsInput: RunEmbeddedAgentParams,
+  streamCutoffRetryBudget: ReturnType<typeof resolveStreamCutoffRetryBudget>,
 ): Promise<EmbeddedAgentRunResult> {
   const paramsBase = applyAgentRunSessionTargetIdentity(paramsInput);
   let lifecycleGeneration = paramsBase.lifecycleGeneration!;
@@ -1718,6 +1748,10 @@ async function runEmbeddedAgentInternal(
       let lastRetryFailoverReason: FailoverReason | null = null;
       let reasoningOnlyRetryInstruction: string | null = null;
       let emptyResponseRetryInstruction: string | null = null;
+      let settledToolContinuationInstruction: string | null = null;
+      let settledToolContinuationAttempts = 0;
+      let implicitYieldContinuationInstruction: string | null = null;
+      let implicitYieldContinuationAttempts = 0;
       let compactionContinuationRetryInstruction: string | null = null;
       let unfinishedStepsRetryInstruction: string | null = null;
       let nextAttemptPromptOverride: string | null = null;
@@ -2023,6 +2057,8 @@ async function runEmbeddedAgentInternal(
           const promptAdditions = [
             reasoningOnlyRetryInstruction,
             emptyResponseRetryInstruction,
+            settledToolContinuationInstruction,
+            implicitYieldContinuationInstruction,
             compactionContinuationRetryInstruction,
             unfinishedStepsRetryInstruction,
           ].filter(
@@ -2153,12 +2189,15 @@ async function runEmbeddedAgentInternal(
             isCanonicalWorkspace,
             senderId: params.senderId,
             senderName: params.senderName,
+            // Feeds the user-source usage header and the attribution children inherit.
+            senderSource: params.senderSource,
             senderUsername: params.senderUsername,
             senderE164: params.senderE164,
             // Gateway-audience OBO (ENG-19115) → attempt.ts → x-boon-gateway-obo-token.
             // The attempt params are an explicit copy of the run params; omitting the
             // field here is why attempt.ts's params.oboToken was always undefined.
             oboToken: params.oboToken,
+            usageAttribution: params.usageAttribution,
             approvalReviewerDeviceId: params.approvalReviewerDeviceId,
             currentChannelId: params.currentChannelId,
             chatId: params.chatId,
@@ -2187,8 +2226,8 @@ async function runEmbeddedAgentInternal(
             currentInboundContext: params.currentInboundContext,
             images: params.images,
             imageOrder: params.imageOrder,
-            clientTools: params.clientTools,
-            disableTools: params.disableTools,
+            clientTools: settledToolContinuationAttempts === 0 ? params.clientTools : undefined,
+            disableTools: params.disableTools || settledToolContinuationAttempts > 0,
             provider,
             modelId,
             requestedModelId,
@@ -2519,6 +2558,8 @@ async function runEmbeddedAgentInternal(
           // ── Timeout-triggered compaction ──────────────────────────────────
           // When the LLM times out with high context usage, compact before
           // retrying to break the death spiral of repeated timeouts.
+          // oxlint-disable-next-line eslint/no-warning-comments -- deferred gap, kept visible until fixed
+          // TODO(okka): skip this compaction retry when attempt.timedOutByRunDeadline is set; it starts a fresh full timeout after the run deadline.
           if (timedOut && !timedOutDuringCompaction && !timedOutDuringToolExecution) {
             // Only consider prompt-side tokens here. API totals include output
             // tokens, which can make a long generation look like high context
@@ -3465,6 +3506,42 @@ async function runEmbeddedAgentInternal(
             );
             continue;
           }
+          // A generation cut off mid-stream (typically one oversized call) would otherwise go to
+          // model fallback and, when every model fails, a sub-agent re-spawn — each re-sending the
+          // same giant call. Retry once on the same model, asking for the step in smaller pieces.
+          if (
+            shouldRetryCutOffGeneration({
+              assistant: assistantForFailover,
+              attempt,
+              aborted,
+              timedOut,
+              idleTimedOut,
+              promptError,
+              authFailure,
+              rateLimitFailure,
+              billingFailure,
+              failoverReason: assistantFailoverReason,
+              priorRetries: streamCutoffRetryBudget.used,
+            })
+          ) {
+            const streamCutoffRetries = ++streamCutoffRetryBudget.used;
+            nextAttemptPromptOverride = STREAM_CUTOFF_RETRY_INSTRUCTION;
+            suppressNextUserMessagePersistence = true;
+            traceAttempts.push({
+              provider: activeErrorContext.provider,
+              model: activeErrorContext.model,
+              result: "stream_cutoff_retry",
+              stage: "assistant",
+            });
+            log.warn(
+              `[stream-cutoff-retry] generation cut off mid-stream; retrying same model in smaller steps ` +
+                `attempt=${streamCutoffRetries}/${MAX_STREAM_CUTOFF_RETRIES} ` +
+                `provider=${assistantForFailover?.provider ?? provider} ` +
+                `model=${assistantForFailover?.model ?? model.id} ` +
+                `sessionKey=${params.sessionKey ?? params.sessionId}`,
+            );
+            continue;
+          }
           // Capture the failing profile before auth-profile rotation mutates `lastProfileId`.
           const failedAssistantProfileId = lastProfileId;
           const logAssistantFailoverDecision = createFailoverDecisionLogger({
@@ -3480,6 +3557,7 @@ async function runEmbeddedAgentInternal(
             profileId: failedAssistantProfileId,
             fallbackConfigured,
             timedOut,
+            timedOutByRunDeadline: attempt.timedOutByRunDeadline === true,
             aborted,
           });
 
@@ -3524,6 +3602,7 @@ async function runEmbeddedAgentInternal(
             idleTimedOut,
             timedOutDuringCompaction,
             timedOutDuringToolExecution,
+            timedOutByRunDeadline: attempt.timedOutByRunDeadline === true,
             harnessOwnsTransport: pluginHarnessOwnsTransport,
             profileRotated: false,
           });
@@ -3538,6 +3617,7 @@ async function runEmbeddedAgentInternal(
             idleTimedOut,
             timedOutDuringCompaction,
             timedOutDuringToolExecution,
+            timedOutByRunDeadline: attempt.timedOutByRunDeadline === true,
             allowSameModelIdleTimeoutRetry:
               timedOut &&
               idleTimedOut &&
@@ -3854,6 +3934,7 @@ async function runEmbeddedAgentInternal(
                 ? [silentToolResultReplyPayload]
                 : payloadsWithToolMedia;
           const payloadCount = payloadsForTerminalPath?.length ?? 0;
+          const afterSettledToolContinuation = settledToolContinuationAttempts > 0;
           const emptyAssistantReplyIsSilent = shouldTreatEmptyAssistantReplyAsSilent({
             allowEmptyAssistantReplyAsSilent: params.allowEmptyAssistantReplyAsSilent,
             payloadCount,
@@ -3861,29 +3942,31 @@ async function runEmbeddedAgentInternal(
             timedOut,
             attempt,
           });
-          const nextReasoningOnlyRetryInstruction = emptyAssistantReplyIsSilent
-            ? null
-            : resolveReasoningOnlyRetryInstruction({
-                provider: activeErrorContext.provider,
-                modelId: activeErrorContext.model,
-                modelApi: effectiveModel.api,
-                executionContract,
-                aborted,
-                timedOut,
-                attempt,
-              });
-          const nextEmptyResponseRetryInstruction = emptyAssistantReplyIsSilent
-            ? null
-            : resolveEmptyResponseRetryInstruction({
-                provider: activeErrorContext.provider,
-                modelId: activeErrorContext.model,
-                modelApi: effectiveModel.api,
-                executionContract,
-                payloadCount,
-                aborted,
-                timedOut,
-                attempt,
-              });
+          const nextReasoningOnlyRetryInstruction =
+            emptyAssistantReplyIsSilent || afterSettledToolContinuation
+              ? null
+              : resolveReasoningOnlyRetryInstruction({
+                  provider: activeErrorContext.provider,
+                  modelId: activeErrorContext.model,
+                  modelApi: effectiveModel.api,
+                  executionContract,
+                  aborted,
+                  timedOut,
+                  attempt,
+                });
+          const nextEmptyResponseRetryInstruction =
+            emptyAssistantReplyIsSilent || afterSettledToolContinuation
+              ? null
+              : resolveEmptyResponseRetryInstruction({
+                  provider: activeErrorContext.provider,
+                  modelId: activeErrorContext.model,
+                  modelApi: effectiveModel.api,
+                  executionContract,
+                  payloadCount,
+                  aborted,
+                  timedOut,
+                  attempt,
+                });
           if (
             nextReasoningOnlyRetryInstruction &&
             reasoningOnlyRetryAttempts < maxReasoningOnlyRetryAttempts
@@ -3902,6 +3985,7 @@ async function runEmbeddedAgentInternal(
             reasoningOnlyRetryAttempts >= maxReasoningOnlyRetryAttempts;
           if (
             !emptyAssistantReplyIsSilent &&
+            !afterSettledToolContinuation &&
             shouldRetryMissingAssistantTurn({
               payloadCount,
               aborted,
@@ -3915,6 +3999,71 @@ async function runEmbeddedAgentInternal(
             log.warn(
               `missing assistant terminal message detected: runId=${params.runId} sessionId=${params.sessionId} ` +
                 `provider=${activeErrorContext.provider}/${activeErrorContext.model} — retrying ${missingAssistantRetryAttempts}/${MAX_MISSING_ASSISTANT_RETRIES} with same prompt`,
+            );
+            continue;
+          }
+          const nextSettledToolContinuationInstruction =
+            emptyAssistantReplyIsSilent || agentHarness.id !== "openclaw"
+              ? null
+              : resolveSettledToolContinuationInstruction({
+                  provider: activeErrorContext.provider,
+                  modelId: activeErrorContext.model,
+                  modelApi: effectiveModel.api,
+                  executionContract,
+                  payloadCount,
+                  aborted,
+                  timedOut,
+                  attempt,
+                });
+          if (nextSettledToolContinuationInstruction && settledToolContinuationAttempts < 1) {
+            settledToolContinuationAttempts += 1;
+            if (
+              params.currentMessageId !== undefined &&
+              params.currentMessageId === lastPersistedCurrentMessageId
+            ) {
+              // The settled tool batch already follows this inbound leaf. Keep the
+              // continuation as the new model prompt instead of replaying that leaf.
+              nextAttemptPromptOverride = nextSettledToolContinuationInstruction;
+              suppressNextUserMessagePersistence = true;
+            } else {
+              settledToolContinuationInstruction = nextSettledToolContinuationInstruction;
+            }
+            log.warn(
+              `settled post-tool turn lacked a final answer: runId=${params.runId} sessionId=${params.sessionId} ` +
+                `provider=${activeErrorContext.provider}/${activeErrorContext.model} — continuing from settled tool results`,
+            );
+            continue;
+          }
+          // Unlike the settled-tool continuation above, not harness-restricted:
+          // sessions_spawn/sessions_yield are ordinary catalog tools any
+          // harness can call, so this race isn't harness-specific either.
+          const nextImplicitYieldContinuationInstruction = emptyAssistantReplyIsSilent
+            ? null
+            : resolveImplicitYieldContinuationInstruction({
+                aborted,
+                timedOut,
+                hasPendingAcceptedSessionSpawn: hasLivePendingAcceptedSessionSpawn(
+                  attempt.acceptedSessionSpawns,
+                ),
+                attempt,
+              });
+          if (nextImplicitYieldContinuationInstruction && implicitYieldContinuationAttempts < 1) {
+            implicitYieldContinuationAttempts += 1;
+            if (
+              params.currentMessageId !== undefined &&
+              params.currentMessageId === lastPersistedCurrentMessageId
+            ) {
+              // Same leaf-replay guard as the settled-tool continuation above:
+              // keep the continuation as the new model prompt instead of
+              // replaying the inbound leaf a second time.
+              nextAttemptPromptOverride = nextImplicitYieldContinuationInstruction;
+              suppressNextUserMessagePersistence = true;
+            } else {
+              implicitYieldContinuationInstruction = nextImplicitYieldContinuationInstruction;
+            }
+            log.warn(
+              `turn narrated over a live un-yielded sub-agent spawn: runId=${params.runId} sessionId=${params.sessionId} ` +
+                `provider=${activeErrorContext.provider}/${activeErrorContext.model} — forcing sessions_yield`,
             );
             continue;
           }
@@ -4189,6 +4338,8 @@ async function runEmbeddedAgentInternal(
             suppressNextUserMessagePersistence = true;
             reasoningOnlyRetryInstruction = null;
             emptyResponseRetryInstruction = null;
+            settledToolContinuationInstruction = null;
+            implicitYieldContinuationInstruction = null;
             compactionContinuationRetryInstruction = null;
             unfinishedStepsRetryInstruction = null;
             log.warn(

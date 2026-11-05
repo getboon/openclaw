@@ -30,6 +30,14 @@ export class LocalMediaAccessError extends Error {
   }
 }
 
+/**
+ * True for the allowlist rejection specifically, so tool callers can answer the
+ * model with a denial result instead of letting the error page as a host defect.
+ */
+export function isLocalMediaPathNotAllowedError(err: unknown): boolean {
+  return err instanceof LocalMediaAccessError && err.code === "path-not-allowed";
+}
+
 /** Returns the default root allowlist for local media reads. */
 export function getDefaultLocalRoots(): readonly string[] {
   return getDefaultMediaLocalRoots();

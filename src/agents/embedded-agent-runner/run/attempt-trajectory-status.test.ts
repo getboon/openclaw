@@ -272,4 +272,15 @@ describe("attempt trajectory status", () => {
       status: "interrupted",
     });
   });
+
+  it("classifies a caller's external timeout abort as interrupted, not error (ENG-21233)", () => {
+    // Exact shape produced once isExternalTimeoutAbortRejection leaves
+    // promptError unset for a channel plugin's own wall-clock turn-budget
+    // abort: aborted + externalAbort + timedOut, no promptError.
+    expect(
+      resolveAttemptTrajectoryTerminal(
+        baseParams({ promptError: undefined, aborted: true, externalAbort: true, timedOut: true }),
+      ),
+    ).toEqual({ status: "interrupted" });
+  });
 });

@@ -506,7 +506,7 @@ export class CoreAgentHarness<
         });
         return result ? { block: result.block, reason: result.reason } : undefined;
       },
-      afterToolCall: async ({ toolCall, args, result, isError }) => {
+      afterToolCall: async ({ toolCall, args, result, isError, executionStarted }) => {
         const patch = await this.emitHook({
           type: "tool_result",
           toolCallId: toolCall.id,
@@ -515,6 +515,7 @@ export class CoreAgentHarness<
           content: result.content,
           details: result.details,
           isError,
+          executionStarted,
         });
         return patch
           ? {

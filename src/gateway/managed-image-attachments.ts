@@ -14,6 +14,7 @@ import { resolveLocalMediaPath } from "../media/local-media-path.js";
 import {
   createImageProcessor,
   getImageMetadata,
+  MAX_IMAGE_INPUT_PIXELS,
   readImageProbeFromHeader,
 } from "../media/media-services.js";
 import { MEDIA_MAX_BYTES, saveMediaBuffer, saveMediaSource } from "../media/store.js";
@@ -933,6 +934,14 @@ export async function createManagedOutgoingImageBlocks(params: {
         }
         if (resizeAttempt >= 3) {
           throw createManagedImageAttachmentError(metadataLimitError);
+        }
+        // Reject outright instead of decoding: the shared processor's decode
+        // ceiling is far above this feature's own limits above, so a source
+        // this large would otherwise cost a full in-process decode first.
+        if (effectiveMetadata.width * effectiveMetadata.height > MAX_IMAGE_INPUT_PIXELS) {
+          throw createManagedImageAttachmentError(
+            `Managed image attachment ${JSON.stringify(alt)} exceeds the ${MAX_IMAGE_INPUT_PIXELS.toLocaleString("en-US")} pixel decode limit and cannot be downscaled for forwarding`,
+          );
         }
         const resized = await resizeManagedImageBufferToLimits({
           buffer: originalBuffer,

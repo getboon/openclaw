@@ -318,6 +318,8 @@ export type ChannelCapabilities = {
   };
   nativeCommands?: boolean;
   blockStreaming?: boolean;
+  /** The channel posts its own outcome for every turn it dispatches, including failures. */
+  reportsTurnOutcome?: boolean;
 };
 
 export type ChannelSecurityDmPolicy = {

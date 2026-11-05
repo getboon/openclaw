@@ -618,9 +618,19 @@ or shortens that specific tool budget. The `image_generate` tool uses
 `agents.defaults.imageGenerationModel.timeoutMs` when the tool call does not
 provide its own timeout, or a 120 second image-generation default otherwise.
 The media-understanding `image` tool uses
-`tools.media.image.timeoutSeconds` or its 60 second media default. For image
-understanding, that timeout applies to the request itself and is not
-reduced by earlier preparation work. Dynamic tool budgets are
+`tools.media.image.timeoutSeconds` or its 150 second media default. For image
+understanding, that timeout is one end-to-end budget shared by model/auth
+setup and the provider request, not a fresh window per phase (MiniMax VLM
+models are the exception: each phase keeps the full configured budget). The
+outer Codex watchdog for this tool adds a 30 second grace on top of that
+inner budget, but not on top of a per-image-model `timeoutSeconds`
+override — raise the capability-level `tools.media.image.timeoutSeconds`
+to match a longer override in use, or this watchdog can still cut that
+model's calls off first. The watchdog also covers only one candidate: a
+configured `agents.defaults.imageModel.fallbacks` list gives each
+fallback its own fresh inner budget, so a slow first candidate can still
+leave later fallbacks cut off by this same outer grace. Dynamic tool
+budgets are
 capped at 600000 ms. On timeout, OpenClaw aborts the tool signal
 where supported and returns a failed dynamic-tool response to Codex so the turn
 can continue instead of leaving the session in `processing`.

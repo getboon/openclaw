@@ -27,6 +27,7 @@ import {
   DEFAULT_REASONING_ONLY_RETRY_LIMIT,
   EMPTY_RESPONSE_RETRY_INSTRUCTION,
   REASONING_ONLY_RETRY_INSTRUCTION,
+  SETTLED_TOOL_CONTINUATION_INSTRUCTION,
   resolveEmptyResponseRetryInstruction,
   isIncompleteTerminalAssistantTurn,
   resolveIncompleteTurnPayloadText as resolveIncompleteTurnPayloadTextCore,
@@ -50,6 +51,8 @@ let runEmbeddedAgent: typeof import("./run.js").runEmbeddedAgent;
 // `isReplyPayloadNonTerminalToolErrorWarning` inside `run.ts` read from two
 // disjoint WeakMaps.
 let setReplyPayloadMetadata: typeof import("../../auto-reply/reply-payload.js").setReplyPayloadMetadata;
+let addSubagentRunForTests: typeof import("../subagent-registry.js").addSubagentRunForTests;
+let resetSubagentRegistryForTests: typeof import("../subagent-registry.js").resetSubagentRegistryForTests;
 
 function resolveIncompleteTurnPayloadText(
   params: Omit<Parameters<typeof resolveIncompleteTurnPayloadTextCore>[0], "externalAbort"> & {
@@ -65,11 +68,14 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
   beforeAll(async () => {
     ({ runEmbeddedAgent } = await loadRunOverflowCompactionHarness());
     ({ setReplyPayloadMetadata } = await import("../../auto-reply/reply-payload.js"));
+    ({ addSubagentRunForTests, resetSubagentRegistryForTests } =
+      await import("../subagent-registry.js"));
   });
 
   beforeEach(() => {
     resetRunOverflowCompactionHarnessMocks();
     mockedGlobalHookRunner.hasHooks.mockImplementation(() => false);
+    resetSubagentRegistryForTests({ persist: false });
   });
 
   function warnMessages(): string[] {
@@ -84,14 +90,24 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     expect(warnMessages().join("\n")).not.toContain(text);
   }
 
-  function runAttemptCall(index: number): { prompt?: string } {
+  function runAttemptCall(index: number): {
+    prompt?: string;
+    disableTools?: boolean;
+    clientTools?: unknown[];
+    suppressNextUserMessagePersistence?: boolean;
+  } {
     // Continuation prompt assertions read the exact prompt passed to the runner
     // attempt rather than derived result metadata.
     const call = mockedRunEmbeddedAttempt.mock.calls[index];
     if (!call) {
       throw new Error(`Expected run embedded attempt call ${index}`);
     }
-    return call[0] as { prompt?: string };
+    return call[0] as {
+      prompt?: string;
+      disableTools?: boolean;
+      clientTools?: unknown[];
+      suppressNextUserMessagePersistence?: boolean;
+    };
   }
 
   it("emits the before_agent_run hook block message as the agent payload", async () => {
@@ -928,6 +944,132 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     const secondCall = runAttemptCall(1);
     expect(secondCall.prompt).toContain(REASONING_ONLY_RETRY_INSTRUCTION);
     expectWarnMessageWith("reasoning-only assistant turn detected");
+  });
+
+  it("forces a sessions_yield continuation when a turn narrates over a sub-agent it just spawned", async () => {
+    // A live (unended) registry record for "child-doc-conversion-1" — the
+    // state right after sessions_spawn accepts and the child is still
+    // running its OCR work.
+    addSubagentRunForTests({
+      runId: "run-doc-conversion-1",
+      childSessionKey: "child-doc-conversion-1",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "OCR the title block and sheet notes",
+      cleanup: "delete",
+      createdAt: Date.now(),
+    });
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    const narratedAssistant = {
+      role: "assistant",
+      stopReason: "stop",
+      provider: "openai",
+      model: "gpt-5.4",
+      content: [{ type: "text", text: "Reading title block and notes tiles." }],
+    } as unknown as EmbeddedRunAttemptResult["lastAssistant"];
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({
+        assistantTexts: ["Reading title block and notes tiles."],
+        acceptedSessionSpawns: [
+          { runId: "run-doc-conversion-1", childSessionKey: "child-doc-conversion-1" },
+        ],
+        visibleToolNames: ["sessions_spawn", "sessions_yield"],
+        lastAssistant: narratedAssistant,
+        currentAttemptAssistant: narratedAssistant,
+      }),
+    );
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({
+        assistantTexts: [],
+        yieldDetected: true,
+        lastAssistant: {
+          role: "assistant",
+          stopReason: "stop",
+          provider: "openai",
+          model: "gpt-5.4",
+          content: [],
+        } as unknown as EmbeddedRunAttemptResult["lastAssistant"],
+      }),
+    );
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      provider: "openai",
+      model: "gpt-5.4",
+      runId: "run-implicit-yield-continuation",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
+    const secondCall = runAttemptCall(1);
+    expect(secondCall.prompt).toContain("Call sessions_yield now with a one-line progress message");
+    expectWarnMessageWith("turn narrated over a live un-yielded sub-agent spawn");
+  });
+
+  it("does not force a yield continuation when the spawned child's registry row is gone (already completed)", async () => {
+    // No record is registered for "child-already-done" — registerSubagentRun
+    // runs synchronously before sessions_spawn returns "accepted", so a miss
+    // here means the run ended and its cleanup:"delete" row was removed, not
+    // that registration is racing.
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    const narratedAssistant = {
+      role: "assistant",
+      stopReason: "stop",
+      provider: "openai",
+      model: "gpt-5.4",
+      content: [{ type: "text", text: "Here's the transcribed title block." }],
+    } as unknown as EmbeddedRunAttemptResult["lastAssistant"];
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({
+        assistantTexts: ["Here's the transcribed title block."],
+        acceptedSessionSpawns: [
+          { runId: "run-already-done", childSessionKey: "child-already-done" },
+        ],
+        visibleToolNames: ["sessions_spawn", "sessions_yield"],
+        lastAssistant: narratedAssistant,
+        currentAttemptAssistant: narratedAssistant,
+      }),
+    );
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      provider: "openai",
+      model: "gpt-5.4",
+      runId: "run-completed-spawn-no-forced-continuation",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
+    expectNoWarnMessageWith("turn narrated over a live un-yielded sub-agent spawn");
+  });
+
+  it("does not force a yield continuation once sessions_yield was actually called", async () => {
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({
+        assistantTexts: ["Working on it in the background."],
+        acceptedSessionSpawns: [
+          { runId: "run-doc-conversion-2", childSessionKey: "child-doc-conversion-2" },
+        ],
+        yieldDetected: true,
+        lastAssistant: {
+          role: "assistant",
+          stopReason: "stop",
+          provider: "openai",
+          model: "gpt-5.4",
+          content: [{ type: "text", text: "Working on it in the background." }],
+        } as unknown as EmbeddedRunAttemptResult["lastAssistant"],
+      }),
+    );
+
+    const result = await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      provider: "openai",
+      model: "gpt-5.4",
+      runId: "run-explicit-yield-no-forced-continuation",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
+    expect(result.meta?.livenessState).not.toBe("abandoned");
+    expectNoWarnMessageWith("turn narrated over a live un-yielded sub-agent spawn");
   });
 
   it("retries generic empty GPT turns with a visible-answer continuation instruction", async () => {
@@ -3450,6 +3592,105 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     expect(result.meta.terminalReplyKind).toBeUndefined();
     expect(result.meta.finalAssistantVisibleText).toBe("Visible StepFun answer.");
     expectWarnMessageWith("empty response detected");
+  });
+
+  it("continues once after a settled side-effecting write without exposing tools", async () => {
+    const emptyStopAssistant = {
+      role: "assistant",
+      api: "openai-responses",
+      stopReason: "stop",
+      provider: "openai",
+      model: "gpt-5.5",
+      content: [],
+    } as unknown as EmbeddedRunAttemptResult["lastAssistant"];
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt
+      .mockImplementationOnce(async (attemptParams) => {
+        (
+          attemptParams as {
+            onUserMessagePersisted?: (message: { role: "user"; content: string }) => void;
+          }
+        ).onUserMessagePersisted?.({ role: "user", content: "Write the note." });
+        return makeAttemptResult({
+          assistantTexts: [],
+          toolMetas: [{ toolName: "write", meta: "path=note.txt", replaySafe: false }],
+          itemLifecycle: { startedCount: 1, completedCount: 1, activeCount: 0 },
+          lastAssistant: emptyStopAssistant,
+          currentAttemptAssistant: emptyStopAssistant,
+        });
+      })
+      .mockResolvedValueOnce(
+        makeAttemptResult({
+          assistantTexts: ["Write completed."],
+          lastAssistant: {
+            role: "assistant",
+            api: "openai-responses",
+            stopReason: "stop",
+            provider: "openai",
+            model: "gpt-5.5",
+            content: [{ type: "text", text: "Write completed." }],
+          } as unknown as EmbeddedRunAttemptResult["lastAssistant"],
+        }),
+      );
+
+    const result = await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      provider: "openai",
+      model: "gpt-5.5",
+      runId: "run-settled-write-empty-stop",
+      currentMessageId: "telegram-message-1",
+      agentHarnessRuntimeOverride: "openclaw",
+      clientTools: [
+        {
+          type: "function",
+          function: { name: "host_write", description: "Write through the host" },
+        },
+      ],
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
+    expect(runAttemptCall(1)).toMatchObject({
+      disableTools: true,
+      clientTools: undefined,
+      prompt: SETTLED_TOOL_CONTINUATION_INSTRUCTION,
+      suppressNextUserMessagePersistence: true,
+    });
+    expect(runAttemptCall(1).prompt).toContain(
+      "Tools are unavailable in this step: it is a text-only pass",
+    );
+    expect(result.meta.finalAssistantVisibleText).toBe("Write completed.");
+    expectWarnMessageWith("settled post-tool turn lacked a final answer");
+  });
+
+  it("does not continue a settled side-effecting turn through a native tool backend", async () => {
+    const emptyStopAssistant = {
+      role: "assistant",
+      api: "openai-responses",
+      stopReason: "stop",
+      provider: "openai",
+      model: "gpt-5.5",
+      content: [],
+    } as unknown as EmbeddedRunAttemptResult["lastAssistant"];
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({
+        assistantTexts: [],
+        toolMetas: [{ toolName: "write", meta: "path=note.txt", replaySafe: false }],
+        itemLifecycle: { startedCount: 1, completedCount: 1, activeCount: 0 },
+        lastAssistant: emptyStopAssistant,
+        currentAttemptAssistant: emptyStopAssistant,
+      }),
+    );
+
+    await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      provider: "openai",
+      model: "gpt-5.5",
+      runId: "run-native-settled-write-empty-stop",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
+    expect(warnMessages().join("\n")).not.toContain("settled post-tool turn lacked a final answer");
   });
 
   it("returns NO_REPLY without retrying post-tool exact silent assistant replies", async () => {

@@ -97,8 +97,11 @@ const resolveAgentDir = vi.hoisted(() => vi.fn(() => "/tmp/agent"));
 const resolveDefaultModelForAgent = vi.hoisted(() =>
   vi.fn(() => ({ provider: "openai", model: "gpt-test" })),
 );
-const getAgentScopedMediaLocalRoots = vi.hoisted(() =>
-  vi.fn((_cfg: unknown, agentId: string) => [`/tmp/.openclaw/workspace-${agentId}`]),
+const resolveAgentScopedOutboundMediaAccess = vi.hoisted(() =>
+  vi.fn((params: { agentId?: string }) => ({
+    localRoots: [`/tmp/.openclaw/workspace-${params.agentId}`],
+    workspaceDir: `/tmp/.openclaw/workspace-${params.agentId}`,
+  })),
 );
 const resolveChunkMode = vi.hoisted(() => vi.fn(() => undefined));
 const resolveMarkdownTableMode = vi.hoisted(() => vi.fn(() => "preserve"));
@@ -153,7 +156,7 @@ vi.mock("./send.js", () => ({
 
 vi.mock("./bot-message-dispatch.runtime.js", () => ({
   generateTopicLabel,
-  getAgentScopedMediaLocalRoots,
+  resolveAgentScopedOutboundMediaAccess,
   loadSessionStore,
   resolveAutoTopicLabelConfig: resolveAutoTopicLabelConfigRuntime,
   resolveChunkMode,
@@ -269,7 +272,7 @@ describe("dispatchTelegramMessage draft streaming", () => {
     loadSessionStore.mockReset();
     resolveStorePath.mockReset();
     generateTopicLabel.mockReset();
-    getAgentScopedMediaLocalRoots.mockClear();
+    resolveAgentScopedOutboundMediaAccess.mockClear();
     resolveChunkMode.mockClear();
     resolveMarkdownTableMode.mockClear();
     resolveSessionStoreEntry.mockClear();
@@ -649,10 +652,16 @@ describe("dispatchTelegramMessage draft streaming", () => {
     });
     expect(draftStream.update).toHaveBeenCalledWith("Hello");
     const delivery = expectDeliverRepliesParams({ thread: { id: 777, scope: "dm" } });
-    const mediaLocalRoots = delivery.mediaLocalRoots as string[] | undefined;
-    expect(mediaLocalRoots?.some((root) => /[\\/]\.openclaw[\\/]workspace-work$/u.test(root))).toBe(
-      true,
-    );
+    const mediaAccess = delivery.mediaAccess as
+      | { localRoots?: string[]; workspaceDir?: string }
+      | undefined;
+    expect(
+      mediaAccess?.localRoots?.some((root) => /[\\/]\.openclaw[\\/]workspace-work$/u.test(root)),
+    ).toBe(true);
+    // Regression: a relative attachment path only resolves against the agent
+    // workspace (instead of the gateway process cwd) when workspaceDir is
+    // present alongside the roots allowlist.
+    expect(mediaAccess?.workspaceDir).toMatch(/[\\/]\.openclaw[\\/]workspace-work$/u);
     const dispatchParams = expectDispatchParams({});
     expect(
       typeof (dispatchParams.dispatcherOptions as { beforeDeliver?: unknown }).beforeDeliver,

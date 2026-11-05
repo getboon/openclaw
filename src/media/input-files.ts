@@ -12,7 +12,11 @@ import { fetchWithSsrFGuard } from "../infra/net/fetch-guard.js";
 import type { SsrFPolicy } from "../infra/net/ssrf.js";
 import { logWarn } from "../logger.js";
 import type { DocumentExtractionCoverage } from "../plugins/document-extractor-types.js";
-import { convertHeicToJpeg } from "./media-services.js";
+import {
+  convertHeicToJpeg,
+  MAX_IMAGE_INPUT_PIXELS,
+  readImageMetadataFromHeader,
+} from "./media-services.js";
 import { extractPdfContent, type PdfExtractedImage } from "./pdf-extract.js";
 
 /** Image payload shape reused for extracted PDF images and normalized input images. */
@@ -339,6 +343,15 @@ async function normalizeInputImage(params: {
     };
   }
 
+  // Reject outright instead of decoding: this conversion requests no resize,
+  // so the shared processor's output cap would reject it after a full
+  // decode anyway — a cheap header check avoids paying for that decode.
+  const heicMeta = readImageMetadataFromHeader(params.buffer);
+  if (heicMeta && heicMeta.width * heicMeta.height > MAX_IMAGE_INPUT_PIXELS) {
+    throw new Error(
+      `Image dimensions exceed the ${MAX_IMAGE_INPUT_PIXELS.toLocaleString("en-US")} pixel limit: ${heicMeta.width}x${heicMeta.height}`,
+    );
+  }
   // Normalize HEIC/HEIF to JPEG because downstream model and channel surfaces expect common images.
   const normalizedBuffer = await convertHeicToJpeg(params.buffer);
   if (normalizedBuffer.byteLength > params.limits.maxBytes) {

@@ -459,6 +459,23 @@ describe("sessions_spawn tool", () => {
     expect(spawnContext.inheritedToolAllowlist).toEqual(["sessions_spawn", "read"]);
   });
 
+  it("passes the requester's usage attribution and OBO token to subagent spawns", async () => {
+    const usageAttribution = { userId: "U-ALICE", userName: "Alice", userSource: "slack" };
+    const tool = createSessionsSpawnTool({
+      agentSessionKey: "agent:main:main",
+      requesterUsageAttribution: usageAttribution,
+      requesterOboToken: "obo-test-token",
+    });
+
+    await tool.execute("call-attributed", {
+      task: "build feature",
+    });
+
+    const spawnContext = mockCallArg(hoisted.spawnSubagentDirectMock, 0, 1, "spawnSubagentDirect");
+    expect(spawnContext.requesterUsageAttribution).toEqual(usageAttribution);
+    expect(spawnContext.requesterOboToken).toBe("obo-test-token");
+  });
+
   it("accepts taskName as a stable subagent handle", async () => {
     const tool = createSessionsSpawnTool({
       agentSessionKey: "agent:main:main",

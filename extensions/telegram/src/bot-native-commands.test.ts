@@ -822,10 +822,16 @@ describe("registerTelegramNativeCommands", () => {
 
     const deliverParams = firstDeliverRepliesParams();
     expect(deliverParams.mediaMaxBytes).toBe(mediaMaxBytes);
-    const mediaLocalRoots = deliverParams.mediaLocalRoots as Array<string> | undefined;
-    expect(mediaLocalRoots?.some((root) => /[\\/]\.openclaw[\\/]workspace-work$/.test(root))).toBe(
-      true,
-    );
+    const mediaAccess = deliverParams.mediaAccess as
+      | { localRoots?: Array<string>; workspaceDir?: string }
+      | undefined;
+    expect(
+      mediaAccess?.localRoots?.some((root) => /[\\/]\.openclaw[\\/]workspace-work$/.test(root)),
+    ).toBe(true);
+    // Regression: a relative attachment path only resolves against the agent
+    // workspace (instead of the gateway process cwd) when workspaceDir is
+    // present alongside the roots allowlist.
+    expect(mediaAccess?.workspaceDir).toMatch(/[\\/]\.openclaw[\\/]workspace-work$/);
     expect(sendMessage).not.toHaveBeenCalledWith(123, "Command not found.");
   });
 

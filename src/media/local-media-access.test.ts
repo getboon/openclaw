@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { resolveStateDir } from "../config/paths.js";
-import { assertLocalMediaAllowed, LocalMediaAccessError } from "./local-media-access.js";
+import {
+  assertLocalMediaAllowed,
+  isLocalMediaPathNotAllowedError,
+  LocalMediaAccessError,
+} from "./local-media-access.js";
 
 const { hoistedRoots } = vi.hoisted(() => ({ hoistedRoots: [] as string[] }));
 
@@ -109,5 +113,50 @@ describe("assertLocalMediaAllowed", () => {
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  it("still rejects a symlink that escapes an allowed root (traversal via alias)", async () => {
+    const tmpDir = path.join(
+      os.tmpdir(),
+      `ocl-local-media-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    const allowedRoot = path.join(tmpDir, "allowed");
+    const outsideDir = path.join(tmpDir, "outside");
+    await fs.mkdir(allowedRoot, { recursive: true });
+    await fs.mkdir(outsideDir, { recursive: true });
+
+    const secretFile = path.join(outsideDir, "secret.png");
+    await fs.writeFile(secretFile, Buffer.from("png"));
+    const aliasPath = path.join(allowedRoot, "alias.png");
+    await fs.symlink(secretFile, aliasPath);
+
+    try {
+      let accessError: unknown;
+      try {
+        // Even though the symlink's literal path is under the allowed root, its
+        // realpath resolves outside it — the realpath-based containment check
+        // in assertLocalMediaAllowed must still reject it.
+        await assertLocalMediaAllowed(aliasPath, [allowedRoot]);
+      } catch (error) {
+        accessError = error;
+      }
+      expect(accessError).toBeInstanceOf(LocalMediaAccessError);
+      expect(isLocalMediaPathNotAllowedError(accessError)).toBe(true);
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("isLocalMediaPathNotAllowedError", () => {
+  it("is true only for the path-not-allowed code", () => {
+    expect(
+      isLocalMediaPathNotAllowedError(new LocalMediaAccessError("path-not-allowed", "x")),
+    ).toBe(true);
+    expect(isLocalMediaPathNotAllowedError(new LocalMediaAccessError("not-found", "x"))).toBe(
+      false,
+    );
+    expect(isLocalMediaPathNotAllowedError(new Error("x"))).toBe(false);
+    expect(isLocalMediaPathNotAllowedError(null)).toBe(false);
   });
 });

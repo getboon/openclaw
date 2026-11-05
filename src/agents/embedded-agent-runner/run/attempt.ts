@@ -267,7 +267,13 @@ import {
   isWorkspaceBootstrapPending,
   type WorkspaceBootstrapFile,
 } from "../../workspace.js";
-import { isRunnerAbortError } from "../abort.js";
+import {
+  classifyAsyncTaskWaitTimeout,
+  classifyCompactionRetryWaitAbort,
+  isExternalTimeoutAbortRejection,
+  isRunnerAbortError,
+  resolveAgentEndErrorText,
+} from "../abort.js";
 import { isCacheTtlEligibleProvider, readLastCacheTtlTimestamp } from "../cache-ttl.js";
 import { resolveCompactionTimeoutMs } from "../compaction-safety-timeout.js";
 import {
@@ -974,6 +980,14 @@ export async function runEmbeddedAttempt(
   let idleTimedOut = false;
   let timedOutDuringCompaction = false;
   let timedOutDuringToolExecution = false;
+  let timedOutByRunDeadline = false;
+  // Set once the prompt catch classifies a rejection as a clean external
+  // timeout abort. Guards the completion-required async-task wait below:
+  // that wait's own deadline collapses to ~now once the run is already
+  // aborted, so a still-pending async task would otherwise re-populate
+  // promptError with a second, unrelated-looking error and silently undo
+  // this classification.
+  let externalTimeoutAbortClassified = false;
   let promptError: unknown = null;
   let emitDiagnosticRunCompleted:
     | ((
@@ -1281,6 +1295,7 @@ export async function runEmbeddedAttempt(
           const allTools = createOpenClawCodingTools({
             agentId: sessionAgentId,
             ...buildEmbeddedAttemptToolRunContext({ ...params, trace: runTrace }),
+            inputProvenanceKind: params.inputProvenance?.kind,
             messageChannel: params.messageChannel,
             exec: {
               ...params.execOverrides,
@@ -2759,6 +2774,7 @@ export async function runEmbeddedAttempt(
         const removeGuard = installToolResultContextGuard({
           agent: activeSession.agent,
           contextWindowTokens: contextTokenBudgetForGuard,
+          liveToolResultMaxChars: toolResultMaxCharsForGuard,
           ...midTurnPrecheckOptions,
         });
         removeToolResultContextGuard = () => {
@@ -2769,6 +2785,7 @@ export async function runEmbeddedAttempt(
         removeToolResultContextGuard = installToolResultContextGuard({
           agent: activeSession.agent,
           contextWindowTokens: contextTokenBudgetForGuard,
+          liveToolResultMaxChars: toolResultMaxCharsForGuard,
           ...midTurnPrecheckOptions,
         });
       }
@@ -3210,6 +3227,7 @@ export async function runEmbeddedAttempt(
           ...(params.oboToken && { oboToken: params.oboToken }),
           ...(params.senderName && { senderName: params.senderName }),
           ...(params.senderSource && { senderSource: params.senderSource }),
+          ...(params.usageAttribution && { usageAttribution: params.usageAttribution }),
           ...(params.messageThreadId != null &&
             String(params.messageThreadId) !== "" && {
               threadId: String(params.messageThreadId),
@@ -3855,6 +3873,7 @@ export async function runEmbeddedAttempt(
             ) {
               timedOutDuringCompaction = true;
             }
+            timedOutByRunDeadline = true;
             abortRun(true);
             if (!abortWarnTimer) {
               abortWarnTimer = setTimeout(() => {
@@ -4901,6 +4920,8 @@ export async function runEmbeddedAttempt(
             releaseLeasedSteering(promptError ?? "prompt submission skipped");
           }
         } catch (err) {
+          // oxlint-disable-next-line eslint/no-warning-comments -- deferred gap, kept visible until fixed
+          // TODO(okka): a sessions_yield abort lands here, so leased steering items return to the queue although this turn's persisted prompt already holds them. Each later wake replays and persists them again.
           releaseLeasedSteering(err);
           yieldAborted =
             yieldDetected &&
@@ -4928,6 +4949,13 @@ export async function runEmbeddedAttempt(
             await withOwnedSessionWriteLock(() => {
               handleMidTurnPrecheckRequest(err.request);
             });
+          } else if (isExternalTimeoutAbortRejection({ err, externalAbort, timedOut })) {
+            // Caller's own abort reason, not a run failure: clear both fields
+            // (not just skip setting them — onExternalAbortSignal's early-exit
+            // path can set promptError directly before this runs).
+            promptError = null;
+            promptErrorSource = null;
+            externalTimeoutAbortClassified = true;
           } else {
             promptError = err;
             promptErrorSource = "prompt";
@@ -5003,17 +5031,30 @@ export async function runEmbeddedAttempt(
             if (!timedOut || !isRunnerAbortError(err)) {
               throw err;
             }
+            // A caller timeout can also fire here, after the main prompt
+            // already resolved cleanly (so the classification branch above
+            // never ran). Classify it the same way so the outcome below
+            // doesn't repopulate promptError for this same external abort.
+            if (isExternalTimeoutAbortRejection({ err, externalAbort, timedOut })) {
+              externalTimeoutAbortClassified = true;
+            }
             asyncTaskWait = await waitForCompletionRequiredAsyncTasks({
               getToolMetas: getAsyncStartedToolMetas,
               sessionKey: params.sessionKey,
               deadlineAtMs: Date.now(),
             });
           }
-          if (asyncTaskWait.timedOutRunIds.length > 0) {
-            promptError = new Error(
-              `Timed out waiting for async task completion: ${asyncTaskWait.timedOutRunIds.join(", ")}`,
-            );
+          const asyncTaskTimeoutOutcome = classifyAsyncTaskWaitTimeout({
+            timedOutRunIds: asyncTaskWait.timedOutRunIds,
+            externalTimeoutAbortClassified,
+          });
+          if (asyncTaskTimeoutOutcome.kind === "error") {
+            promptError = new Error(asyncTaskTimeoutOutcome.message);
             promptErrorSource = "prompt";
+          } else if (asyncTaskTimeoutOutcome.kind === "log") {
+            log.warn(
+              `${asyncTaskTimeoutOutcome.message} runId=${params.runId} sessionId=${params.sessionId}`,
+            );
           } else if (asyncTaskWait.waitedRunIds.length > 0) {
             await sessionLockController.waitForSessionEvents(activeSession);
           }
@@ -5063,7 +5104,25 @@ export async function runEmbeddedAttempt(
             }
           }
         } catch (err) {
-          if (isRunnerAbortError(err)) {
+          const compactionAbortOutcome = classifyCompactionRetryWaitAbort({
+            err,
+            externalAbort,
+            timedOut,
+          });
+          if (compactionAbortOutcome.kind === "rethrow") {
+            throw err;
+          }
+          if (compactionAbortOutcome.kind === "externalTimeoutClassified") {
+            // Same caller-driven stop already in progress, not a new failure:
+            // leave promptError untouched (classification above already
+            // handles reporting) instead of repopulating it from this wait.
+            externalTimeoutAbortClassified = true;
+            if (!isProbeSession) {
+              log.debug(
+                `compaction wait aborted by caller's external timeout: runId=${params.runId} sessionId=${params.sessionId}`,
+              );
+            }
+          } else {
             if (!promptError) {
               promptError = err;
               promptErrorSource = "compaction";
@@ -5073,8 +5132,6 @@ export async function runEmbeddedAttempt(
                 `compaction wait aborted: runId=${params.runId} sessionId=${params.sessionId}`,
               );
             }
-          } else {
-            throw err;
           }
         }
 
@@ -5316,7 +5373,7 @@ export async function runEmbeddedAttempt(
             event: {
               messages: messagesSnapshot,
               success: !aborted && !promptError,
-              error: promptError ? formatErrorMessage(promptError) : undefined,
+              error: resolveAgentEndErrorText({ promptError, externalTimeoutAbortClassified }),
               durationMs: Date.now() - promptStartedAt,
             },
             ctx: {
@@ -5671,6 +5728,7 @@ export async function runEmbeddedAttempt(
         aborted,
         externalAbort,
         timedOut,
+        timedOutByRunDeadline,
         idleTimedOut,
         timedOutDuringCompaction,
         timedOutDuringToolExecution,

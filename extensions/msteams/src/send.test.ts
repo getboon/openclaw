@@ -307,6 +307,37 @@ describe("sendMessageMSTeams", () => {
     expect(result.receipt?.parts[0]?.kind).toBe("media");
   });
 
+  it("forwards mediaAccess workspaceDir to the media loader for relative paths", async () => {
+    const mediaBuffer = Buffer.from("tiny-image");
+    mockState.loadOutboundMediaFromUrl.mockResolvedValueOnce({
+      buffer: mediaBuffer,
+      contentType: "image/png",
+      fileName: "inline.png",
+      kind: "image",
+    });
+
+    await sendMessageMSTeams({
+      cfg: {} as OpenClawConfig,
+      to: "conversation:19:conversation@thread.tacv2",
+      text: "hello",
+      mediaUrl: "projects/lazo-lodge/estimate.pdf",
+      mediaAccess: {
+        localRoots: ["/tmp/agent-root"],
+        workspaceDir: "/tmp/agent-root/workspace",
+      },
+    });
+
+    expect(mockState.loadOutboundMediaFromUrl).toHaveBeenCalledWith(
+      "projects/lazo-lodge/estimate.pdf",
+      expect.objectContaining({
+        mediaAccess: {
+          localRoots: ["/tmp/agent-root"],
+          workspaceDir: "/tmp/agent-root/workspace",
+        },
+      }),
+    );
+  });
+
   it("sends with provided cfg even when Teams runtime text helpers are unavailable", async () => {
     mockState.runtimeResolveMarkdownTableMode.mockImplementation(() => {
       throw new Error("MSTeams runtime not initialized");

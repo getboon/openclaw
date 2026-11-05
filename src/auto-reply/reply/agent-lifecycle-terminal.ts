@@ -61,7 +61,10 @@ export function createAgentLifecycleTerminalBackstop(params: {
       startedAt = evt.data.startedAt;
     }
     if (phase === "finishing") {
-      deferredError = readStringValue(evt.data.error) ?? deferredError;
+      deferredError = readStringValue(evt.data.error);
+      for (const key of DEFERRED_TERMINAL_METADATA_KEYS) {
+        delete deferredTerminalMetadata[key];
+      }
       Object.assign(deferredTerminalMetadata, resolveAgentLifecycleTerminalMetadata(evt.data));
     }
     if (phase === "end" || phase === "error") {

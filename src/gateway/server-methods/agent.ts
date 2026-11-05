@@ -38,7 +38,6 @@ import {
   resolveAgentAvatar,
   resolvePublicAgentAvatarSource,
 } from "../../agents/identity-avatar.js";
-import { AGENT_INTERNAL_EVENT_TYPE_TASK_COMPLETION } from "../../agents/internal-event-contract.js";
 import type { AgentInternalEvent } from "../../agents/internal-events.js";
 import { resolveProviderIdForAuth } from "../../agents/provider-auth-aliases.js";
 import {
@@ -54,6 +53,10 @@ import {
   resolveIngressWorkspaceOverrideForSpawnedRun,
 } from "../../agents/spawned-context.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
+import {
+  normalizeUsageAttribution,
+  type UsageAttribution,
+} from "../../agents/usage-attribution.js";
 import { agentCommandFromIngress } from "../../commands/agent.js";
 import {
   evaluateSessionFreshness,
@@ -219,6 +222,28 @@ function resolveAllowModelOverrideFromClient(
   client: GatewayRequestHandlerOptions["client"],
 ): boolean {
   return clientHasAdminScope(client) || client?.internal?.allowModelOverride === true;
+}
+
+// Usage attribution only changes billing headers, but it is still caller-supplied
+// identity: accept it only from in-process dispatch (subagent spawn, plugin
+// runtime), never from a socket client. The request lane is caller-controlled and
+// is not a trust signal on its own.
+function resolveTrustedUsageAttribution(
+  client: GatewayRequestHandlerOptions["client"],
+  value: unknown,
+): UsageAttribution | undefined {
+  return client?.internal?.inProcessDispatch === true
+    ? normalizeUsageAttribution(value)
+    : undefined;
+}
+
+// Gateway-audience OBO token forwarded for the run's model calls. It is a bearer
+// credential: same in-process-only trust gate as usage attribution, never persisted.
+function resolveTrustedOboToken(
+  client: GatewayRequestHandlerOptions["client"],
+  value: unknown,
+): string | undefined {
+  return client?.internal?.inProcessDispatch === true ? normalizeOptionalString(value) : undefined;
 }
 
 function resolveCanUseInternalRuntimeHandoff(
@@ -956,24 +981,6 @@ function dispatchAgentRunFromGateway(params: {
     });
 }
 
-function shouldSuppressAgentPromptPersistence(params: {
-  inputProvenance?: InputProvenance;
-  internalEvents?: AgentInternalEvent[];
-}): boolean {
-  if (
-    params.inputProvenance?.kind !== "inter_session" ||
-    params.inputProvenance.sourceTool !== "subagent_announce"
-  ) {
-    return false;
-  }
-  return (
-    params.internalEvents?.some(
-      (event) =>
-        event.type === AGENT_INTERNAL_EVENT_TYPE_TASK_COMPLETION && event.source === "subagent",
-    ) === true
-  );
-}
-
 function yieldAfterAgentAcceptedAck(): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, 10);
@@ -1041,8 +1048,12 @@ export const agentHandlers: GatewayRequestHandlers = {
       inputProvenance?: InputProvenance;
       workspaceDir?: string;
       voiceWakeTrigger?: string;
+      usageAttribution?: unknown;
+      oboToken?: unknown;
     };
     const allowModelOverride = resolveAllowModelOverrideFromClient(client);
+    const usageAttribution = resolveTrustedUsageAttribution(client, request.usageAttribution);
+    const oboToken = resolveTrustedOboToken(client, request.oboToken);
     const canUseInternalRuntimeHandoff = resolveCanUseInternalRuntimeHandoff(client);
     const requestedModelOverride = Boolean(request.provider || request.model);
     const requestedInternalSessionEffects = request.sessionEffects === "internal";
@@ -2690,12 +2701,7 @@ export const agentHandlers: GatewayRequestHandlers = {
               preserveUserFacingSessionModelState,
               sourceReplyDeliveryMode: request.sourceReplyDeliveryMode,
               disableMessageTool: request.disableMessageTool,
-              suppressPromptPersistence:
-                requestedPromptPersistenceSuppression ||
-                shouldSuppressAgentPromptPersistence({
-                  inputProvenance,
-                  internalEvents: request.internalEvents,
-                }),
+              suppressPromptPersistence: requestedPromptPersistenceSuppression,
               cleanupBundleMcpOnRunEnd: request.cleanupBundleMcpOnRunEnd,
               abortSignal: activeRunAbort.controller.signal,
               lifecycleGeneration,
@@ -2723,6 +2729,8 @@ export const agentHandlers: GatewayRequestHandlers = {
                 sessionEntry,
               }),
               allowModelOverride,
+              ...(usageAttribution ? { usageAttribution } : {}),
+              ...(oboToken ? { oboToken } : {}),
             },
             runId,
             dedupeKeys: agentDedupeKeys,

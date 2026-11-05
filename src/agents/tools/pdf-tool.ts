@@ -12,6 +12,7 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { complete } from "../../llm/stream.js";
 import type { Context } from "../../llm/types.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
+import { isLocalMediaPathNotAllowedError } from "../../media/local-media-access.js";
 import {
   classifyMediaReferenceSource,
   normalizeMediaReferenceSource,
@@ -24,6 +25,7 @@ import type {
 } from "../../plugins/document-extractor-types.js";
 import { resolveUserPath } from "../../utils.js";
 import type { AuthProfileStore } from "../auth-profiles/types.js";
+import { getModelProviderRequestTransport } from "../provider-request-config.js";
 import type { AgentToolUpdateCallback } from "../runtime/index.js";
 import { optionalFiniteNumberSchema } from "../schema/typebox.js";
 import { readFiniteNumberParam, ToolInputError } from "./common.js";
@@ -424,6 +426,10 @@ async function runPdfPrompt(params: {
             pdfs,
             maxTokens: resolvePdfToolMaxTokens(model.maxTokens),
             baseUrl: model.baseUrl,
+            requestConfig: {
+              headers: model.headers,
+              request: getModelProviderRequestTransport(model),
+            },
           });
           return { text, provider, model: modelId, native: true };
         }
@@ -435,6 +441,10 @@ async function runPdfPrompt(params: {
             prompt: params.prompt,
             pdfs,
             baseUrl: model.baseUrl,
+            requestConfig: {
+              headers: model.headers,
+              request: getModelProviderRequestTransport(model),
+            },
           });
           return { text, provider, model: modelId, native: true };
         }
@@ -639,6 +649,7 @@ export function createPdfTool(options?: {
 
       // Parse page range
       const pagesRaw = normalizeOptionalString(record.pages);
+      const pageNumbers = pagesRaw ? parsePageRange(pagesRaw, configuredMaxPages) : undefined;
       const password = typeof record.password === "string" ? record.password : undefined;
 
       const pdfModelConfig =
@@ -716,22 +727,52 @@ export function createPdfTool(options?: {
           options?.workspaceDir,
           {
             workspaceOnly: options?.fsPolicy?.workspaceOnly === true,
+            rootExpansionAllowed: options?.fsPolicy?.rootExpansionAllowed === true,
           },
           [resolvedPathInfo.resolved],
         );
 
-        const media = sandboxConfig
-          ? await loadWebMediaRaw(resolvedPathInfo.resolved, {
-              maxBytes,
-              sandboxValidated: true,
-              readFile: createSandboxBridgeReadFile({ sandbox: sandboxConfig, maxBytes }),
-            })
-          : await loadWebMediaRaw(resolvedPathInfo.resolved, {
-              maxBytes,
-              localRoots,
-              ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
-              ssrfPolicy: remoteMediaSsrfPolicy,
-            });
+        let media: Awaited<ReturnType<typeof loadWebMediaRaw>>;
+        try {
+          media = sandboxConfig
+            ? await loadWebMediaRaw(resolvedPathInfo.resolved, {
+                maxBytes,
+                sandboxValidated: true,
+                readFile: createSandboxBridgeReadFile({ sandbox: sandboxConfig, maxBytes }),
+              })
+            : await loadWebMediaRaw(resolvedPathInfo.resolved, {
+                maxBytes,
+                localRoots,
+                // Lets a relative ref (e.g. "projects/doc.pdf") resolve against the
+                // agent workspace instead of the gateway process cwd, matching the
+                // image tool and the outbound send path.
+                ...(options?.workspaceDir ? { workspaceDir: options.workspaceDir } : {}),
+                ...(isHttpUrl ? { readIdleTimeoutMs: REMOTE_MEDIA_READ_IDLE_TIMEOUT_MS } : {}),
+                ssrfPolicy: remoteMediaSsrfPolicy,
+              });
+        } catch (err) {
+          // A blocked path is a policy outcome, not a host defect: return a
+          // denial result the model can act on instead of throwing. `status:
+          // "denied"` routes this through classifyToolCallErrorKind as
+          // "denied" so the after_tool_call Sentry capture drops it instead
+          // of paging (details.denied is reserved for inline gateway exec
+          // approval denials, where `status` is already overloaded).
+          if (isLocalMediaPathNotAllowedError(err)) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Cannot read ${pdfRaw}: that path is outside the directories this agent may read media from. Write the file under the workspace and reference it again.`,
+                },
+              ],
+              details: {
+                error: "media_path_not_allowed",
+                status: "denied",
+              },
+            };
+          }
+          throw err;
+        }
 
         if (media.kind !== "document") {
           // Check MIME type more specifically
@@ -756,8 +797,6 @@ export function createPdfTool(options?: {
             : {}),
         });
       }
-
-      const pageNumbers = pagesRaw ? parsePageRange(pagesRaw, configuredMaxPages) : undefined;
 
       const getExtractions = async (): Promise<{
         chunks: PdfExtractionChunk[];

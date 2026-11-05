@@ -414,6 +414,45 @@ describe("memory_search unavailable payloads", () => {
     expect(getMemorySyncMockCalls()).toBe(0);
   });
 
+  // ENG-21227 / OPENCLAW-FLEET-X4: a "missing" index identity (no catalog built
+  // yet, e.g. the first moments of a new session) must NOT be treated as a paused
+  // error the way a genuinely "mismatched" identity is -- it's the ordinary
+  // cold-start state and self-heals. Previously this returned the same
+  // disabled/error shape as "mismatched", which a fleet-wide tool-result
+  // classifier flagged as a real exception and paged to Sentry on every cold
+  // start (166 events / 7 hosts over 44 days).
+  it("treats a missing index identity as an ordinary empty result, not a paused error", async () => {
+    let searchCalls = 0;
+    setMemorySearchImpl(async () => {
+      searchCalls += 1;
+      return [];
+    });
+    setMemoryCustomStatus({
+      indexIdentity: {
+        status: "missing",
+        reason: "index metadata is missing",
+      },
+    });
+
+    const tool = createMemorySearchToolOrThrow({
+      config: {
+        agents: { list: [{ id: "main", default: true }] },
+        memory: { citations: "off" },
+      },
+    });
+    const result = await tool.execute("missing-index", { query: "hidden thread codename" });
+
+    const details = result.details as { results?: unknown; disabled?: unknown; error?: unknown };
+    expect(details.results).toEqual([]);
+    expect(details.disabled).toBeUndefined();
+    expect(details.error).toBeUndefined();
+    // Unlike "mismatched", "missing" no longer short-circuits before tools.ts's
+    // own forced-retry-sync layer -- it now gets a real chance to self-heal
+    // within the same call, not just via the independent session-start sync.
+    expect(searchCalls).toBe(2);
+    expect(getMemorySyncMockCalls()).toBe(1);
+  });
+
   it("returns structured search debug metadata for qmd results", async () => {
     setMemoryBackend("qmd");
     setMemorySearchImpl(async (opts) => {

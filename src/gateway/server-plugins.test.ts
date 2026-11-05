@@ -969,6 +969,76 @@ describe("loadGatewayPlugins", () => {
     expect(params.deliver).toBe(false);
   });
 
+  test("forwards usageAttribution on subagent run as an in-process dispatch", async () => {
+    const serverPlugins = serverPluginsModule;
+    const runtime = await createSubagentRuntime(serverPlugins);
+    serverPlugins.setFallbackGatewayContext(createTestContext("usage-attribution-forward"));
+
+    await runtime.run({
+      sessionKey: "s-usage-attribution",
+      message: "start workflow",
+      deliver: false,
+      usageAttribution: { userId: "U-ALICE", userName: "Alice", userSource: "boon-web" },
+    });
+
+    const params = getRequiredLastDispatchedParams();
+    expect(params.usageAttribution).toEqual({
+      userId: "U-ALICE",
+      userName: "Alice",
+      userSource: "boon-web",
+    });
+    // The agent method honors usageAttribution only for in-process dispatch.
+    expect(getLastDispatchedClientInternal().inProcessDispatch).toBe(true);
+  });
+
+  test("does not mark plugin route dispatch of caller params as in-process dispatch", async () => {
+    const serverPlugins = serverPluginsModule;
+    await createSubagentRuntime(serverPlugins);
+    const scope = {
+      context: createTestContext("route-dispatch-untrusted"),
+      client: {
+        connect: { scopes: ["operator.write"] },
+      } as GatewayRequestOptions["client"],
+      isWebchatConnect: () => false,
+    } satisfies PluginRuntimeGatewayRequestScope;
+
+    // Same options the plugin SDK `dispatchGatewayMethod` passes for HTTP route bodies.
+    await gatewayRequestScopeModule.withPluginRuntimeGatewayRequestScope(scope, () =>
+      serverPlugins.dispatchGatewayMethodInProcessRaw(
+        "agent",
+        { message: "proxied", usageAttribution: { userId: "U-SPOOF" } },
+        { disableSyntheticClient: true, requireScopedClient: true },
+      ),
+    );
+
+    expect(getLastDispatchedClientInternal()).not.toHaveProperty("inProcessDispatch");
+  });
+
+  test("does not inherit the in-process trust flag from an outer trusted request scope", async () => {
+    const serverPlugins = serverPluginsModule;
+    await createSubagentRuntime(serverPlugins);
+    // A run started by a trusted in-process `agent` dispatch keeps that request's
+    // client in its async scope; dispatches made later inside it must not reuse the flag.
+    const scope = {
+      context: createTestContext("inherited-trust-flag"),
+      client: {
+        connect: { scopes: ["operator.write"] },
+        internal: { inProcessDispatch: true },
+      } as GatewayRequestOptions["client"],
+      isWebchatConnect: () => false,
+    } satisfies PluginRuntimeGatewayRequestScope;
+
+    await gatewayRequestScopeModule.withPluginRuntimeGatewayRequestScope(scope, () =>
+      serverPlugins.dispatchGatewayMethodInProcessRaw(
+        "agent",
+        { message: "nested", usageAttribution: { userId: "U-SPOOF" } },
+        { disableSyntheticClient: true, requireScopedClient: true },
+      ),
+    );
+
+    expect(getLastDispatchedClientInternal()).not.toHaveProperty("inProcessDispatch");
+  });
+
   test("generates a non-empty idempotencyKey when the caller omits it", async () => {
     const serverPlugins = serverPluginsModule;
     const runtime = await createSubagentRuntime(serverPlugins);

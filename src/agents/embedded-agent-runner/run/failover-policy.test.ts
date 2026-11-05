@@ -926,3 +926,51 @@ describe("truncated stream (missing message_stop) walks the fallback ladder", ()
     });
   });
 });
+
+describe("resolveRunFailoverDecision after the run deadline timer fired", () => {
+  const deadlineTimeout = {
+    stage: "assistant",
+    aborted: true,
+    externalAbort: false,
+    fallbackConfigured: true,
+    failoverFailure: false,
+    failoverReason: "timeout",
+    timedOut: true,
+    idleTimedOut: false,
+    timedOutDuringCompaction: false,
+    timedOutDuringToolExecution: false,
+    profileRotated: false,
+  } as const;
+
+  it("surfaces the timeout instead of rotating the auth profile", () => {
+    expect(resolveRunFailoverDecision(deadlineTimeout)).toEqual({
+      action: "rotate_profile",
+      reason: "timeout",
+    });
+    expect(resolveRunFailoverDecision({ ...deadlineTimeout, timedOutByRunDeadline: true })).toEqual(
+      {
+        action: "surface_error",
+        reason: "timeout",
+      },
+    );
+  });
+
+  it("surfaces the timeout instead of switching to a fallback model", () => {
+    const rotated = { ...deadlineTimeout, profileRotated: true };
+    expect(resolveRunFailoverDecision(rotated)).toEqual({
+      action: "fallback_model",
+      reason: "timeout",
+    });
+    expect(resolveRunFailoverDecision({ ...rotated, timedOutByRunDeadline: true })).toEqual({
+      action: "surface_error",
+      reason: "timeout",
+    });
+  });
+
+  it("keeps the compaction-timeout decision unchanged", () => {
+    const duringCompaction = { ...deadlineTimeout, timedOutDuringCompaction: true };
+    expect(
+      resolveRunFailoverDecision({ ...duringCompaction, timedOutByRunDeadline: true }),
+    ).toEqual(resolveRunFailoverDecision(duringCompaction));
+  });
+});
