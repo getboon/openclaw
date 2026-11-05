@@ -639,20 +639,26 @@ describe("applyPatch", () => {
 *** Add File: slot/nested/deep/file.txt
 +safe
 *** End Patch`;
+        let slotRealpathCalls = 0;
 
         try {
           await withRealpathSymlinkRebindRace({
+            realpathApi: "native-sync",
+            // fs-safe 0.8 resolves the existing "slot" ancestor with realpathSync.native: the
+            // first resolution is the boundary pre-check, the second the parent re-check that
+            // precedes mkdir. Rebind on the second so the mkdir path's own check must catch it.
             shouldFlip: (realpathInput) =>
-              realpathInput.endsWith(path.join("slot", "nested", "deep", "file.txt")),
+              realpathInput.endsWith(path.join("slot")) && ++slotRealpathCalls === 2,
             symlinkPath: slot,
             symlinkTarget: outside,
             timing: "before-realpath",
             run: async () => {
               await expect(applyPatch(patch, { cwd: dir })).rejects.toThrow(
-                /path alias under sandbox root|path escapes sandbox root|under root|unable to resolve opened file path/i,
+                /path alias under sandbox root|path escapes sandbox root|symlink escapes sandbox root|under root|unable to resolve opened file path/i,
               );
             },
           });
+          expect(slotRealpathCalls).toBeGreaterThanOrEqual(2);
           await expectMissingPath(fs.stat(path.join(outside, "nested")));
         } finally {
           await fs.rm(outside, { recursive: true, force: true });

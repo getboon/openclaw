@@ -176,9 +176,10 @@ export class SandboxFsPathGuard {
       absolutePath: target.hostPath,
       rootPath: lexicalMount.hostRoot,
       boundaryLabel: "sandbox mount root",
-      // Follow in-mount symlink hops (fs-safe 0.5.2 rejects them by default):
-      // escaping hops still fail with fs-safe's containment error, and the
-      // canonical container path is re-checked against mounts afterwards.
+      // Follow symlink hops that stay inside this mount: fs-safe still
+      // rejects any open whose real path leaves the mount's host root, which
+      // is the only containment check on reads. Mutations additionally
+      // re-check the canonical container path (assertGuardedPathSafety).
       rejectSymlinks: false,
       aliasPolicy: options?.aliasPolicy,
       allowedType: options?.allowedType,
