@@ -50,6 +50,7 @@ const {
 
 // fs-safe 0.8 pins and chmods the session store directory on write, so keep
 // per-test stores in a private dir instead of directly under /tmp.
+// openclaw-temp-dir: allow extension tests cannot import root test helpers
 const TELEGRAM_TEST_STORE_DIR = mkdtempSync(path.join(os.tmpdir(), "openclaw-telegram-bot-test-"));
 
 afterAll(() => {

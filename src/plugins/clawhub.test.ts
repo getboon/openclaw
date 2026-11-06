@@ -6,6 +6,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import JSZip from "jszip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeTempDir } from "../../test/helpers/temp-dir.js";
 import { createZipCentralDirectoryArchive } from "../test-utils/zip-central-directory-fixture.js";
 
 const parseClawHubPluginSpecMock = vi.fn();
@@ -1683,8 +1684,7 @@ describe("installPluginFromClawHub", () => {
   it.each(["file", "directory"] as const)(
     "rejects fallback verification when actual ZIP %s entries exceed the entry limit",
     async (entryType) => {
-      const dir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-clawhub-archive-"));
-      tempDirs.push(dir);
+      const dir = makeTempDir(tempDirs, "openclaw-clawhub-archive-");
       const archivePath = path.join(dir, "archive.zip");
       await fs.writeFile(
         archivePath,

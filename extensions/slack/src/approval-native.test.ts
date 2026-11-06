@@ -28,6 +28,7 @@ function buildConfig(
 
 // fs-safe 0.8 pins and chmods the store directory, so keep the store in a
 // private temp dir rather than directly in the shared OS temp root.
+// openclaw-temp-dir: allow extension tests cannot import root test helpers
 const STORE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-slack-approval-native-"));
 const STORE_PATH = path.join(STORE_DIR, "sessions.json");
 
