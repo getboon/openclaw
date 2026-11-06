@@ -65,6 +65,7 @@ export type ModelCatalogCompatConfig = {
   toolCallArgumentsEncoding?: string;
   requiresMistralToolIds?: boolean;
   requiresOpenAiAnthropicToolPayload?: boolean;
+  requiresGoogleThoughtSignatures?: boolean;
   thinkingFormat?: ModelCatalogThinkingFormat;
   supportedReasoningEfforts?: string[];
   reasoningEffortMap?: Record<string, string>;
