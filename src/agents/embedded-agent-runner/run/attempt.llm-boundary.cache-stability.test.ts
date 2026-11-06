@@ -23,13 +23,25 @@ import { buildTimestampPrefix } from "../../../gateway/server-methods/agent-time
 import { streamOpenAICompletions } from "../../../llm/providers/openai-completions.js";
 import { streamOpenAIResponses } from "../../../llm/providers/openai-responses.js";
 import type { Context, Model } from "../../../llm/types.js";
-import { normalizeMessagesForLlmBoundary } from "./attempt.llm-boundary.js";
+import {
+  OPENCLAW_RUNTIME_CONTEXT_CUSTOM_TYPE,
+  relocateCurrentRuntimeContextCarrierAfterActiveUser,
+} from "../../internal-runtime-context.js";
+import {
+  installModelPromptTransform,
+  normalizeMessagesForLlmBoundary,
+} from "./attempt.llm-boundary.js";
+import {
+  buildRuntimeContextCustomMessage,
+  resolveCurrentTurnPromptParts,
+} from "./runtime-context-prompt.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 type AgentMsg = Parameters<typeof normalizeMessagesForLlmBoundary>[0][number];
+type TransformContext = (messages: AgentMsg[], signal?: AbortSignal) => Promise<AgentMsg[]>;
 
 const TZ = "UTC";
 // Payload capture stops before transport, but the provider helper still
@@ -352,5 +364,275 @@ describe("prompt-cache byte-identity (issue #3658)", () => {
     // Metadata stripped, then stamped from the message's own timestamp.
     const expectedStrippedBare = stripInboundMetadata(stored); // "What is 2+2?"
     expect(output[0]?.content).toBe(`${EXPECTED_PREFIX_TURN1}${expectedStrippedBare}`);
+  });
+});
+
+function runtimeCarrier(content: string, timestamp: number): AgentMsg {
+  return {
+    role: "custom",
+    customType: OPENCLAW_RUNTIME_CONTEXT_CUSTOM_TYPE,
+    content,
+    display: false,
+    details: { source: "openclaw-runtime-context", runtimeContextCarrier: true },
+    timestamp,
+  } as unknown as AgentMsg;
+}
+
+function isCarrier(message: unknown): boolean {
+  return Boolean(
+    message &&
+    typeof message === "object" &&
+    (message as { customType?: unknown }).customType === OPENCLAW_RUNTIME_CONTEXT_CUSTOM_TYPE,
+  );
+}
+
+function textOf(message: unknown): string | undefined {
+  const content = (message as { content?: unknown } | undefined)?.content;
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    const block = content.find(
+      (b) => b && typeof b === "object" && (b as { type?: unknown }).type === "text",
+    );
+    return block ? (block as { text?: string }).text : undefined;
+  }
+  return undefined;
+}
+
+describe("prompt-cache runtime-context carrier for current-turn metadata (issue #100271)", () => {
+  const wire = (messages: AgentMsg[]) =>
+    relocateCurrentRuntimeContextCarrierAfterActiveUser(
+      normalizeMessagesForLlmBoundary(messages, { timezone: TZ }),
+    ) as unknown as Array<Record<string, unknown>>;
+
+  const META = "Conversation info (untrusted metadata):\nsender=Bob";
+
+  it("keeps the active user turn bare, places the carrier after it, and drops it from replayed history", () => {
+    // The runner installs the carrier immediately BEFORE the active user turn;
+    // the user turn itself is bare.
+    const active: AgentMsg[] = [
+      storedUserMsg("earlier", TS_TURN1 - 2000),
+      ASSISTANT_MSG,
+      runtimeCarrier(META, TS_TURN2),
+      currentUserMsg("what does this mean?", TS_TURN2),
+    ];
+    const wireActive = wire(active);
+
+    // Carrier relocated right after the active user turn.
+    expect(isCarrier(wireActive[wireActive.length - 1])).toBe(true);
+    // The active user turn sits just before it, BARE and stamped — no metadata.
+    const activeUser = wireActive[wireActive.length - 2];
+    expect(textOf(activeUser)).toBe(`${requiredTimestampPrefix(TS_TURN2)}what does this mean?`);
+    expect(textOf(activeUser)).not.toContain("Conversation info");
+
+    // Next turn: that user message is now historical (bare, no carrier survives).
+    const historical: AgentMsg[] = [
+      storedUserMsg("earlier", TS_TURN1 - 2000),
+      ASSISTANT_MSG,
+      storedUserMsg("what does this mean?", TS_TURN2),
+      ASSISTANT_MSG,
+      currentUserMsg("and then?", TS_TURN2 + 60000),
+    ];
+    const wireHistorical = wire(historical);
+
+    // No runtime-context carrier remains anywhere in replayed history.
+    expect(wireHistorical.some(isCarrier)).toBe(false);
+    // The aged user turn is byte-identical to its active form.
+    const agedUser = wireHistorical.find((m) => textOf(m)?.endsWith("what does this mean?"));
+    expect(JSON.stringify(agedUser)).toBe(JSON.stringify(activeUser));
+  });
+
+  it("request N+1 is a strict prefix-extension of request N through the active user turn", () => {
+    const turnN: AgentMsg[] = [
+      storedUserMsg("q1", TS_TURN1 - 2000),
+      ASSISTANT_MSG,
+      runtimeCarrier(META, TS_TURN2),
+      currentUserMsg("q2", TS_TURN2),
+    ];
+    const turnN1: AgentMsg[] = [
+      storedUserMsg("q1", TS_TURN1 - 2000),
+      ASSISTANT_MSG,
+      storedUserMsg("q2", TS_TURN2),
+      ASSISTANT_MSG,
+      runtimeCarrier(META, TS_TURN2 + 60000),
+      currentUserMsg("q3", TS_TURN2 + 60000),
+    ];
+    const wireN = wire(turnN).map((m) => JSON.stringify(m));
+    const wireN1 = wire(turnN1).map((m) => JSON.stringify(m));
+
+    // Everything through the turn-N active user turn (q1, reply, q2) is
+    // byte-identical in request N+1 — only the trailing carrier differs.
+    const sharedPrefixLen = 3;
+    expect(wireN1.slice(0, sharedPrefixLen)).toEqual(wireN.slice(0, sharedPrefixLen));
+    // In request N the carrier sits right after q2.
+    expect(isCarrier(wire(turnN)[3])).toBe(true);
+  });
+
+  it("keeps the carrier right after the active user turn on every tool-loop call", () => {
+    const toolCall = {
+      role: "assistant",
+      content: [{ type: "toolCall", id: "call_1", name: "message", arguments: { text: "4" } }],
+      stopReason: "toolUse",
+      timestamp: TS_TURN2 + 1000,
+    } as unknown as AgentMsg;
+    const toolResult = {
+      role: "toolResult",
+      toolCallId: "call_1",
+      toolName: "message",
+      content: [{ type: "text", text: "delivered" }],
+      isError: false,
+      timestamp: TS_TURN2 + 2000,
+    } as unknown as AgentMsg;
+    const prefix: AgentMsg[] = [storedUserMsg("q1", TS_TURN1 - 2000), ASSISTANT_MSG];
+
+    const call1 = wire([...prefix, runtimeCarrier(META, TS_TURN2), currentUserMsg("q2", TS_TURN2)]);
+    const call2 = wire([
+      ...prefix,
+      runtimeCarrier(META, TS_TURN2),
+      currentUserMsg("q2", TS_TURN2),
+      toolCall,
+      toolResult,
+    ]);
+
+    expect(call1.map((m) => m.role)).toEqual(["user", "assistant", "user", "custom"]);
+    expect(call2.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "custom",
+      "assistant",
+      "toolResult",
+    ]);
+    expect(call2.slice(0, 4).map((m) => JSON.stringify(m))).toEqual(
+      call1.map((m) => JSON.stringify(m)),
+    );
+  });
+
+  it("runtime-only (room-event) inline context is not strip-eligible, so it stays byte-stable in both positions", () => {
+    // Runtime-only turns keep their inbound context inline (not in the carrier).
+    // That is safe ONLY because room-event/system context is not strip-eligible:
+    // the historical strip removes just the buildInboundUserContextPrefix blocks
+    // (Conversation info / Reply target / …), which room events never carry. So
+    // the inline form is byte-identical active vs historical.
+    const roomText = [
+      "[OpenClaw room event]",
+      "inbound_event_kind: room_event",
+      "Room context:\n#1 Alice: hi",
+    ].join("\n\n");
+    const asCurrent: AgentMsg[] = [currentUserMsg(roomText, TS_TURN2)];
+    const asHistorical: AgentMsg[] = [
+      storedUserMsg(roomText, TS_TURN2),
+      ASSISTANT_MSG,
+      currentUserMsg("next", TS_TURN2 + 60000),
+    ];
+    const cur = normalizeMessagesForLlmBoundary(asCurrent, { timezone: TZ }) as unknown as Array<{
+      content?: unknown;
+    }>;
+    const hist = normalizeMessagesForLlmBoundary(asHistorical, {
+      timezone: TZ,
+    }) as unknown as Array<{ content?: unknown }>;
+    // Byte-identical active vs historical...
+    expect(JSON.stringify(cur[0]?.content)).toBe(JSON.stringify(hist[0]?.content));
+    // ...and the room context is preserved in both (the strip does not touch it).
+    expect(JSON.stringify(hist[0]?.content)).toContain("inbound_event_kind: room_event");
+  });
+});
+
+describe("prompt-cache runtime-context carrier for before_prompt_build prompt context", () => {
+  const INBOUND = [
+    "Conversation info (untrusted metadata):",
+    "```json",
+    JSON.stringify({ conversation_label: "Boon Web" }, null, 2),
+    "```",
+    "",
+    "Sender (untrusted metadata):",
+    "```json",
+    JSON.stringify({ label: "Bob" }, null, 2),
+    "```",
+  ].join("\n");
+
+  function resolveTurn(prompt: string, appendContext: string) {
+    const parts = resolveCurrentTurnPromptParts({
+      effectivePrompt: prompt,
+      transcriptPrompt: prompt,
+      modelPromptWithBuildContext: `${prompt}\n\n${appendContext}`,
+      promptBuildContext: { appendContext },
+      currentInboundContext: { text: INBOUND },
+    });
+    const carrier = buildRuntimeContextCustomMessage(parts.runtimeContext);
+    if (!carrier) {
+      throw new Error("expected runtime-context carrier");
+    }
+    return { parts, carrier: carrier as unknown as AgentMsg };
+  }
+
+  async function wireWithModelPromptTransform(
+    parts: ReturnType<typeof resolveCurrentTurnPromptParts>,
+    messages: AgentMsg[],
+  ) {
+    const session = { agent: {} as { transformContext?: TransformContext } };
+    const cleanup = installModelPromptTransform({
+      session,
+      transcriptPrompt: parts.promptForSession,
+      modelPrompt: parts.promptForModel,
+      prependContext: parts.inlinePromptBuildContext?.prependContext,
+      appendContext: parts.inlinePromptBuildContext?.appendContext,
+      shouldCapturePrompt: () => true,
+    });
+    try {
+      const transformed = session.agent.transformContext
+        ? await session.agent.transformContext(messages)
+        : messages;
+      return relocateCurrentRuntimeContextCarrierAfterActiveUser(
+        normalizeMessagesForLlmBoundary(transformed, { timezone: TZ }),
+      ) as unknown as Array<Record<string, unknown>>;
+    } finally {
+      cleanup();
+    }
+  }
+
+  it("keeps the hook-decorated user turn byte-identical when it ages into history", async () => {
+    const hookN = "User is on page: Estimates\nIntegrations: procore=connected";
+    const hookN1 = "User is on page: Projects\nIntegrations: procore=syncing";
+    const turnN = resolveTurn("what does this mean?", hookN);
+    const turnN1 = resolveTurn("and then?", hookN1);
+
+    const wireN = await wireWithModelPromptTransform(turnN.parts, [
+      storedUserMsg("earlier", TS_TURN1 - 2000),
+      ASSISTANT_MSG,
+      turnN.carrier,
+      currentUserMsg(turnN.parts.promptForSession, TS_TURN2),
+    ]);
+    const wireN1 = await wireWithModelPromptTransform(turnN1.parts, [
+      storedUserMsg("earlier", TS_TURN1 - 2000),
+      ASSISTANT_MSG,
+      storedUserMsg(turnN.parts.promptForSession, TS_TURN2),
+      ASSISTANT_MSG,
+      turnN1.carrier,
+      currentUserMsg(turnN1.parts.promptForSession, TS_TURN2 + 60000),
+    ]);
+
+    const activeUser = wireN[wireN.length - 2];
+    expect(textOf(activeUser)).toBe(`${requiredTimestampPrefix(TS_TURN2)}what does this mean?`);
+    const agedUser = wireN1.find((m) => textOf(m)?.endsWith("what does this mean?"));
+    expect(JSON.stringify(agedUser)).toBe(JSON.stringify(activeUser));
+    expect(wireN1.slice(0, 3).map((m) => JSON.stringify(m))).toEqual(
+      wireN.slice(0, 3).map((m) => JSON.stringify(m)),
+    );
+
+    const carrierN = wireN[wireN.indexOf(activeUser) + 1];
+    expect(isCarrier(carrierN)).toBe(true);
+    expect(textOf(carrierN)).toContain("Conversation info (untrusted metadata):");
+    expect(textOf(carrierN)).toContain(hookN);
+    expect(textOf(carrierN)!.indexOf(hookN)).toBeGreaterThan(
+      textOf(carrierN)!.indexOf("Sender (untrusted metadata):"),
+    );
+    expect(wireN.filter((m) => !isCarrier(m)).some((m) => textOf(m)?.includes(hookN))).toBe(false);
+
+    expect(wireN1.filter(isCarrier)).toHaveLength(1);
+    expect(isCarrier(wireN1[wireN1.length - 1])).toBe(true);
+    expect(JSON.stringify(wireN1)).not.toContain(hookN);
+    expect(textOf(wireN1[wireN1.length - 1])).toContain(hookN1);
   });
 });
