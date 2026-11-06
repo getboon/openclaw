@@ -455,6 +455,12 @@ releases.
     | Process-local async lock | `openclaw/plugin-sdk/async-lock-runtime` |
     | File locks | `openclaw/plugin-sdk/file-lock` |
 
+    File-lock nesting is owner-scoped. Without `reentrantOwner`, every acquisition in the
+    process uses one process-wide owner, so nested and concurrent in-process acquisitions of
+    the same file share the lock (the helper's long-standing re-entrant behavior; other
+    processes contend). Pass a per-operation `reentrantOwner` to make independent in-process
+    work on the same file contend instead; only acquisitions with the same owner share the lock.
+
     Bundled plugins are scanner-guarded against `infra-runtime`, so repo code
     cannot regress to the broad barrel.
 

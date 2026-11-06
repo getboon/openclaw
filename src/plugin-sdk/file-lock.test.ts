@@ -10,6 +10,7 @@ import {
   drainFileLockStateForTest,
   FILE_LOCK_TIMEOUT_ERROR_CODE,
   resetFileLockStateForTest,
+  withFileLock,
 } from "./file-lock.js";
 
 describe("acquireFileLock", () => {
@@ -57,6 +58,42 @@ describe("acquireFileLock", () => {
       "oauth-refresh.lock",
     );
   }, 5_000);
+
+  it("lets the same caller nest acquisitions of one file and keeps the lock until the final release", async () => {
+    const filePath = path.join(tempDir, "nested.json");
+    const options = {
+      retries: { retries: 0, factor: 1, minTimeout: 1, maxTimeout: 1 },
+      stale: 60_000,
+    } as const;
+
+    // Release each handle exactly once: fs-safe's release is not idempotent per
+    // handle, so a second inner.release() would drop the outer's reference and
+    // make the final ENOENT check pass without outer.release() doing anything.
+    const outer = await acquireFileLock(filePath, options);
+    try {
+      const inner = await acquireFileLock(filePath, options);
+      expect(inner.lockPath).toBe(outer.lockPath);
+      await inner.release();
+      await expect(fs.access(outer.lockPath)).resolves.toBeUndefined();
+    } finally {
+      await outer.release();
+    }
+    await expect(fs.access(outer.lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("lets withFileLock nest inside withFileLock on the same file", async () => {
+    const filePath = path.join(tempDir, "nested-with.json");
+    const options = {
+      retries: { retries: 0, factor: 1, minTimeout: 1, maxTimeout: 1 },
+      stale: 60_000,
+    } as const;
+
+    const result = await withFileLock(filePath, options, async () =>
+      withFileLock(filePath, options, async () => "inner-done"),
+    );
+    expect(result).toBe("inner-done");
+    await expect(fs.access(`${filePath}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+  });
 
   it("removes a reported stale lock when its owner pid is dead", async () => {
     const filePath = path.join(tempDir, "auth-profiles.json");

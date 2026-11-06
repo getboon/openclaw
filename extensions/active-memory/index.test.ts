@@ -5358,7 +5358,6 @@ describe("active-memory plugin", () => {
 
   it("keeps subagent transcripts off disk by default by using a temp session file", async () => {
     const mkdtempSpy = vi.spyOn(fs, "mkdtemp");
-    const rmSpy = vi.spyOn(fs, "rm");
 
     await hooks.before_prompt_build(
       { prompt: "what wings should i order? temp transcript path", messages: [] },
@@ -5373,10 +5372,10 @@ describe("active-memory plugin", () => {
     expect(mkdtempSpy).toHaveBeenCalled();
     const sessionFile = lastEmbeddedSessionFile();
     expect(sessionFile).toMatch(/openclaw-active-memory-.*\/session\.jsonl$/);
-    expect(rmSpy).toHaveBeenCalledWith(path.dirname(sessionFile), {
-      recursive: true,
-      force: true,
-    });
+    // fs-safe 0.8 cleans a temp workspace by renaming it aside before removal,
+    // so assert the outcome rather than the exact rm() argument: the temp
+    // transcript directory is gone once the hook returns.
+    await expect(fs.access(path.dirname(sessionFile))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("persists subagent transcripts in a separate directory when enabled", async () => {

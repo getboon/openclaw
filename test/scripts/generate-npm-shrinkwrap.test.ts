@@ -5,6 +5,7 @@ import {
   applyPackageExtensionPeerMetadata,
   collectCurrentShrinkwrapOverrides,
   collectOverrideViolations,
+  collectPnpmLockScopedVersionOverrides,
   collectPnpmLockViolations,
   createNpmShrinkwrapExecOptions,
   createNpmShrinkwrapCommand,
@@ -120,6 +121,38 @@ describe("generate-npm-shrinkwrap", () => {
         path: "node_modules/@openclaw/codex/node_modules/@anthropic-ai/sdk",
       },
     ]);
+  });
+
+  it("scopes forked packages to their pnpm-locked version even when the edge has a peer suffix", () => {
+    // Mirrors boon's lock: @opentelemetry/sdk-trace-base is locked at 2.8.0 at the top level
+    // and 2.11.0 under @sentry/node, whose snapshot edge carries pnpm's peer suffix.
+    const lockfile = {
+      packages: {
+        "@opentelemetry/sdk-trace-base@2.8.0": {},
+        "@opentelemetry/sdk-trace-base@2.11.0": {},
+        "@sentry/node@10.75.3": {},
+        "@opentelemetry/exporter-trace-otlp-proto@0.219.0": {},
+      },
+      snapshots: {
+        "@sentry/node@10.75.3(@opentelemetry/core@2.9.0(@opentelemetry/api@1.9.1))": {
+          dependencies: {
+            "@opentelemetry/sdk-trace-base": "2.11.0(@opentelemetry/api@1.9.1)",
+          },
+        },
+        "@opentelemetry/exporter-trace-otlp-proto@0.219.0(@opentelemetry/api@1.9.1)": {
+          dependencies: {
+            "@opentelemetry/sdk-trace-base": "2.8.0(@opentelemetry/api@1.9.1)",
+          },
+        },
+      },
+    };
+
+    expect(collectPnpmLockScopedVersionOverrides(lockfile)).toEqual({
+      "@opentelemetry/exporter-trace-otlp-proto@0.219.0": {
+        "@opentelemetry/sdk-trace-base": "2.8.0",
+      },
+      "@sentry/node@10.75.3": { "@opentelemetry/sdk-trace-base": "2.11.0" },
+    });
   });
 
   it("parses pnpm lock package keys", () => {

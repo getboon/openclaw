@@ -1036,6 +1036,13 @@ async function writeWorkspaceFile(
   content: string,
 ) {
   const relative = await toCanonicalRelativeWorkspacePath(root, absolutePath);
+  // fs-safe 0.5.2+ atomically replaces a final symlink on write. The workspace
+  // contract rejects symlink write targets so the link and its target survive.
+  const rootReal = await fs.realpath(root);
+  const targetStat = await fs.lstat(path.resolve(rootReal, relative)).catch(() => undefined);
+  if (targetStat?.isSymbolicLink()) {
+    throw new FsSafeError("symlink", `refusing to write to symlink: ${absolutePath}`);
+  }
   await (await rootPromise).write(relative, content, { mkdir: true });
 }
 
@@ -1069,7 +1076,10 @@ function createHostWriteOperations(root: string, options?: { workspaceOnly?: boo
     writeFile: (absolutePath: string, content: string) =>
       writeWorkspaceFile(root, rootPromise, absolutePath, content),
     readFile: async (absolutePath: string) => {
-      const relative = toRelativeWorkspacePath(root, absolutePath);
+      // Canonicalize symlink parents like the write path: fs-safe 0.5.2+
+      // rejects intermediate symlinks by default, but in-workspace symlink
+      // parents are part of the workspace contract.
+      const relative = await toCanonicalRelativeWorkspacePath(root, absolutePath);
       return (await (await rootPromise).read(relative)).buffer;
     },
     statFile: async (absolutePath: string) => {
@@ -1099,7 +1109,10 @@ function createHostEditOperations(root: string, options?: { workspaceOnly?: bool
   const rootPromise = fsRoot(root);
   return {
     readFile: async (absolutePath: string) => {
-      const relative = toRelativeWorkspacePath(root, absolutePath);
+      // Canonicalize symlink parents like the write path: fs-safe 0.5.2+
+      // rejects intermediate symlinks by default, but in-workspace symlink
+      // parents are part of the workspace contract.
+      const relative = await toCanonicalRelativeWorkspacePath(root, absolutePath);
       const safeRead = await (await rootPromise).read(relative);
       return safeRead.buffer;
     },
@@ -1108,7 +1121,8 @@ function createHostEditOperations(root: string, options?: { workspaceOnly?: bool
     access: async (absolutePath: string) => {
       let relative: string;
       try {
-        relative = toRelativeWorkspacePath(root, absolutePath);
+        // Canonicalized like readFile so in-workspace symlink parents pass.
+        relative = await toCanonicalRelativeWorkspacePath(root, absolutePath);
       } catch {
         // Path escapes workspace root.  Don't throw here – the upstream
         // library replaces any `access` error with a misleading "File not

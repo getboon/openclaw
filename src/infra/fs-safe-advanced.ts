@@ -8,8 +8,8 @@ export {
   assertNoSymlinkParentsSync,
   sameFileIdentity,
   sanitizeUntrustedFileName,
-  writeSiblingTempFile,
   writeViaSiblingTempPath,
   type AssertNoSymlinkParentsOptions,
   type FileIdentityStat,
 } from "@openclaw/fs-safe/advanced";
+export { writeSiblingTempFile } from "./sibling-temp-file.js";

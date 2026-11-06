@@ -3375,11 +3375,29 @@ describe("short-term promotion", () => {
           minUniqueQueries: 0,
         });
 
+        // fs-safe 0.8 writes the promotion temp through a file handle, so
+        // inject the failure on handles opened for MEMORY.md.promotion* too
+        // (upstream v2026.9.4).
+        const originalOpen = fs.open.bind(fs);
         const originalWriteFile = fs.writeFile.bind(fs);
+        const promotionTempHandles = new WeakSet<object>();
+        vi.spyOn(fs, "open").mockImplementation(async (target, flags, mode) => {
+          const handle = await originalOpen(target, flags, mode);
+          if (
+            typeof target === "string" &&
+            path.basename(target).startsWith("MEMORY.md.promotion")
+          ) {
+            promotionTempHandles.add(handle);
+          }
+          return handle;
+        });
         vi.spyOn(fs, "writeFile").mockImplementation((async (target, data, options) => {
           const targetPath =
             typeof target === "string" ? target : target instanceof URL ? target.pathname : "";
-          if (targetPath && path.basename(targetPath).startsWith("MEMORY.md")) {
+          if (
+            (targetPath && path.basename(targetPath).startsWith("MEMORY.md")) ||
+            (typeof target === "object" && target !== null && promotionTempHandles.has(target))
+          ) {
             const text =
               typeof data === "string" ? data : Buffer.from(data as Uint8Array).toString();
             await originalWriteFile(target, text.slice(0, 51_200), options);

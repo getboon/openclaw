@@ -547,12 +547,12 @@ describe("secret ref resolver", () => {
 
     const sampleHandle = await fs.open(filePath, "r");
     const fileHandlePrototype = Object.getPrototypeOf(sampleHandle) as {
-      readFile: typeof sampleHandle.readFile;
+      read: typeof sampleHandle.read;
     };
     await sampleHandle.close();
-    const readFileSpy = vi
-      .spyOn(fileHandlePrototype, "readFile")
-      .mockImplementation(() => new Promise<Buffer>(() => {}) as never);
+    const readSpy = vi
+      .spyOn(fileHandlePrototype, "read")
+      .mockImplementation(() => new Promise(() => {}) as never);
 
     try {
       await expect(
@@ -572,7 +572,7 @@ describe("secret ref resolver", () => {
         ),
       ).rejects.toThrow('File provider "filemain" timed out');
     } finally {
-      readFileSpy.mockRestore();
+      readSpy.mockRestore();
     }
   });
 

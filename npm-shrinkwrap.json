@@ -1,12 +1,12 @@
 {
   "name": "openclaw",
-  "version": "2026.6.35-boon.3",
+  "version": "2026.6.35-boon.4",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "openclaw",
-      "version": "2026.6.35-boon.3",
+      "version": "2026.6.35-boon.4",
       "hasInstallScript": true,
       "license": "MIT",
       "dependencies": {
@@ -23,7 +23,7 @@
         "@mistralai/mistralai": "2.2.5",
         "@modelcontextprotocol/sdk": "1.32.1",
         "@mozilla/readability": "0.6.0",
-        "@openclaw/fs-safe": "0.3.0",
+        "@openclaw/fs-safe": "0.8.5",
         "@openclaw/proxyline": "0.3.3",
         "@opentelemetry/api": "1.9.1",
         "@opentelemetry/api-logs": "0.219.0",
@@ -434,16 +434,134 @@
       }
     },
     "node_modules/@openclaw/fs-safe": {
-      "version": "0.3.0",
-      "resolved": "https://registry.npmjs.org/@openclaw/fs-safe/-/fs-safe-0.3.0.tgz",
-      "integrity": "sha512-uIBE441CIt1kIURoP9qRGKZ8LkGyfD9ZzeESjwAd29ZPWtghws/5GR3Pjb67jKdcJHP1I6roNXcvnhzAU7lHlA==",
+      "version": "0.8.5",
+      "resolved": "https://registry.npmjs.org/@openclaw/fs-safe/-/fs-safe-0.8.5.tgz",
+      "integrity": "sha512-MAuWVgZ+DZhakzfrbyn2NOKsZop3ES2ITeVCoAaDNb/NIxF45hAzYDXmp2G8W10CE/HGasL97QMC0+iBZNzHUQ==",
       "license": "MIT",
       "engines": {
-        "node": ">=20.11"
+        "node": ">=22"
       },
       "optionalDependencies": {
-        "jszip": "^3.10.1",
-        "tar": "7.5.13"
+        "@openclaw/fs-safe-darwin-arm64": "0.8.5",
+        "@openclaw/fs-safe-darwin-x64": "0.8.5",
+        "@openclaw/fs-safe-linux-arm64-gnu": "0.8.5",
+        "@openclaw/fs-safe-linux-arm64-musl": "0.8.5",
+        "@openclaw/fs-safe-linux-x64-gnu": "0.8.5",
+        "@openclaw/fs-safe-linux-x64-musl": "0.8.5",
+        "@openclaw/fs-safe-win32-x64-msvc": "0.8.5",
+        "jszip": "^3.10.1"
+      }
+    },
+    "node_modules/@openclaw/fs-safe-darwin-arm64": {
+      "version": "0.8.5",
+      "resolved": "https://registry.npmjs.org/@openclaw/fs-safe-darwin-arm64/-/fs-safe-darwin-arm64-0.8.5.tgz",
+      "integrity": "sha512-FfVvzgmn4OixKrfh0vTM3OL4/y7WAVqwL4RfcQw3vtainzWE492YD1Gn3PrFEMpUB86VDmNX8mBNCNz4zQrr5g==",
+      "cpu": [
+        "arm64"
+      ],
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "darwin"
+      ],
+      "engines": {
+        "node": ">=22"
+      }
+    },
+    "node_modules/@openclaw/fs-safe-darwin-x64": {
+      "version": "0.8.5",
+      "resolved": "https://registry.npmjs.org/@openclaw/fs-safe-darwin-x64/-/fs-safe-darwin-x64-0.8.5.tgz",
+      "integrity": "sha512-npJFOWhRq6FSnTtb6TCq7t+uaL+4owxzyD6JG44L54NsZlr/QO+iQCZN1CXybejar0Ou8QVSxf8vhL94Q4cKJw==",
+      "cpu": [
+        "x64"
+      ],
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "darwin"
+      ],
+      "engines": {
+        "node": ">=22"
+      }
+    },
+    "node_modules/@openclaw/fs-safe-linux-arm64-gnu": {
+      "version": "0.8.5",
+      "resolved": "https://registry.npmjs.org/@openclaw/fs-safe-linux-arm64-gnu/-/fs-safe-linux-arm64-gnu-0.8.5.tgz",
+      "integrity": "sha512-JAR/JPO/QL1i9N6N7acXeZcf807iIBN6R51A9Kda1GW8iy7+35Qt4wa06jw0cemjfoy9QBsfVv/XCkosc7ikaQ==",
+      "cpu": [
+        "arm64"
+      ],
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "engines": {
+        "node": ">=22"
+      }
+    },
+    "node_modules/@openclaw/fs-safe-linux-arm64-musl": {
+      "version": "0.8.5",
+      "resolved": "https://registry.npmjs.org/@openclaw/fs-safe-linux-arm64-musl/-/fs-safe-linux-arm64-musl-0.8.5.tgz",
+      "integrity": "sha512-COv697J5N9kizognlTFyXJaudFLMqpgq4XZajVOut145RCKUa45EKRLWD+OHIn1hJ5IseF7V0t5VY1IX4MN1Sg==",
+      "cpu": [
+        "arm64"
+      ],
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "engines": {
+        "node": ">=22"
+      }
+    },
+    "node_modules/@openclaw/fs-safe-linux-x64-gnu": {
+      "version": "0.8.5",
+      "resolved": "https://registry.npmjs.org/@openclaw/fs-safe-linux-x64-gnu/-/fs-safe-linux-x64-gnu-0.8.5.tgz",
+      "integrity": "sha512-tlgwQH9V49GWClxuB7gQ9MdPQoMHhd/RjEWBABRINkfAb8OEqLp2OXRxIhBD2++98KsX3nfQ9ldvjzxLj/qbLw==",
+      "cpu": [
+        "x64"
+      ],
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "engines": {
+        "node": ">=22"
+      }
+    },
+    "node_modules/@openclaw/fs-safe-linux-x64-musl": {
+      "version": "0.8.5",
+      "resolved": "https://registry.npmjs.org/@openclaw/fs-safe-linux-x64-musl/-/fs-safe-linux-x64-musl-0.8.5.tgz",
+      "integrity": "sha512-zeDVgMML51mmc62RbzE9/LlxYGaHHfqC3qQ6LpYWkHHQphI4P5shxUhtdXVJZ7whCTVkT3GWVLei6lXumpC2jg==",
+      "cpu": [
+        "x64"
+      ],
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "linux"
+      ],
+      "engines": {
+        "node": ">=22"
+      }
+    },
+    "node_modules/@openclaw/fs-safe-win32-x64-msvc": {
+      "version": "0.8.5",
+      "resolved": "https://registry.npmjs.org/@openclaw/fs-safe-win32-x64-msvc/-/fs-safe-win32-x64-msvc-0.8.5.tgz",
+      "integrity": "sha512-wqNhQznNjrbenmWpXYcJeDtwxY75krDeRtHjclvkpLOAwDI2cP0kSxd+2TlHOcPM9yLnkJrpGCwl/i8wQmmtIw==",
+      "cpu": [
+        "x64"
+      ],
+      "license": "MIT",
+      "optional": true,
+      "os": [
+        "win32"
+      ],
+      "engines": {
+        "node": ">=22"
       }
     },
     "node_modules/@openclaw/proxyline": {
@@ -885,6 +1003,24 @@
         }
       }
     },
+    "node_modules/@sentry/node-core/node_modules/@sentry/opentelemetry": {
+      "version": "10.75.3",
+      "resolved": "https://registry.npmjs.org/@sentry/opentelemetry/-/opentelemetry-10.75.3.tgz",
+      "integrity": "sha512-Ux2eXgS4NkmT9nj1/guV+j4Dwx9WTZSBO+/WMRmfektEgt05u5nuHuKhSGN8maQ72m8HmEx360vcn8Hd/dh5WA==",
+      "license": "MIT",
+      "dependencies": {
+        "@sentry/conventions": "^0.16.0",
+        "@sentry/core": "10.75.3"
+      },
+      "engines": {
+        "node": ">=18"
+      },
+      "peerDependencies": {
+        "@opentelemetry/api": "^1.9.0",
+        "@opentelemetry/core": "^1.30.1 || ^2.1.0",
+        "@opentelemetry/sdk-trace-base": "^1.30.1 || ^2.1.0"
+      }
+    },
     "node_modules/@sentry/node/node_modules/@opentelemetry/resources": {
       "version": "2.11.0",
       "resolved": "https://registry.npmjs.org/@opentelemetry/resources/-/resources-2.11.0.tgz",
@@ -905,6 +1041,7 @@
       "version": "2.11.0",
       "resolved": "https://registry.npmjs.org/@opentelemetry/sdk-trace-base/-/sdk-trace-base-2.11.0.tgz",
       "integrity": "sha512-H19x/TX/LZdqiYOjM7fqtSxwlplC5pgelavqbQdHbhdq0q/AI/TGkM2dfGuuynTXmJPeF2HoZVoPDu+TGoW78A==",
+      "deprecated": "Use @opentelemetry/sdk-trace package",
       "license": "Apache-2.0",
       "dependencies": {
         "@opentelemetry/core": "2.11.0",
@@ -919,7 +1056,7 @@
         "@opentelemetry/api": ">=1.3.0 <1.10.0"
       }
     },
-    "node_modules/@sentry/opentelemetry": {
+    "node_modules/@sentry/node/node_modules/@sentry/opentelemetry": {
       "version": "10.75.3",
       "resolved": "https://registry.npmjs.org/@sentry/opentelemetry/-/opentelemetry-10.75.3.tgz",
       "integrity": "sha512-Ux2eXgS4NkmT9nj1/guV+j4Dwx9WTZSBO+/WMRmfektEgt05u5nuHuKhSGN8maQ72m8HmEx360vcn8Hd/dh5WA==",
