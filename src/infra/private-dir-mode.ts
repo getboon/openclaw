@@ -1,6 +1,7 @@
 // Tightens OpenClaw-owned private directories before secret writes. Only
 // directories owned by the current user are chmodded, each through a no-follow
-// descriptor; fs-safe rejects symlinked, swapped, or foreign-owned paths itself.
+// descriptor. Ancestors are walked by path, so a same-user swap mid-walk can
+// redirect a chmod; fs-safe still validates the final write.
 import fsSync, { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";

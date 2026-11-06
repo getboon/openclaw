@@ -280,16 +280,29 @@ describe("acquireSessionWriteLock", () => {
 
   it("joinInProcessHolder does not reuse a released holder's owner", async () => {
     await withSymlinkedSessionPaths(async ({ sessionReal, sessionLink }) => {
-      const outer = await acquireSessionWriteLock({ sessionFile: sessionReal, timeoutMs: 500 });
+      const releasedOwner = "session:released-operation";
+      const outer = await acquireSessionWriteLock({
+        sessionFile: sessionReal,
+        timeoutMs: 500,
+        reentrantOwner: releasedOwner,
+      });
       await outer.release();
-      // With the holder gone, the joiner takes a fresh owner and becomes the holder itself, so an
-      // independent acquisition contends with it instead of sharing a stale owner.
+      // With the holder gone, the joiner takes a fresh owner and becomes the holder itself. Had it
+      // reused the released owner, the acquisition below would re-enter instead of contending.
       const joiner = await acquireSessionWriteLock({
         sessionFile: sessionLink,
         timeoutMs: 500,
         joinInProcessHolder: true,
       });
       try {
+        await expect(
+          acquireSessionWriteLock({
+            sessionFile: sessionReal,
+            timeoutMs: 5,
+            staleMs: 60_000,
+            reentrantOwner: releasedOwner,
+          }),
+        ).rejects.toThrow(/session file locked/);
         await expect(
           acquireSessionWriteLock({
             sessionFile: sessionReal,
