@@ -188,6 +188,7 @@ export async function buildCodexWorkspaceBootstrapContext(params: {
       warn: (message) => embeddedAgentLog.warn(message),
       contextMode: params.params.bootstrapContextMode,
       runKind: params.params.bootstrapContextRunKind,
+      senderId: params.params.senderId ?? undefined,
     });
     const memoryToolRoutedBootstrapFiles = memoryToolsAvailable
       ? selectCodexWorkspaceMemoryReferenceFiles({

@@ -1,4 +1,5 @@
 // Implements system prompt inspection commands for agent runtime sessions.
+import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { isAcpRuntimeSpawnAvailable } from "../../acp/runtime/availability.js";
 import { resolveSessionAgentIds } from "../../agents/agent-scope.js";
 import { createOpenClawCodingTools } from "../../agents/agent-tools.js";
@@ -170,6 +171,9 @@ export async function resolveCommandsSystemPromptBundle(
     sessionKey: params.sessionKey,
     sessionId: targetSessionEntry?.sessionId,
     agentId: sessionAgentId,
+    // /context and /export report the prompt the agent run would build, so they
+    // must read the same per-sender MEMORY.md/USER.md partition the run uses.
+    senderId: normalizeOptionalString(params.ctx.SenderId),
   });
   const toolPolicySessionKey = resolveRuntimePolicySessionKey({
     cfg: params.cfg,

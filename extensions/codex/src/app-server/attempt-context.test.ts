@@ -143,6 +143,33 @@ describe("Codex app-server attempt context", () => {
     expect(context.memoryToolRouted).toBe(false);
   });
 
+  it("loads USER.md from the sender's identity partition, not the shared workspace root", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-identity-workspace-"));
+    const identityDir = path.join(workspaceDir, "identities", "sender-1");
+    await fs.mkdir(identityDir, { recursive: true });
+    await fs.writeFile(path.join(identityDir, "USER.md"), "sender-1 only profile");
+    await fs.writeFile(path.join(workspaceDir, "USER.md"), "shared root profile");
+
+    const context = await buildCodexWorkspaceBootstrapContext({
+      params: {
+        sessionId: "session-1",
+        sessionKey: "agent:main:session-1",
+        senderId: "sender-1",
+        config: { agents: { defaults: { workspace: workspaceDir } } },
+      } as EmbeddedRunAttemptParams,
+      resolvedWorkspace: workspaceDir,
+      effectiveWorkspace: workspaceDir,
+      sessionKey: "agent:main:session-1",
+      sessionAgentId: "main",
+      memoryToolNames: [],
+    });
+
+    const userFile = context.bootstrapFiles.find((file) => file.name === "USER.md");
+    expect(userFile?.path).toBe(path.join(identityDir, "USER.md"));
+    expect(userFile?.content).toBe("sender-1 only profile");
+    expect(context.contextFiles.map((file) => file.content)).not.toContain("shared root profile");
+  });
+
   it("remaps Codex bootstrap files under dot-prefixed workspace directories", () => {
     expect(
       remapCodexContextFilePath({
