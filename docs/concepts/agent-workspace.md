@@ -67,7 +67,7 @@ These are the standard files OpenClaw expects inside the workspace:
     Persona, tone, and boundaries. Loaded every session. Guide: [SOUL.md personality guide](/concepts/soul).
   </Accordion>
   <Accordion title="USER.md - who the user is">
-    Who the user is and how to address them. Loaded every session.
+    Who the user is and how to address them. Loaded every session. When the turn carries a sender identity, this file is read from `identities/<senderId>/USER.md` instead of the workspace root, so each human user of a shared agent gets their own profile.
   </Accordion>
   <Accordion title="IDENTITY.md - name, vibe, emoji">
     The agent's name, vibe, and emoji. Created/updated during the bootstrap ritual.
@@ -88,7 +88,10 @@ These are the standard files OpenClaw expects inside the workspace:
     Daily memory log (one file per day). Recommended to read today + yesterday on session start.
   </Accordion>
   <Accordion title="MEMORY.md - curated long-term memory (optional)">
-    Curated long-term memory: durable facts, preferences, decisions, and short summaries. Keep detailed logs in `memory/YYYY-MM-DD.md` so memory tools can retrieve them on demand without injecting them into every prompt. Only load `MEMORY.md` in the main, private session (not shared/group contexts). See [Memory](/concepts/memory) for the workflow and automatic memory flush.
+    Curated long-term memory: durable facts, preferences, decisions, and short summaries. Keep detailed logs in `memory/YYYY-MM-DD.md` so memory tools can retrieve them on demand without injecting them into every prompt. Only load `MEMORY.md` in the main, private session (not shared/group contexts). When the turn carries a sender identity, this file is read from `identities/<senderId>/MEMORY.md` instead of the workspace root. See [Memory](/concepts/memory) for the workflow and automatic memory flush.
+  </Accordion>
+  <Accordion title="identities/&lt;senderId&gt;/ - per-sender USER.md and MEMORY.md">
+    Per-sender copies of `USER.md` and `MEMORY.md`. When a turn carries a sender identity, OpenClaw reads those two files from `identities/<senderId>/` so one agent serving several humans does not share one profile and one memory file across all of them. Every other bootstrap file (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`) stays at the workspace root and is shared. Turns without a sender identity keep reading `USER.md` and `MEMORY.md` from the workspace root.
   </Accordion>
   <Accordion title="skills/ - workspace skills (optional)">
     Workspace-specific skills. Highest-precedence skill location for that workspace. Overrides project agent skills, personal agent skills, managed skills, bundled skills, and `skills.load.extraDirs` when names collide.
@@ -131,6 +134,8 @@ Run these steps on the machine where the Gateway runs (that is where the workspa
     git add AGENTS.md SOUL.md TOOLS.md IDENTITY.md USER.md HEARTBEAT.md memory/
     git commit -m "Add agent workspace"
     ```
+
+    On a multi-user deployment, also add `identities/` so each sender's `USER.md` and `MEMORY.md` are backed up.
 
   </Step>
   <Step title="Add a private remote">
