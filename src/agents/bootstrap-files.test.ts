@@ -340,6 +340,39 @@ describe("resolveBootstrapFilesForRun", () => {
       "USER.md",
     ]);
   });
+
+  it("forwards senderId to the loader when sessionKey is set", async () => {
+    const workspaceDir = await makeTempWorkspace("openclaw-bootstrap-sender-");
+    const identityUserPath = path.join(workspaceDir, "identities", "42", "USER.md");
+    await fs.mkdir(path.dirname(identityUserPath), { recursive: true });
+    await fs.writeFile(identityUserPath, "sender 42 profile", "utf8");
+
+    const files = await resolveBootstrapFilesForRun({
+      workspaceDir,
+      sessionKey: "agent:main:sender-session",
+      senderId: "42",
+    });
+
+    const userFile = files.find((file) => file.name === "USER.md");
+    expect(userFile?.path).toBe(identityUserPath);
+    expect(userFile?.content).toBe("sender 42 profile");
+  });
+
+  it("forwards senderId to the loader when sessionKey is absent", async () => {
+    const workspaceDir = await makeTempWorkspace("openclaw-bootstrap-sender-");
+    const identityUserPath = path.join(workspaceDir, "identities", "42", "USER.md");
+    await fs.mkdir(path.dirname(identityUserPath), { recursive: true });
+    await fs.writeFile(identityUserPath, "sender 42 profile", "utf8");
+
+    const files = await resolveBootstrapFilesForRun({
+      workspaceDir,
+      senderId: "42",
+    });
+
+    const userFile = files.find((file) => file.name === "USER.md");
+    expect(userFile?.path).toBe(identityUserPath);
+    expect(userFile?.content).toBe("sender 42 profile");
+  });
 });
 
 describe("resolveBootstrapContextForRun", () => {
