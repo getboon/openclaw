@@ -103,6 +103,28 @@ describe("getOrLoadBootstrapFiles", () => {
 
     expect(mockLoad()).toHaveBeenCalledTimes(66);
   });
+
+  it("does not reuse a cached snapshot across different senderIds on the same sessionKey", async () => {
+    const filesForA = [makeFile("USER.md", "about A")];
+    const filesForB = [makeFile("USER.md", "about B")];
+    mockLoad().mockImplementation(async (_dir: string, options?: { senderId?: string }) =>
+      options?.senderId === "B" ? filesForB : filesForA,
+    );
+
+    const first = await getOrLoadBootstrapFiles({
+      workspaceDir: "/ws",
+      sessionKey: "shared-session",
+      senderId: "A",
+    });
+    const second = await getOrLoadBootstrapFiles({
+      workspaceDir: "/ws",
+      sessionKey: "shared-session",
+      senderId: "B",
+    });
+
+    expect(first[0]?.content).toBe("about A");
+    expect(second[0]?.content).toBe("about B");
+  });
 });
 
 describe("clearBootstrapSnapshot", () => {
