@@ -2,6 +2,15 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.35-boon.5
+
+Stops every new user message in Boon Web, Slack, and MS Teams from rewriting the whole conversation into the prompt cache, and lets Gemini 3 models finish tool loops behind an OpenAI-compatible proxy such as the Boon LLM gateway.
+
+- **#328 (ENG-22237):** a replayed user turn is now sent byte-for-byte as it was on its own turn, so the next user message reads the previous prompt from cache instead of writing the whole history again. Current-turn inbound metadata and `before_prompt_build` hook `prependContext` / `appendContext` move into the hidden runtime-context carrier, backported from upstream openclaw. Unlike upstream, the carrier sits right after the active user message, not at the end of the request: Claude 5.x on non-direct `anthropic-messages` routes can answer a standalone trailing carrier. The managed Anthropic transport merges the carrier into that user message as trailing text blocks without `cache_control`, and keeps it out of tool result turns.
+- **#280 (ENG-21157):** new opt-in model compat flag `requiresGoogleThoughtSignatures`. A model with the flag replays Gemini thought signatures on the `openai-completions` transport whatever its endpoint class, and sends `skip_thought_signature_validator` for unsigned tool calls. Before, Vertex AI rejected the request after the first tool result with `400 Function call is missing a thought_signature`. Models without the flag keep the current behavior. No fleet model config sets the flag yet.
+- **#327 follow-ups:** review fixes that merged after the `v2026.6.35-boon.4` tag was cut from the PR branch. Tests and one code comment only; no runtime change.
+- Base = `2026.6.35-boon.4`. Fork gateway and every bundled plugin bumped to `2026.6.35-boon.5` in lockstep. Plugin changes beyond the version: `anthropic` carries the one-line #328 stream-wrapper change. Everything else in plugins is version-only.
+
 ## 2026.6.35-boon.4
 
 Removes the vulnerable nested `tar` 7.5.13 that every global install carried under `@openclaw/fs-safe`, migrates the fork's session and plugin file locks to fs-safe's owner-scoped re-entry, and ships the dependency advisory bumps and the compaction-retry abort fix merged since boon.3.
