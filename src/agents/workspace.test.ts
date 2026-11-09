@@ -908,6 +908,45 @@ describe("loadWorkspaceBootstrapFiles", () => {
     expect(memory?.missing).toBe(true);
   });
 
+  it("refuses a symlink from one identity's USER.md to another identity's file", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const tempDir = await makeTempWorkspace("openclaw-workspace-identity-symlink-");
+    const victimDir = path.join(tempDir, "identities", "victim");
+    const attackerDir = path.join(tempDir, "identities", "attacker");
+    await fs.mkdir(victimDir, { recursive: true });
+    await fs.mkdir(attackerDir, { recursive: true });
+    await fs.writeFile(path.join(victimDir, DEFAULT_USER_FILENAME), "victim secrets", "utf-8");
+    await fs.symlink(
+      path.join(victimDir, DEFAULT_USER_FILENAME),
+      path.join(attackerDir, DEFAULT_USER_FILENAME),
+    );
+
+    const files = await loadWorkspaceBootstrapFiles(tempDir, { senderId: "attacker" });
+    const user = files.find((file) => file.name === DEFAULT_USER_FILENAME);
+
+    expect(user?.missing).toBe(true);
+    expect(user?.content).toBeUndefined();
+  });
+
+  it("refuses a symlinked identity directory that aliases another identity", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const tempDir = await makeTempWorkspace("openclaw-workspace-identity-dir-symlink-");
+    const victimDir = path.join(tempDir, "identities", "victim");
+    await fs.mkdir(victimDir, { recursive: true });
+    await fs.writeFile(path.join(victimDir, DEFAULT_MEMORY_FILENAME), "victim memory", "utf-8");
+    await fs.symlink(victimDir, path.join(tempDir, "identities", "attacker"));
+
+    const files = await loadWorkspaceBootstrapFiles(tempDir, { senderId: "attacker" });
+    const memory = files.find((file) => file.name === DEFAULT_MEMORY_FILENAME);
+
+    expect(memory?.missing).toBe(true);
+    expect(memory?.content).toBeUndefined();
+  });
+
   it("treats hardlinked bootstrap aliases as missing", async () => {
     if (process.platform === "win32") {
       return;

@@ -74,10 +74,35 @@ function workspaceFileIdentity(stat: syncFs.Stats, canonicalPath: string): strin
   return `${canonicalPath}|${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
 }
 
+/**
+ * Reports whether the file or its directory is a symlink. `openRootFile` resolves
+ * symlinks and only rejects targets outside the workspace, so an in-workspace
+ * alias would otherwise read straight through a boundary that lives inside the
+ * workspace. Mirrors `resolveCanonicalRootMemoryFile`'s symlink refusal.
+ */
+async function hasSymlinkAlias(filePath: string): Promise<boolean> {
+  for (const target of [filePath, path.dirname(filePath)]) {
+    try {
+      if ((await fs.lstat(target)).isSymbolicLink()) {
+        return true;
+      }
+    } catch {
+      // A missing path is not an alias; the normal open reports it as missing.
+    }
+  }
+  return false;
+}
+
 async function readWorkspaceFileWithGuards(params: {
   filePath: string;
   workspaceDir: string;
+  /** Set for identity-partitioned reads, where an in-workspace symlink would cross senders. */
+  rejectSymlinkAlias?: boolean;
 }): Promise<WorkspaceGuardedReadResult> {
+  if (params.rejectSymlinkAlias && (await hasSymlinkAlias(params.filePath))) {
+    workspaceFileCache.delete(params.filePath);
+    return { ok: false, reason: "validation" };
+  }
   try {
     // A transient FS race (EAGAIN/EWOULDBLOCK/EINTR under load) on the open or
     // read must not drop the agent's bootstrap file for the turn — this reader
@@ -1101,6 +1126,7 @@ export async function loadWorkspaceBootstrapFiles(
   const entries: Array<{
     name: WorkspaceBootstrapFileName;
     filePath: string;
+    identityScoped?: true;
   }> = [
     {
       name: DEFAULT_AGENTS_FILENAME,
@@ -1121,6 +1147,7 @@ export async function loadWorkspaceBootstrapFiles(
     {
       name: DEFAULT_USER_FILENAME,
       filePath: path.join(identityDir, DEFAULT_USER_FILENAME),
+      identityScoped: true,
     },
     {
       name: DEFAULT_HEARTBEAT_FILENAME,
@@ -1133,6 +1160,7 @@ export async function loadWorkspaceBootstrapFiles(
     {
       name: DEFAULT_MEMORY_FILENAME,
       filePath: path.join(identityDir, DEFAULT_MEMORY_FILENAME),
+      identityScoped: true,
     },
   ];
 
@@ -1151,6 +1179,7 @@ export async function loadWorkspaceBootstrapFiles(
     const loaded = await readWorkspaceFileWithGuards({
       filePath: entry.filePath,
       workspaceDir: resolvedDir,
+      rejectSymlinkAlias: isPartitioned && entry.identityScoped === true,
     });
     if (loaded.ok) {
       result.push({
