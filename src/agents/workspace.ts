@@ -1072,8 +1072,31 @@ export async function ensureAgentWorkspace(params?: {
   };
 }
 
-export async function loadWorkspaceBootstrapFiles(dir: string): Promise<WorkspaceBootstrapFile[]> {
+/**
+ * Returns the trimmed senderId when it is safe to use as one path component under
+ * `identities/`, otherwise undefined. This is the only sanitization point for
+ * per-sender bootstrap paths; callers pass the raw senderId through.
+ */
+export function sanitizeIdentityPathSegment(senderId: string): string | undefined {
+  const trimmed = senderId.trim();
+  if (trimmed === "" || trimmed === "." || trimmed === ".." || /[/\\\0]/.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+export async function loadWorkspaceBootstrapFiles(
+  dir: string,
+  options?: { senderId?: string },
+): Promise<WorkspaceBootstrapFile[]> {
   const resolvedDir = resolveUserPath(dir);
+  // MEMORY.md and USER.md are per-sender when a usable senderId is given; every other
+  // bootstrap file stays at the workspace root.
+  const identitySegment = sanitizeIdentityPathSegment(options?.senderId ?? "");
+  const identityDir = identitySegment
+    ? path.join(resolvedDir, "identities", identitySegment)
+    : resolvedDir;
+  const isPartitioned = identityDir !== resolvedDir;
 
   const entries: Array<{
     name: WorkspaceBootstrapFileName;
@@ -1097,7 +1120,7 @@ export async function loadWorkspaceBootstrapFiles(dir: string): Promise<Workspac
     },
     {
       name: DEFAULT_USER_FILENAME,
-      filePath: path.join(resolvedDir, DEFAULT_USER_FILENAME),
+      filePath: path.join(identityDir, DEFAULT_USER_FILENAME),
     },
     {
       name: DEFAULT_HEARTBEAT_FILENAME,
@@ -1109,14 +1132,18 @@ export async function loadWorkspaceBootstrapFiles(dir: string): Promise<Workspac
     },
     {
       name: DEFAULT_MEMORY_FILENAME,
-      filePath: path.join(resolvedDir, DEFAULT_MEMORY_FILENAME),
+      filePath: path.join(identityDir, DEFAULT_MEMORY_FILENAME),
     },
   ];
 
   const result: WorkspaceBootstrapFile[] = [];
   for (const entry of entries) {
+    // Root MEMORY.md is omitted entirely when absent to keep the no-memory prompt unchanged.
+    // A per-sender MEMORY.md is always reported (missing when new) so the agent sees the
+    // identity-scoped path it can write to.
     if (
       entry.name === DEFAULT_MEMORY_FILENAME &&
+      !isPartitioned &&
       !(await exactWorkspaceEntryExists(resolvedDir, DEFAULT_MEMORY_FILENAME))
     ) {
       continue;
