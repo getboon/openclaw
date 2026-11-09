@@ -809,6 +809,10 @@ async function compactEmbeddedAgentSessionDirectOnce(
             sessionKey: params.sessionKey,
             sessionId: params.sessionId,
             agentId: effectiveSkillAgentId,
+            // Compaction rebuilds the successor system prompt. Without the sender
+            // the rebuild would reload the shared workspace-root USER.md/MEMORY.md
+            // and undo the per-sender partition for the rest of the session.
+            senderId: params.senderId ?? undefined,
             warn: makeBootstrapWarn({
               sessionLabel,
               warn: (message) => log.warn(message),

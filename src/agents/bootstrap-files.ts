@@ -344,6 +344,8 @@ export async function resolveBootstrapContextForRun(params: {
   sessionKey?: string;
   sessionId?: string;
   agentId?: string;
+  /** Partitions MEMORY.md/USER.md under the sender's identity dir; see loadWorkspaceBootstrapFiles. */
+  senderId?: string;
   warn?: (message: string) => void;
   contextMode?: BootstrapContextMode;
   runKind?: BootstrapContextRunKind;
