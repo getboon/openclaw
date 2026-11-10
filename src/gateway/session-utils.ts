@@ -198,6 +198,10 @@ function resolveIdentityAvatarUrl(
       boundaryLabel: "workspace root",
       maxBytes: AVATAR_MAX_BYTES,
       skipLexicalRootCheck: true,
+      // Avatars symlinked within the workspace are supported; fs-safe 0.5.2+
+      // rejects every symlink hop by default, but with this off it still
+      // rejects hops whose canonical target escapes the workspace root.
+      rejectSymlinks: false,
     });
     if (!opened.ok) {
       return undefined;

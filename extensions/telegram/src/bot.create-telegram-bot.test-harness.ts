@@ -5,7 +5,7 @@ import { buildChannelInboundEventContext } from "openclaw/plugin-sdk/channel-inb
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { MockFn } from "openclaw/plugin-sdk/plugin-test-runtime";
 import type { GetReplyOptions, MsgContext } from "openclaw/plugin-sdk/reply-runtime";
-import { beforeEach, vi } from "vitest";
+import { afterAll, beforeEach, vi } from "vitest";
 import type { TelegramBotDeps } from "./bot-deps.js";
 
 type AnyMock = ReturnType<typeof vi.fn>;
@@ -42,10 +42,16 @@ const { sessionStorePath } = vi.hoisted(() => {
       ? (process.env.TEMP ?? process.env.TMP ?? "C:\\Windows\\Temp")
       : (process.env.TMPDIR ?? "/tmp");
   const separator = process.platform === "win32" ? "\\" : "/";
+  // fs-safe 0.8 pins and chmods the session store directory on write, so the
+  // store must live in a private directory, not directly in the OS temp root.
+  const fs = process.getBuiltinModule("node:fs");
+  const storeDir = fs.mkdtempSync(
+    `${tempRoot.replace(/[\\/]+$/u, "")}${separator}openclaw-telegram-store-`,
+  );
   return {
-    sessionStorePath: `${tempRoot.replace(/[\\/]+$/u, "")}${separator}openclaw-telegram-${
-      process.pid
-    }-${process.env.VITEST_POOL_ID ?? "0"}.json`,
+    sessionStorePath: `${storeDir}${separator}openclaw-telegram-${process.pid}-${
+      process.env.VITEST_POOL_ID ?? "0"
+    }.json`,
   };
 });
 
@@ -554,6 +560,11 @@ function clearTelegramDispatchDedupeFilesForTest(): void {
     }
   }
 }
+
+// The store directory is private to this module instance; remove it, not just its files.
+afterAll(() => {
+  rmSync(path.dirname(sessionStorePath), { recursive: true, force: true });
+});
 
 beforeEach(() => {
   getRuntimeConfig.mockReset();

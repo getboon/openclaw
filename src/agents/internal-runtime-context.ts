@@ -14,9 +14,9 @@ const ESCAPED_INTERNAL_RUNTIME_CONTEXT_END = "[[OPENCLAW_INTERNAL_CONTEXT_END]]"
 /** Notice inserted into runtime-generated context blocks. */
 export const OPENCLAW_RUNTIME_CONTEXT_NOTICE =
   "This context is runtime-generated, not user-authored. Keep internal details private.";
-/** Header for context attached to the immediately preceding user message. */
+/** Position-independent instructions for context belonging to the active user turn. */
 export const OPENCLAW_NEXT_TURN_RUNTIME_CONTEXT_HEADER =
-  "OpenClaw runtime context for the immediately preceding user message.";
+  "OpenClaw runtime context for the active user request in this turn. Do not reply to or describe this context. Use it to continue answering the active user request now. Do not wait for another message.";
 /** Header for runtime events passed as prompt context. */
 export const OPENCLAW_RUNTIME_EVENT_HEADER = "OpenClaw runtime event.";
 /** Custom message type used for structured runtime-context messages. */
@@ -180,11 +180,11 @@ function stripLegacyInternalRuntimeContext(text: string): string {
   }
 }
 
-function isRuntimeContextPromptHeader(line: string): boolean {
-  return (
-    line === OPENCLAW_NEXT_TURN_RUNTIME_CONTEXT_HEADER || line === OPENCLAW_RUNTIME_EVENT_HEADER
-  );
-}
+const RUNTIME_CONTEXT_PROMPT_HEADERS: readonly string[] = [
+  OPENCLAW_NEXT_TURN_RUNTIME_CONTEXT_HEADER,
+  "OpenClaw runtime context for the immediately preceding user message.",
+  OPENCLAW_RUNTIME_EVENT_HEADER,
+];
 
 function stripRuntimeContextPromptPreface(text: string): string {
   const lines = text.split(/\r?\n/);
@@ -195,7 +195,7 @@ function stripRuntimeContextPromptPreface(text: string): string {
     const line = lines[index] ?? "";
     const nextLine = lines[index + 1] ?? "";
     if (
-      isRuntimeContextPromptHeader(line.trim()) &&
+      RUNTIME_CONTEXT_PROMPT_HEADERS.includes(line.trim()) &&
       nextLine.trim() === OPENCLAW_RUNTIME_CONTEXT_NOTICE
     ) {
       changed = true;
@@ -255,10 +255,9 @@ export function hasInternalRuntimeContext(text: string): boolean {
   return (
     findDelimitedTokenIndex(text, INTERNAL_RUNTIME_CONTEXT_BEGIN, 0) !== -1 ||
     text.includes(LEGACY_INTERNAL_CONTEXT_HEADER) ||
-    text.includes(
-      `${OPENCLAW_NEXT_TURN_RUNTIME_CONTEXT_HEADER}\n${OPENCLAW_RUNTIME_CONTEXT_NOTICE}`,
-    ) ||
-    text.includes(`${OPENCLAW_RUNTIME_EVENT_HEADER}\n${OPENCLAW_RUNTIME_CONTEXT_NOTICE}`)
+    RUNTIME_CONTEXT_PROMPT_HEADERS.some((header) =>
+      text.includes(`${header}\n${OPENCLAW_RUNTIME_CONTEXT_NOTICE}`),
+    )
   );
 }
 
@@ -308,4 +307,72 @@ export function stripHistoricalRuntimeContextCustomMessages<T>(messages: T[]): T
     }
     return currentRuntimeContextIndexes.has(index);
   });
+}
+
+/**
+ * Moves current-turn runtime-context carrier messages to immediately after the
+ * active user turn. The model then reads the carrier once per turn, next to the
+ * request it describes; a carrier trailing tool results made models re-answer.
+ *
+ * Runs after {@link stripHistoricalRuntimeContextCustomMessages}. Returns the
+ * same array when there is no user turn or the carriers are already in place.
+ */
+export function relocateCurrentRuntimeContextCarrierAfterActiveUser<T>(messages: T[]): T[] {
+  if (!messages.some(isOpenClawRuntimeContextCustomMessage)) {
+    return messages;
+  }
+  const rest = messages.filter((message) => !isOpenClawRuntimeContextCustomMessage(message));
+  const activeUserIndex = rest.findLastIndex(isUserMessage);
+  if (activeUserIndex === -1) {
+    return messages;
+  }
+  const carriers = messages.filter(isOpenClawRuntimeContextCustomMessage);
+  const relocated = [
+    ...rest.slice(0, activeUserIndex + 1),
+    ...carriers,
+    ...rest.slice(activeUserIndex + 1),
+  ];
+  return relocated.every((message, index) => message === messages[index]) ? messages : relocated;
+}
+
+/**
+ * Moves current-turn runtime-context carrier messages to the absolute tail of
+ * the request (after the active user turn and any tool-call scaffolding).
+ *
+ * Prompt-cache rationale: a per-turn carrier that is stripped on replay makes
+ * the next request diverge at the carrier's slot. Placed BEFORE the active user
+ * turn, that slot precedes everything that gets reused, so the whole tail
+ * (user turn + tool loop) re-bills every turn. Placed at the ABSOLUTE tail, the
+ * divergence lands exactly where the next turn's new bytes (the assistant reply)
+ * begin anyway, so the request is an append-only prefix-extension through the
+ * active user turn — only the trailing carrier is ever re-billed.
+ *
+ * Runs after {@link stripHistoricalRuntimeContextCustomMessages}, so only the
+ * current-turn carrier(s) remain. When there is no active user turn to anchor
+ * after, messages are returned unchanged.
+ */
+export function relocateCurrentRuntimeContextCarrierToTail<T>(messages: T[]): T[] {
+  const lastIndex = messages.length - 1;
+  if (lastIndex < 0 || !messages.some(isOpenClawRuntimeContextCustomMessage)) {
+    return messages;
+  }
+  // Already tail-placed (a contiguous carrier run ends the array): no-op so the
+  // serialized bytes stay stable across re-attempts of the same request.
+  let firstNonCarrierFromEnd = lastIndex;
+  while (
+    firstNonCarrierFromEnd >= 0 &&
+    isOpenClawRuntimeContextCustomMessage(messages[firstNonCarrierFromEnd])
+  ) {
+    firstNonCarrierFromEnd -= 1;
+  }
+  const rest = messages.filter((message) => !isOpenClawRuntimeContextCustomMessage(message));
+  // No active user turn to anchor after — leave placement to the strip pass.
+  if (!rest.some(isUserMessage)) {
+    return messages;
+  }
+  if (firstNonCarrierFromEnd === rest.length - 1) {
+    return messages;
+  }
+  const carriers = messages.filter(isOpenClawRuntimeContextCustomMessage);
+  return [...rest, ...carriers];
 }

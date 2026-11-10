@@ -109,6 +109,8 @@ export type ModelCompatConfig = SupportedOpenAICompatFields &
     requiresMistralToolIds?: boolean;
     /** Whether OpenAI-style calls must be reshaped to Anthropic-compatible tool payloads. */
     requiresOpenAiAnthropicToolPayload?: boolean;
+    /** Whether Google tool-call thought signatures must be replayed on non-Google endpoints. */
+    requiresGoogleThoughtSignatures?: boolean;
   };
 
 export type ModelImageInputConfig = {

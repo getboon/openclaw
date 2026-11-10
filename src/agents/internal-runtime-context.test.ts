@@ -9,8 +9,29 @@ import {
   hasInternalRuntimeContext,
   INTERNAL_RUNTIME_CONTEXT_BEGIN,
   INTERNAL_RUNTIME_CONTEXT_END,
+  OPENCLAW_NEXT_TURN_RUNTIME_CONTEXT_HEADER,
+  OPENCLAW_RUNTIME_CONTEXT_CUSTOM_TYPE,
+  OPENCLAW_RUNTIME_CONTEXT_NOTICE,
+  OPENCLAW_RUNTIME_EVENT_HEADER,
+  relocateCurrentRuntimeContextCarrierAfterActiveUser,
+  relocateCurrentRuntimeContextCarrierToTail,
   stripInternalRuntimeContext,
 } from "./internal-runtime-context.js";
+
+type TestMessage = { role: string; content: string; customType?: string };
+
+function carrier(content = "runtime ctx"): TestMessage {
+  return { role: "custom", customType: OPENCLAW_RUNTIME_CONTEXT_CUSTOM_TYPE, content };
+}
+function user(content: string): TestMessage {
+  return { role: "user", content };
+}
+function assistant(content: string): TestMessage {
+  return { role: "assistant", content };
+}
+function toolResult(content: string): TestMessage {
+  return { role: "toolResult", content };
+}
 
 function createDeterministicRng(seed: number): () => number {
   let state = seed >>> 0;
@@ -86,6 +107,40 @@ describe("internal runtime context codec", () => {
     ).toBe(false);
   });
 
+  it.each([
+    ["current turn", OPENCLAW_NEXT_TURN_RUNTIME_CONTEXT_HEADER],
+    [
+      "previous current turn",
+      "OpenClaw runtime context for the immediately preceding user message.",
+    ],
+    ["runtime event", OPENCLAW_RUNTIME_EVENT_HEADER],
+  ])("detects and strips the %s prompt preface", (_name, header) => {
+    const preface = [header, OPENCLAW_RUNTIME_CONTEXT_NOTICE].join("\n");
+    const input = [
+      preface,
+      "",
+      INTERNAL_RUNTIME_CONTEXT_BEGIN,
+      "secret runtime context",
+      INTERNAL_RUNTIME_CONTEXT_END,
+      "",
+      "Visible reply",
+    ].join("\n");
+
+    expect(hasInternalRuntimeContext(preface)).toBe(true);
+    expect(stripInternalRuntimeContext(preface)).toBe("");
+    expect(stripInternalRuntimeContext(input)).toBe("Visible reply");
+  });
+
+  it("preserves text when the runtime-context header or notice does not match", () => {
+    for (const input of [
+      [OPENCLAW_NEXT_TURN_RUNTIME_CONTEXT_HEADER, "Ordinary user text"].join("\n"),
+      ["OpenClaw runtime context for another message.", OPENCLAW_RUNTIME_CONTEXT_NOTICE].join("\n"),
+    ]) {
+      expect(hasInternalRuntimeContext(input)).toBe(false);
+      expect(stripInternalRuntimeContext(input)).toBe(input);
+    }
+  });
+
   it("fuzzes delimiter injection and nested marker handling deterministically", () => {
     const rng = createDeterministicRng(0xc0ff_ee42);
     const tokenPool = [
@@ -123,5 +178,106 @@ describe("internal runtime context codec", () => {
       expect(stripped).not.toContain(INTERNAL_RUNTIME_CONTEXT_BEGIN);
       expect(stripped).not.toContain(INTERNAL_RUNTIME_CONTEXT_END);
     }
+  });
+});
+
+describe("relocateCurrentRuntimeContextCarrierToTail", () => {
+  it("moves a before-user carrier to the absolute tail", () => {
+    const messages = [user("older"), assistant("reply"), carrier("meta"), user("active")];
+    const out = relocateCurrentRuntimeContextCarrierToTail(messages);
+    expect(out.map((m) => m.role)).toEqual(["user", "assistant", "user", "custom"]);
+    // Non-carrier order is preserved; the active user turn is no longer preceded
+    // by the volatile carrier, so it caches as a stable prefix.
+    expect(out.filter((m) => m.role !== "custom")).toEqual([
+      user("older"),
+      assistant("reply"),
+      user("active"),
+    ]);
+    expect(out[out.length - 1]).toEqual(carrier("meta"));
+  });
+
+  it("moves the carrier past tool-call/tool-result scaffolding to the absolute tail", () => {
+    const messages = [
+      carrier("meta"),
+      user("active"),
+      assistant("tool call"),
+      toolResult("tool output"),
+    ];
+    const out = relocateCurrentRuntimeContextCarrierToTail(messages);
+    expect(out.map((m) => m.role)).toEqual(["user", "assistant", "toolResult", "custom"]);
+    expect(out[out.length - 1]).toEqual(carrier("meta"));
+  });
+
+  it("is a no-op (same reference) when the carrier is already at the tail", () => {
+    const messages = [user("active"), assistant("tool call"), toolResult("out"), carrier("meta")];
+    const out = relocateCurrentRuntimeContextCarrierToTail(messages);
+    expect(out).toBe(messages);
+  });
+
+  it("is a no-op when there is no carrier", () => {
+    const messages = [user("active"), assistant("reply")];
+    expect(relocateCurrentRuntimeContextCarrierToTail(messages)).toBe(messages);
+  });
+
+  it("leaves a carrier in place when there is no active user turn to anchor after", () => {
+    const messages = [carrier("meta"), assistant("reply")];
+    expect(relocateCurrentRuntimeContextCarrierToTail(messages)).toBe(messages);
+  });
+});
+
+describe("relocateCurrentRuntimeContextCarrierAfterActiveUser", () => {
+  it("moves a before-user carrier right after the active user turn", () => {
+    const messages = [user("older"), assistant("reply"), carrier("meta"), user("active")];
+    expect(relocateCurrentRuntimeContextCarrierAfterActiveUser(messages)).toEqual([
+      user("older"),
+      assistant("reply"),
+      user("active"),
+      carrier("meta"),
+    ]);
+  });
+
+  it("keeps the carrier right after the active user turn during the tool loop", () => {
+    const messages = [
+      user("older"),
+      assistant("reply"),
+      carrier("meta"),
+      user("active"),
+      assistant("tool call"),
+      toolResult("tool output"),
+    ];
+    expect(relocateCurrentRuntimeContextCarrierAfterActiveUser(messages)).toEqual([
+      user("older"),
+      assistant("reply"),
+      user("active"),
+      carrier("meta"),
+      assistant("tool call"),
+      toolResult("tool output"),
+    ]);
+  });
+
+  it("moves a contiguous carrier run in order", () => {
+    const messages = [carrier("first"), carrier("second"), user("active"), assistant("tool")];
+    expect(relocateCurrentRuntimeContextCarrierAfterActiveUser(messages)).toEqual([
+      user("active"),
+      carrier("first"),
+      carrier("second"),
+      assistant("tool"),
+    ]);
+  });
+
+  it("is idempotent and returns the same reference once placed", () => {
+    const messages = [carrier("meta"), user("active"), assistant("tool call"), toolResult("out")];
+    const once = relocateCurrentRuntimeContextCarrierAfterActiveUser(messages);
+    expect(relocateCurrentRuntimeContextCarrierAfterActiveUser(once)).toBe(once);
+  });
+
+  it("is a no-op when there is no carrier", () => {
+    const messages = [user("active"), assistant("reply")];
+    expect(relocateCurrentRuntimeContextCarrierAfterActiveUser(messages)).toBe(messages);
+  });
+
+  it("leaves messages unchanged when there is no user turn", () => {
+    const messages = [carrier("meta"), assistant("reply"), toolResult("out")];
+    expect(relocateCurrentRuntimeContextCarrierAfterActiveUser(messages)).toBe(messages);
   });
 });

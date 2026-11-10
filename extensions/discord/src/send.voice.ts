@@ -60,7 +60,13 @@ async function materializeVoiceMessageInput(
     prefix: "voice-src-",
   });
   const filePath = await workspace.write(`input${ext}`, media.buffer);
-  return { filePath, cleanup: async () => await workspace.cleanup() };
+  return {
+    filePath,
+    cleanup: async () => {
+      // fs-safe 0.5+ returns a cleanup receipt; callers only need completion.
+      await workspace.cleanup();
+    },
+  };
 }
 
 /**

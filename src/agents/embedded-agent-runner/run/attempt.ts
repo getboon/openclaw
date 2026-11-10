@@ -175,6 +175,7 @@ import { runAgentEndSideEffects } from "../../harness/agent-end-side-effects.js"
 import { runAgentHarnessBeforeAgentFinalizeHook } from "../../harness/lifecycle-hook-helpers.js";
 import { resolveHeartbeatPromptForSystemPrompt } from "../../heartbeat-system-prompt.js";
 import { resolveImageSanitizationLimits } from "../../image-sanitization.js";
+import { relocateCurrentRuntimeContextCarrierAfterActiveUser } from "../../internal-runtime-context.js";
 import {
   applyLocalModelLeanToolSearchDefaults,
   filterLocalModelLeanTools,
@@ -269,8 +270,10 @@ import {
 } from "../../workspace.js";
 import {
   classifyAsyncTaskWaitTimeout,
+  classifyCompactionRetryWaitAbort,
   isExternalTimeoutAbortRejection,
   isRunnerAbortError,
+  resolveAgentEndErrorText,
 } from "../abort.js";
 import { isCacheTtlEligibleProvider, readLastCacheTtlTimestamp } from "../cache-ttl.js";
 import { resolveCompactionTimeoutMs } from "../compaction-safety-timeout.js";
@@ -521,9 +524,8 @@ import {
 } from "./preemptive-compaction.js";
 import { resolveRunPromptPolicy } from "./prompt-policy.js";
 import {
-  buildCurrentInboundPrompt,
   buildRuntimeContextCustomMessage,
-  resolveRuntimeContextPromptParts,
+  resolveCurrentTurnPromptParts,
 } from "./runtime-context-prompt.js";
 import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
 
@@ -2638,7 +2640,16 @@ export async function runEmbeddedAttempt(
       if (typeof activeSession.agent.convertToLlm === "function") {
         const baseConvertToLlm = activeSession.agent.convertToLlm.bind(activeSession.agent);
         activeSession.agent.convertToLlm = async (messages) =>
-          await baseConvertToLlm(normalizeMessagesForLlmBoundary(messages, buildBoundaryOptions()));
+          await baseConvertToLlm(
+            // Wire-only: the carrier follows the active user turn, not the tail, so the
+            // model does not reread it after each tool result and repeat its answer.
+            // Applied here, not inside normalizeMessagesForLlmBoundary, because
+            // normalizeMessagesForCurrentPromptBoundary slices off its appended
+            // prompt by position and must not see the carrier relocated past it.
+            relocateCurrentRuntimeContextCarrierAfterActiveUser(
+              normalizeMessagesForLlmBoundary(messages, buildBoundaryOptions()),
+            ),
+          );
       }
       let prePromptMessageCount = activeSession.messages.length;
       const toolResultPromptProjectionState: ToolResultPromptProjectionState =
@@ -4048,8 +4059,6 @@ export async function runEmbeddedAttempt(
         const promptBeforePromptBuildHooks = effectivePrompt;
         const promptBuildPrependContext = hookResult?.prependContext;
         const promptBuildAppendContext = hookResult?.appendContext;
-        const hasPromptBuildContext =
-          Boolean(promptBuildPrependContext?.trim()) || Boolean(promptBuildAppendContext?.trim());
         {
           if (hookResult?.prependContext) {
             effectivePrompt = `${hookResult.prependContext}\n\n${effectivePrompt}`;
@@ -4293,24 +4302,19 @@ export async function runEmbeddedAttempt(
             );
           }
 
-          const promptSubmission = resolveRuntimeContextPromptParts({
+          const currentTurnPrompt = resolveCurrentTurnPromptParts({
             effectivePrompt: promptForRuntimeContextSplit,
             transcriptPrompt: transcriptPromptForRuntimeSplit,
-            modelPrompt: hasPromptBuildContext
-              ? promptForModelBeforeRuntimeContextSplit
-              : undefined,
-            emptyTranscriptMode: params.suppressNextUserMessagePersistence
-              ? "model-prompt"
-              : "runtime-event",
+            modelPromptWithBuildContext: promptForModelBeforeRuntimeContextSplit,
+            promptBuildContext: {
+              prependContext: promptBuildPrependContext,
+              appendContext: promptBuildAppendContext,
+            },
+            currentInboundContext: params.currentInboundContext,
+            suppressUserMessagePersistence: params.suppressNextUserMessagePersistence,
           });
-          const promptForSession = buildCurrentInboundPrompt({
-            context: params.currentInboundContext,
-            prompt: promptSubmission.prompt,
-          });
-          const promptForModel = buildCurrentInboundPrompt({
-            context: params.currentInboundContext,
-            prompt: promptSubmission.modelPrompt ?? promptSubmission.prompt,
-          });
+          const promptSubmission = currentTurnPrompt.submission;
+          const { promptForSession, promptForModel } = currentTurnPrompt;
           currentUserTimestampOverride =
             !isRawModelRun && typeof preparedUserTurnMessage?.timestamp === "number"
               ? {
@@ -4329,9 +4333,7 @@ export async function runEmbeddedAttempt(
               setActiveSessionSystemPrompt(runtimeSystemPrompt);
             }
           }
-          const runtimeContextForHook = promptSubmission.runtimeOnly
-            ? undefined
-            : promptSubmission.runtimeContext?.trim();
+          const runtimeContextForHook = currentTurnPrompt.runtimeContext;
           const runtimeContextMessageForCurrentTurn =
             buildRuntimeContextCustomMessage(runtimeContextForHook);
           const messagesForCurrentPrompt = runtimeContextMessageForCurrentTurn
@@ -4868,8 +4870,8 @@ export async function runEmbeddedAttempt(
               session: activeSession,
               transcriptPrompt: promptForSession,
               modelPrompt: promptForModel,
-              prependContext: promptBuildPrependContext,
-              appendContext: promptBuildAppendContext,
+              prependContext: currentTurnPrompt.inlinePromptBuildContext?.prependContext,
+              appendContext: currentTurnPrompt.inlinePromptBuildContext?.appendContext,
               shouldCapturePrompt: () => captureCurrentPromptForModel,
             });
             const armModelPromptTransform = (submitted: boolean) => {
@@ -5104,7 +5106,25 @@ export async function runEmbeddedAttempt(
             }
           }
         } catch (err) {
-          if (isRunnerAbortError(err)) {
+          const compactionAbortOutcome = classifyCompactionRetryWaitAbort({
+            err,
+            externalAbort,
+            timedOut,
+          });
+          if (compactionAbortOutcome.kind === "rethrow") {
+            throw err;
+          }
+          if (compactionAbortOutcome.kind === "externalTimeoutClassified") {
+            // Same caller-driven stop already in progress, not a new failure:
+            // leave promptError untouched (classification above already
+            // handles reporting) instead of repopulating it from this wait.
+            externalTimeoutAbortClassified = true;
+            if (!isProbeSession) {
+              log.debug(
+                `compaction wait aborted by caller's external timeout: runId=${params.runId} sessionId=${params.sessionId}`,
+              );
+            }
+          } else {
             if (!promptError) {
               promptError = err;
               promptErrorSource = "compaction";
@@ -5114,8 +5134,6 @@ export async function runEmbeddedAttempt(
                 `compaction wait aborted: runId=${params.runId} sessionId=${params.sessionId}`,
               );
             }
-          } else {
-            throw err;
           }
         }
 
@@ -5357,7 +5375,7 @@ export async function runEmbeddedAttempt(
             event: {
               messages: messagesSnapshot,
               success: !aborted && !promptError,
-              error: promptError ? formatErrorMessage(promptError) : undefined,
+              error: resolveAgentEndErrorText({ promptError, externalTimeoutAbortClassified }),
               durationMs: Date.now() - promptStartedAt,
             },
             ctx: {

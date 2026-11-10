@@ -11,7 +11,6 @@ minimumReleaseAgeExclude:
   - "undici@8.10.2"
   - "undici@7.29.1"
   - "@openclaw/crabline@0.1.6"
-  - "@openclaw/fs-safe@0.3.0"
   - "@openclaw/proxyline@0.3.3"
   - "acpx"
   - "tokenjuice"

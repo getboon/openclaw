@@ -1094,6 +1094,16 @@ async function loadWebMediaInternal(
             { cause: err },
           );
         }
+        if (err.code === "path-mismatch") {
+          // The file was swapped between the identity check and the open (a
+          // transient race), not a policy denial: keep it a thrown, reported
+          // error and tell the model a retry may succeed.
+          throw new LocalMediaAccessError(
+            "invalid-path",
+            `Local media file changed while it was being opened; retry: ${mediaUrl}`,
+            { cause: err },
+          );
+        }
         throw new LocalMediaAccessError(
           "invalid-path",
           `Local media path is not safe to read: ${mediaUrl}`,

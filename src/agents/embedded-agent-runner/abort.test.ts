@@ -4,8 +4,10 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyAsyncTaskWaitTimeout,
+  classifyCompactionRetryWaitAbort,
   isExternalTimeoutAbortRejection,
   isRunnerAbortError,
+  resolveAgentEndErrorText,
 } from "./abort.js";
 import { abortable } from "./run/abortable.js";
 
@@ -146,5 +148,77 @@ describe("classifyAsyncTaskWaitTimeout", () => {
       kind: "log",
       message: expect.stringContaining("run-1, run-2"),
     });
+  });
+});
+
+describe("classifyCompactionRetryWaitAbort", () => {
+  // A caller's external-timeout abort during the compaction-retry wait must
+  // classify instead of leaving promptError set to the raw abort error.
+  it("classifies the caller's external-timeout abort instead of setting promptError", async () => {
+    const controller = new AbortController();
+    controller.abort(new DOMException("Turn budget exceeded", "TimeoutError"));
+    const err = await abortable(controller.signal, new Promise(() => {})).catch((e: unknown) => e);
+    expect(classifyCompactionRetryWaitAbort({ err, externalAbort: true, timedOut: true })).toEqual({
+      kind: "externalTimeoutClassified",
+    });
+  });
+
+  it("still sets promptError for OpenClaw's own internal-watchdog compaction timeout", async () => {
+    const err = await makeInternalTimeoutRejection();
+    expect(classifyCompactionRetryWaitAbort({ err, externalAbort: false, timedOut: true })).toEqual(
+      { kind: "promptError" },
+    );
+  });
+
+  it("rethrows a non-abort-shaped error unchanged", () => {
+    const err = new Error("upstream 500");
+    expect(classifyCompactionRetryWaitAbort({ err, externalAbort: true, timedOut: true })).toEqual({
+      kind: "rethrow",
+    });
+  });
+});
+
+describe("resolveAgentEndErrorText", () => {
+  it("suppresses the error text once the run is classified, even if promptError was left set", async () => {
+    // Defense in depth: this is the single point buildAgentEndCapture's
+    // `error` field is derived from, so a future cleanup-phase catch that
+    // forgets to null promptError degrades to "no error reported" instead of
+    // reintroducing OPENCLAW-FLEET-14X-style Sentry noise.
+    const signal = makeExternalTimeoutSignal();
+    const promptError = await abortable(signal, new Promise(() => {})).catch((e: unknown) => e);
+    expect(
+      resolveAgentEndErrorText({
+        promptError,
+        externalTimeoutAbortClassified: true,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("keeps a genuine unrelated promptError even when the run was also classified", () => {
+    // The run can be classified by a later wait observing the same
+    // already-fired signal while an earlier, real failure is still sitting
+    // in promptError — suppressing on the classification flag alone would
+    // discard that real error just because the run was also aborted.
+    expect(
+      resolveAgentEndErrorText({
+        promptError: new Error("upstream 500"),
+        externalTimeoutAbortClassified: true,
+      }),
+    ).toBe("upstream 500");
+  });
+
+  it("formats a real promptError when the run was not classified", () => {
+    expect(
+      resolveAgentEndErrorText({
+        promptError: new Error("upstream 500"),
+        externalTimeoutAbortClassified: false,
+      }),
+    ).toBe("upstream 500");
+  });
+
+  it("stays undefined when there is no promptError", () => {
+    expect(
+      resolveAgentEndErrorText({ promptError: null, externalTimeoutAbortClassified: false }),
+    ).toBeUndefined();
   });
 });

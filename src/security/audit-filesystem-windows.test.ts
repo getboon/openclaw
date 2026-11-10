@@ -10,6 +10,32 @@ const windowsAuditEnv = {
   USERDOMAIN: "DESKTOP-TEST",
 };
 
+const TESTER_SID = "S-1-5-21-1-2-3-1001";
+
+// fs-safe 0.8 inspects Windows permissions with a PowerShell owner query
+// (owner SID, current user SID, principal name -> SID map) before icacls, and
+// reports "unknown" (no findings) when that query fails. Answer it as upstream
+// does (v2026.9.4); every other command is the icacls listing.
+function windowsSidQueryResult(command: string): { stdout: string; stderr: string } | undefined {
+  if (!command.toLowerCase().endsWith("powershell.exe")) {
+    return undefined;
+  }
+  return {
+    stdout: JSON.stringify({
+      ownerSid: TESTER_SID,
+      currentUserSid: TESTER_SID,
+      principalSids: [
+        { name: "NT AUTHORITY\\SYSTEM", sid: "S-1-5-18" },
+        { name: "BUILTIN\\Users", sid: "S-1-5-32-545" },
+        { name: "DESKTOP-TEST\\Tester", sid: TESTER_SID },
+      ],
+      principalTranslationFailed: false,
+      remote: false,
+    }),
+    stderr: "",
+  };
+}
+
 describe("security audit filesystem Windows findings", () => {
   const tempCases = new AsyncTempCaseFactory("openclaw-security-audit-win-");
 
@@ -34,10 +60,11 @@ describe("security audit filesystem Windows findings", () => {
           configPath,
           platform: "win32",
           env: windowsAuditEnv,
-          execIcacls: async (_cmd: string, args: string[]) => ({
-            stdout: `${args[0]} NT AUTHORITY\\SYSTEM:(F)\n DESKTOP-TEST\\Tester:(F)\n`,
-            stderr: "",
-          }),
+          execIcacls: async (cmd: string, args: string[]) =>
+            windowsSidQueryResult(cmd) ?? {
+              stdout: `${args[0]} NT AUTHORITY\\SYSTEM:(F)\n DESKTOP-TEST\\Tester:(F)\n`,
+              stderr: "",
+            },
         });
         const forbidden = new Set([
           "fs.state_dir.perms_world_writable",
@@ -65,7 +92,11 @@ describe("security audit filesystem Windows findings", () => {
           configPath,
           platform: "win32",
           env: windowsAuditEnv,
-          execIcacls: async (_cmd: string, args: string[]) => {
+          execIcacls: async (cmd: string, args: string[]) => {
+            const sidQuery = windowsSidQueryResult(cmd);
+            if (sidQuery) {
+              return sidQuery;
+            }
             const target = args[0];
             if (target.endsWith(`${path.sep}state`)) {
               return {
@@ -97,7 +128,11 @@ describe("security audit filesystem Windows findings", () => {
           configPath,
           platform: "win32",
           env: windowsAuditEnv,
-          execIcacls: async (_cmd: string, args: string[]) => {
+          execIcacls: async (cmd: string, args: string[]) => {
+            const sidQuery = windowsSidQueryResult(cmd);
+            if (sidQuery) {
+              return sidQuery;
+            }
             const target = args[0];
             if (target.endsWith(`${path.sep}state`)) {
               return {

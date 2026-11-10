@@ -1053,10 +1053,11 @@ describe("loadWorkspaceBootstrapFiles", () => {
       content: "# AGENTS.md\n\nboundary retry\n",
     });
 
-    const agentsPath = path.join(tempDir, DEFAULT_AGENTS_FILENAME);
-    const originalLstat = syncFs.promises.lstat.bind(syncFs.promises);
+    // fs-safe 0.8 checks child metadata synchronously against the canonical root.
+    const agentsPath = path.join(syncFs.realpathSync(tempDir), DEFAULT_AGENTS_FILENAME);
+    const originalLstat = syncFs.lstatSync.bind(syncFs);
     let agentsLstatAttempts = 0;
-    const lstatSpy = vi.spyOn(syncFs.promises, "lstat").mockImplementation((async (
+    const lstatSpy = vi.spyOn(syncFs, "lstatSync").mockImplementation(((
       target: unknown,
       options?: unknown,
     ) => {
@@ -1066,12 +1067,13 @@ describe("loadWorkspaceBootstrapFiles", () => {
           errno: -11,
         });
       }
-      return await originalLstat(target as never, options as never);
-    }) as typeof syncFs.promises.lstat);
+      return originalLstat(target as never, options as never);
+    }) as typeof syncFs.lstatSync);
 
     try {
       const files = await loadWorkspaceBootstrapFiles(tempDir);
-      expect(agentsLstatAttempts).toBe(2);
+      // fs-safe 0.8 lstats the child more than once per successful open.
+      expect(agentsLstatAttempts).toBeGreaterThanOrEqual(2);
       const agents = files.find((file) => file.name === DEFAULT_AGENTS_FILENAME);
       expect(agents?.missing).toBe(false);
       expect(agents?.content).toContain("boundary retry");

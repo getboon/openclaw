@@ -699,7 +699,8 @@ describe("appendNarrativeEntry", () => {
     vi.spyOn(fs, "rename").mockRejectedValueOnce(
       Object.assign(new Error("replace failed"), { code: "ENOSPC" }),
     );
-    vi.spyOn(fs, "rm").mockRejectedValueOnce(
+    // fs-safe 0.8 removes its owned temp with unlink (identity-checked), not rm.
+    vi.spyOn(fs, "unlink").mockRejectedValueOnce(
       Object.assign(new Error("cleanup failed"), { code: "EACCES" }),
     );
 

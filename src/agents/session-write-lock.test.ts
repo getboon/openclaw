@@ -10,6 +10,10 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { SessionWriteLockStaleError } from "./session-write-lock-error.js";
 
 const FAKE_STARTTIME = 12345;
+// fs-safe >= 0.5 reads lock sidecars through its own handle-based snapshot, so the first
+// `fs.readFile` of the lock is acquireSessionWriteLock's post-failure diagnostics read
+// (fs-safe 0.3.0 made two `fs.readFile` reads of its own first).
+const DIAGNOSTICS_LOCK_READ = 1;
 let testing: typeof import("./session-write-lock.js").testing;
 let acquireSessionWriteLock: typeof import("./session-write-lock.js").acquireSessionWriteLock;
 let cleanStaleLockFiles: typeof import("./session-write-lock.js").cleanStaleLockFiles;
@@ -153,7 +157,6 @@ async function expectActiveInProcessLockIsNotReclaimed(params?: {
       acquireSessionWriteLock({
         sessionFile,
         timeoutMs: 5,
-        allowReentrant: false,
       }),
     ).rejects.toThrow(/session file locked/);
     await lock.release();
@@ -186,15 +189,16 @@ describe("acquireSessionWriteLock", () => {
   it("reuses locks across symlinked session paths", async () => {
     await withSymlinkedSessionPaths(
       async ({ sessionReal, sessionLink, realLockPath, linkLockPath }) => {
+        const reentrantOwner = "session:symlink-alias-test";
         const lockA = await acquireSessionWriteLock({
           sessionFile: sessionReal,
           timeoutMs: 500,
-          allowReentrant: true,
+          reentrantOwner,
         });
         const lockB = await acquireSessionWriteLock({
           sessionFile: sessionLink,
           timeoutMs: 500,
-          allowReentrant: true,
+          reentrantOwner,
         });
 
         await expect(fs.access(realLockPath)).resolves.toBeUndefined();
@@ -215,15 +219,16 @@ describe("acquireSessionWriteLock", () => {
 
   it("keeps the lock file until the last release", async () => {
     await withTempSessionLockFile(async ({ sessionFile, lockPath }) => {
+      const reentrantOwner = "session:final-release-test";
       const lockA = await acquireSessionWriteLock({
         sessionFile,
         timeoutMs: 500,
-        allowReentrant: true,
+        reentrantOwner,
       });
       const lockB = await acquireSessionWriteLock({
         sessionFile,
         timeoutMs: 500,
-        allowReentrant: true,
+        reentrantOwner,
       });
 
       await expectLockRemovedOnlyAfterFinalRelease({
@@ -231,6 +236,184 @@ describe("acquireSessionWriteLock", () => {
         firstLock: lockA,
         secondLock: lockB,
       });
+    });
+  });
+
+  it("makes a different logical owner contend for a held lock", async () => {
+    await withTempSessionLockFile(async ({ sessionFile }) => {
+      const lock = await acquireSessionWriteLock({
+        sessionFile,
+        timeoutMs: 500,
+        reentrantOwner: "session:first-operation",
+      });
+      try {
+        await expect(
+          acquireSessionWriteLock({
+            sessionFile,
+            timeoutMs: 5,
+            staleMs: 60_000,
+            reentrantOwner: "session:second-operation",
+          }),
+        ).rejects.toThrow(/session file locked/);
+      } finally {
+        await lock.release();
+      }
+    });
+  });
+
+  it("joinInProcessHolder joins an ownerless holder, including via symlinks", async () => {
+    await withSymlinkedSessionPaths(async ({ sessionReal, sessionLink, realLockPath }) => {
+      // A holder acquired without reentrantOwner still records a logical owner for joiners.
+      const outer = await acquireSessionWriteLock({ sessionFile: sessionReal, timeoutMs: 500 });
+      const nested = await acquireSessionWriteLock({
+        sessionFile: sessionLink,
+        timeoutMs: 50,
+        joinInProcessHolder: true,
+      });
+      await expectLockRemovedOnlyAfterFinalRelease({
+        lockPath: realLockPath,
+        firstLock: outer,
+        secondLock: nested,
+      });
+    });
+  });
+
+  it("joinInProcessHolder does not reuse a released holder's owner", async () => {
+    await withSymlinkedSessionPaths(async ({ sessionReal, sessionLink }) => {
+      const releasedOwner = "session:released-operation";
+      const outer = await acquireSessionWriteLock({
+        sessionFile: sessionReal,
+        timeoutMs: 500,
+        reentrantOwner: releasedOwner,
+      });
+      await outer.release();
+      // With the holder gone, the joiner takes a fresh owner and becomes the holder itself. Had it
+      // reused the released owner, the acquisition below would re-enter instead of contending.
+      const joiner = await acquireSessionWriteLock({
+        sessionFile: sessionLink,
+        timeoutMs: 500,
+        joinInProcessHolder: true,
+      });
+      try {
+        await expect(
+          acquireSessionWriteLock({
+            sessionFile: sessionReal,
+            timeoutMs: 5,
+            staleMs: 60_000,
+            reentrantOwner: releasedOwner,
+          }),
+        ).rejects.toThrow(/session file locked/);
+        await expect(
+          acquireSessionWriteLock({
+            sessionFile: sessionReal,
+            timeoutMs: 5,
+            staleMs: 60_000,
+            reentrantOwner: "session:independent-operation",
+          }),
+        ).rejects.toThrow(/session file locked/);
+      } finally {
+        await joiner.release();
+      }
+    });
+  });
+
+  it("joinInProcessHolder takes a fresh owner with no holder; later joiners nest and independent acquisitions contend", async () => {
+    await withTempSessionLockFile(async ({ sessionFile }) => {
+      const first = await acquireSessionWriteLock({
+        sessionFile,
+        timeoutMs: 500,
+        joinInProcessHolder: true,
+      });
+      // `first` is now the holder, so a later joiner nests under it...
+      const joined = await acquireSessionWriteLock({
+        sessionFile,
+        timeoutMs: 50,
+        joinInProcessHolder: true,
+      });
+      await joined.release();
+      await first.release();
+      // ...but an independent acquisition with its own owner still contends with a holder.
+      const holder = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500 });
+      await expect(
+        acquireSessionWriteLock({ sessionFile, timeoutMs: 5, staleMs: 60_000 }),
+      ).rejects.toThrow(/session file locked/);
+      await holder.release();
+    });
+  });
+
+  it("joinInProcessHolder resolves the holder after path setup, closing the pre-resolve window", async () => {
+    await withTempSessionLockFile(async ({ sessionFile }) => {
+      // An operation takes the lock while the joining writer is still preparing (the mkdir of
+      // the session dir). With a precomputed owner the writer would contend and time out; the
+      // late-resolved holder owner lets it nest.
+      let outer: Awaited<ReturnType<typeof acquireSessionWriteLock>> | undefined;
+      const realMkdir = fs.mkdir.bind(fs);
+      const mkdirSpy = vi.spyOn(fs, "mkdir").mockImplementation((async (
+        target: Parameters<typeof fs.mkdir>[0],
+        options?: Parameters<typeof fs.mkdir>[1],
+      ) => {
+        const result = await realMkdir(target, options);
+        if (!outer && String(target) === path.dirname(path.resolve(sessionFile))) {
+          mkdirSpy.mockRestore();
+          outer = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500 });
+        }
+        return result;
+      }) as typeof fs.mkdir);
+      try {
+        const nested = await acquireSessionWriteLock({
+          sessionFile,
+          timeoutMs: 100,
+          joinInProcessHolder: true,
+        });
+        expect(outer).toBeDefined();
+        await nested.release();
+      } finally {
+        mkdirSpy.mockRestore();
+        await outer?.release();
+      }
+    });
+  });
+
+  it("rejects reentrantOwner combined with joinInProcessHolder", async () => {
+    await withTempSessionLockFile(async ({ sessionFile }) => {
+      await expect(
+        acquireSessionWriteLock({
+          sessionFile,
+          reentrantOwner: "explicit",
+          joinInProcessHolder: true,
+        }),
+      ).rejects.toThrow(TypeError);
+    });
+  });
+
+  it("rejects the removed allowReentrant option loudly for JS callers", async () => {
+    await withTempSessionLockFile(async ({ sessionFile }) => {
+      // Compiled plugins can still pass the fs-safe 0.3-era flag; silently
+      // ignoring it would turn intended nesting into a self-deadlock timeout.
+      const legacyParams = { sessionFile, timeoutMs: 500, allowReentrant: true } as unknown as {
+        sessionFile: string;
+      };
+      await expect(acquireSessionWriteLock(legacyParams)).rejects.toThrow(TypeError);
+      await expect(acquireSessionWriteLock(legacyParams)).rejects.toThrow(
+        /allowReentrant was removed.*reentrantOwner/,
+      );
+      // Nothing was acquired, so a normal acquisition still succeeds immediately.
+      const lock = await acquireSessionWriteLock({ sessionFile, timeoutMs: 5 });
+      await lock.release();
+    });
+  });
+
+  it("still accepts allowReentrant: false, which matches the default", async () => {
+    await withTempSessionLockFile(async ({ sessionFile }) => {
+      const lock = await acquireSessionWriteLock({
+        sessionFile,
+        timeoutMs: 500,
+        allowReentrant: false,
+      } as unknown as { sessionFile: string; timeoutMs: number });
+      await expect(
+        acquireSessionWriteLock({ sessionFile, timeoutMs: 5, staleMs: 60_000 }),
+      ).rejects.toThrow(/session file locked/);
+      await lock.release();
     });
   });
 
@@ -422,7 +605,6 @@ describe("acquireSessionWriteLock", () => {
           sessionFile,
           timeoutMs: 5,
           staleMs: 60_000,
-          allowReentrant: false,
         }),
       ).rejects.toThrow(/session file locked/);
       await expect(fs.access(lockPath)).resolves.toBeUndefined();
@@ -496,7 +678,7 @@ describe("acquireSessionWriteLock", () => {
         const lockFilePath = readFilePathToString(filePath);
         if (lockFilePath && path.basename(lockFilePath) === path.basename(lockPath)) {
           lockReads += 1;
-          if (lockReads === 3) {
+          if (lockReads === DIAGNOSTICS_LOCK_READ) {
             await fs.rm(lockFilePath, { force: true });
             await fs.rm(lockPath, { force: true });
             throw Object.assign(new Error("lock disappeared"), { code: "ENOENT" });
@@ -508,7 +690,7 @@ describe("acquireSessionWriteLock", () => {
       try {
         const lock = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500, staleMs: 10 });
         await lock.release();
-        expect(lockReads).toBeGreaterThanOrEqual(3);
+        expect(lockReads).toBeGreaterThanOrEqual(DIAGNOSTICS_LOCK_READ);
         await expectPathMissing(lockPath);
       } finally {
         readFileSpy.mockRestore();
@@ -543,7 +725,7 @@ describe("acquireSessionWriteLock", () => {
         const lockFilePath = readFilePathToString(filePath);
         if (lockFilePath && path.basename(lockFilePath) === path.basename(lockPath)) {
           lockReads += 1;
-          if (lockReads === 3) {
+          if (lockReads === DIAGNOSTICS_LOCK_READ) {
             await fs.rm(lockFilePath, { force: true });
             await fs.rm(lockPath, { force: true });
             await fs.writeFile(
@@ -563,7 +745,7 @@ describe("acquireSessionWriteLock", () => {
       try {
         const lock = await acquireSessionWriteLock({ sessionFile, timeoutMs: 500, staleMs: 10 });
         await lock.release();
-        expect(lockReads).toBeGreaterThanOrEqual(3);
+        expect(lockReads).toBeGreaterThanOrEqual(DIAGNOSTICS_LOCK_READ);
         await expectPathMissing(lockPath);
       } finally {
         readFileSpy.mockRestore();
@@ -598,7 +780,7 @@ describe("acquireSessionWriteLock", () => {
         const lockFilePath = readFilePathToString(filePath);
         if (lockFilePath && path.basename(lockFilePath) === path.basename(lockPath)) {
           lockReads += 1;
-          if (lockReads === 3) {
+          if (lockReads === DIAGNOSTICS_LOCK_READ) {
             await fs.rm(lockFilePath, { force: true });
             await fs.writeFile(lockFilePath, "", "utf8");
             setTimeout(() => {
@@ -612,7 +794,7 @@ describe("acquireSessionWriteLock", () => {
       try {
         const lock = await acquireSessionWriteLock({ sessionFile, timeoutMs: 800, staleMs: 10 });
         await lock.release();
-        expect(lockReads).toBeGreaterThanOrEqual(3);
+        expect(lockReads).toBeGreaterThanOrEqual(DIAGNOSTICS_LOCK_READ);
         await expectPathMissing(lockPath);
       } finally {
         readFileSpy.mockRestore();

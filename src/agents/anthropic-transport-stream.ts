@@ -368,14 +368,41 @@ function convertAnthropicMessages(
   messages: Context["messages"],
   model: AnthropicTransportModel,
   isOAuthToken: boolean,
-  options?: {
+  options: {
     allowReasoningContentReplay?: boolean;
+    cacheBreakpointOptOutBlocks: Set<object>;
+    cacheBreakpointOptOutMessageIndexes: Set<number>;
     replayThinkingEnabled?: boolean;
   },
-) {
+): Array<Record<string, unknown>> {
   const params: Array<Record<string, unknown>> = [];
-  const allowReasoningContentReplay = options?.allowReasoningContentReplay === true;
-  const replayThinkingEnabled = options?.replayThinkingEnabled !== false;
+  let previousUserMessageParam: Record<string, unknown> | undefined;
+  const pushUserParam = (content: string | object[], isRuntimeContextCarrier: boolean) => {
+    const previous = previousUserMessageParam;
+    // Claude 5.x on non-direct routes can answer a standalone trailing carrier turn instead of
+    // the user, so the carrier rides the preceding user turn as uncached trailing text blocks.
+    if (isRuntimeContextCarrier && previous) {
+      const carrierBlocks =
+        typeof content === "string" ? [{ type: "text", text: content }] : content;
+      const previousContent = previous.content as string | object[];
+      const previousBlocks =
+        typeof previousContent === "string"
+          ? [{ type: "text", text: previousContent }]
+          : previousContent;
+      previous.content = [...previousBlocks, ...carrierBlocks];
+      for (const block of carrierBlocks) {
+        options.cacheBreakpointOptOutBlocks.add(block);
+      }
+      return;
+    }
+    if (isRuntimeContextCarrier) {
+      options.cacheBreakpointOptOutMessageIndexes.add(params.length);
+    }
+    previousUserMessageParam = { role: "user", content };
+    params.push(previousUserMessageParam);
+  };
+  const allowReasoningContentReplay = options.allowReasoningContentReplay === true;
+  const replayThinkingEnabled = options.replayThinkingEnabled !== false;
   const transformedMessages = transformTransportMessages(messages, model, normalizeToolCallId);
   const activeToolTurnAssistantIndex = replayThinkingEnabled
     ? -1
@@ -383,12 +410,10 @@ function convertAnthropicMessages(
   for (let i = 0; i < transformedMessages.length; i += 1) {
     const msg = transformedMessages[i];
     if (msg.role === "user") {
+      const isRuntimeContextCarrier = msg.runtimeContextCarrier === true;
       if (typeof msg.content === "string") {
         if (msg.content.trim().length > 0) {
-          params.push({
-            role: "user",
-            content: sanitizeTransportPayloadText(msg.content),
-          });
+          pushUserParam(sanitizeTransportPayloadText(msg.content), isRuntimeContextCarrier);
         }
         continue;
       }
@@ -422,10 +447,7 @@ function convertAnthropicMessages(
       if (filteredBlocks.length === 0) {
         continue;
       }
-      params.push({
-        role: "user",
-        content: filteredBlocks,
-      });
+      pushUserParam(filteredBlocks, isRuntimeContextCarrier);
       continue;
     }
     if (msg.role === "assistant") {
@@ -513,6 +535,7 @@ function convertAnthropicMessages(
           });
         }
         params.push(assistantMsg);
+        previousUserMessageParam = undefined;
       }
       continue;
     }
@@ -545,6 +568,7 @@ function convertAnthropicMessages(
         role: "user",
         content: toolResults,
       });
+      previousUserMessageParam = undefined;
     }
   }
   return params;
@@ -956,14 +980,19 @@ function buildAnthropicParams(
     cacheRetention: options?.cacheRetention,
     enableCacheControl: true,
   });
+  // Transient runtime-context carrier indexes and merged carrier blocks skip cache anchoring so
+  // the breakpoint stays on the last stable user turn; conversion-to-policy must not splice messages.
+  const cacheBreakpointOptOutMessageIndexes = new Set<number>();
+  const cacheBreakpointOptOutBlocks = new Set<object>();
+  const messages = convertAnthropicMessages(context.messages, model, isOAuthToken, {
+    allowReasoningContentReplay: supportsReasoningContentReplay(model),
+    cacheBreakpointOptOutBlocks,
+    cacheBreakpointOptOutMessageIndexes,
+    replayThinkingEnabled,
+  });
   const params: Record<string, unknown> = {
     model: resolveAnthropicRequestModelId(model),
-    messages: ensureNonEmptyAnthropicMessages(
-      convertAnthropicMessages(context.messages, model, isOAuthToken, {
-        allowReasoningContentReplay: supportsReasoningContentReplay(model),
-        replayThinkingEnabled,
-      }),
-    ),
+    messages: ensureNonEmptyAnthropicMessages(messages),
     max_tokens: maxTokens,
     stream: true,
   };
@@ -1040,7 +1069,12 @@ function buildAnthropicParams(
       params.tool_choice = projectedToolChoice;
     }
   }
-  applyAnthropicPayloadPolicyToParams(params, payloadPolicy);
+  applyAnthropicPayloadPolicyToParams(
+    params,
+    payloadPolicy,
+    cacheBreakpointOptOutMessageIndexes,
+    cacheBreakpointOptOutBlocks,
+  );
   return { params, toolProjection };
 }
 

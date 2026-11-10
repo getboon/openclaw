@@ -10,7 +10,7 @@ import path from "node:path";
 import { readStringValue } from "@openclaw/normalization-core/string-coerce";
 import { extractFrontmatterBlock } from "../../packages/markdown-core/src/frontmatter.js";
 import { resolveLegacyStateDirs, resolveStateDir } from "../config/paths.js";
-import { openRootFile } from "../infra/boundary-file-read.js";
+import { openRootFileFollowingParents } from "../infra/boundary-file-read.js";
 import { pathExists } from "../infra/fs-safe.js";
 import { replaceFileAtomic } from "../infra/replace-file.js";
 import { retryAsync } from "../infra/retry.js";
@@ -112,7 +112,7 @@ async function readWorkspaceFileWithGuards(params: {
     // in openRootFile still protects against a swapped file between attempts.
     return await retryAsync(
       async () => {
-        const opened = await openRootFile({
+        const opened = await openRootFileFollowingParents({
           absolutePath: params.filePath,
           rootPath: params.workspaceDir,
           boundaryLabel: "workspace root",

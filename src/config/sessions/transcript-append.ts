@@ -616,7 +616,8 @@ async function withSessionTranscriptWriteLock<T>(
   const lock = await acquireSessionWriteLock({
     sessionFile: params.transcriptPath,
     ...resolveSessionWriteLockOptions(params.config),
-    allowReentrant: true,
+    // Join this process's current holder (the enclosing operation) or contend with a fresh owner.
+    joinInProcessHolder: true,
   });
   try {
     return await run();

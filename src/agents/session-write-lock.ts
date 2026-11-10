@@ -4,6 +4,7 @@
  * Uses lock files with owner metadata, stale detection, signal cleanup, and watchdog checks to serialize writes.
  */
 import "../infra/fs-safe-defaults.js";
+import { randomUUID } from "node:crypto";
 import type fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -87,6 +88,8 @@ type LockInspectionDetails = Pick<
 >;
 
 const SESSION_LOCKS = createFileLockManager("openclaw.session-write-lock");
+/** Held-entry metadata key recording the logical owner of each session lock acquisition. */
+const SESSION_WRITE_LOCK_OWNER_METADATA_KEY = "reentrantOwner";
 let resolveProcessStartTimeForLock = getProcessStartTime;
 
 function isFileLockError(error: unknown, code: string): boolean {
@@ -701,6 +704,22 @@ function sessionLockHeldByThisProcess(normalizedSessionFile: string): boolean {
   );
 }
 
+function createSessionWriteLockOwner(): string {
+  return `session-write-lock:${process.pid}:${randomUUID()}`;
+}
+
+/**
+ * Logical owner key of the session write lock this process currently holds for the normalized
+ * session file, if any. Every acquisition records its owner in the held entry's metadata so
+ * `joinInProcessHolder` writers can nest under the holding operation.
+ */
+function heldSessionWriteLockOwner(normalizedSessionFile: string): string | undefined {
+  const owner = SESSION_LOCKS.heldEntries().find(
+    (entry) => entry.normalizedTargetPath === normalizedSessionFile,
+  )?.metadata[SESSION_WRITE_LOCK_OWNER_METADATA_KEY];
+  return typeof owner === "string" && owner ? owner : undefined;
+}
+
 function shouldTreatAsOrphanSelfLock(params: {
   payload: LockFilePayload | null;
   heldByThisProcess: boolean;
@@ -884,12 +903,44 @@ export async function acquireSessionWriteLock(params: {
   timeoutMs?: number;
   staleMs?: number;
   maxHoldMs?: number;
-  allowReentrant?: boolean;
+  /**
+   * Logical operation identity for intentional nested acquisition. An acquisition that passes
+   * the owner of the current in-process holder shares its lock (reference-counted until the
+   * final release); omitted or different owners contend normally.
+   */
+  reentrantOwner?: string;
+  /**
+   * Join this process's current holder of the session lock (as transcript writers do), resolved
+   * immediately before each acquire attempt; with no holder the acquisition uses a fresh owner and
+   * contends normally. Prefer this over passing a precomputed holder owner: resolving the owner
+   * up front leaves a window in which another operation can take the lock first.
+   * Mutually exclusive with `reentrantOwner`.
+   */
+  joinInProcessHolder?: true;
+  /**
+   * Removed with fs-safe 0.5+ (process-scoped re-entry); use `reentrantOwner` or
+   * `joinInProcessHolder`. `true` throws a TypeError at runtime; `false` matches the default.
+   */
+  allowReentrant?: never;
 }): Promise<{
   release: () => Promise<void>;
 }> {
+  // JS (e.g. compiled plugin) callers bypass the `never` type. Silently dropping a 0.3-era
+  // `allowReentrant: true` would turn intended nesting into a self-deadlock timeout.
+  if ((params as { allowReentrant?: unknown }).allowReentrant === true) {
+    throw new TypeError(
+      "acquireSessionWriteLock: allowReentrant was removed with @openclaw/fs-safe 0.5+; pass reentrantOwner (an owner key shared by the nested acquisitions) or joinInProcessHolder: true instead.",
+    );
+  }
+  if (params.joinInProcessHolder && params.reentrantOwner !== undefined) {
+    throw new TypeError(
+      "acquireSessionWriteLock: pass either reentrantOwner or joinInProcessHolder, not both.",
+    );
+  }
   registerCleanupHandlers();
-  const allowReentrant = params.allowReentrant ?? false;
+  // Every acquisition carries an owner so nested writers can join it; an omitted owner is a
+  // fresh one, so independent acquisitions never share the lock.
+  const ownOwner = params.reentrantOwner ?? createSessionWriteLockOwner();
   const defaultOptions = resolveSessionWriteLockOptions();
   const timeoutMs = resolvePositiveMs(params.timeoutMs, defaultOptions.timeoutMs, {
     allowInfinity: true,
@@ -922,14 +973,19 @@ export async function acquireSessionWriteLock(params: {
       const owner = describeLockOwnerForError({ payload, inspected });
       throw new SessionWriteLockTimeoutError({ timeoutMs, owner, lockPath });
     }
+    // Resolve the join owner synchronously right before handing off to fs-safe, so an operation
+    // that took the lock while we were resolving paths above is joined rather than contended.
+    const reentrantOwner = params.joinInProcessHolder
+      ? (heldSessionWriteLockOwner(normalizedSessionFile) ?? ownOwner)
+      : ownOwner;
     try {
       const lock = await SESSION_LOCKS.acquire(sessionFile, {
         staleMs,
         timeoutMs: remainingTimeoutMs,
         retry: { minTimeout: 50, maxTimeout: 1000, factor: 1 },
         staleRecovery: "remove-if-unchanged",
-        allowReentrant,
-        metadata: { maxHoldMs },
+        reentrantOwner,
+        metadata: { maxHoldMs, [SESSION_WRITE_LOCK_OWNER_METADATA_KEY]: reentrantOwner },
         payload: () => {
           const createdAt = new Date().toISOString();
           const starttime = resolveProcessStartTimeForLock(process.pid);

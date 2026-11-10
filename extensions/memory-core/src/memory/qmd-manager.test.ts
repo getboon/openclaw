@@ -5930,36 +5930,18 @@ describe("QmdMemoryManager", () => {
     ]);
 
     expect(inner.resolveReadPath(results[0].path)).toBe(exportedSessionPath);
-    const realLstat = fs.lstat;
-    const lstatSpy = vi.spyOn(fs, "lstat").mockImplementation(async (target, options) => {
-      if (typeof target === "string" && path.resolve(target) === exportedSessionPath) {
-        return {
-          isFile: () => true,
-          isSymbolicLink: () => false,
-        } as Awaited<ReturnType<typeof realLstat>>;
-      }
-      return await realLstat(target, options);
+    // fs-safe 0.8 inspects and reads through descriptors (lstatSync, handle
+    // reads), so stubbing fs.promises.lstat/readFile no longer reaches the read
+    // path. Write the exported session file for real instead.
+    await fs.mkdir(path.dirname(exportedSessionPath), { recursive: true });
+    await fs.writeFile(exportedSessionPath, "# Session session-1\n\nsession canary\n", "utf8");
+    const readResult = await manager.readFile({ relPath: results[0].path });
+    expect(readResult).toEqual({
+      path: "qmd/sessions-main/session-1.md",
+      text: "# Session session-1\n\nsession canary\n",
+      from: 1,
+      lines: 4,
     });
-    const realReadFile = fs.readFile;
-    const readSpy = vi.spyOn(fs, "readFile").mockImplementation(async (target, options) => {
-      if (typeof target === "string" && path.resolve(target) === exportedSessionPath) {
-        return "# Session session-1\n\nsession canary\n";
-      }
-      return await realReadFile(target, options as never);
-    });
-
-    try {
-      const readResult = await manager.readFile({ relPath: results[0].path });
-      expect(readResult).toEqual({
-        path: "qmd/sessions-main/session-1.md",
-        text: "# Session session-1\n\nsession canary\n",
-        from: 1,
-        lines: 4,
-      });
-    } finally {
-      lstatSpy.mockRestore();
-      readSpy.mockRestore();
-    }
 
     await manager.close();
   });
