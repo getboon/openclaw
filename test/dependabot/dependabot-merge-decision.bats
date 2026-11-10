@@ -391,6 +391,31 @@ _spec_change() {
   [ "$output" = "skip: new dependency evil in Gemfile" ]
 }
 
+@test "existing gem switched to a git/GitHub/path source blocks (both hash syntaxes)" {
+  printf 'Gemfile\n' > "$FILES"
+  printf '%s\n' '+++ b/Gemfile' "-gem 'rack', '~> 3.1.0'" "+gem 'rack', git: 'https://github.com/evil/rack.git'" > "$DIFF"
+  _decide version-update:semver-patch on
+  [ "$output" = "skip: new package source git=https://github.com/evil/rack.git" ]
+  printf '%s\n' '+++ b/Gemfile' "-gem 'rack', '~> 3.1.0'" '+gem "rack", :github => "evil/rack"' > "$DIFF"
+  _decide version-update:semver-patch on
+  [ "$output" = "skip: new package source github=evil/rack" ]
+  printf '%s\n' '+++ b/Gemfile' "-gem 'rack', '~> 3.1.0'" "+gem 'rack', path: '../evil'" > "$DIFF"
+  _decide version-update:semver-patch on
+  [ "$output" = "skip: new package source path=../evil" ]
+}
+
+@test "gradle catalog alias ending in 'id' is keyed by alias, not its version" {
+  printf 'apps/android/gradle/libs.versions.toml\n' > "$FILES"
+  printf '%s\n' '+++ b/apps/android/gradle/libs.versions.toml' '-uuid = "9.0.0"' '+uuid = "9.0.1"' > "$DIFF"
+  _decide version-update:semver-patch on
+  [ "$output" = "merge" ]
+  printf '%s\n' '+++ b/apps/android/gradle/libs.versions.toml' \
+    '-android-application = { id = "com.android.application", version.ref = "agp" }' \
+    '+android-application = { id = "com.evil.application", version.ref = "agp" }' > "$DIFF"
+  _decide version-update:semver-patch on
+  [ "$output" = "skip: new dependency android-application@com.evil.application in apps/android/gradle/libs.versions.toml" ]
+}
+
 @test "new package in requirements.txt blocks; version change passes" {
   printf 'requirements.txt\n' > "$FILES"
   printf '%s\n' '+++ b/requirements.txt' '-requests==2.32.3' '+requests==2.32.4' > "$DIFF"

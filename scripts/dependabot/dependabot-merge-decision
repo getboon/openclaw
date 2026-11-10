@@ -126,8 +126,18 @@ source_of() {
 # print "spec:<spec>" when the specifier points somewhere other than the
 # registry (git, URL, file, link, workspace, or a "user/repo" GitHub
 # shorthand). A registry version, range, dist-tag or npm: alias prints nothing.
+# For a Gemfile `gem` line with a git/github/path/source option, print
+# "spec:<option>=<value>".
 specifier_source() {
   local file="$1" line="$2" spec
+  # Gemfile: a gem pulled from git/GitHub/a path/another source, in either
+  # `git: "..."` or `:git => "..."` form.
+  if [ "$(basename "$file")" = "Gemfile" ]; then
+    if [[ "$line" =~ ^[+-][[:space:]]*gem[[:space:]].*[,[:space:]]:?(git|github|gist|bitbucket|path|source)[[:space:]]*(:|=\>)[[:space:]]*[\"\']([^\"\']+)[\"\'] ]]; then
+      echo "spec:${BASH_REMATCH[1]}=${BASH_REMATCH[3]}"
+    fi
+    return 0
+  fi
   [ "$(basename "$file")" = "package.json" ] || return 0
   [[ "$line" =~ ^[+-][[:space:]]*\"[^\"]+\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]] || return 0
   spec="${BASH_REMATCH[1]}"
@@ -160,9 +170,11 @@ dep_key() {
     libs.versions.toml)
       [[ "$line" =~ ^[+-][[:space:]]*([A-Za-z0-9_.-]+)[[:space:]]*= ]] || return 0
       local alias="${BASH_REMATCH[1]}" target=""
-      if [[ "$line" =~ (module|id)[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+      # Inline-table keys only ("{ module = ...", ", id = ..."), so an alias
+      # that merely ends in "id" (uuid = "9.0.0") isn't read as one.
+      if [[ "$line" =~ [{,][[:space:]]*(module|id)[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
         target="${BASH_REMATCH[2]}"
-      elif [[ "$line" =~ group[[:space:]]*=[[:space:]]*\"([^\"]+)\".*name[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+      elif [[ "$line" =~ [{,][[:space:]]*group[[:space:]]*=[[:space:]]*\"([^\"]+)\".*[{,][[:space:]]*name[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
         target="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"
       fi
       echo "$alias@$target" ;;
