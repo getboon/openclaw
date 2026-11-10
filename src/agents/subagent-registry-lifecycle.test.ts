@@ -426,6 +426,46 @@ describe("subagent registry lifecycle hardening", () => {
     expect(entry.killReconciliation).toBeUndefined();
   });
 
+  it("keeps the kill's own outcome canonical when a low-confidence grace retry arrives after it", async () => {
+    // A delayed lifecycle-error/timeout grace-timer retry is a low-confidence
+    // fallback guess (no further event arrived within the grace window). It
+    // must not overwrite the operator kill's outcome/reason with its own
+    // guessed classification, but it is still the signal that closes the
+    // kill's provisional window and fires the ended hook exactly once.
+    const entry = createRunEntry({
+      endedAt: 4_000,
+      endedReason: SUBAGENT_ENDED_REASON_KILLED,
+      outcome: { status: "error", error: "agent run aborted" },
+      suppressAnnounceReason: "killed",
+      killReconciliation: { killedAt: 4_000 },
+      cleanupHandled: true,
+      cleanupCompletedAt: 4_000,
+    });
+    const emitSubagentEndedHookForRun = vi.fn(async () => {});
+    const controller = createLifecycleController({ entry, emitSubagentEndedHookForRun });
+
+    await controller.completeSubagentRun({
+      runId: entry.runId,
+      endedAt: 4_001,
+      outcome: { status: "ok" },
+      reason: SUBAGENT_ENDED_REASON_COMPLETE,
+      triggerCleanup: false,
+      isLowConfidenceGraceRetry: true,
+    });
+
+    expect(entry.endedReason).toBe(SUBAGENT_ENDED_REASON_KILLED);
+    expect(entry.outcome).toEqual({ status: "error", error: "agent run aborted" });
+    expect(entry.killReconciliation).toBeUndefined();
+    expect(taskExecutorMocks.completeTaskRunByRunId).not.toHaveBeenCalled();
+    expect(emitSubagentEndedHookForRun).toHaveBeenCalledTimes(1);
+    expect(emitSubagentEndedHookForRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entry,
+        reason: SUBAGENT_ENDED_REASON_KILLED,
+      }),
+    );
+  });
+
   it("keeps the shared task writable when a steer restart aborts its old run", async () => {
     const entry = createRunEntry({ suppressAnnounceReason: "steer-restart" });
     const controller = createLifecycleController({ entry });
