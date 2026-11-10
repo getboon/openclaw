@@ -1079,12 +1079,13 @@ function classifyFailoverClassificationFromHttpStatus(
     // isHtmlErrorResponse/isCloudflareOrHtmlErrorPage — those also match a
     // generic complete-HTML auth page with no WAF signature (still a genuine
     // auth_html case) or a plain upstream 5xx gateway page misrouted here.
-    // isEdgeWafBlockPage's bare `cdn-cgi/` marker also matches a Cloudflare
-    // JS-challenge interstitial's `cdn-cgi/challenge-platform` script path, so
-    // excludes isCloudflareChallengeResponse explicitly — that case is a
-    // request-independent anti-bot checkpoint, not this fork's auth-miscooldown
-    // bug, and belongs in the existing upstream_html bucket below.
-    if (message && isEdgeWafBlockPage(message) && !isCloudflareChallengeResponse(message)) {
+    // Does NOT exclude isCloudflareChallengeResponse here (unlike
+    // classifyProviderRuntimeFailureKind below): this function's FailoverReason
+    // taxonomy has no separate upstream_html bucket for a challenge page to
+    // fall into, so excluding it here would silently fall through to "auth"
+    // and cooldown-disable the profile for a checkpoint that isn't a
+    // credential problem either — a strictly worse outcome than edge_blocked.
+    if (message && isEdgeWafBlockPage(message)) {
       return toReasonClassification("edge_blocked");
     }
     if (opts?.preserveProviderSignalClassification && messageClassification) {
