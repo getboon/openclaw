@@ -1,6 +1,5 @@
 ---
-# Dependabot config for getboon/openclaw (ENG-22470, epic ENG-22136). Same
-# rules as getboon/boon (ENG-22137).
+# Dependabot config for getboon/openclaw.
 # Options: https://docs.github.com/code-security/dependabot/working-with-dependabot/dependabot-options-reference
 #
 # Rules this file follows (scripts/dependabot/verify-dependabot-coverage
@@ -15,10 +14,11 @@
 #   after a release, so a hijacked package version (the 2025 npm chalk/debug
 #   and Shai-Hulud attacks) is usually pulled before we take it. Security
 #   updates ignore the cooldown and arrive immediately. pnpm's own
-#   minimumReleaseAge in pnpm-workspace.yaml is the same 5 days.
+#   minimumReleaseAge in pnpm-workspace.yaml is the same 5 days, and it does
+#   apply to a security PR: see the note there for a fix younger than that.
 # - github-actions and docker support only cooldown.default-days; a
 #   semver-*-days key on them makes Dependabot reject the WHOLE file.
-# - Base-image (docker) bumps are owned by ENG-22139; the docker entry below is
+# - Base images are rebuilt on their own schedule; the docker entry below is
 #   kept as it was, only with the shared schedule and cooldown.
 # - Dependabot does not rewrite pnpm `overrides` in pnpm-workspace.yaml. A
 #   package pinned there only moves when someone bumps the override, so the
@@ -155,7 +155,7 @@ updates:
         applies-to: security-updates
         patterns: ["*"]
 
-  # Base images belong to ENG-22139; see the header. `directory` (not
+  # Base images: see the header. `directory` (not
   # `directories`): src/docker-image-digests.test.ts reads this entry.
   - package-ecosystem: "docker"
     directory: "/"

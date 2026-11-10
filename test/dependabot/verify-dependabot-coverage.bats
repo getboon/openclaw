@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# Tests for scripts/dependabot/verify-dependabot-coverage (ENG-22470, ported from boon ENG-22137). Each fixture test builds
+# Tests for scripts/dependabot/verify-dependabot-coverage. Each fixture test builds
 # a tiny repo tree + dependabot config under $BATS_TEST_TMPDIR and points the
 # checker at it with --root/--config.
 
@@ -219,7 +219,7 @@ YAML
   [[ "$output" == *"pip"* ]]
 }
 
-# --- openclaw (ENG-22470) ---------------------------------------------------
+# --- openclaw-specific rules -----------------------------------------------
 
 @test "Swift package and Gradle settings need entries" {
   _file apps/mac/Package.resolved '{}'
@@ -239,7 +239,7 @@ YAML
   [[ "$output" == *"apps/kit/Package.swift is not covered"*"swift"* ]]
   [[ "$output" == *"apps/android/settings.gradle.kts is not covered"*"gradle"* ]]
   [[ "$output" != *"apps/mac/"* ]]
-  [[ "$output" != *"build.gradle.kts"* ]]
+  [[ "$output" == *"apps/android/app/build.gradle.kts is not covered"*"Gradle project root"* ]]
 }
 
 @test "npm-shrinkwrap.json in a pnpm repo is covered by the root npm entry" {
@@ -286,7 +286,8 @@ YAML
 # zod@4 4.6.7 (outside the zod alert's range) and an npm: alias.
 _alerts_fixture() {
   _file pnpm-lock.yaml 'lockfileVersion: 9.0'
-  _file pnpm-workspace.yaml 'overrides:
+  _file pnpm-workspace.yaml 'minimumReleaseAge: 7200
+overrides:
   tinypool: 2.1.0
   "zod@4": 4.6.7
   "parent>@a2ui/web_core": "npm:@a2ui/web_core@0.10.0"
@@ -340,7 +341,8 @@ JSON
 
 @test "override at the patched version passes (--alerts)" {
   _alerts_fixture
-  _file pnpm-workspace.yaml 'overrides:
+  _file pnpm-workspace.yaml 'minimumReleaseAge: 7200
+overrides:
   tinypool: 2.2.0
   "zod@4": 4.6.7'
   _file package.json '{}'
@@ -351,7 +353,8 @@ JSON
 @test "dismissed or non-npm alerts are ignored (--alerts)" {
   _alerts_fixture
   _file package.json '{}'
-  _file pnpm-workspace.yaml 'overrides:
+  _file pnpm-workspace.yaml 'minimumReleaseAge: 7200
+overrides:
   tinypool: 2.1.0'
   cat > "$ALERTS" <<'JSON'
 [{"number": 1, "state": "dismissed",
@@ -375,7 +378,8 @@ JSON
 @test "override key with a range operator is parsed (--alerts)" {
   _alerts_fixture
   _file package.json '{}'
-  _file pnpm-workspace.yaml 'overrides:
+  _file pnpm-workspace.yaml 'minimumReleaseAge: 7200
+overrides:
   "tinypool@>=2": 2.1.0
   "x@1>tinypool@^2 || >1": 2.1.0'
   run scripts/dependabot/verify-dependabot-coverage --root "$ROOT" --config "$CFG" --alerts "$ALERTS"
@@ -387,7 +391,8 @@ JSON
 @test "alert without a version range is skipped, not fatal (--alerts)" {
   _alerts_fixture
   _file package.json '{}'
-  _file pnpm-workspace.yaml 'overrides:
+  _file pnpm-workspace.yaml 'minimumReleaseAge: 7200
+overrides:
   tinypool: 2.1.0'
   echo '[{"number": 9, "state": "open", "dependency": {"package": {"ecosystem": "npm", "name": "tinypool"}}, "security_vulnerability": null}]' > "$ALERTS"
   run scripts/dependabot/verify-dependabot-coverage --root "$ROOT" --config "$CFG" --alerts "$ALERTS"
@@ -400,4 +405,111 @@ JSON
   run scripts/dependabot/verify-dependabot-coverage --root "$ROOT" --config "$CFG" --alerts "$ALERTS"
   [ "$status" -ne 0 ]
   [[ "$output" != *"dependabot-coverage: OK"* ]]
+}
+
+@test "alert range this check cannot parse is reported, not guessed (--alerts)" {
+  _alerts_fixture
+  _file package.json '{}'
+  _file pnpm-workspace.yaml 'minimumReleaseAge: 7200
+overrides:
+  tinypool: 2.1.0'
+  echo '[{"number": 7, "state": "open", "dependency": {"package": {"ecosystem": "npm", "name": "tinypool"}}, "security_advisory": {"ghsa_id": "GHSA-z"}, "security_vulnerability": {"vulnerable_version_range": ">=1.0.0 <3.0.0 || 4.x"}}]' > "$ALERTS"
+  run scripts/dependabot/verify-dependabot-coverage --root "$ROOT" --config "$CFG" --alerts "$ALERTS"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'override "tinypool": 2.1.0 pins tinypool, and open alert #7 (GHSA-z) has a range this check cannot parse'* ]]
+}
+
+@test "go.mod needs a gomod entry for its directory" {
+  _file tools/i18n/go.mod 'module example.com/i18n'
+  cat > "$CFG" <<'YAML'
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /tools
+    schedule: {interval: weekly}
+    cooldown: {default-days: 5}
+YAML
+  _check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tools/i18n/go.mod is not covered: add a 'gomod' update entry for directory '/tools/i18n'"* ]]
+  sed -i.bak 's#directory: /tools#directory: /tools/i18n#' "$CFG"
+  _check
+  [ "$status" -eq 0 ]
+}
+
+@test "semver cooldown shorter than default-days fails" {
+  _file a/go.mod 'module a'
+  cat > "$CFG" <<'YAML'
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /a
+    schedule: {interval: weekly}
+    cooldown: {default-days: 5, semver-major-days: 2}
+YAML
+  _check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'sets cooldown.semver-major-days=2, shorter than default-days=5'* ]]
+}
+
+@test "pnpm minimumReleaseAge below 3 days (or missing) fails" {
+  _file pnpm-workspace.yaml 'minimumReleaseAge: 2880'
+  cat > "$CFG" <<'YAML'
+version: 2
+updates: []
+YAML
+  _check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"minimumReleaseAge is '2880'; it needs >= 4320"* ]]
+  _file pnpm-workspace.yaml 'packages: [.]'
+  _check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"minimumReleaseAge is '0'"* ]]
+}
+
+@test "the real config keeps a 14-day major cooldown wherever it's supported" {
+  run yq -o=json '.updates' .github/dependabot.yml
+  [ "$status" -eq 0 ]
+  run jq -r '.[] | select(.["package-ecosystem"] != "github-actions" and .["package-ecosystem"] != "docker")
+    | select((.cooldown["default-days"] // 0) < 5 or (.cooldown["semver-major-days"] // 0) < 14)
+    | .["package-ecosystem"]' <<<"$output"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "pyproject.toml with dependencies needs pip; tool-config-only is ignored" {
+  _file svc/pyproject.toml '[project]
+name = "svc"
+dependencies = ["httpx>=0.28"]'
+  _file skills/pyproject.toml '[tool.ruff]
+line-length = 100'
+  cat > "$CFG" <<'YAML'
+version: 2
+updates: []
+YAML
+  _check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"svc/pyproject.toml is not covered: add a 'pip' update entry"* ]]
+  [[ "$output" != *"skills/pyproject.toml"* ]]
+}
+
+@test "Gradle build files are covered by the project root's gradle entry" {
+  _file apps/android/settings.gradle.kts ''
+  _file apps/android/app/build.gradle.kts ''
+  _file apps/android/gradle/libs.versions.toml ''
+  _file tools/lone/build.gradle ''
+  cat > "$CFG" <<'YAML'
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /apps/android
+    schedule: {interval: weekly}
+    cooldown: {default-days: 5}
+YAML
+  _check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"tools/lone/build.gradle is not covered"* ]]
+  [[ "$output" != *"apps/android/app"* ]]
+  [[ "$output" != *"libs.versions.toml"* ]]
+  [[ "$output" == *"1 violation(s)"* ]]
 }

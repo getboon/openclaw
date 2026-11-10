@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# Tests for scripts/dependabot/dependabot-merge-decision (ENG-22470, ported from boon ENG-22137): the rules that decide
+# Tests for scripts/dependabot/dependabot-merge-decision: the rules that decide
 # whether a Dependabot PR may auto-merge.
 
 setup() {
@@ -178,7 +178,7 @@ _assert_source_blocked() {
   [ "$status" -eq 2 ]
 }
 
-# --- openclaw (ENG-22470) ---------------------------------------------------
+# --- openclaw-specific rules -----------------------------------------------
 
 @test "pnpm-workspace.yaml change blocks (allowBuilds, overrides, minimumReleaseAge)" {
   printf '%s\n' package.json pnpm-lock.yaml pnpm-workspace.yaml > "$FILES"
@@ -186,7 +186,7 @@ _assert_source_blocked() {
   [ "$output" = "skip: non-dependency file pnpm-workspace.yaml" ]
 }
 
-@test "Dockerfile change blocks (base images need a human, ENG-22139)" {
+@test "Dockerfile change blocks (base images need a human)" {
   printf 'Dockerfile\n' > "$FILES"
   _decide version-update:semver-patch on
   [ "$output" = "skip: non-dependency file Dockerfile" ]
@@ -282,7 +282,7 @@ _assert_source_blocked() {
   [ "$output" = "merge" ]
   printf '%s\n' '+evil-lib = { module = "com.evil:lib", version = "1.0.0" }' >> "$DIFF"
   _decide version-update:semver-patch on
-  [ "$output" = "skip: new dependency evil-lib in apps/android/gradle/libs.versions.toml" ]
+  [ "$output" = "skip: new dependency evil-lib@com.evil:lib in apps/android/gradle/libs.versions.toml" ]
 }
 
 @test "gradle build file: coordinate bump → merge; new coordinate or repository blocks" {
@@ -331,4 +331,85 @@ _assert_source_blocked() {
   printf '%s\n' '--- a/my app/package.json' "+++ b/my app/package.json	" '+    "left-pad": "1.3.0",' > "$DIFF"
   _decide version-update:semver-patch on
   [ "$output" = "skip: new dependency left-pad in my app/package.json" ]
+}
+
+# _spec_change SPEC — package.json changes an existing dependency to SPEC.
+_spec_change() {
+  printf '%s\n' package.json pnpm-lock.yaml > "$FILES"
+  printf '%s\n' '--- a/package.json' '+++ b/package.json' \
+    '-    "zod": "4.6.7",' "+    \"zod\": \"$1\"," > "$DIFF"
+  _decide version-update:semver-patch on
+}
+
+@test "package.json dependency switched to a git/URL/file/GitHub source blocks" {
+  for spec in "git+https://github.com/evil/zod.git#v4" "git@github.com:evil/zod.git" \
+    "https://evil.example/zod.tgz" "file:../evil" "link:../evil" "github:evil/zod" "evil/zod#main"; do
+    _spec_change "$spec"
+    [ "$output" = "skip: new package source $spec" ]
+  done
+}
+
+@test "package.json registry versions, ranges, dist-tags and npm: aliases pass" {
+  for spec in "4.6.8" "^4.6.8" ">=4.6.8 <5" "latest" "npm:zod@4.6.8"; do
+    _spec_change "$spec"
+    [ "$output" = "merge" ]
+  done
+}
+
+@test "an unchanged non-registry specifier on a moved line passes" {
+  printf '%s\n' package.json > "$FILES"
+  printf '%s\n' '+++ b/package.json' '-    "x": "github:org/x",' '+    "x": "github:org/x",' > "$DIFF"
+  _decide version-update:semver-patch on
+  [ "$output" = "merge" ]
+}
+
+@test "gradle catalog alias pointed at another module blocks" {
+  printf 'apps/android/gradle/libs.versions.toml\n' > "$FILES"
+  printf '%s\n' '+++ b/apps/android/gradle/libs.versions.toml' \
+    '-okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }' \
+    '+okhttp = { module = "com.evil:okhttp", version.ref = "okhttp" }' > "$DIFF"
+  _decide version-update:semver-patch on
+  [ "$output" = "skip: new dependency okhttp@com.evil:okhttp in apps/android/gradle/libs.versions.toml" ]
+}
+
+@test "gradle catalog version change with group/name form passes" {
+  printf 'apps/android/gradle/libs.versions.toml\n' > "$FILES"
+  printf '%s\n' '+++ b/apps/android/gradle/libs.versions.toml' \
+    '-okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version = "5.1.0" }' \
+    '+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version = "5.2.0" }' > "$DIFF"
+  _decide version-update:semver-minor on
+  [ "$output" = "merge" ]
+}
+
+@test "new gem in Gemfile blocks; version change passes" {
+  printf '%s\n' Gemfile Gemfile.lock > "$FILES"
+  printf '%s\n' '+++ b/Gemfile' "-gem 'rack', '~> 3.1.0'" "+gem 'rack', '~> 3.1.2'" > "$DIFF"
+  _decide version-update:semver-patch on
+  [ "$output" = "merge" ]
+  printf '%s\n' '+gem "evil"' >> "$DIFF"
+  _decide version-update:semver-patch on
+  [ "$output" = "skip: new dependency evil in Gemfile" ]
+}
+
+@test "new package in requirements.txt blocks; version change passes" {
+  printf 'requirements.txt\n' > "$FILES"
+  printf '%s\n' '+++ b/requirements.txt' '-requests==2.32.3' '+requests==2.32.4' > "$DIFF"
+  _decide version-update:semver-patch on
+  [ "$output" = "merge" ]
+  printf '%s\n' '+evil-pkg[extra]>=1.0' >> "$DIFF"
+  _decide version-update:semver-patch on
+  [ "$output" = "skip: new dependency evil-pkg in requirements.txt" ]
+}
+
+@test "new dependency in pyproject.toml blocks (PEP 621 and Poetry); version change passes" {
+  printf 'pyproject.toml\n' > "$FILES"
+  printf '%s\n' '+++ b/pyproject.toml' '-  "httpx>=0.27.0",' '+  "httpx>=0.28.1",' > "$DIFF"
+  _decide version-update:semver-minor on
+  [ "$output" = "merge" ]
+  printf '%s\n' '+  "evil>=1.0",' >> "$DIFF"
+  _decide version-update:semver-minor on
+  [ "$output" = "skip: new dependency evil in pyproject.toml" ]
+  printf '%s\n' '+++ b/pyproject.toml' '+evil = "^1.0"' > "$DIFF"
+  _decide version-update:semver-minor on
+  [ "$output" = "skip: new dependency evil in pyproject.toml" ]
 }

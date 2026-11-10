@@ -4,20 +4,21 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # scripts/dependabot/dependabot-digest-message — the Slack text for the weekly Dependabot thread.
 #
-# Called by .github/workflows/dependabot-digest.yml (ENG-22470, ported from
-# getboon/boon ENG-22137). Dependabot PRs get one Slack thread per week
-# instead of a message each: the first post of the week lists every open
-# Dependabot PR, and later posts (thread replies) list only PRs that are new
-# or have a new head commit.
+# Called by .github/workflows/dependabot-digest.yml. Dependabot PRs get one
+# Slack thread per week instead of a message each: the first post of the week
+# lists every open Dependabot PR, and later posts (thread replies) list only
+# PRs that are new or have a new head commit.
 #
 # Each PR goes under one heading:
 #   Ready for review       auto-merge is on, no approval of the current head
 #                          yet. Gandalf the White is tagged (once) to review.
-#   Approved, waiting      auto-merge is on and the current head is approved;
-#   for CI                 GitHub merges when required checks pass.
+#   Approved, waiting      auto-merge is on and the current head is approved
+#   for CI                 (by anyone the `boon` ruleset accepts); GitHub
+#                          merges when required checks pass.
 #   Needs a human          auto-merge is off: a major, a GitHub Actions bump,
 #                          a PR the rules in scripts/dependabot/dependabot-merge-decision
 #                          skipped, or every PR while the kill switch is off.
+#                          Also any PR a reviewer requested changes on.
 #                          On-call is tagged (once) to review and merge, and
 #                          asks the CODEOWNERS if they have a concern.
 # Each PR shows its short head commit and how many days it has been open.
@@ -74,11 +75,16 @@ rows="$(jq -c --rawfile announced "$ANNOUNCED" --arg mode "$MODE" --argjson now 
   | select($mode == "full" or ((("\(.number)@\(.headRefOid)") as $k | $seen | index($k)) == null))
   | . as $pr
   | (any(.reviews[]?; .state == "APPROVED" and .commit.oid == $pr.headRefOid)) as $approved
+  # A reviewer whose latest verdict is "changes requested" blocks the merge
+  # whatever else is approved, so the PR needs a human, not just CI. Reviews
+  # come oldest first and group_by is stable, so `last` is the latest.
+  | ([.reviews[]? | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED")]
+     | group_by(.author.login) | map(last) | any(.state == "CHANGES_REQUESTED")) as $changes_requested
   | {
       number, url, sha: (.headRefOid[0:7]),
       age: (if .createdAt then " [age=\((($now - (.createdAt | fromdateiso8601)) / 86400) | floor)d]" else "" end),
       title: (.title | gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;")),
-      bucket: (if .autoMergeRequest == null then "human"
+      bucket: (if .autoMergeRequest == null or $changes_requested then "human"
                elif $approved then "approved"
                else "ready" end)
     }

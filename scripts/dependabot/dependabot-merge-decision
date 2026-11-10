@@ -3,17 +3,17 @@ set -euo pipefail
 
 # ---------------------------------------------------------------------------
 # scripts/dependabot/dependabot-merge-decision — may this Dependabot PR
-# auto-merge? Ported from getboon/boon bin/dependabot-merge-decision
-# (ENG-22137) for openclaw (ENG-22470).
+# auto-merge?
 #
 # Called by .github/workflows/dependabot-auto-merge.yml. Auto-merge means a
 # new package version can reach `boon` with no human looking at it. The 2025
 # npm supply-chain attacks (hijacked chalk/debug, the Shai-Hulud worm) worked
 # exactly that way, so the rules are deliberately narrow:
 #   1. the kill switch (repo variable DEPENDABOT_AUTOMERGE) is exactly "on";
-#   2. every commit on the branch is a verified Dependabot commit (the update
-#      type below is parsed from Dependabot's commit metadata, and a human push
-#      onto the branch must not ride through unreviewed);
+#   2. every commit on the branch is a verified Dependabot commit: authored by
+#      dependabot[bot] and committed by GitHub (web-flow). The update type
+#      below is parsed from Dependabot's commit metadata, and a human push onto
+#      the branch must not ride through unreviewed;
 #   3. the update is a semver patch or minor (fetch-metadata reports a grouped
 #      PR's highest level, so a group containing a major is refused);
 #   4. every changed file is a dependency manifest/lockfile. GitHub Actions
@@ -21,26 +21,31 @@ set -euo pipefail
 #      hijacked action tag (tj-actions/changed-files, 2025) needs a human.
 #      pnpm-workspace.yaml is refused too: besides the workspace list it holds
 #      allowBuilds (which packages may run install scripts), overrides and
-#      minimumReleaseAge, so a change there needs a human. Dockerfiles
-#      (base images, ENG-22139) and Gradle settings/wrapper files (they hold
-#      repositories and the Gradle distribution URL) also need a human;
+#      minimumReleaseAge, so a change there needs a human. Dockerfiles (base
+#      images are rebuilt on their own schedule) and Gradle settings/wrapper
+#      files (they hold repositories and the Gradle distribution URL) also
+#      need a human;
 #   5. every added diff line that names a package source names an allowlisted
 #      registry, or a source the same diff removes (a bump of a package we
 #      already pull from that place, e.g. a Swift package's git URL). Git,
-#      ssh, file:, directory and direct-URL sources are otherwise refused;
+#      ssh, file:, directory and direct-URL sources are otherwise refused,
+#      including as a package.json dependency specifier;
 #   6. the PR adds no new direct dependency: in package.json, go.mod,
-#      libs.versions.toml and build.gradle(.kts), every dependency an added
-#      line names is also named on a removed line of the same file (a version
-#      change, not a new entry). New transitive entries in lockfiles are
-#      allowed: they come from an allowlisted registry (rule 5) and are pulled
-#      in by the bumped package.
+#      libs.versions.toml, build.gradle(.kts), Gemfile, requirements.txt and
+#      pyproject.toml, every dependency an added line names is also named on a
+#      removed line of the same file (a version change, not a new entry). A
+#      version-catalog entry is identified by its alias AND its module, so an
+#      alias can't be pointed at another artifact. New transitive entries in
+#      lockfiles are allowed: they come from an allowlisted registry (rule 5)
+#      and are pulled in by the bumped package.
 # The cooldown in .github/dependabot.yml and pnpm's minimumReleaseAge are the
 # other half of the defense.
 #
 # Usage:
 #   scripts/dependabot/dependabot-merge-decision --update-type TYPE --kill-switch VALUE \
 #     --files CHANGED_PATHS_FILE --diff UNIFIED_DIFF_FILE --foreign-commits N
-#   (N = number of PR commits not authored by dependabot[bot] or not verified)
+#   (N = number of PR commits not authored by dependabot[bot], not committed
+#    by web-flow, or not verified)
 #
 # Prints exactly one line: "merge" or "skip: <reason>", and exits 0 either way.
 # Exits 2 on bad arguments.
@@ -117,11 +122,32 @@ source_of() {
   fi
 }
 
+# specifier_source FILE LINE — for a package.json `"name": "<spec>"` line,
+# print "spec:<spec>" when the specifier points somewhere other than the
+# registry (git, URL, file, link, workspace, or a "user/repo" GitHub
+# shorthand). A registry version, range, dist-tag or npm: alias prints nothing.
+specifier_source() {
+  local file="$1" line="$2" spec
+  [ "$(basename "$file")" = "package.json" ] || return 0
+  [[ "$line" =~ ^[+-][[:space:]]*\"[^\"]+\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]] || return 0
+  spec="${BASH_REMATCH[1]}"
+  case "$spec" in
+    npm:*) return 0 ;;
+    git+*|git:*|git@*|http:*|https:*|file:*|link:*|portal:*|workspace:*|github:*|gitlab:*|bitbucket:*|gist:*|ssh:*)
+      echo "spec:$spec" ;;
+    */*) [[ "$spec" =~ [[:space:]] ]] || echo "spec:$spec" ;;
+  esac
+  return 0
+}
+
 # dep_key FILE LINE — print the direct dependency a manifest line names, or nothing.
 #   package.json        "name": "version"
-#   go.mod              [require] module/path vX.Y.Z
-#   libs.versions.toml  key = ...
+#   go.mod              [require] module/path vX.Y.Z     (not "// indirect")
+#   libs.versions.toml  alias = { module = "g:a", ... }  -> alias@g:a
 #   build.gradle(.kts)  "group:artifact:version"
+#   Gemfile             gem "name", ...
+#   requirements.txt    name[extras]==1.2 (any PEP 508 operator)
+#   pyproject.toml      "name>=1.2", (PEP 621 list) or name = "^1.2" (Poetry)
 dep_key() {
   local file="$1" line="$2"
   case "$(basename "$file")" in
@@ -132,9 +158,26 @@ dep_key() {
       [[ "$line" =~ //[[:space:]]*indirect ]] && return 0
       [[ "$line" =~ ^[+-][[:space:]]*(require[[:space:]]+)?([^[:space:]()]+)[[:space:]]+v[0-9][^[:space:]]*([[:space:]]|$) ]] && echo "${BASH_REMATCH[2]}" ;;
     libs.versions.toml)
-      [[ "$line" =~ ^[+-][[:space:]]*([A-Za-z0-9_.-]+)[[:space:]]*= ]] && echo "${BASH_REMATCH[1]}" ;;
+      [[ "$line" =~ ^[+-][[:space:]]*([A-Za-z0-9_.-]+)[[:space:]]*= ]] || return 0
+      local alias="${BASH_REMATCH[1]}" target=""
+      if [[ "$line" =~ (module|id)[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+        target="${BASH_REMATCH[2]}"
+      elif [[ "$line" =~ group[[:space:]]*=[[:space:]]*\"([^\"]+)\".*name[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+        target="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"
+      fi
+      echo "$alias@$target" ;;
     build.gradle|build.gradle.kts)
       [[ "$line" =~ [\"\']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+):[^\"\']+[\"\'] ]] && echo "${BASH_REMATCH[1]}" ;;
+    Gemfile)
+      [[ "$line" =~ ^[+-][[:space:]]*gem[[:space:]]+[\"\']([^\"\']+)[\"\'] ]] && echo "${BASH_REMATCH[1]}" ;;
+    requirements*.txt)
+      [[ "$line" =~ ^[+-][[:space:]]*([A-Za-z0-9][A-Za-z0-9_.-]*)[[:space:]]*(\[[^]]*\])?[[:space:]]*(===|==|>=|<=|~=|!=|<|>|@|;|$) ]] && echo "${BASH_REMATCH[1]}" ;;
+    pyproject.toml)
+      if [[ "$line" =~ ^[+-][[:space:]]*[\"\']([A-Za-z0-9][A-Za-z0-9_.-]*)[[:space:]]*(\[[^]]*\])?[[:space:]]*([\<\>=!~\;@]|[\"\']) ]]; then
+        echo "${BASH_REMATCH[1]}"
+      elif [[ "$line" =~ ^[+-][[:space:]]*([A-Za-z0-9][A-Za-z0-9_.-]*)[[:space:]]*= ]]; then
+        echo "${BASH_REMATCH[1]}"
+      fi ;;
   esac
   return 0
 }
@@ -187,6 +230,7 @@ while IFS= read -r line; do
     *) continue ;;
   esac
   src="$(source_of "$line")"
+  [ -n "$src" ] || src="$(specifier_source "$current" "$line")"
   [ -z "$src" ] || removed_sources+="$src"$'\n'
   key="$(dep_key "$current" "$line")"
   [ -z "$key" ] || removed_keys+="$current	$key"$'\n'
@@ -203,11 +247,12 @@ while IFS= read -r line; do
 
   # 5. Every source named on an added line is allowlisted or already used.
   src="$(source_of "$line")"
+  [ -n "$src" ] || src="$(specifier_source "$current" "$line")"
   if [ -n "$src" ]; then
     case "$src" in
       never:*) decide "skip: new package source ${src#never:}" ;;
     esac
-    allowed_source "$src" || grep -qFx -- "$src" <<<"$removed_sources" || decide "skip: new package source $src"
+    allowed_source "$src" || grep -qFx -- "$src" <<<"$removed_sources" || decide "skip: new package source ${src#spec:}"
   fi
 
   # 6. No new direct dependency.

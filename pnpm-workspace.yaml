@@ -5,8 +5,14 @@ packages:
   - extensions/*
 
 # 5 days, the same supply-chain wait as the Dependabot cooldown in
-# .github/dependabot.yml (ENG-22470): hijacked npm releases (chalk/debug,
+# .github/dependabot.yml: hijacked npm releases (chalk/debug,
 # Shai-Hulud, 2025) were usually pulled within that window.
+# Security fixes: Dependabot does not read this setting, so a security PR for
+# a release younger than 5 days fails CI's frozen install
+# (ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION). Push a commit to that PR adding
+# the exact "name@version" to minimumReleaseAgeExclude below, with the GHSA
+# id and a remove-after date. Any change here routes the PR to a human
+# (scripts/dependabot/dependabot-merge-decision), so it gets reviewed.
 minimumReleaseAge: 7200
 
 minimumReleaseAgeExclude:
@@ -218,7 +224,7 @@ overrides:
   # @openclaw/crabline) declare their own zod@4.x range that still resolves
   # to the vulnerable 4.4.3. Scoped to the "4" line only — zod@3.25.76
   # (a2ui/web_core's own dependency, unaffected by this range) is untouched.
-  # Dependabot alert #285 stays open on purpose (ENG-22470): the advisory's
+  # The Dependabot alert for zod 3 stays open on purpose: the advisory's
   # range is <4.6.6, so every 3.x is "vulnerable", there is no patched 3.x,
   # and every @a2ui/web_core release (0.10.x-0.15.x) still declares
   # zod ^3.25.76. Forcing zod 4 onto a2ui would break it. Revisit when a2ui

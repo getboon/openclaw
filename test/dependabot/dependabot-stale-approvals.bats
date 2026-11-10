@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# Tests for scripts/dependabot/dependabot-stale-approvals (ENG-22470, ported from boon ENG-22137): which approvals were
+# Tests for scripts/dependabot/dependabot-stale-approvals: which approvals were
 # given to an older commit and must be dismissed before auto-merge is re-enabled.
 # main does not dismiss stale approvals itself, so without this an approval of
 # an earlier head would still count for a newer one.
@@ -32,6 +32,7 @@ _stale() {
 @test "comments and already-dismissed reviews are ignored" {
   echo '[{"id":13,"state":"COMMENTED","commit_id":"old1"},{"id":14,"state":"DISMISSED","commit_id":"old1"},{"id":15,"state":"CHANGES_REQUESTED","commit_id":"old1"}]' > "$REVIEWS"
   _stale
+  [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
 

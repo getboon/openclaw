@@ -1,7 +1,7 @@
 ---
 # .github/workflows/dependabot-scripts.yml
 # Tests the Dependabot scripts and keeps .github/dependabot.yml covering every
-# dependency file (ENG-22470, ported from getboon/boon's testShellScripts job).
+# dependency file.
 #
 # `bats test/dependabot/` runs the scripts' tests, including "passes on the
 # real committed config", which runs scripts/dependabot/verify-dependabot-coverage
@@ -27,6 +27,10 @@ on: # yamllint disable-line rule:truthy
       - "**/Package.swift"
       - "**/settings.gradle"
       - "**/settings.gradle.kts"
+      - "**/build.gradle"
+      - "**/build.gradle.kts"
+      - "**/libs.versions.toml"
+      - "**/pyproject.toml"
       - "**/Gemfile.lock"
       - "**/uv.lock"
       - "**/go.mod"
@@ -46,6 +50,10 @@ on: # yamllint disable-line rule:truthy
       - "**/Package.swift"
       - "**/settings.gradle"
       - "**/settings.gradle.kts"
+      - "**/build.gradle"
+      - "**/build.gradle.kts"
+      - "**/libs.versions.toml"
+      - "**/pyproject.toml"
       - "**/Gemfile.lock"
       - "**/uv.lock"
       - "**/go.mod"

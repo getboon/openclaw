@@ -3,24 +3,28 @@ set -euo pipefail
 
 # ---------------------------------------------------------------------------
 # scripts/dependabot/verify-dependabot-coverage — keep .github/dependabot.yml
-# honest. Ported from getboon/boon bin/verify-dependabot-coverage (ENG-22137)
-# for openclaw (ENG-22470).
+# honest.
 #
-# Dependabot only fixes what its config points at, and it fails silently. In
-# 2026 boon had open alerts in lockfiles no update entry covered, and its
-# bundler job had been failing on every run for months; nothing in CI noticed.
-# openclaw's alerts sat behind pnpm overrides, which Dependabot never rewrites.
-# This checker fails the build when:
+# Dependabot only fixes what its config points at, and it fails silently: an
+# uncovered lockfile or a rejected config just means alerts that never become
+# PRs, and pnpm overrides (which Dependabot never rewrites) block fixes the
+# same way. This checker fails the build when:
 #   1. a tracked dependency file's directory has no update entry for its
 #      ecosystem (package-lock.json/pnpm-lock.yaml/yarn.lock → npm,
 #      Package.resolved/Package.swift → swift, settings.gradle(.kts) → gradle,
 #      Gemfile.lock → bundler, uv.lock → uv, requirements*.txt → pip unless a
-#      uv.lock sits beside it, go.mod → gomod). node_modules/ and vendor/ are
-#      ignored, and so are Dockerfiles (base images belong to ENG-22139) and
-#      npm-shrinkwrap.json in a pnpm repo (generated from pnpm-lock.yaml by
-#      scripts/generate-npm-shrinkwrap.mjs, so the root npm entry covers it);
-#   2. an update entry has no cooldown, or cooldown.default-days < 3 (the
-#      supply-chain wait before taking a fresh release);
+#      uv.lock sits beside it, pyproject.toml that declares dependencies → pip
+#      unless a uv.lock sits beside it, go.mod → gomod). A build.gradle(.kts)
+#      or libs.versions.toml is covered by a gradle entry for its own
+#      directory or any parent (the Gradle project root). node_modules/ and
+#      vendor/ are ignored, and so are Dockerfiles (base images are rebuilt
+#      on their own schedule) and npm-shrinkwrap.json in a pnpm repo
+#      (generated from pnpm-lock.yaml by scripts/generate-npm-shrinkwrap.mjs,
+#      so the root npm entry covers it);
+#   2. an update entry has no cooldown, cooldown.default-days < 3 (the
+#      supply-chain wait before taking a fresh release), or a
+#      cooldown.semver-*-days shorter than default-days; or pnpm-workspace.yaml
+#      sets minimumReleaseAge below 4320 minutes (the same 3 days for pnpm);
 #   3. a covered Gemfile pulls from a private `source "https://…"` that no
 #      rubygems-server registry (listed on that bundler entry) points at;
 #   4. a github-actions or docker entry sets cooldown.semver-*-days. Dependabot
@@ -28,7 +32,8 @@ set -euo pipefail
 #      ecosystem stops updating;
 #   5. (only with --alerts) a pnpm override (pnpm-workspace.yaml `overrides`
 #      or package.json `pnpm.overrides`) pins an exact version that an open
-#      npm Dependabot alert says is vulnerable. Dependabot does not rewrite
+#      npm Dependabot alert says is vulnerable, or the alert's range can't be
+#      parsed (it must then be checked by hand). Dependabot does not rewrite
 #      overrides, so such a pin blocks every fix until someone bumps it.
 #
 # Usage:
@@ -93,26 +98,46 @@ fail() { echo "dependabot-coverage: $*" >&2; violations=$((violations + 1)); }
 
 dir_of() { local d; d="$(dirname "$1")"; if [ "$d" = "." ]; then echo "/"; else echo "/$d"; fi; }
 is_covered() { grep -qFx "$1	$2" <<<"$COVERED"; }
+# is_covered_up ECO DIR — covered at DIR or any parent directory.
+is_covered_up() {
+  local d="$2"
+  while :; do
+    is_covered "$1" "$d" && return 0
+    [ "$d" = "/" ] && return 1
+    d="$(dirname "$d")"
+  done
+}
+has_sibling() { local s; s="$(dirname "$1")/$2"; grep -qFx "${s#./}" <<<"$FILES"; }
 
 # 1. Every dependency file is covered by an entry of the right ecosystem.
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  eco=""
+  eco="" up=0
   case "$(basename "$f")" in
     package-lock.json|pnpm-lock.yaml|yarn.lock) eco=npm ;;
     npm-shrinkwrap.json) grep -qFx "pnpm-lock.yaml" <<<"$FILES" || eco=npm ;;
     Package.resolved|Package.swift) eco=swift ;;
     settings.gradle|settings.gradle.kts) eco=gradle ;;
+    build.gradle|build.gradle.kts|libs.versions.toml) eco=gradle up=1 ;;
     Gemfile.lock) eco=bundler ;;
     uv.lock) eco=uv ;;
     go.mod) eco=gomod ;;
-    requirements*.txt)
-      sibling_uv="$(dirname "$f")/uv.lock"; sibling_uv="${sibling_uv#./}"
-      grep -qFx "$sibling_uv" <<<"$FILES" || eco=pip ;;
+    requirements*.txt) has_sibling "$f" uv.lock || eco=pip ;;
+    pyproject.toml)
+      # Only a project that declares dependencies; a tool-config-only
+      # pyproject (ruff/pytest settings) has nothing for Dependabot to update.
+      if ! has_sibling "$f" uv.lock \
+        && grep -qE '^[[:space:]]*(dependencies[[:space:]]*=|\[tool\.poetry\.dependencies\]|\[project\.optional-dependencies\])' "$ROOT/$f"; then
+        eco=pip
+      fi ;;
   esac
   [ -n "$eco" ] || continue
   dir="$(dir_of "$f")"
-  is_covered "$eco" "$dir" || fail "$f is not covered: add a '$eco' update entry for directory '$dir'"
+  if [ "$up" -eq 1 ]; then
+    is_covered_up "$eco" "$dir" || fail "$f is not covered: add a '$eco' update entry for its Gradle project root ('$dir' or a parent)"
+  else
+    is_covered "$eco" "$dir" || fail "$f is not covered: add a '$eco' update entry for directory '$dir'"
+  fi
 done <<<"$FILES"
 
 # Each jq check below runs in a plain $(...) assignment, not a `< <(...)`
@@ -128,6 +153,25 @@ short_cooldowns="$(jq -r "$JQ_DEFS"'
 while IFS= read -r entry; do
   [ -z "$entry" ] || fail "update entry '$entry' needs cooldown.default-days >= 3"
 done <<<"$short_cooldowns"
+
+#    A semver-*-days override may lengthen the wait, never shorten it.
+short_semver="$(jq -r "$JQ_DEFS"'
+  (.updates // [])[]
+  | . as $e | (.cooldown // {}) as $c
+  | $c | to_entries[]
+  | select((.key | startswith("semver-")) and .value < ($c["default-days"] // 0))
+  | "update entry \"\($e["package-ecosystem"]) \($e | dirs | join(","))\" sets cooldown.\(.key)=\(.value), shorter than default-days=\($c["default-days"])"
+' <<<"$CONFIG_JSON")"
+while IFS= read -r msg; do
+  [ -z "$msg" ] || fail "$msg"
+done <<<"$short_semver"
+
+#    pnpm's own wait applies to every install, including a human's.
+if [ -f "$ROOT/pnpm-workspace.yaml" ]; then
+  release_age="$(yq '.minimumReleaseAge // 0' "$ROOT/pnpm-workspace.yaml")"
+  [[ "$release_age" =~ ^[0-9]+$ ]] && [ "$release_age" -ge 4320 ] \
+    || fail "pnpm-workspace.yaml minimumReleaseAge is '$release_age'; it needs >= 4320 (3 days)"
+fi
 
 # 3. Private gem sources need a rubygems-server registry listed on the entry.
 while IFS= read -r lock; do
@@ -179,7 +223,12 @@ if [ -n "$ALERTS" ]; then
     # "1.2.3" -> [1,2,3]. A prerelease/build tag is dropped: GitHub advisory
     # ranges for npm name release versions.
     def ver: sub("^v"; "") | split("+")[0] | split("-")[0] | split(".") | map(tonumber? // 0);
-    # GitHub ranges look like ">= 0.9.0, < 0.10.2", "<= 2.1.0" or "= 1.0.0".
+    # GitHub ranges look like ">= 0.9.0, < 0.10.2", "<= 2.1.0" or "= 1.0.0":
+    # comma-separated comparators that must all hold. Anything else (spaces
+    # between comparators, "||", wildcards) is reported, never guessed at.
+    def parsable:
+      split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))
+      | length > 0 and all(.[]; test("^(>=|<=|>|<|=)?\\s*v?[0-9]+(\\.[0-9]+)*([-+][0-9A-Za-z.-]+)?$"));
     def in_range($v):
       split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))
       | all(.[]; capture("^(?<op>>=|<=|>|<|=)?\\s*(?<ver>\\S+)$") as $c
@@ -213,8 +262,12 @@ if [ -n "$ALERTS" ]; then
     | (.value | pin($key)) as [$name, $version]
     | $open[]
     | select(.dependency.package.name == $name)
-    | select(.security_vulnerability.vulnerable_version_range | in_range($version | ver))
-    | "override \"\($key)\": \($version) pins \($name) inside open alert #\(.number) (\(.security_advisory.ghsa_id), vulnerable \(.security_vulnerability.vulnerable_version_range), fixed in \(.security_vulnerability.first_patched_version.identifier // "no release yet")): Dependabot cannot bump an override, so bump it by hand"
+    | .security_vulnerability.vulnerable_version_range as $range
+    | if ($range | parsable | not) then
+        "override \"\($key)\": \($version) pins \($name), and open alert #\(.number) (\(.security_advisory.ghsa_id)) has a range this check cannot parse (\($range)): compare them by hand"
+      elif ($range | in_range($version | ver)) then
+        "override \"\($key)\": \($version) pins \($name) inside open alert #\(.number) (\(.security_advisory.ghsa_id), vulnerable \($range), fixed in \(.security_vulnerability.first_patched_version.identifier // "no release yet")): Dependabot cannot bump an override, so bump it by hand"
+      else empty end
   ' "$ALERTS")"
   while IFS= read -r msg; do
     [ -z "$msg" ] || fail "$msg"

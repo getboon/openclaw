@@ -1,7 +1,6 @@
 ---
 # .github/workflows/dependabot-digest.yml
-# One Slack thread per week for Dependabot PRs (ENG-22470, ported from
-# getboon/boon ENG-22137; epic ENG-22136).
+# One Slack thread per week for Dependabot PRs.
 #
 # Dependabot opens its version-update PRs on Monday morning (schedule.time in
 # .github/dependabot.yml) and dependabot-auto-merge.yml decides each one
@@ -48,7 +47,7 @@ jobs:
     timeout-minutes: 5
     env:
       # #engineering-alerts. A channel ID isn't sensitive; the SLACK_API_TOKEN
-      # bot is already a member (boon's digest and agent-regression post there).
+      # bot is already a member (other repos' digests post there too).
       SLACK_CHANNEL_ID: C060YRESPB5
       STATE_DIR: .dependabot-digest
     steps:
@@ -76,7 +75,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$STATE_DIR"
           touch "$STATE_DIR/announced.txt"
-          gh pr list --repo "$REPO" --author app/dependabot --state open --limit 100 \
+          gh pr list --repo "$REPO" --author app/dependabot --state open --limit 1000 \
             --json number,title,url,createdAt,headRefOid,autoMergeRequest,reviews > "$RUNNER_TEMP/prs.json"
 
       - name: Post to Slack

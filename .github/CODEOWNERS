@@ -70,9 +70,9 @@
 /scripts/openclaw-npm-release-check.ts @openclaw/openclaw-release-managers
 /scripts/release-check.ts @openclaw/openclaw-release-managers
 
-# Dependabot auto-merge (ENG-22470, same owners as getboon/boon ENG-22137).
-# Last match wins, so these replace the upstream secops owner on dependabot.yml.
-/.github/dependabot.yml @jerhinesmith @insomnius
+# Dependabot auto-merge automation.
+# Last match wins, so the dependabot.yml line repeats the secops owner above.
+/.github/dependabot.yml @openclaw/openclaw-secops @jerhinesmith @insomnius
 /.github/workflows/dependabot-auto-merge.yml @jerhinesmith @insomnius
 /.github/workflows/dependabot-digest.yml @jerhinesmith @insomnius
 /.github/workflows/dependabot-scripts.yml @jerhinesmith @insomnius

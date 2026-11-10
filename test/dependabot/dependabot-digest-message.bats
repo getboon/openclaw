@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# Tests for scripts/dependabot/dependabot-digest-message (ENG-22470, ported from boon ENG-22137): builds the one Slack
+# Tests for scripts/dependabot/dependabot-digest-message: builds the one Slack
 # thread per week that lists every open Dependabot PR. The weekly post lists
 # them all; later posts that week (thread replies) list only PRs that are new
 # or have a new head commit, and nothing at all when nothing changed, so the
@@ -122,6 +122,23 @@ JSON
   _three_prs
   _digest full on
   [[ "$output" != *"Auto-merge is off"* ]]
+}
+
+@test "a reviewer's outstanding changes request puts the PR under Needs a human" {
+  echo '[{"number":106,"title":"Bump x","url":"https://github.com/getboon/openclaw/pull/106","headRefOid":"eeeeeee5555","autoMergeRequest":{"mergeMethod":"SQUASH"},"reviews":[
+    {"author":{"login":"boon-hermes-bot"},"state":"APPROVED","commit":{"oid":"eeeeeee5555"}},
+    {"author":{"login":"engineer"},"state":"CHANGES_REQUESTED","commit":{"oid":"eeeeeee5555"}}]}]' > "$PRS"
+  _digest full
+  [[ "$output" == *"Needs a human"*"#106"* ]]
+  [[ "$output" != *"Approved, waiting for CI"* ]]
+}
+
+@test "a changes request later replaced by the same reviewer's approval no longer blocks" {
+  echo '[{"number":107,"title":"Bump y","url":"https://github.com/getboon/openclaw/pull/107","headRefOid":"fffffff6666","autoMergeRequest":{"mergeMethod":"SQUASH"},"reviews":[
+    {"author":{"login":"engineer"},"state":"CHANGES_REQUESTED","commit":{"oid":"fffffff6666"}},
+    {"author":{"login":"engineer"},"state":"APPROVED","commit":{"oid":"fffffff6666"}}]}]' > "$PRS"
+  _digest full
+  [[ "$output" == *"Approved, waiting for CI"*"#107"* ]]
 }
 
 @test "an approval of an older commit does not count as approved" {
