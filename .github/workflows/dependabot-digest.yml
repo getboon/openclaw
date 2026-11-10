@@ -1,0 +1,163 @@
+---
+# .github/workflows/dependabot-digest.yml
+# One Slack thread per week for Dependabot PRs (ENG-22470, ported from
+# getboon/boon ENG-22137; epic ENG-22136).
+#
+# Dependabot opens its version-update PRs on Monday morning (schedule.time in
+# .github/dependabot.yml) and dependabot-auto-merge.yml decides each one
+# within minutes. This job then posts ONE message to #engineering-alerts that
+# lists every open Dependabot PR with its age. It tags Gandalf the White once
+# to review the ones whose auto-merge is on, and on-call once to review and
+# merge the rest (scripts/dependabot/dependabot-digest-message builds the
+# text). While the DEPENDABOT_AUTOMERGE kill switch is off, every PR goes to
+# on-call. On later weekdays it replies in that same thread, and only when a PR
+# is new or has a new head commit (e.g. a security update, or a Dependabot
+# rebase that dismissed an approval). When nothing changed it posts nothing.
+#
+# Posts with the SLACK_API_TOKEN bot (chat.postMessage) rather than a webhook,
+# because a webhook can't reply in a thread. The thread's ts and the PRs
+# already posted ("NUMBER@SHA") are kept in an Actions cache keyed by ISO week.
+# If the cache is gone, the next run simply starts a new thread.
+#
+# The overrides job runs scripts/dependabot/verify-dependabot-coverage
+# --alerts: Dependabot never rewrites pnpm overrides, so an override pinning a
+# version with an open alert blocks every fix until someone bumps it by hand.
+# GITHUB_TOKEN can't read Dependabot alerts, so it reads them with the Gandalf
+# app token (Dependabot alerts: read). A finding fails that job (red run,
+# annotations in the summary); the Slack post doesn't depend on it.
+
+name: Dependabot digest
+
+on: # yamllint disable-line rule:truthy
+  schedule:
+    # Weekdays 13:00 UTC: about 7 hours after Dependabot's Monday 06:00 UTC run.
+    - cron: "0 13 * * 1-5"
+  workflow_dispatch: {}
+
+permissions:
+  pull-requests: read
+  contents: read
+
+concurrency:
+  group: dependabot-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      # #engineering-alerts. A channel ID isn't sensitive; the SLACK_API_TOKEN
+      # bot is already a member (boon's digest and agent-regression post there).
+      SLACK_CHANNEL_ID: C060YRESPB5
+      STATE_DIR: .dependabot-digest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Pick this week's cache key
+        id: week
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore this week's thread
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: .dependabot-digest
+          key: dependabot-digest-${{ steps.week.outputs.week }}-${{ github.run_id }}
+          restore-keys: dependabot-digest-${{ steps.week.outputs.week }}-
+
+      - name: List open Dependabot PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$STATE_DIR"
+          touch "$STATE_DIR/announced.txt"
+          gh pr list --repo "$REPO" --author app/dependabot --state open --limit 100 \
+            --json number,title,url,createdAt,headRefOid,autoMergeRequest,reviews > "$RUNNER_TEMP/prs.json"
+
+      - name: Post to Slack
+        env:
+          SLACK_API_TOKEN: ${{ secrets.SLACK_API_TOKEN }}
+          REPO: ${{ github.repository }}
+          # The same kill switch dependabot-auto-merge.yml reads.
+          DEPENDABOT_AUTOMERGE: ${{ vars.DEPENDABOT_AUTOMERGE }}
+        run: |
+          set -euo pipefail
+          thread_ts="$(cat "$STATE_DIR/thread_ts" 2>/dev/null || true)"
+          mode=new
+          [ -n "$thread_ts" ] || mode=full
+
+          scripts/dependabot/dependabot-digest-message --prs "$RUNNER_TEMP/prs.json" \
+            --announced "$STATE_DIR/announced.txt" --mode "$mode" --repo "$REPO" \
+            --automerge "$DEPENDABOT_AUTOMERGE" > "$RUNNER_TEMP/message.txt"
+          if [ ! -s "$RUNNER_TEMP/message.txt" ]; then
+            echo "Nothing new to post." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          payload="$(jq -n --rawfile text "$RUNNER_TEMP/message.txt" \
+            --arg channel "$SLACK_CHANNEL_ID" --arg thread_ts "$thread_ts" \
+            '{channel: $channel, text: $text, unfurl_links: false, unfurl_media: false}
+             + (if $thread_ts == "" then {} else {thread_ts: $thread_ts} end)')"
+          response="$(curl --fail-with-body -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_API_TOKEN" \
+            -H 'Content-type: application/json; charset=utf-8' \
+            --data "$payload")"
+          if [ "$(jq -r '.ok' <<< "$response")" != "true" ]; then
+            echo "::error::chat.postMessage failed: $(jq -r '.error' <<< "$response")"
+            exit 1
+          fi
+
+          # A new thread starts with this message; replies keep the parent's ts.
+          [ -n "$thread_ts" ] || jq -r '.ts' <<< "$response" > "$STATE_DIR/thread_ts"
+          jq -r '.[] | "\(.number)@\(.headRefOid)"' "$RUNNER_TEMP/prs.json" >> "$STATE_DIR/announced.txt"
+          {
+            echo "### Dependabot digest"
+            echo "- Mode: $mode ($( [ "$mode" = full ] && echo "new thread" || echo "reply in this week's thread"))"
+            echo "- Open Dependabot PRs: $(jq 'length' "$RUNNER_TEMP/prs.json")"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save this week's thread
+        if: success()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: .dependabot-digest
+          key: dependabot-digest-${{ steps.week.outputs.week }}-${{ github.run_id }}
+
+  overrides:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Mint Gandalf app token (Dependabot alerts read)
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.GANDALF_APP_ID }}
+          private-key: ${{ secrets.GANDALF_PRIVATE_KEY }}
+          permission-vulnerability-alerts: read
+
+      - name: Check overrides against open alerts
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/dependabot/alerts?state=open&per_page=100" --paginate > "$RUNNER_TEMP/alerts.json"
+          if ! scripts/dependabot/verify-dependabot-coverage --alerts "$RUNNER_TEMP/alerts.json" 2> "$RUNNER_TEMP/findings.txt"; then
+            {
+              echo "### Overrides pinning a vulnerable version"
+              sed 's/^dependabot-coverage: /- /' "$RUNNER_TEMP/findings.txt"
+            } >> "$GITHUB_STEP_SUMMARY"
+            sed 's/^dependabot-coverage: /::error::/' "$RUNNER_TEMP/findings.txt"
+            exit 1
+          fi
+          echo "No override pins a version with an open alert." >> "$GITHUB_STEP_SUMMARY"

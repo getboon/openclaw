@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# scripts/dependabot/dependabot-stale-approvals — which approvals were given to an older commit?
+#
+# Called by .github/workflows/dependabot-auto-merge.yml (ENG-22470, ported from
+# getboon/boon ENG-22137) before it re-enables auto-merge on a Dependabot PR.
+# The `boon` branch ruleset does not dismiss stale approvals on push, so an
+# approval of an earlier head (for example Gandalf the White's review, before
+# Dependabot rebased) would otherwise still count for the new head and let it
+# merge without anyone reviewing it.
+#
+# Usage:
+#   scripts/dependabot/dependabot-stale-approvals --reviews REVIEWS_JSON --head HEAD_SHA
+#   (REVIEWS_JSON = output of `gh api .../pulls/N/reviews --paginate`, which
+#    may be several JSON arrays back to back)
+#
+# Prints the id of every APPROVED review whose commit is not HEAD_SHA, one per
+# line. Exits non-zero if the JSON can't be read, so the caller fails closed.
+# Exits 2 on bad arguments.
+# ---------------------------------------------------------------------------
+
+usage() {
+  echo "usage: $0 --reviews FILE --head SHA" >&2
+  exit 2
+}
+
+REVIEWS="" HEAD=""
+while [ $# -gt 0 ]; do
+  [ $# -ge 2 ] || usage
+  case "$1" in
+    --reviews) REVIEWS="$2" ;;
+    --head)    HEAD="$2" ;;
+    *) usage ;;
+  esac
+  shift 2
+done
+[ -f "$REVIEWS" ] && [ -n "$HEAD" ] || usage
+
+jq -rs --arg head "$HEAD" \
+  'add // [] | .[] | select(.state == "APPROVED" and .commit_id != $head) | .id' \
+  "$REVIEWS"

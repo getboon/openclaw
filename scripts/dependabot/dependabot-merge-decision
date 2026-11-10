@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# scripts/dependabot/dependabot-merge-decision — may this Dependabot PR
+# auto-merge? Ported from getboon/boon bin/dependabot-merge-decision
+# (ENG-22137) for openclaw (ENG-22470).
+#
+# Called by .github/workflows/dependabot-auto-merge.yml. Auto-merge means a
+# new package version can reach `boon` with no human looking at it. The 2025
+# npm supply-chain attacks (hijacked chalk/debug, the Shai-Hulud worm) worked
+# exactly that way, so the rules are deliberately narrow:
+#   1. the kill switch (repo variable DEPENDABOT_AUTOMERGE) is exactly "on";
+#   2. every commit on the branch is a verified Dependabot commit (the update
+#      type below is parsed from Dependabot's commit metadata, and a human push
+#      onto the branch must not ride through unreviewed);
+#   3. the update is a semver patch or minor (fetch-metadata reports a grouped
+#      PR's highest level, so a group containing a major is refused);
+#   4. every changed file is a dependency manifest/lockfile. GitHub Actions
+#      bumps are refused: an action runs inside CI where the secrets are, and a
+#      hijacked action tag (tj-actions/changed-files, 2025) needs a human.
+#      pnpm-workspace.yaml is refused too: besides the workspace list it holds
+#      allowBuilds (which packages may run install scripts), overrides and
+#      minimumReleaseAge, so a change there needs a human. Dockerfiles
+#      (base images, ENG-22139) and Gradle settings/wrapper files (they hold
+#      repositories and the Gradle distribution URL) also need a human;
+#   5. every added diff line that names a package source names an allowlisted
+#      registry, or a source the same diff removes (a bump of a package we
+#      already pull from that place, e.g. a Swift package's git URL). Git,
+#      ssh, file:, directory and direct-URL sources are otherwise refused;
+#   6. the PR adds no new direct dependency: in package.json, go.mod,
+#      libs.versions.toml and build.gradle(.kts), every dependency an added
+#      line names is also named on a removed line of the same file (a version
+#      change, not a new entry). New transitive entries in lockfiles are
+#      allowed: they come from an allowlisted registry (rule 5) and are pulled
+#      in by the bumped package.
+# The cooldown in .github/dependabot.yml and pnpm's minimumReleaseAge are the
+# other half of the defense.
+#
+# Usage:
+#   scripts/dependabot/dependabot-merge-decision --update-type TYPE --kill-switch VALUE \
+#     --files CHANGED_PATHS_FILE --diff UNIFIED_DIFF_FILE --foreign-commits N
+#   (N = number of PR commits not authored by dependabot[bot] or not verified)
+#
+# Prints exactly one line: "merge" or "skip: <reason>", and exits 0 either way.
+# Exits 2 on bad arguments.
+# ---------------------------------------------------------------------------
+
+usage() {
+  echo "usage: $0 --update-type TYPE --kill-switch VALUE --files FILE --diff FILE --foreign-commits N" >&2
+  exit 2
+}
+
+UPDATE_TYPE="" KILL_SWITCH="" FILES="" DIFF="" FOREIGN=""
+have_type=0 have_switch=0
+while [ $# -gt 0 ]; do
+  [ $# -ge 2 ] || usage
+  case "$1" in
+    --update-type)     UPDATE_TYPE="$2"; have_type=1 ;;
+    --kill-switch)     KILL_SWITCH="$2"; have_switch=1 ;;
+    --files)           FILES="$2" ;;
+    --diff)            DIFF="$2" ;;
+    --foreign-commits) FOREIGN="$2" ;;
+    *) usage ;;
+  esac
+  shift 2
+done
+[ "$have_type" -eq 1 ] && [ "$have_switch" -eq 1 ] && [ -f "$FILES" ] && [ -f "$DIFF" ] || usage
+[[ "$FOREIGN" =~ ^[0-9]+$ ]] || usage
+
+# Source URL prefixes we already use. Anything else that names a source is new
+# unless the same diff removes it (rule 5).
+ALLOWED_SOURCE_PREFIXES=(
+  "https://registry.npmjs.org/"
+  "https://registry.yarnpkg.com/"
+  "https://rubygems.org/"
+  "https://pypi.org/simple"
+  "https://files.pythonhosted.org/"
+)
+
+decide() { echo "$1"; exit 0; }
+
+allowed_source() {
+  local value="$1" prefix
+  for prefix in "${ALLOWED_SOURCE_PREFIXES[@]}"; do
+    [[ "$value" == "$prefix"* ]] && return 0
+  done
+  return 1
+}
+
+# source_of LINE — print the package source a diff line names, or nothing.
+# Prints "never:kind=VALUE" for a uv source that isn't a registry, which rule 5
+# always refuses (even when the same diff removes it).
+#   npm   "resolved": "<src>"            yarn  resolved "<src>"
+#   pnpm  tarball: / repo: / directory: <src>   Gemfile.lock  remote: <src>
+#   uv    source = { <kind> = "<src>" }  (only kind=registry may pass)
+#   swift "location" : "<src>" / .package(url: "<src>", ...)
+#   gradle url = "<src>" / url("<src>") / url = uri("<src>")
+source_of() {
+  local line="$1"
+  if [[ "$line" =~ \"resolved\":[[:space:]]*\"([^\"]+)\" ]]; then
+    echo "${BASH_REMATCH[1]}"
+  elif [[ "$line" =~ ^[+-][[:space:]]*resolved[[:space:]]+\"([^\"]+)\" ]]; then
+    echo "${BASH_REMATCH[1]}"
+  elif [[ "$line" =~ (tarball|repo|directory):[[:space:]]*([^[:space:]},]+) ]]; then
+    echo "${BASH_REMATCH[2]}"
+  elif [[ "$line" =~ ^[+-][[:space:]]*remote:[[:space:]]*([^[:space:]]+) ]]; then
+    echo "${BASH_REMATCH[1]}"
+  elif [[ "$line" =~ source[[:space:]]*=[[:space:]]*\{[[:space:]]*([a-z]+)[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
+    if [ "${BASH_REMATCH[1]}" = "registry" ]; then echo "${BASH_REMATCH[2]}"; else echo "never:${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"; fi
+  elif [[ "$line" =~ \"location\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
+    echo "${BASH_REMATCH[1]}"
+  elif [[ "$line" =~ \.package\([[:space:]]*(url|path):[[:space:]]*\"([^\"]+)\" ]]; then
+    echo "${BASH_REMATCH[2]}"
+  elif [[ "$line" =~ (^|[^A-Za-z])url[[:space:]]*(=[[:space:]]*(uri\()?|\()[[:space:]]*\"([^\"]+)\" ]]; then
+    echo "${BASH_REMATCH[4]}"
+  fi
+}
+
+# dep_key FILE LINE — print the direct dependency a manifest line names, or nothing.
+#   package.json        "name": "version"
+#   go.mod              [require] module/path vX.Y.Z
+#   libs.versions.toml  key = ...
+#   build.gradle(.kts)  "group:artifact:version"
+dep_key() {
+  local file="$1" line="$2"
+  case "$(basename "$file")" in
+    package.json)
+      [[ "$line" =~ ^[+-][[:space:]]*\"([^\"]+)\"[[:space:]]*:[[:space:]]*\"[^\"]*\",?[[:space:]]*$ ]] && echo "${BASH_REMATCH[1]}" ;;
+    go.mod)
+      # "// indirect" requires are transitive (go mod tidy adds them).
+      [[ "$line" =~ //[[:space:]]*indirect ]] && return 0
+      [[ "$line" =~ ^[+-][[:space:]]*(require[[:space:]]+)?([^[:space:]()]+)[[:space:]]+v[0-9][^[:space:]]*([[:space:]]|$) ]] && echo "${BASH_REMATCH[2]}" ;;
+    libs.versions.toml)
+      [[ "$line" =~ ^[+-][[:space:]]*([A-Za-z0-9_.-]+)[[:space:]]*= ]] && echo "${BASH_REMATCH[1]}" ;;
+    build.gradle|build.gradle.kts)
+      [[ "$line" =~ [\"\']([A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+):[^\"\']+[\"\'] ]] && echo "${BASH_REMATCH[1]}" ;;
+  esac
+  return 0
+}
+
+# 1. Kill switch.
+[ "$KILL_SWITCH" = "on" ] || decide "skip: kill switch off"
+
+# 2. Only verified Dependabot commits.
+[ "$FOREIGN" -eq 0 ] || decide "skip: non-Dependabot or unverified commit on the branch"
+
+# 3. Update type.
+case "$UPDATE_TYPE" in
+  version-update:semver-patch|version-update:semver-minor) ;;
+  *) decide "skip: update type $UPDATE_TYPE" ;;
+esac
+
+# 4. Only dependency files.
+while IFS= read -r path; do
+  [ -n "$path" ] || continue
+  case "$path" in
+    .github/workflows/*|.github/actions/*) decide "skip: GitHub Actions change $path needs a human" ;;
+  esac
+  case "$(basename "$path")" in
+    package.json|package-lock.json|npm-shrinkwrap.json|pnpm-lock.yaml|yarn.lock|Gemfile|Gemfile.lock|pyproject.toml|uv.lock|requirements.txt|go.mod|go.sum|Package.swift|Package.resolved|libs.versions.toml|build.gradle|build.gradle.kts) ;;
+    *) decide "skip: non-dependency file $path" ;;
+  esac
+done < "$FILES"
+
+# header_path "+++ b/path" — the file a diff header names: "path", or
+# "/dev/null" for a deleted file. Git appends a tab to a path with spaces and
+# quotes one with special characters; both are stripped, so a later file's
+# lines are never credited to the previous one.
+header_path() {
+  local p="${1#+++ }"
+  p="${p%%$'\t'*}"; p="${p#\"}"; p="${p%\"}"
+  echo "${p#b/}"
+}
+
+# Walk the diff twice, tracking the current file. Removed sources and
+# dependency keys are collected in a first pass so rules 5 and 6 can tell a
+# moved line from a new one.
+removed_sources=""
+removed_keys=""
+current=""
+while IFS= read -r line; do
+  case "$line" in
+    "+++ "*) current="$(header_path "$line")"; continue ;;
+    "--- "*) continue ;;
+    -*) ;;
+    *) continue ;;
+  esac
+  src="$(source_of "$line")"
+  [ -z "$src" ] || removed_sources+="$src"$'\n'
+  key="$(dep_key "$current" "$line")"
+  [ -z "$key" ] || removed_keys+="$current	$key"$'\n'
+done < "$DIFF"
+
+current=""
+while IFS= read -r line; do
+  case "$line" in
+    "+++ "*) current="$(header_path "$line")"; continue ;;
+    "--- "*) continue ;;
+    +*) ;;
+    *) continue ;;
+  esac
+
+  # 5. Every source named on an added line is allowlisted or already used.
+  src="$(source_of "$line")"
+  if [ -n "$src" ]; then
+    case "$src" in
+      never:*) decide "skip: new package source ${src#never:}" ;;
+    esac
+    allowed_source "$src" || grep -qFx -- "$src" <<<"$removed_sources" || decide "skip: new package source $src"
+  fi
+
+  # 6. No new direct dependency.
+  key="$(dep_key "$current" "$line")"
+  if [ -n "$key" ] && ! grep -qFx -- "$current	$key" <<<"$removed_keys"; then
+    decide "skip: new dependency $key in ${current:-unknown file}"
+  fi
+done < "$DIFF"
+
+decide "merge"
