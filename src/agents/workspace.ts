@@ -1099,22 +1099,27 @@ export async function ensureAgentWorkspace(params?: {
   };
 }
 
+const SAFE_IDENTITY_PATH_CHAR = /[A-Za-z0-9_-]/;
+
 /**
- * Returns a safe single path component for `identities/` derived from senderId, or
- * undefined when there is no identity at all (empty/whitespace-only — the masked
- * staff-co-prompt and trial sentinel). A non-empty senderId always yields a path
- * segment: `encodeURIComponent` escapes separators/control characters but leaves
- * "." alone, so periods are re-escaped too — otherwise a literal "." or ".."
- * senderId would encode to itself and resolve outside `identities/<segment>/`.
- * This is the only sanitization point for per-sender bootstrap paths; callers
- * pass the raw senderId through.
+ * Encodes senderId into a safe single `identities/` path component, or undefined
+ * for empty input. Encodes per UTF-16 code unit rather than via
+ * `encodeURIComponent` so it never throws on an unpaired surrogate and never
+ * passes "." through unescaped (which would resolve outside its own segment).
  */
 export function sanitizeIdentityPathSegment(senderId: string): string | undefined {
   const trimmed = senderId.trim();
   if (trimmed === "") {
     return undefined;
   }
-  return encodeURIComponent(trimmed).replace(/\./g, "%2E");
+  let encoded = "";
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i] as string;
+    encoded += SAFE_IDENTITY_PATH_CHAR.test(ch)
+      ? ch
+      : `%${trimmed.charCodeAt(i).toString(16).padStart(4, "0")}`;
+  }
+  return encoded;
 }
 
 export async function loadWorkspaceBootstrapFiles(

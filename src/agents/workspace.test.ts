@@ -938,11 +938,27 @@ describe("loadWorkspaceBootstrapFiles", () => {
       expect(user?.path).toBe(
         path.join(tempDir, "identities", sanitizeIdentityPathSegment(unsafe)!, DEFAULT_USER_FILENAME),
       );
+      // Independent of the sanitizer under test: the identity directory must be
+      // exactly one level under identities/, with the raw unsafe characters gone
+      // from the path itself — catches a traversal/nesting regression even if
+      // sanitizeIdentityPathSegment's own output were wrong in the same way.
+      const identityDir = path.dirname(user!.path);
+      expect(path.dirname(identityDir)).toBe(path.join(tempDir, "identities"));
+      expect(path.basename(identityDir)).not.toMatch(/[/\\]/);
       // Every unsafe raw senderId must land in its OWN identity directory, never
       // collapse into a shared bucket with another unsafe senderId.
       expect(seen.has(user!.path)).toBe(false);
       seen.add(user!.path);
     }
+  });
+
+  it("does not throw on a senderId containing an unpaired UTF-16 surrogate", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-workspace-");
+    const lonelySurrogate = "sender-\uD800-end";
+    // encodeURIComponent would throw URIError on this input; the sanitizer must not.
+    const files = await loadWorkspaceBootstrapFiles(tempDir, { senderId: lonelySurrogate });
+    const user = files.find((f) => f.name === DEFAULT_USER_FILENAME);
+    expect(user?.path).not.toBe(path.join(tempDir, DEFAULT_USER_FILENAME));
   });
 
   it("reports a new identity's MEMORY.md as missing, not an error", async () => {
