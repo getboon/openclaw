@@ -155,10 +155,10 @@ updates:
         applies-to: security-updates
         patterns: ["*"]
 
-  # Base images belong to ENG-22139; see the header.
+  # Base images belong to ENG-22139; see the header. `directory` (not
+  # `directories`): src/docker-image-digests.test.ts reads this entry.
   - package-ecosystem: "docker"
-    directories:
-      - "/"
+    directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
