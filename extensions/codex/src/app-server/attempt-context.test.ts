@@ -197,7 +197,9 @@ describe("Codex app-server attempt context", () => {
       });
 
       expect(context.memoryToolRouted).toBe(true);
-      expect(context.memoryReferenceFiles.map((file) => file.content)).toContain(memorySummary);
+      expect((context.memoryReferenceFiles ?? []).map((file) => file.content)).toContain(
+        memorySummary,
+      );
       expect(context.promptContext ?? "").not.toContain(memorySummary);
     } finally {
       await fs.rm(workspaceDir, { recursive: true, force: true });
