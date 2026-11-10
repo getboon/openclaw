@@ -145,29 +145,63 @@ describe("Codex app-server attempt context", () => {
 
   it("loads USER.md from the sender's identity partition, not the shared workspace root", async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-identity-workspace-"));
-    const identityDir = path.join(workspaceDir, "identities", "sender-1");
-    await fs.mkdir(identityDir, { recursive: true });
-    await fs.writeFile(path.join(identityDir, "USER.md"), "sender-1 only profile");
-    await fs.writeFile(path.join(workspaceDir, "USER.md"), "shared root profile");
+    try {
+      const identityDir = path.join(workspaceDir, "identities", "sender-1");
+      await fs.mkdir(identityDir, { recursive: true });
+      await fs.writeFile(path.join(identityDir, "USER.md"), "sender-1 only profile");
+      await fs.writeFile(path.join(workspaceDir, "USER.md"), "shared root profile");
 
-    const context = await buildCodexWorkspaceBootstrapContext({
-      params: {
-        sessionId: "session-1",
+      const context = await buildCodexWorkspaceBootstrapContext({
+        params: {
+          sessionId: "session-1",
+          sessionKey: "agent:main:session-1",
+          senderId: "sender-1",
+          config: { agents: { defaults: { workspace: workspaceDir } } },
+        } as EmbeddedRunAttemptParams,
+        resolvedWorkspace: workspaceDir,
+        effectiveWorkspace: workspaceDir,
         sessionKey: "agent:main:session-1",
-        senderId: "sender-1",
-        config: { agents: { defaults: { workspace: workspaceDir } } },
-      } as EmbeddedRunAttemptParams,
-      resolvedWorkspace: workspaceDir,
-      effectiveWorkspace: workspaceDir,
-      sessionKey: "agent:main:session-1",
-      sessionAgentId: "main",
-      memoryToolNames: [],
-    });
+        sessionAgentId: "main",
+        memoryToolNames: [],
+      });
 
-    const userFile = context.bootstrapFiles.find((file) => file.name === "USER.md");
-    expect(userFile?.path).toBe(path.join(identityDir, "USER.md"));
-    expect(userFile?.content).toBe("sender-1 only profile");
-    expect(context.contextFiles.map((file) => file.content)).not.toContain("shared root profile");
+      const userFile = context.bootstrapFiles.find((file) => file.name === "USER.md");
+      expect(userFile?.path).toBe(path.join(identityDir, "USER.md"));
+      expect(userFile?.content).toBe("sender-1 only profile");
+      expect(context.contextFiles.map((file) => file.content)).not.toContain("shared root profile");
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it("routes a sender's identity-scoped MEMORY.md through memory tools instead of inlining it", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-identity-memory-"));
+    try {
+      const identityDir = path.join(workspaceDir, "identities", "sender-1");
+      await fs.mkdir(identityDir, { recursive: true });
+      const memorySummary = "sender-1's own curated memory.";
+      await fs.writeFile(path.join(identityDir, "MEMORY.md"), memorySummary);
+
+      const context = await buildCodexWorkspaceBootstrapContext({
+        params: {
+          sessionId: "session-1",
+          sessionKey: "agent:main:session-1",
+          senderId: "sender-1",
+          config: { agents: { defaults: { workspace: workspaceDir } } },
+        } as EmbeddedRunAttemptParams,
+        resolvedWorkspace: workspaceDir,
+        effectiveWorkspace: workspaceDir,
+        sessionKey: "agent:main:session-1",
+        sessionAgentId: "main",
+        memoryToolNames: ["memory_search", "memory_get"],
+      });
+
+      expect(context.memoryToolRouted).toBe(true);
+      expect(context.memoryReferenceFiles.map((file) => file.content)).toContain(memorySummary);
+      expect(context.promptContext ?? "").not.toContain(memorySummary);
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
   });
 
   it("remaps Codex bootstrap files under dot-prefixed workspace directories", () => {

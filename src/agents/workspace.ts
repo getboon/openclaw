@@ -75,20 +75,22 @@ function workspaceFileIdentity(stat: syncFs.Stats, canonicalPath: string): strin
 }
 
 /**
- * Reports whether the file or its directory is a symlink. `openRootFile` resolves
- * symlinks and only rejects targets outside the workspace, so an in-workspace
- * alias would otherwise read straight through a boundary that lives inside the
- * workspace. Mirrors `resolveCanonicalRootMemoryFile`'s symlink refusal.
+ * Reports whether any ancestor up to (not including) `workspaceDir` is a symlink,
+ * so an in-workspace alias (e.g. a symlinked `identities/` directory) can't cross
+ * a boundary `openRootFile` only enforces at the workspace edge.
  */
-async function hasSymlinkAlias(filePath: string): Promise<boolean> {
-  for (const target of [filePath, path.dirname(filePath)]) {
+async function hasSymlinkAlias(filePath: string, workspaceDir: string): Promise<boolean> {
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  let current = path.resolve(filePath);
+  while (current !== resolvedWorkspaceDir && current.startsWith(`${resolvedWorkspaceDir}${path.sep}`)) {
     try {
-      if ((await fs.lstat(target)).isSymbolicLink()) {
+      if ((await fs.lstat(current)).isSymbolicLink()) {
         return true;
       }
     } catch {
       // A missing path is not an alias; the normal open reports it as missing.
     }
+    current = path.dirname(current);
   }
   return false;
 }
@@ -99,7 +101,7 @@ async function readWorkspaceFileWithGuards(params: {
   /** Set for identity-partitioned reads, where an in-workspace symlink would cross senders. */
   rejectSymlinkAlias?: boolean;
 }): Promise<WorkspaceGuardedReadResult> {
-  if (params.rejectSymlinkAlias && (await hasSymlinkAlias(params.filePath))) {
+  if (params.rejectSymlinkAlias && (await hasSymlinkAlias(params.filePath, params.workspaceDir))) {
     workspaceFileCache.delete(params.filePath);
     return { ok: false, reason: "validation" };
   }
@@ -1098,16 +1100,21 @@ export async function ensureAgentWorkspace(params?: {
 }
 
 /**
- * Returns the trimmed senderId when it is safe to use as one path component under
- * `identities/`, otherwise undefined. This is the only sanitization point for
- * per-sender bootstrap paths; callers pass the raw senderId through.
+ * Returns a safe single path component for `identities/` derived from senderId, or
+ * undefined when there is no identity at all (empty/whitespace-only — the masked
+ * staff-co-prompt and trial sentinel). A non-empty senderId always yields a path
+ * segment: `encodeURIComponent` escapes separators/control characters but leaves
+ * "." alone, so periods are re-escaped too — otherwise a literal "." or ".."
+ * senderId would encode to itself and resolve outside `identities/<segment>/`.
+ * This is the only sanitization point for per-sender bootstrap paths; callers
+ * pass the raw senderId through.
  */
 export function sanitizeIdentityPathSegment(senderId: string): string | undefined {
   const trimmed = senderId.trim();
-  if (trimmed === "" || trimmed === "." || trimmed === ".." || /[/\\\0]/.test(trimmed)) {
+  if (trimmed === "") {
     return undefined;
   }
-  return trimmed;
+  return encodeURIComponent(trimmed).replace(/\./g, "%2E");
 }
 
 export async function loadWorkspaceBootstrapFiles(

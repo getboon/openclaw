@@ -94,7 +94,7 @@ describe("runEmbeddedAttempt bootstrap sender identity", () => {
   it("resolves USER.md under the caller's senderId when one is provided", async () => {
     // The real turn's senderId must reach bootstrap file resolution so
     // MEMORY.md/USER.md resolve under that sender's identity path instead of
-    // the shared workspace root (ENG-21047).
+    // the shared workspace root.
     await createContextEngineAttemptRunner({
       contextEngine: createContextEngineBootstrapAndAssemble(),
       sessionKey: "agent:main:telegram:dm:alice",
