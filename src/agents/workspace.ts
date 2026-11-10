@@ -1114,7 +1114,7 @@ export function sanitizeIdentityPathSegment(senderId: string): string | undefine
   }
   let encoded = "";
   for (let i = 0; i < trimmed.length; i++) {
-    const ch = trimmed[i] as string;
+    const ch = trimmed[i];
     encoded += SAFE_IDENTITY_PATH_CHAR.test(ch)
       ? ch
       : `%${trimmed.charCodeAt(i).toString(16).padStart(4, "0")}`;
