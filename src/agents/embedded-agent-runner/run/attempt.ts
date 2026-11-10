@@ -1451,6 +1451,7 @@ export async function runEmbeddedAttempt(
         warn: bootstrapWarn,
         contextMode: params.bootstrapContextMode,
         runKind: params.bootstrapContextRunKind,
+        senderId: params.senderId ?? undefined,
       });
       bootstrapRouting = await resolveBootstrapRouting(preloadedBootstrapFiles);
     }
@@ -1481,6 +1482,7 @@ export async function runEmbeddedAttempt(
             warn: bootstrapWarn,
             contextMode: params.bootstrapContextMode,
             runKind: params.bootstrapContextRunKind,
+            senderId: params.senderId ?? undefined,
           }));
         return {
           bootstrapFiles,

@@ -498,6 +498,7 @@ export async function prepareCliRunContext(
         sessionKey: params.sessionKey,
         sessionId: params.sessionId,
         agentId: sessionAgentId,
+        senderId: params.senderId ?? undefined,
         contextMode: params.bootstrapContextMode,
         runKind: params.bootstrapContextRunKind,
         warn: prepareDeps.makeBootstrapWarn({

@@ -1021,6 +1021,69 @@ describe("shouldSkipLocalCliCredentialEpoch", () => {
     expect(context.systemPromptReport.tools.entries).toEqual([]);
   });
 
+  it("threads senderId into resolveBootstrapContextForRun so CLI runs use the sender's bootstrap partition", async () => {
+    const { dir, sessionFile } = createSessionFile();
+    const resolveBootstrapContextForRun = vi.fn(async () => ({
+      bootstrapFiles: [],
+      contextFiles: [],
+    }));
+    setCliRunnerPrepareTestDeps({
+      resolveBootstrapContextForRun,
+    });
+
+    try {
+      await prepareCliRunContext({
+        sessionId: "session-test",
+        sessionFile,
+        workspaceDir: dir,
+        prompt: "latest ask",
+        provider: "test-cli",
+        model: "test-model",
+        timeoutMs: 1_000,
+        runId: "run-test-sender-id-bootstrap",
+        senderId: "sender-123",
+        config: createCliBackendConfig(),
+      });
+
+      expect(resolveBootstrapContextForRun).toHaveBeenCalledWith(
+        expect.objectContaining({ senderId: "sender-123" }),
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("omits senderId from resolveBootstrapContextForRun when the run has no sender (back-compat)", async () => {
+    const { dir, sessionFile } = createSessionFile();
+    const resolveBootstrapContextForRun = vi.fn(async () => ({
+      bootstrapFiles: [],
+      contextFiles: [],
+    }));
+    setCliRunnerPrepareTestDeps({
+      resolveBootstrapContextForRun,
+    });
+
+    try {
+      await prepareCliRunContext({
+        sessionId: "session-test",
+        sessionFile,
+        workspaceDir: dir,
+        prompt: "latest ask",
+        provider: "test-cli",
+        model: "test-model",
+        timeoutMs: 1_000,
+        runId: "run-test-no-sender-id-bootstrap",
+        config: createCliBackendConfig(),
+      });
+
+      expect(resolveBootstrapContextForRun).toHaveBeenCalledWith(
+        expect.objectContaining({ senderId: undefined }),
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("applies prompt-build hook context to Claude-style CLI preparation", async () => {
     const { dir, sessionFile } = createSessionFile();
     try {

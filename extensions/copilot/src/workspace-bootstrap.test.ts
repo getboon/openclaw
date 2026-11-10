@@ -1,5 +1,5 @@
 // Copilot tests cover workspace bootstrap plugin behavior.
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { AgentHarnessAttemptParams } from "openclaw/plugin-sdk/agent-harness-runtime";
@@ -137,6 +137,23 @@ describe("resolveCopilotWorkspaceBootstrapContext", () => {
     expect(result.bootstrapFiles.length).toBeGreaterThan(0);
     expect(result.instructions).toBeDefined();
     expect(result.instructions).toContain("Soul voice goes here.");
+  });
+
+  it("loads USER.md from the sender's identity partition, not the shared workspace root", async () => {
+    const identityDir = path.join(workspaceDir, "identities", "sender-1");
+    await mkdir(identityDir, { recursive: true });
+    await writeFile(path.join(identityDir, "USER.md"), "sender-1 only profile");
+    await writeFile(path.join(workspaceDir, "USER.md"), "shared root profile");
+
+    const result = await resolveCopilotWorkspaceBootstrapContext({
+      attempt: makeAttempt({ workspaceDir, senderId: "sender-1" }),
+      effectiveWorkspaceDir: workspaceDir,
+    });
+
+    const userFile = result.bootstrapFiles.find((file) => file.name === "USER.md");
+    expect(userFile?.path).toBe(path.join(identityDir, "USER.md"));
+    expect(result.instructions).toContain("sender-1 only profile");
+    expect(result.instructions).not.toContain("shared root profile");
   });
 
   it("filters AGENTS.md out of the rendered block (SDK loads it natively)", async () => {

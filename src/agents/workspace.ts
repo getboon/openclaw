@@ -74,10 +74,37 @@ function workspaceFileIdentity(stat: syncFs.Stats, canonicalPath: string): strin
   return `${canonicalPath}|${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
 }
 
+/**
+ * Reports whether any ancestor up to (not including) `workspaceDir` is a symlink,
+ * so an in-workspace alias (e.g. a symlinked `identities/` directory) can't cross
+ * a boundary `openRootFile` only enforces at the workspace edge.
+ */
+async function hasSymlinkAlias(filePath: string, workspaceDir: string): Promise<boolean> {
+  const resolvedWorkspaceDir = path.resolve(workspaceDir);
+  let current = path.resolve(filePath);
+  while (current !== resolvedWorkspaceDir && current.startsWith(`${resolvedWorkspaceDir}${path.sep}`)) {
+    try {
+      if ((await fs.lstat(current)).isSymbolicLink()) {
+        return true;
+      }
+    } catch {
+      // A missing path is not an alias; the normal open reports it as missing.
+    }
+    current = path.dirname(current);
+  }
+  return false;
+}
+
 async function readWorkspaceFileWithGuards(params: {
   filePath: string;
   workspaceDir: string;
+  /** Set for identity-partitioned reads, where an in-workspace symlink would cross senders. */
+  rejectSymlinkAlias?: boolean;
 }): Promise<WorkspaceGuardedReadResult> {
+  if (params.rejectSymlinkAlias && (await hasSymlinkAlias(params.filePath, params.workspaceDir))) {
+    workspaceFileCache.delete(params.filePath);
+    return { ok: false, reason: "validation" };
+  }
   try {
     // A transient FS race (EAGAIN/EWOULDBLOCK/EINTR under load) on the open or
     // read must not drop the agent's bootstrap file for the turn — this reader
@@ -1072,12 +1099,46 @@ export async function ensureAgentWorkspace(params?: {
   };
 }
 
-export async function loadWorkspaceBootstrapFiles(dir: string): Promise<WorkspaceBootstrapFile[]> {
+const SAFE_IDENTITY_PATH_CHAR = /[A-Za-z0-9_-]/;
+
+/**
+ * Encodes senderId into a safe single `identities/` path component, or undefined
+ * for empty input. Encodes per UTF-16 code unit rather than via
+ * `encodeURIComponent` so it never throws on an unpaired surrogate and never
+ * passes "." through unescaped (which would resolve outside its own segment).
+ */
+export function sanitizeIdentityPathSegment(senderId: string): string | undefined {
+  const trimmed = senderId.trim();
+  if (trimmed === "") {
+    return undefined;
+  }
+  let encoded = "";
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    encoded += SAFE_IDENTITY_PATH_CHAR.test(ch)
+      ? ch
+      : `%${trimmed.charCodeAt(i).toString(16).padStart(4, "0")}`;
+  }
+  return encoded;
+}
+
+export async function loadWorkspaceBootstrapFiles(
+  dir: string,
+  options?: { senderId?: string },
+): Promise<WorkspaceBootstrapFile[]> {
   const resolvedDir = resolveUserPath(dir);
+  // MEMORY.md and USER.md are per-sender when a usable senderId is given; every other
+  // bootstrap file stays at the workspace root.
+  const identitySegment = sanitizeIdentityPathSegment(options?.senderId ?? "");
+  const identityDir = identitySegment
+    ? path.join(resolvedDir, "identities", identitySegment)
+    : resolvedDir;
+  const isPartitioned = identityDir !== resolvedDir;
 
   const entries: Array<{
     name: WorkspaceBootstrapFileName;
     filePath: string;
+    identityScoped?: true;
   }> = [
     {
       name: DEFAULT_AGENTS_FILENAME,
@@ -1097,7 +1158,8 @@ export async function loadWorkspaceBootstrapFiles(dir: string): Promise<Workspac
     },
     {
       name: DEFAULT_USER_FILENAME,
-      filePath: path.join(resolvedDir, DEFAULT_USER_FILENAME),
+      filePath: path.join(identityDir, DEFAULT_USER_FILENAME),
+      identityScoped: true,
     },
     {
       name: DEFAULT_HEARTBEAT_FILENAME,
@@ -1109,14 +1171,19 @@ export async function loadWorkspaceBootstrapFiles(dir: string): Promise<Workspac
     },
     {
       name: DEFAULT_MEMORY_FILENAME,
-      filePath: path.join(resolvedDir, DEFAULT_MEMORY_FILENAME),
+      filePath: path.join(identityDir, DEFAULT_MEMORY_FILENAME),
+      identityScoped: true,
     },
   ];
 
   const result: WorkspaceBootstrapFile[] = [];
   for (const entry of entries) {
+    // Root MEMORY.md is omitted entirely when absent to keep the no-memory prompt unchanged.
+    // A per-sender MEMORY.md is always reported (missing when new) so the agent sees the
+    // identity-scoped path it can write to.
     if (
       entry.name === DEFAULT_MEMORY_FILENAME &&
+      !isPartitioned &&
       !(await exactWorkspaceEntryExists(resolvedDir, DEFAULT_MEMORY_FILENAME))
     ) {
       continue;
@@ -1124,6 +1191,7 @@ export async function loadWorkspaceBootstrapFiles(dir: string): Promise<Workspac
     const loaded = await readWorkspaceFileWithGuards({
       filePath: entry.filePath,
       workspaceDir: resolvedDir,
+      rejectSymlinkAlias: isPartitioned && entry.identityScoped === true,
     });
     if (loaded.ok) {
       result.push({

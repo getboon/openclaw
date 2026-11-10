@@ -27,6 +27,7 @@ import {
   resolveWorkspaceBootstrapStatus,
   resolveDefaultAgentWorkspaceDir,
   resolveWorkspaceAttestationPaths,
+  sanitizeIdentityPathSegment,
   WORKSPACE_VANISHED_ERROR_CODE,
   type WorkspaceBootstrapFile,
 } from "./workspace.js";
@@ -859,6 +860,151 @@ describe("loadWorkspaceBootstrapFiles", () => {
 
     const files = await loadWorkspaceBootstrapFiles(tempDir);
     expect(getMemoryEntries(files)).toHaveLength(0);
+  });
+
+  it("resolves MEMORY.md and USER.md under identities/<senderId>/ when senderId is given", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-workspace-");
+    await writeWorkspaceFile({ dir: tempDir, name: "MEMORY.md", content: "root memory" });
+
+    const files = await loadWorkspaceBootstrapFiles(tempDir, { senderId: "1987" });
+    const memory = files.find((f) => f.name === DEFAULT_MEMORY_FILENAME);
+    const user = files.find((f) => f.name === DEFAULT_USER_FILENAME);
+
+    expect(memory?.path).toBe(path.join(tempDir, "identities", "1987", "MEMORY.md"));
+    expect(user?.path).toBe(path.join(tempDir, "identities", "1987", "USER.md"));
+    // root MEMORY.md exists but is a different path now, so this read is "missing" for this identity
+    expect(memory?.missing).toBe(true);
+  });
+
+  it("loads an existing identity-scoped MEMORY.md's own content, not the root file's", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-workspace-");
+    await writeWorkspaceFile({ dir: tempDir, name: "MEMORY.md", content: "root memory" });
+    await fs.mkdir(path.join(tempDir, "identities", "1987"), { recursive: true });
+    await fs.writeFile(
+      path.join(tempDir, "identities", "1987", "MEMORY.md"),
+      "identity-scoped memory",
+      "utf-8",
+    );
+
+    const files = await loadWorkspaceBootstrapFiles(tempDir, { senderId: "1987" });
+    const memory = files.find((f) => f.name === DEFAULT_MEMORY_FILENAME);
+
+    expect(memory?.missing).toBe(false);
+    expect(memory?.content).toBe("identity-scoped memory");
+  });
+
+  it("does not partition AGENTS.md/SOUL.md/TOOLS.md/IDENTITY.md/HEARTBEAT.md/BOOTSTRAP.md even when senderId is given", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-workspace-");
+    const files = await loadWorkspaceBootstrapFiles(tempDir, { senderId: "1987" });
+    for (const name of [
+      DEFAULT_AGENTS_FILENAME,
+      DEFAULT_SOUL_FILENAME,
+      DEFAULT_TOOLS_FILENAME,
+      DEFAULT_IDENTITY_FILENAME,
+      DEFAULT_HEARTBEAT_FILENAME,
+      DEFAULT_BOOTSTRAP_FILENAME,
+    ]) {
+      const file = files.find((f) => f.name === name);
+      expect(file?.path).toBe(path.join(tempDir, name));
+    }
+  });
+
+  it("falls back to workspace-root MEMORY.md/USER.md when senderId is omitted (back-compat)", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-workspace-");
+    const filesNoOptions = await loadWorkspaceBootstrapFiles(tempDir);
+    const filesEmptyOptions = await loadWorkspaceBootstrapFiles(tempDir, {});
+    for (const files of [filesNoOptions, filesEmptyOptions]) {
+      const user = files.find((f) => f.name === DEFAULT_USER_FILENAME);
+      expect(user?.path).toBe(path.join(tempDir, DEFAULT_USER_FILENAME));
+    }
+  });
+
+  it("falls back to workspace-root only when senderId is truly empty", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-workspace-");
+    for (const empty of ["", "   "]) {
+      const files = await loadWorkspaceBootstrapFiles(tempDir, { senderId: empty });
+      const user = files.find((f) => f.name === DEFAULT_USER_FILENAME);
+      expect(user?.path).toBe(path.join(tempDir, DEFAULT_USER_FILENAME));
+    }
+  });
+
+  it("encodes a non-empty senderId with unsafe characters into its own distinct identity, never the shared root", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-workspace-");
+    const seen = new Set<string>();
+    for (const unsafe of ["../escape", "a/b", "a\\b", "..", ".", "a/b/c"]) {
+      const files = await loadWorkspaceBootstrapFiles(tempDir, { senderId: unsafe });
+      const user = files.find((f) => f.name === DEFAULT_USER_FILENAME);
+      expect(user?.path).not.toBe(path.join(tempDir, DEFAULT_USER_FILENAME));
+      expect(user?.path).toBe(
+        path.join(tempDir, "identities", sanitizeIdentityPathSegment(unsafe)!, DEFAULT_USER_FILENAME),
+      );
+      // Independent of the sanitizer under test: the identity directory must be
+      // exactly one level under identities/, with the raw unsafe characters gone
+      // from the path itself — catches a traversal/nesting regression even if
+      // sanitizeIdentityPathSegment's own output were wrong in the same way.
+      const identityDir = path.dirname(user!.path);
+      expect(path.dirname(identityDir)).toBe(path.join(tempDir, "identities"));
+      expect(path.basename(identityDir)).not.toMatch(/[/\\]/);
+      // Every unsafe raw senderId must land in its OWN identity directory, never
+      // collapse into a shared bucket with another unsafe senderId.
+      expect(seen.has(user!.path)).toBe(false);
+      seen.add(user!.path);
+    }
+  });
+
+  it("does not throw on a senderId containing an unpaired UTF-16 surrogate", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-workspace-");
+    const lonelySurrogate = "sender-\uD800-end";
+    // encodeURIComponent would throw URIError on this input; the sanitizer must not.
+    const files = await loadWorkspaceBootstrapFiles(tempDir, { senderId: lonelySurrogate });
+    const user = files.find((f) => f.name === DEFAULT_USER_FILENAME);
+    expect(user?.path).not.toBe(path.join(tempDir, DEFAULT_USER_FILENAME));
+  });
+
+  it("reports a new identity's MEMORY.md as missing, not an error", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-workspace-");
+    const files = await loadWorkspaceBootstrapFiles(tempDir, { senderId: "brand-new-user" });
+    const memory = files.find((f) => f.name === DEFAULT_MEMORY_FILENAME);
+    expect(memory?.missing).toBe(true);
+  });
+
+  it("refuses a symlink from one identity's USER.md to another identity's file", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const tempDir = await makeTempWorkspace("openclaw-workspace-identity-symlink-");
+    const victimDir = path.join(tempDir, "identities", "victim");
+    const attackerDir = path.join(tempDir, "identities", "attacker");
+    await fs.mkdir(victimDir, { recursive: true });
+    await fs.mkdir(attackerDir, { recursive: true });
+    await fs.writeFile(path.join(victimDir, DEFAULT_USER_FILENAME), "victim secrets", "utf-8");
+    await fs.symlink(
+      path.join(victimDir, DEFAULT_USER_FILENAME),
+      path.join(attackerDir, DEFAULT_USER_FILENAME),
+    );
+
+    const files = await loadWorkspaceBootstrapFiles(tempDir, { senderId: "attacker" });
+    const user = files.find((file) => file.name === DEFAULT_USER_FILENAME);
+
+    expect(user?.missing).toBe(true);
+    expect(user?.content).toBeUndefined();
+  });
+
+  it("refuses a symlinked identity directory that aliases another identity", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const tempDir = await makeTempWorkspace("openclaw-workspace-identity-dir-symlink-");
+    const victimDir = path.join(tempDir, "identities", "victim");
+    await fs.mkdir(victimDir, { recursive: true });
+    await fs.writeFile(path.join(victimDir, DEFAULT_MEMORY_FILENAME), "victim memory", "utf-8");
+    await fs.symlink(victimDir, path.join(tempDir, "identities", "attacker"));
+
+    const files = await loadWorkspaceBootstrapFiles(tempDir, { senderId: "attacker" });
+    const memory = files.find((file) => file.name === DEFAULT_MEMORY_FILENAME);
+
+    expect(memory?.missing).toBe(true);
+    expect(memory?.content).toBeUndefined();
   });
 
   it("treats hardlinked bootstrap aliases as missing", async () => {

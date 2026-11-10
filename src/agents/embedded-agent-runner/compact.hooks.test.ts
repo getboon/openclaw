@@ -20,6 +20,7 @@ import {
   maybeCompactAgentHarnessSessionMock,
   resolveAgentHarnessPolicyMock,
   registerProviderStreamForModelMock,
+  resolveBootstrapContextForRunMock,
   resolveContextWindowInfoMock,
   resolveContextEngineMock,
   resolveEmbeddedAgentStreamFnMock,
@@ -429,6 +430,23 @@ describe("compactEmbeddedAgentSessionDirect hooks", () => {
       senderName: "Alice",
       senderUsername: "alice_u",
       senderE164: "+15551234567",
+    });
+  });
+
+  it("rebuilds the compaction system prompt from the sender's bootstrap partition", async () => {
+    // Compaction re-resolves bootstrap context for the successor prompt. Without
+    // the senderId it would reload the shared workspace-root USER.md/MEMORY.md
+    // and leak another sender's profile into the compacted session.
+    await compactEmbeddedAgentSessionDirect({
+      sessionId: "session-1",
+      sessionFile: "/tmp/session.jsonl",
+      workspaceDir: "/tmp/workspace",
+      senderId: "sender-1",
+    });
+
+    expectRecordFields(mockCallArg(resolveBootstrapContextForRunMock), {
+      workspaceDir: "/tmp/workspace",
+      senderId: "sender-1",
     });
   });
 

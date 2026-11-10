@@ -188,6 +188,7 @@ export async function buildCodexWorkspaceBootstrapContext(params: {
       warn: (message) => embeddedAgentLog.warn(message),
       contextMode: params.params.bootstrapContextMode,
       runKind: params.params.bootstrapContextRunKind,
+      senderId: params.params.senderId ?? undefined,
     });
     const memoryToolRoutedBootstrapFiles = memoryToolsAvailable
       ? selectCodexWorkspaceMemoryReferenceFiles({
@@ -958,6 +959,13 @@ function isCodexWorkspaceRootMemoryContextFile(params: {
   });
 }
 
+/**
+ * Matches either the shared workspace-root MEMORY.md or a sender's identity-scoped
+ * one (`identities/<segment>/MEMORY.md`). Only core ever populates `bootstrapFiles`
+ * with the latter, and only for the current call's own sender, so matching the
+ * structural shape here (rather than re-deriving the sender's exact encoded
+ * segment, which is core's sanitization concern, not this extension's) is safe.
+ */
 function isCodexWorkspaceRootMemoryPath(params: {
   filePath: string;
   workspaceDir: string;
@@ -969,7 +977,19 @@ function isCodexWorkspaceRootMemoryPath(params: {
   const absolutePath = path.isAbsolute(filePath)
     ? path.resolve(filePath)
     : path.resolve(params.workspaceDir, filePath);
-  return absolutePath === path.join(path.resolve(params.workspaceDir), "MEMORY.md");
+  const resolvedWorkspaceDir = path.resolve(params.workspaceDir);
+  if (absolutePath === path.join(resolvedWorkspaceDir, "MEMORY.md")) {
+    return true;
+  }
+  const relative = path.relative(path.join(resolvedWorkspaceDir, "identities"), absolutePath);
+  const segments = relative.split(path.sep);
+  return (
+    !relative.startsWith("..") &&
+    !path.isAbsolute(relative) &&
+    segments.length === 2 &&
+    segments[0] !== "" &&
+    segments[1] === "MEMORY.md"
+  );
 }
 
 function isSameCodexWorkspacePath(left: string, right: string): boolean {
