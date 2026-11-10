@@ -1,0 +1,281 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# scripts/dependabot/verify-dependabot-coverage — keep .github/dependabot.yml
+# honest.
+#
+# Dependabot only fixes what its config points at, and it fails silently: an
+# uncovered lockfile or a rejected config just means alerts that never become
+# PRs, and pnpm overrides (which Dependabot never rewrites) block fixes the
+# same way. This checker fails the build when:
+#   1. a tracked dependency file's directory has no update entry for its
+#      ecosystem (package-lock.json/pnpm-lock.yaml/yarn.lock → npm,
+#      Package.resolved/Package.swift → swift, settings.gradle(.kts) → gradle,
+#      Gemfile.lock → bundler, uv.lock → uv, requirements*.txt → pip unless a
+#      uv.lock sits beside it, pyproject.toml that declares dependencies → pip
+#      unless a uv.lock sits beside it, go.mod → gomod). A build.gradle(.kts)
+#      or libs.versions.toml is covered by a gradle entry for its own
+#      directory or any parent (the Gradle project root). node_modules/ and
+#      vendor/ are ignored, and so are Dockerfiles (base images are rebuilt
+#      on their own schedule) and npm-shrinkwrap.json in a pnpm repo
+#      (generated from pnpm-lock.yaml by scripts/generate-npm-shrinkwrap.mjs,
+#      so the root npm entry covers it);
+#   2. an update entry has no cooldown, cooldown.default-days < 3 (the
+#      supply-chain wait before taking a fresh release), or a
+#      cooldown.semver-*-days shorter than default-days; or pnpm-workspace.yaml
+#      sets minimumReleaseAge below 4320 minutes (the same 3 days for pnpm);
+#   3. a covered Gemfile pulls from a private `source "https://…"` that no
+#      rubygems-server registry (listed on that bundler entry) points at;
+#   4. a github-actions or docker entry sets cooldown.semver-*-days. Dependabot
+#      does not support those there and rejects the WHOLE file, so every
+#      ecosystem stops updating;
+#   5. (only with --alerts) a pnpm override (pnpm-workspace.yaml `overrides`
+#      or package.json `pnpm.overrides`) pins an exact version that an open
+#      npm Dependabot alert says is vulnerable, or the alert's range can't be
+#      parsed (it must then be checked by hand). Dependabot does not rewrite
+#      overrides, so such a pin blocks every fix until someone bumps it.
+#
+# Usage:
+#   scripts/dependabot/verify-dependabot-coverage              # repo + .github/dependabot.yml
+#   scripts/dependabot/verify-dependabot-coverage --root DIR --config FILE   # fixtures (tests)
+#   ... [--alerts ALERTS_JSON]
+#   (ALERTS_JSON = `gh api 'repos/OWNER/NAME/dependabot/alerts?state=open'
+#    --paginate`, which may be several JSON arrays back to back)
+#
+# Exit 0 = config covers everything; exit 1 = at least one violation, each
+# printed to stderr as "dependabot-coverage: …". Exit 2 = bad arguments or a
+# missing tool.
+# ---------------------------------------------------------------------------
+
+ROOT=""
+CONFIG=""
+ALERTS=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --root)   ROOT="${2:?--root needs a directory}"; shift 2 ;;
+    --config) CONFIG="${2:?--config needs a file}"; shift 2 ;;
+    --alerts) ALERTS="${2:?--alerts needs a file}"; shift 2 ;;
+    *) echo "usage: $0 [--root DIR] [--config FILE] [--alerts FILE]" >&2; exit 2 ;;
+  esac
+done
+
+if [ -n "$ROOT" ]; then
+  # Fixture trees are not git repos; list files with find.
+  list_files() {
+    (cd "$ROOT" && find . -type f -not -path '*/node_modules/*' -not -path '*/vendor/*' | sed 's|^\./||')
+  }
+else
+  ROOT="$(git rev-parse --show-toplevel)"
+  list_files() { git -C "$ROOT" ls-files | grep -v -e '/node_modules/' -e '^node_modules/' -e '/vendor/' -e '^vendor/' || true; }
+fi
+CONFIG="${CONFIG:-$ROOT/.github/dependabot.yml}"
+if [ -n "$ALERTS" ] && [ ! -f "$ALERTS" ]; then
+  echo "dependabot-coverage: --alerts file $ALERTS not found" >&2
+  exit 2
+fi
+
+for tool in yq jq; do
+  command -v "$tool" >/dev/null || { echo "dependabot-coverage: $tool is required" >&2; exit 2; }
+done
+
+CONFIG_JSON="$(yq -o=json '.' "$CONFIG")"
+
+# Shared jq helpers: normalize "/a/" and "a" to "/a"; "/" stays "/".
+JQ_DEFS='
+  def norm: ("/" + ltrimstr("/")) | rtrimstr("/") | if . == "" then "/" else . end;
+  def dirs: ([.directory // empty] + (.directories // [])) | map(norm);
+'
+
+# "ecosystem<TAB>/dir" for every covered directory.
+COVERED="$(jq -r "$JQ_DEFS"'
+  (.updates // [])[] | .["package-ecosystem"] as $e | dirs[] | "\($e)\t\(.)"
+' <<<"$CONFIG_JSON")"
+
+FILES="$(list_files)"
+violations=0
+fail() { echo "dependabot-coverage: $*" >&2; violations=$((violations + 1)); }
+
+dir_of() { local d; d="$(dirname "$1")"; if [ "$d" = "." ]; then echo "/"; else echo "/$d"; fi; }
+is_covered() { grep -qFx "$1	$2" <<<"$COVERED"; }
+# is_covered_up ECO DIR — covered at DIR or any parent directory.
+is_covered_up() {
+  local d="$2"
+  while :; do
+    is_covered "$1" "$d" && return 0
+    [ "$d" = "/" ] && return 1
+    d="$(dirname "$d")"
+  done
+}
+has_sibling() { local s; s="$(dirname "$1")/$2"; grep -qFx "${s#./}" <<<"$FILES"; }
+
+# 1. Every dependency file is covered by an entry of the right ecosystem.
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  eco="" up=0
+  case "$(basename "$f")" in
+    package-lock.json|pnpm-lock.yaml|yarn.lock) eco=npm ;;
+    npm-shrinkwrap.json) grep -qFx "pnpm-lock.yaml" <<<"$FILES" || eco=npm ;;
+    Package.resolved|Package.swift) eco=swift ;;
+    settings.gradle|settings.gradle.kts) eco=gradle ;;
+    build.gradle|build.gradle.kts|libs.versions.toml) eco=gradle up=1 ;;
+    Gemfile.lock) eco=bundler ;;
+    uv.lock) eco=uv ;;
+    go.mod) eco=gomod ;;
+    requirements*.txt) has_sibling "$f" uv.lock || eco=pip ;;
+    pyproject.toml)
+      # Only a project that declares dependencies; a tool-config-only
+      # pyproject (ruff/pytest settings) has nothing for Dependabot to update.
+      if ! has_sibling "$f" uv.lock \
+        && grep -qE '^[[:space:]]*(dependencies[[:space:]]*=|\[tool\.poetry\.dependencies\]|\[project\.optional-dependencies\])' "$ROOT/$f"; then
+        eco=pip
+      fi ;;
+  esac
+  [ -n "$eco" ] || continue
+  dir="$(dir_of "$f")"
+  if [ "$up" -eq 1 ]; then
+    is_covered_up "$eco" "$dir" || fail "$f is not covered: add a '$eco' update entry for its Gradle project root ('$dir' or a parent)"
+  else
+    is_covered "$eco" "$dir" || fail "$f is not covered: add a '$eco' update entry for directory '$dir'"
+  fi
+done <<<"$FILES"
+
+# Each jq check below runs in a plain $(...) assignment, not a `< <(...)`
+# process substitution: set -e ignores a failed process substitution, so a jq
+# error there would print nothing and the check would silently pass.
+
+# 2. Every update entry has a cooldown of at least 3 days.
+short_cooldowns="$(jq -r "$JQ_DEFS"'
+  (.updates // [])[]
+  | select(((.cooldown // {})["default-days"] // 0) < 3)
+  | "\(.["package-ecosystem"]) \(dirs | join(","))"
+' <<<"$CONFIG_JSON")"
+while IFS= read -r entry; do
+  [ -z "$entry" ] || fail "update entry '$entry' needs cooldown.default-days >= 3"
+done <<<"$short_cooldowns"
+
+#    A semver-*-days override may lengthen the wait, never shorten it.
+short_semver="$(jq -r "$JQ_DEFS"'
+  (.updates // [])[]
+  | . as $e | (.cooldown // {}) as $c
+  | $c | to_entries[]
+  | select((.key | startswith("semver-")) and .value < ($c["default-days"] // 0))
+  | "update entry \"\($e["package-ecosystem"]) \($e | dirs | join(","))\" sets cooldown.\(.key)=\(.value), shorter than default-days=\($c["default-days"])"
+' <<<"$CONFIG_JSON")"
+while IFS= read -r msg; do
+  [ -z "$msg" ] || fail "$msg"
+done <<<"$short_semver"
+
+#    pnpm's own wait applies to every install, including a human's.
+if [ -f "$ROOT/pnpm-workspace.yaml" ]; then
+  release_age="$(yq '.minimumReleaseAge // 0' "$ROOT/pnpm-workspace.yaml")"
+  [[ "$release_age" =~ ^[0-9]+$ ]] && [ "$release_age" -ge 4320 ] \
+    || fail "pnpm-workspace.yaml minimumReleaseAge is '$release_age'; it needs >= 4320 (3 days)"
+fi
+
+# 3. Private gem sources need a rubygems-server registry listed on the entry.
+while IFS= read -r lock; do
+  [ -n "$lock" ] || continue
+  dir="$(dir_of "$lock")"
+  gemfile="$ROOT${dir%/}/Gemfile"
+  is_covered bundler "$dir" && [ -f "$gemfile" ] || continue
+  while IFS= read -r url; do
+    [ -n "$url" ] || continue
+    norm_url="${url%/}"
+    [ "$norm_url" = "https://rubygems.org" ] && continue
+    ok="$(jq -r --arg dir "$dir" --arg url "$norm_url" "$JQ_DEFS"'
+      [ (.registries // {}) | to_entries[]
+        | select(.value.type == "rubygems-server" and ((.value.url // "") | rtrimstr("/")) == $url)
+        | .key ] as $keys
+      | [ (.updates // [])[]
+          | select(.["package-ecosystem"] == "bundler" and (dirs | index($dir)))
+          | (.registries // []) | if type == "array" then . else [.] end
+          | map(select(. as $r | $keys | index($r))) | length ]
+      | any(. > 0)
+    ' <<<"$CONFIG_JSON")"
+    [ "$ok" = "true" ] || fail "${gemfile#"$ROOT"/} pulls gems from $url but no rubygems-server registry for it is listed on the bundler entry for '$dir'"
+  done < <(grep -oE "^[[:space:]]*source[[:space:]]+[\"']https?://[^\"']+" "$gemfile" | sed -E "s/.*[\"']//")
+done < <(grep -E '(^|/)Gemfile\.lock$' <<<"$FILES" || true)
+
+# 4. github-actions and docker entries may not use semver cooldowns
+#    (Dependabot rejects the file).
+semver_cooldowns="$(jq -r "$JQ_DEFS"'
+  (.updates // [])[]
+  | .["package-ecosystem"] as $eco
+  | select($eco == "github-actions" or $eco == "docker")
+  | . as $e | (.cooldown // {}) | keys[] | select(startswith("semver-"))
+  | "\($eco) entry \($e | dirs | join(",")) sets cooldown.\(.), which Dependabot does not support for \($eco)"
+' <<<"$CONFIG_JSON")"
+while IFS= read -r msg; do
+  [ -z "$msg" ] || fail "$msg"
+done <<<"$semver_cooldowns"
+
+# 5. No pnpm override pins a version with an open npm alert.
+if [ -n "$ALERTS" ]; then
+  overrides='{}'
+  if [ -f "$ROOT/pnpm-workspace.yaml" ]; then
+    overrides="$(yq -o=json '.overrides // {}' "$ROOT/pnpm-workspace.yaml")"
+  fi
+  if [ -f "$ROOT/package.json" ]; then
+    overrides="$(jq --argjson ws "$overrides" '$ws + (.pnpm.overrides // {})' "$ROOT/package.json")"
+  fi
+  pinned_alerts="$(jq -rs --argjson overrides "$overrides" '
+    # "1.2.3" -> [1,2,3]. A prerelease/build tag is dropped: GitHub advisory
+    # ranges for npm name release versions.
+    def ver: sub("^v"; "") | split("+")[0] | split("-")[0] | split(".") | map(tonumber? // 0);
+    # GitHub ranges look like ">= 0.9.0, < 0.10.2", "<= 2.1.0" or "= 1.0.0":
+    # comma-separated comparators that must all hold. Anything else (spaces
+    # between comparators, "||", wildcards) is reported, never guessed at.
+    def parsable:
+      split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))
+      | length > 0 and all(.[]; test("^(>=|<=|>|<|=)?\\s*v?[0-9]+(\\.[0-9]+)*([-+][0-9A-Za-z.-]+)?$"));
+    def in_range($v):
+      split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))
+      | all(.[]; capture("^(?<op>>=|<=|>|<|=)?\\s*(?<ver>\\S+)$") as $c
+            | ($c.ver | ver) as $r
+            | ($c.op // "=") as $op
+            | if $op == ">=" then $v >= $r
+              elif $op == "<=" then $v <= $r
+              elif $op == ">" then $v > $r
+              elif $op == "<" then $v < $r
+              else $v == $r end);
+    # Package name of an override key: "a>b@^2" -> "b", "@s/p@4" -> "@s/p",
+    # "a@>=2" -> "a". A ">" right after "@", a space or "|" belongs to a
+    # version range, not the parent>child selector, so it is masked first.
+    def key_name: gsub("(?<p>[@ |])>"; "\(.p)\u0001") | split(">") | last
+      | if startswith("@") then "@" + (.[1:] | split("@")[0]) else split("@")[0] end;
+    # [name, version] a value pins: "1.2.3" or "npm:@s/p@1.2.3". A range pins
+    # nothing, so it is skipped.
+    def pin($key):
+      if type != "string" then empty
+      elif startswith("npm:") then .[4:]
+        | (if startswith("@") then 1 else 0 end) as $o
+        | (.[$o:] | index("@")) as $i
+        | if $i == null then empty else [.[:$i + $o], .[$i + $o + 1:]] end
+      else [($key | key_name), .] end
+      | select(.[1] | test("^v?[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?$"));
+    # An alert without a version range cannot be matched to a pin; skip it.
+    [ add // [] | .[]
+      | select(.state == "open" and .dependency.package.ecosystem == "npm")
+      | select((.security_vulnerability.vulnerable_version_range // "") != "") ] as $open
+    | $overrides | to_entries[] | .key as $key
+    | (.value | pin($key)) as [$name, $version]
+    | $open[]
+    | select(.dependency.package.name == $name)
+    | .security_vulnerability.vulnerable_version_range as $range
+    | if ($range | parsable | not) then
+        "override \"\($key)\": \($version) pins \($name), and open alert #\(.number) (\(.security_advisory.ghsa_id)) has a range this check cannot parse (\($range)): compare them by hand"
+      elif ($range | in_range($version | ver)) then
+        "override \"\($key)\": \($version) pins \($name) inside open alert #\(.number) (\(.security_advisory.ghsa_id), vulnerable \($range), fixed in \(.security_vulnerability.first_patched_version.identifier // "no release yet")): Dependabot cannot bump an override, so bump it by hand"
+      else empty end
+  ' "$ALERTS")"
+  while IFS= read -r msg; do
+    [ -z "$msg" ] || fail "$msg"
+  done <<<"$pinned_alerts"
+fi
+
+if [ "$violations" -gt 0 ]; then
+  echo "dependabot-coverage: $violations violation(s) in $CONFIG" >&2
+  exit 1
+fi
+echo "dependabot-coverage: OK"

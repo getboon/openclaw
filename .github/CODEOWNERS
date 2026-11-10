@@ -69,3 +69,12 @@
 /scripts/openclaw-npm-publish.sh @openclaw/openclaw-release-managers
 /scripts/openclaw-npm-release-check.ts @openclaw/openclaw-release-managers
 /scripts/release-check.ts @openclaw/openclaw-release-managers
+
+# Dependabot auto-merge automation.
+# Last match wins, so the dependabot.yml line repeats the secops owner above.
+/.github/dependabot.yml @openclaw/openclaw-secops @jerhinesmith @insomnius
+/.github/workflows/dependabot-auto-merge.yml @jerhinesmith @insomnius
+/.github/workflows/dependabot-digest.yml @jerhinesmith @insomnius
+/.github/workflows/dependabot-scripts.yml @jerhinesmith @insomnius
+/scripts/dependabot/ @jerhinesmith @insomnius
+/test/dependabot/ @jerhinesmith @insomnius

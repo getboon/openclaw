@@ -1,0 +1,211 @@
+---
+# .github/workflows/dependabot-auto-merge.yml
+# Auto-merges safe Dependabot PRs once Gandalf the White approves.
+#
+# Three gates, all required:
+#   1. Rules in scripts/dependabot/dependabot-merge-decision (bats-tested):
+#      kill switch on, only verified Dependabot commits, semver patch/minor
+#      only, dependency files only (no GitHub Actions bumps, no
+#      pnpm-workspace.yaml), no new package source, no new direct dependency.
+#   2. An approving review that satisfies the `boon` ruleset: Gandalf the
+#      White (boon-hermes-bot), the same AI review openclaw's other PRs get, or
+#      an engineer. This workflow never approves anything itself and posts
+#      nothing to Slack: dependabot-digest.yml asks Gandalf the White to
+#      review, in one weekly thread that lists every Dependabot PR.
+#   3. The `boon` ruleset's required checks (ci-gate in ci.yml).
+# When the rules pass, the job enables GitHub auto-merge pinned to the checked
+# head, so GitHub merges only after gates 2 and 3. Anything the rules skip is
+# left for a human; the digest lists it under "Needs a human".
+#
+# Every run re-decides against the PR's current head. It first turns OFF any
+# auto-merge queued by an earlier run and dismisses approvals of older commits
+# (the `boon` ruleset keeps stale approvals on push), then re-enables
+# auto-merge only if this head is decided "merge". A skip or any failed step
+# leaves auto-merge off.
+#
+# Kill switch (one step): set the repo variable DEPENDABOT_AUTOMERGE to "off"
+# (Settings -> Secrets and variables -> Actions -> Variables). Auto-merge is
+# enabled only when it is exactly "on", so new PRs then never get it, and the
+# `kill-switch-sweep` job below turns auto-merge off on every Dependabot PR
+# that still has it queued, within 15 minutes. A repository variable change
+# can't trigger a workflow, so the sweep runs on a schedule; to clear queued
+# PRs immediately, run this workflow by hand (Actions -> Dependabot
+# auto-merge -> Run workflow). The sweep runs only while the variable is set
+# to something other than "on": while it is unset (the trial before
+# auto-merge is first turned on) nothing can be queued, so nothing runs.
+#
+# Uses pull_request_target so Actions secrets resolve. Safe because the job
+# checks out the BASE branch only (the scripts come from `boon`, never from
+# the PR), never runs PR-supplied code, and passes PR data to shell only
+# through env. Writes go through the Gandalf GitHub App token, not
+# GITHUB_TOKEN, so the resulting merge to `boon` triggers the normal push
+# workflows.
+
+name: Dependabot auto-merge
+
+on: # yamllint disable-line rule:truthy
+  pull_request_target: # zizmor: ignore[dangerous-triggers] checks out the trusted base branch only; never runs PR code
+    types: [opened, synchronize, reopened]
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number || 'sweep' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
+
+jobs:
+  decide-and-merge:
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      PR_URL: ${{ github.event.pull_request.html_url }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout base branch (never the PR head)
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+
+      - name: Mint Gandalf app token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.GANDALF_APP_ID }}
+          private-key: ${{ secrets.GANDALF_PRIVATE_KEY }}
+          # No owner/repositories -> token is scoped to this repo only.
+          # pull-requests: toggle auto-merge and dismiss stale approvals;
+          # contents: GitHub merges as the identity that enabled auto-merge.
+          permission-contents: write
+          permission-pull-requests: write
+
+      # Runs before the decision, on every run: an auto-merge queued for an
+      # earlier head must not carry over to this one. If anything below fails,
+      # the PR is left with auto-merge off.
+      - name: Turn off any auto-merge queued by an earlier run
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          queued="$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest != null')"
+          if [ "$queued" = "true" ]; then
+            gh pr merge "$PR_URL" --disable-auto
+            echo "- Auto-merge from an earlier run was turned off before re-checking." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # The `boon` ruleset does not dismiss approvals when new commits are
+      # pushed, so an approval of an older head would still satisfy the review
+      # rule for this one. Dismiss them; Gandalf the White re-reviews this head.
+      - name: Dismiss approvals of older commits
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --paginate > "$RUNNER_TEMP/reviews.json"
+          scripts/dependabot/dependabot-stale-approvals --reviews "$RUNNER_TEMP/reviews.json" --head "$HEAD_SHA" > "$RUNNER_TEMP/stale.txt"
+          while IFS= read -r review_id; do
+            gh api --method PUT "repos/$REPO/pulls/$PR_NUMBER/reviews/$review_id/dismissals" \
+              -f event=DISMISS \
+              -f message="Dismissed by dependabot-auto-merge.yml: approval was for an older commit than $HEAD_SHA." \
+              > /dev/null
+            echo "- Dismissed approval $review_id (older commit)." >> "$GITHUB_STEP_SUMMARY"
+          done < "$RUNNER_TEMP/stale.txt"
+
+      - name: Collect changed files, diff and commit authorship
+        id: collect
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh pr diff "$PR_URL" --name-only > "$RUNNER_TEMP/files.txt"
+          gh pr diff "$PR_URL" > "$RUNNER_TEMP/diff.txt"
+          # A Dependabot commit is authored by dependabot[bot], committed and
+          # signed by GitHub (web-flow), and verified. Anything else, e.g. a
+          # human's signed commit whose author email was set to Dependabot's,
+          # counts as foreign.
+          foreign="$(gh api "repos/$REPO/pulls/$PR_NUMBER/commits" --paginate \
+            --jq '.[] | select(.author.login != "dependabot[bot]" or .committer.login != "web-flow" or (.commit.verification.verified | not)) | .sha' \
+            | wc -l | tr -d ' ')"
+          echo "foreign=$foreign" >> "$GITHUB_OUTPUT"
+
+      - name: Decide
+        id: decide
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          KILL_SWITCH: ${{ vars.DEPENDABOT_AUTOMERGE }}
+          PKGS: ${{ steps.meta.outputs.dependency-names }}
+          FOREIGN: ${{ steps.collect.outputs.foreign }}
+        run: |
+          set -euo pipefail
+          decision="$(scripts/dependabot/dependabot-merge-decision \
+            --update-type "${UPDATE_TYPE:-}" \
+            --kill-switch "${KILL_SWITCH:-}" \
+            --files "$RUNNER_TEMP/files.txt" \
+            --diff "$RUNNER_TEMP/diff.txt" \
+            --foreign-commits "$FOREIGN")"
+          echo "decision=$decision" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Dependabot auto-merge"
+            echo "- Packages: $(printf '%s' "${PKGS:-unknown}" | tr '\n' ',' | sed 's/,$//')"
+            echo "- Update type: ${UPDATE_TYPE:-unknown}"
+            echo "- Head commit: $HEAD_SHA"
+            echo "- Decision: **$decision**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enable auto-merge for the checked head
+        if: steps.decide.outputs.decision == 'merge'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          # GitHub merges only once an approval and the required checks are
+          # in; until then the PR waits. --match-head-commit refuses the merge
+          # if the head moved since we checked.
+          gh pr merge "$PR_URL" --auto --squash --match-head-commit "$HEAD_SHA"
+          echo "- Auto-merge enabled; waiting for Gandalf the White's approval and green CI." >> "$GITHUB_STEP_SUMMARY"
+
+  # The second half of the kill switch: while DEPENDABOT_AUTOMERGE is set but
+  # not "on", turn auto-merge off on every open Dependabot PR that still has
+  # it. Skipped (no runner) while the switch is on or unset.
+  kill-switch-sweep:
+    if: github.event_name != 'pull_request_target' && vars.DEPENDABOT_AUTOMERGE != '' && vars.DEPENDABOT_AUTOMERGE != 'on'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Mint Gandalf app token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.GANDALF_APP_ID }}
+          private-key: ${{ secrets.GANDALF_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Turn off queued auto-merge on Dependabot PRs
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh pr list --repo "$REPO" --author app/dependabot --state open --limit 1000 \
+            --json number,autoMergeRequest --jq '.[] | select(.autoMergeRequest != null) | .number' \
+            > "$RUNNER_TEMP/queued.txt"
+          echo "### Dependabot kill switch sweep" >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r number; do
+            gh pr merge "$number" --repo "$REPO" --disable-auto
+            echo "- Turned off auto-merge on #$number." >> "$GITHUB_STEP_SUMMARY"
+          done < "$RUNNER_TEMP/queued.txt"
+          [ -s "$RUNNER_TEMP/queued.txt" ] || echo "- No Dependabot PR had auto-merge queued." >> "$GITHUB_STEP_SUMMARY"

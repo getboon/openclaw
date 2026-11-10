@@ -2025,7 +2025,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@a2ui/lit": "0.10.0",
+    "@a2ui/lit": "0.10.3",
     "@copilotkit/aimock": "1.27.3",
     "@grammyjs/types": "3.27.3",
     "@lit-labs/signals": "0.3.0",

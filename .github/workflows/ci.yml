@@ -2617,3 +2617,48 @@ jobs:
           name: ci-timings-summary
           path: ci-timings-summary.txt
           retention-days: 14
+
+  # One stable check name for the `boon` ruleset to require: the
+  # matrix jobs above are routed per PR by preflight, so their names come and
+  # go. Skipped jobs are fine (preflight routed them out); a failed or
+  # cancelled one fails the gate. Without a required check, GitHub auto-merge
+  # (dependabot-auto-merge.yml) would merge on approval alone, even on red CI.
+  ci-gate:
+    permissions: {}
+    name: ci-gate
+    needs:
+      - runner-admission
+      - preflight
+      - security-fast
+      - pnpm-store-warmup
+      - build-artifacts
+      - checks-fast-core
+      - checks-fast-plugin-contracts-shard
+      - checks-fast-channel-contracts-shard
+      - checks-node-compat
+      - checks-node-core-test-nondist-shard
+      - check-shard
+      - check-additional-shard
+      - check-docs
+      - skills-python
+      - checks-windows
+      - macos-node
+      - macos-swift
+      - ios-build
+      - android
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Fail if any CI job failed or was cancelled
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          set -euo pipefail
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "::error::a required CI job finished with '$result'"; exit 1 ;;
+            esac
+          done

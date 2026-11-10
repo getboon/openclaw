@@ -17,9 +17,6 @@ overrides:
   follow-redirects: 1.16.2
   defu: 6.1.5
   fast-xml-parser: 5.7.0
-  request: npm:@cypress/request@3.0.10
-  request-promise: npm:@cypress/request-promise@5.0.0
-  basic-ftp: 6.0.1
   file-type: 22.0.1
   form-data: 2.5.6
   ip-address: 10.7.5
@@ -31,10 +28,8 @@ overrides:
   typebox: 1.1.39
   tar: 7.5.22
   tough-cookie: 4.1.3
-  yauzl: 3.2.1
   protobufjs: 7.6.5
   uuid: 14.0.0
-  '@grpc/grpc-js': 1.14.4
   linkify-it: 5.0.2
   brace-expansion: 5.0.12
   postcss: 8.5.32
@@ -53,6 +48,7 @@ overrides:
   markdown-it: 14.3.3
   ws: 8.21.0
   '@vitest/browser': 4.1.12
+  tinypool: 2.2.0
 
 packageExtensionsChecksum: sha256-zZ8fyodhMTumshonC7kktCqTPsiHL3UAyS9vltFAlMo=
 
@@ -260,8 +256,8 @@ importers:
         version: 4.6.7
     devDependencies:
       '@a2ui/lit':
-        specifier: 0.10.0
-        version: 0.10.0(signal-polyfill@0.2.2)
+        specifier: 0.10.3
+        version: 0.10.3(signal-polyfill@0.2.2)
       '@copilotkit/aimock':
         specifier: 1.27.3
         version: 1.27.3(vitest@4.1.12)
@@ -523,8 +519,8 @@ importers:
   extensions/canvas:
     dependencies:
       '@a2ui/lit':
-        specifier: 0.10.0
-        version: 0.10.0(signal-polyfill@0.2.2)
+        specifier: 0.10.3
+        version: 0.10.3(signal-polyfill@0.2.2)
       '@lit/context':
         specifier: 1.1.6
         version: 1.1.6
@@ -2051,16 +2047,16 @@ importers:
 
 packages:
 
-  '@a2ui/lit@0.10.0':
-    resolution: {integrity: sha512-TP0EPOUZt+9yLPnVA6vLgXw7nepymUhhmrvpBZ/M0zJLOISRWXnjV3r3mevsQlOynFK9XaFkY34RhciZb+oKGA==}
+  '@a2ui/lit@0.10.3':
+    resolution: {integrity: sha512-/kkL0BqJJfC6sn3XNKbo7QDWKE9K06blUVIoLHLU2PZQJalE1KBv/HLTpupBJ94SMhG+NaOUUu8yBUT+ACsm2Q==}
     peerDependencies:
-      '@a2ui/markdown-it': ^0.0.4
+      '@a2ui/markdown-it': '*'
     peerDependenciesMeta:
       '@a2ui/markdown-it':
         optional: true
 
-  '@a2ui/web_core@0.10.0':
-    resolution: {integrity: sha512-pSieKxaB6aZWBL2LjZfKo4/1v4xMWylczpzte1ehuGH0kfNGf/iTd73PKsIKYx3b0FNWTbD8gAloOM4JCVqUig==}
+  '@a2ui/web_core@0.10.7':
+    resolution: {integrity: sha512-9czuUjSgsomHYy79lKExwtmMza9iCqaXJx7aw5xOGMLKNPziwux5fj4UnsV41bQkLDeZwNu2LoOwn5c2ceyDsQ==}
 
   '@agentclientprotocol/claude-agent-acp@0.39.0':
     resolution: {integrity: sha512-+tCm5v32L0R3zE4qjZQowfO1L/zqvQ5FapmsMSIf4gawXfTf26CG5hgz99wARdo0zn20/1eP80gzx7PbZlSX9A==}
@@ -2967,9 +2963,6 @@ packages:
   '@line/bot-sdk@11.0.1':
     resolution: {integrity: sha512-De9gBX2JfZs78nDSyzfetHJw0R6hncPVVy3tzPMwYZzgwK06C/tcijGy7Vq28K8uYKGVTSthbtMIoYKNhXISzw==}
     engines: {node: '>=22'}
-
-  '@lit-labs/signals@0.1.3':
-    resolution: {integrity: sha512-P0yWgH5blwVyEwBg+WFspLzeu1i0ypJP1QB0l1Omr9qZLIPsUu0p4Fy2jshOg7oQyha5n163K3GJGeUhQQ682Q==}
 
   '@lit-labs/signals@0.3.0':
     resolution: {integrity: sha512-PfB5FLtorVfkhwTWXOPNT/rvrVdSDY8siwPyR17ztrViRbMqxy1TQBcHqJoA4303QT8yXPGxYtGKJGj7fEfEwg==}
@@ -4167,7 +4160,9 @@ packages:
   '@smithy/core@3.24.6':
     resolution: {integrity: sha512-wBXDRup6UU97VKyaiRo8AssnfStPtG0oAAfpq/bC0a1YYau8pM86YB4kM6ccoVi1mS8l/UHbn9oDM+7uozr/ug==}
     engines: {node: '>=18.0.0'}
-    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
+    deprecated: |-
+      Deprecated due to a bug in custom logger data redaction. Upgrade to the latest version. If you used a custom logger with this
+        version, review your logs and rotate any credentials or other secrets. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.3.8':
     resolution: {integrity: sha512-5cAM+KZC02sTqDt6NaLXyu50M/GNMd1eTzDVR8Lb0BBsVtu7RWHo47VPPEEv1vt3Yub6uzr+M5FHC+GtoT0USg==}
@@ -7451,8 +7446,8 @@ packages:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
     engines: {node: '>=12.0.0'}
 
-  tinypool@2.1.0:
-    resolution: {integrity: sha512-Pugqs6M0m7Lv1I7FtxN4aoyToKg1C4tu+/381vH35y8oENM/Ai7f7C4StcoK4/+BSw9ebcS8jRiVrORFKCALLw==}
+  tinypool@2.2.0:
+    resolution: {integrity: sha512-jBrmx4lYmaC9k/mgPbylxs7kBUxHtD8256up+HjLaDFfXScKJQyil+SWXSvhAtT7XHo+yTVlpB81PGmHP8oLSQ==}
     engines: {node: ^20.0.0 || >=22.0.0}
 
   tinyrainbow@3.1.0:
@@ -7952,10 +7947,10 @@ packages:
 
 snapshots:
 
-  '@a2ui/lit@0.10.0(signal-polyfill@0.2.2)':
+  '@a2ui/lit@0.10.3(signal-polyfill@0.2.2)':
     dependencies:
-      '@a2ui/web_core': 0.10.0
-      '@lit-labs/signals': 0.1.3
+      '@a2ui/web_core': 0.10.7
+      '@lit-labs/signals': 0.3.0
       '@lit/context': 1.1.6
       lit: 3.3.3
       signal-utils: 0.21.1(signal-polyfill@0.2.2)
@@ -7963,7 +7958,7 @@ snapshots:
     transitivePeerDependencies:
       - signal-polyfill
 
-  '@a2ui/web_core@0.10.0':
+  '@a2ui/web_core@0.10.7':
     dependencies:
       '@preact/signals-core': 1.14.2
       date-fns: 4.4.0
@@ -9061,11 +9056,6 @@ snapshots:
   '@line/bot-sdk@11.0.1':
     dependencies:
       '@types/node': 24.13.1
-
-  '@lit-labs/signals@0.1.3':
-    dependencies:
-      lit: 3.3.3
-      signal-polyfill: 0.2.2
 
   '@lit-labs/signals@0.3.0':
     dependencies:
@@ -13009,7 +12999,7 @@ snapshots:
 
   oxfmt@0.52.0:
     dependencies:
-      tinypool: 2.1.0
+      tinypool: 2.2.0
     optionalDependencies:
       '@oxfmt/binding-android-arm-eabi': 0.52.0
       '@oxfmt/binding-android-arm64': 0.52.0
@@ -13978,7 +13968,7 @@ snapshots:
       fdir: 6.5.0(picomatch@4.0.7)
       picomatch: 4.0.7
 
-  tinypool@2.1.0: {}
+  tinypool@2.2.0: {}
 
   tinyrainbow@3.1.0: {}
 

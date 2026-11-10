@@ -1,0 +1,87 @@
+---
+# .github/workflows/dependabot-scripts.yml
+# Tests the Dependabot scripts and keeps .github/dependabot.yml covering every
+# dependency file.
+#
+# `bats test/dependabot/` runs the scripts' tests, including "passes on the
+# real committed config", which runs scripts/dependabot/verify-dependabot-coverage
+# against this checkout. The paths below therefore include every file kind the
+# checker maps to an ecosystem, so a PR that adds a new lockfile in a directory
+# Dependabot doesn't cover fails here.
+
+name: Dependabot scripts
+
+on: # yamllint disable-line rule:truthy
+  push:
+    branches: [boon]
+    paths:
+      - ".github/dependabot.yml"
+      - ".github/workflows/dependabot-*.yml"
+      - "scripts/dependabot/**"
+      - "test/dependabot/**"
+      - "**/package-lock.json"
+      - "**/npm-shrinkwrap.json"
+      - "**/pnpm-lock.yaml"
+      - "**/yarn.lock"
+      - "**/Package.resolved"
+      - "**/Package.swift"
+      - "**/settings.gradle"
+      - "**/settings.gradle.kts"
+      - "**/build.gradle"
+      - "**/build.gradle.kts"
+      - "**/libs.versions.toml"
+      - "**/pyproject.toml"
+      - "**/Gemfile.lock"
+      - "**/uv.lock"
+      - "**/go.mod"
+      - "**/requirements*.txt"
+  # Keep identical to the push paths above.
+  pull_request:
+    paths:
+      - ".github/dependabot.yml"
+      - ".github/workflows/dependabot-*.yml"
+      - "scripts/dependabot/**"
+      - "test/dependabot/**"
+      - "**/package-lock.json"
+      - "**/npm-shrinkwrap.json"
+      - "**/pnpm-lock.yaml"
+      - "**/yarn.lock"
+      - "**/Package.resolved"
+      - "**/Package.swift"
+      - "**/settings.gradle"
+      - "**/settings.gradle.kts"
+      - "**/build.gradle"
+      - "**/build.gradle.kts"
+      - "**/libs.versions.toml"
+      - "**/pyproject.toml"
+      - "**/Gemfile.lock"
+      - "**/uv.lock"
+      - "**/go.mod"
+      - "**/requirements*.txt"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test-dependabot-scripts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install Bats
+        uses: bats-core/bats-action@3566550e0f594451ac0f58fcbfdeca93aa29a45e # 4.1.0
+
+      # The runner image ships mikefarah yq v4, which the coverage checker uses.
+      - name: Run Bats tests
+        shell: bash
+        run: |
+          yq --version
+          bats test/dependabot/
