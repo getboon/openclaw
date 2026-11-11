@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.35-boon.6
+
+Fixes a cross-user privacy leak where one employee's identity, preferences, or conversation history could surface in a different employee's private Boon Agent chat.
+
+- **#330 (ENG-21047):** `MEMORY.md` and `USER.md` now resolve under `identities/<senderId>/` when the current turn carries a verified sender identity (`MsgContext.SenderId`, already populated by every channel plugin), instead of always resolving at the shared workspace root. A multi-user Boon Agent box (one organization's box serving many employees' separate private 1:1 conversations) can no longer answer one employee using a different employee's name, role, or conversation history. All other workspace files (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`) stay shared, as intended. A symlink guard blocks an identity-scoped file from aliasing another identity's file. Deployments that never populate a sender identity (single-user CLI/Claude-Code-style usage) see byte-for-byte unchanged behavior. Does not migrate already-contaminated root `MEMORY.md`/`USER.md` content on existing live boxes, partition the separate `extensions/memory-core` tool surface, or cover the Discord voice realtime path (no single-speaker identity to key off of today) — tracked as follow-ups, not regressions.
+- **#331 (ENG-22470):** Dependabot coverage, a 5-day update cooldown, and guarded patch/minor auto-merge. CI/tooling only; no shipped runtime change.
+- Base = `2026.6.35-boon.5`. Fork gateway and every bundled plugin bumped to `2026.6.35-boon.6` in lockstep. Plugin changes beyond the version: `codex` and `copilot` thread the turn's sender identity into the shared workspace-bootstrap resolver so their memory-file routing stays identity-scoped too. Everything else in plugins is version-only.
+
 ## 2026.6.35-boon.5
 
 Stops every new user message in Boon Web, Slack, and MS Teams from rewriting the whole conversation into the prompt cache, and lets Gemini 3 models finish tool loops behind an OpenAI-compatible proxy such as the Boon LLM gateway.
