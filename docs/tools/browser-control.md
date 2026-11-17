@@ -243,7 +243,7 @@ openclaw browser set device "iPhone 14"
 Notes:
 
 - `upload` and `dialog` are **arming** calls; run them before the click/press that triggers the chooser/dialog. If an action opens a modal, the action response includes `blockedByDialog` and `browserState.dialogs.pending`; pass that `dialogId` to respond directly. Dialogs handled outside OpenClaw appear under `browserState.dialogs.recent`.
-- `click`/`type`/etc require a `ref` from `snapshot` (numeric `12`, role ref `e12`, or actionable ARIA ref `ax12`). CSS selectors are intentionally not supported for actions. Use `click-coords` when the visible viewport position is the only reliable target. Agent screenshots larger than the model image limit are scaled down; the screenshot result then states the image-to-viewport scale to apply before `click-coords`.
+- `click`/`type`/etc require a `ref` from `snapshot` (numeric `12`, role ref `e12`, or actionable ARIA ref `ax12`). CSS selectors are intentionally not supported for actions. Use `click-coords` when the visible viewport position is the only reliable target. When a plain viewport screenshot is scaled down to the model image limit, the screenshot result states the image-to-viewport scale to apply before `click-coords`. Full-page, element, and ref screenshots and existing-session profiles carry no scale note.
 - Download and trace paths are constrained to OpenClaw temp roots: `/tmp/openclaw{,/downloads}` (fallback: `${os.tmpdir()}/openclaw/...`).
 - `upload` accepts files from the OpenClaw temp uploads root and
   OpenClaw-managed inbound media. Managed inbound media can be referenced as

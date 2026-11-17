@@ -273,7 +273,7 @@ describe("screenshotWithLabelsViaPlaywright (viewport measurement)", () => {
     expect(result).not.toHaveProperty("viewport");
   });
 
-  it("does not measure the viewport for fullPage captures", async () => {
+  it("omits viewport and skips the post-capture read for fullPage captures", async () => {
     const evaluate = evaluateMockReturning({ x: 0, y: 0, width: 1300, height: 900 });
     setPwToolsCoreCurrentPage({ evaluate, screenshot: vi.fn(async () => Buffer.from("FULL")) });
     setPwToolsCoreCurrentRefLocator({
@@ -291,7 +291,7 @@ describe("screenshotWithLabelsViaPlaywright (viewport measurement)", () => {
     expect(functionEvaluateCalls(evaluate)).toHaveLength(1);
   });
 
-  it("does not measure the viewport for element captures", async () => {
+  it("omits viewport and skips the post-capture read for element captures", async () => {
     const evaluate = evaluateMockReturning({ x: 0, y: 0, width: 1300, height: 900 });
     const boundingBox = vi
       .fn<() => Promise<{ x: number; y: number; width: number; height: number } | null>>()
