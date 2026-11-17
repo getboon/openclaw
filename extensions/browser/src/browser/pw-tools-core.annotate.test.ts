@@ -203,3 +203,104 @@ describe("screenshotWithLabelsViaPlaywright (skipped accounting)", () => {
     expect(result.skipped).toBe(1);
   });
 });
+
+describe("screenshotWithLabelsViaPlaywright (viewport measurement)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const functionEvaluateCalls = (evaluate: ReturnType<typeof vi.fn>) =>
+    evaluate.mock.calls.filter(([arg]) => typeof arg === "function");
+
+  it("measures the viewport after the capture and overlay clear", async () => {
+    const evaluate = evaluateMockReturning({ x: 0, y: 0, width: 1300, height: 900 });
+    const screenshot = vi.fn(async () => Buffer.from("PNG"));
+    setPwToolsCoreCurrentPage({ evaluate, screenshot });
+    setPwToolsCoreCurrentRefLocator({
+      boundingBox: async () => ({ x: 10, y: 20, width: 30, height: 40 }),
+    });
+
+    const result = await mod.screenshotWithLabelsViaPlaywright({
+      cdpUrl: "http://127.0.0.1:18792",
+      targetId: "T1",
+      refs: { e1: { role: "button" } },
+    });
+
+    expect(result.buffer.toString()).toBe("PNG");
+    expect(result.viewport).toEqual({ width: 1300, height: 900 });
+    const calls = evaluate.mock.calls;
+    const lastCall = calls.at(-1)?.[0];
+    const clearCall = calls.at(-2)?.[0];
+    expect(typeof lastCall).toBe("function");
+    expect(typeof clearCall === "string" && clearCall.includes("data-openclaw-labels")).toBe(true);
+    expect(evaluate.mock.invocationCallOrder.at(-1)).toBeGreaterThan(
+      screenshot.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("returns the labeled screenshot without viewport when the measurement fails", async () => {
+    let functionCalls = 0;
+    const evaluate = vi.fn(async (arg: EvaluateArg) => {
+      if (typeof arg !== "function") {
+        return true;
+      }
+      functionCalls += 1;
+      if (functionCalls > 1) {
+        throw new Error("evaluate failed");
+      }
+      return { x: 0, y: 0, width: 1300, height: 900 };
+    });
+    setPwToolsCoreCurrentPage({ evaluate, screenshot: vi.fn(async () => Buffer.from("PNG")) });
+    setPwToolsCoreCurrentRefLocator({
+      boundingBox: async () => ({ x: 10, y: 20, width: 30, height: 40 }),
+    });
+
+    const result = await mod.screenshotWithLabelsViaPlaywright({
+      cdpUrl: "http://127.0.0.1:18792",
+      targetId: "T1",
+      refs: { e1: { role: "button" } },
+    });
+
+    expect(result.buffer.toString()).toBe("PNG");
+    expect(result).not.toHaveProperty("viewport");
+  });
+
+  it("does not measure the viewport for fullPage captures", async () => {
+    const evaluate = evaluateMockReturning({ x: 0, y: 0, width: 1300, height: 900 });
+    setPwToolsCoreCurrentPage({ evaluate, screenshot: vi.fn(async () => Buffer.from("FULL")) });
+    setPwToolsCoreCurrentRefLocator({
+      boundingBox: async () => ({ x: 10, y: 20, width: 30, height: 40 }),
+    });
+
+    const result = await mod.screenshotWithLabelsViaPlaywright({
+      cdpUrl: "http://127.0.0.1:18792",
+      targetId: "T1",
+      refs: { e1: { role: "button" } },
+      fullPage: true,
+    });
+
+    expect(result).not.toHaveProperty("viewport");
+    expect(functionEvaluateCalls(evaluate)).toHaveLength(1);
+  });
+
+  it("does not measure the viewport for element captures", async () => {
+    const evaluate = evaluateMockReturning({ x: 0, y: 0, width: 1300, height: 900 });
+    const boundingBox = vi
+      .fn<() => Promise<{ x: number; y: number; width: number; height: number } | null>>()
+      .mockResolvedValueOnce({ x: 50, y: 100, width: 200, height: 300 })
+      .mockResolvedValueOnce({ x: 60, y: 110, width: 30, height: 20 });
+    setPwToolsCoreCurrentPage({ evaluate, screenshot: vi.fn() });
+    setPwToolsCoreCurrentRefLocator({
+      boundingBox,
+      screenshot: vi.fn(async () => Buffer.from("ELEM")),
+    });
+
+    const result = await mod.screenshotWithLabelsViaPlaywright({
+      cdpUrl: "http://127.0.0.1:18792",
+      targetId: "T1",
+      refs: { e1: { role: "button" } },
+      ref: "container",
+    });
+
+    expect(result).not.toHaveProperty("viewport");
+    expect(functionEvaluateCalls(evaluate)).toHaveLength(1);
+  });
+});

@@ -30,4 +30,15 @@ describe("browser tool schema", () => {
     expect(properties.targetId.description).toContain("raw CDP targetId");
     expect(requestProperties.targetId.description).toBe(properties.targetId.description);
   });
+
+  it("describes clickCoords x/y as viewport CSS pixels on nested and flattened act params", () => {
+    const properties = BrowserToolSchema.properties as BrowserSchemaRecord;
+    const requestProperties = properties.request.properties as BrowserSchemaRecord;
+
+    for (const key of ["x", "y"]) {
+      expect(properties[key].description).toContain(`clickCoords ${key} in viewport CSS pixels`);
+      expect(properties[key].description).toContain("apply the scale from the screenshot note");
+      expect(requestProperties[key].description).toBe(properties[key].description);
+    }
+  });
 });

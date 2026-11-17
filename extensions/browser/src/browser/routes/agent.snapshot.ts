@@ -27,6 +27,7 @@ import {
 import { getBrowserProfileCapabilities } from "../profile-capabilities.js";
 import type { AnnotationItem } from "../screenshot-annotate.js";
 import { scaleAnnotations } from "../screenshot-annotate.js";
+import type { BrowserViewportSize } from "../screenshot-viewport.js";
 import {
   DEFAULT_BROWSER_SCREENSHOT_MAX_BYTES,
   DEFAULT_BROWSER_SCREENSHOT_MAX_SIDE,
@@ -196,6 +197,7 @@ async function saveNormalizedScreenshotResponse(params: {
   labelsCount?: number;
   labelsSkipped?: number;
   annotations?: AnnotationItem[];
+  viewport?: BrowserViewportSize;
 }) {
   // Measure original dimensions BEFORE normalization so we can rescale
   // annotation coordinates if the response pipeline shrinks the image
@@ -224,6 +226,7 @@ async function saveNormalizedScreenshotResponse(params: {
     labelsCount: params.labelsCount,
     labelsSkipped: params.labelsSkipped,
     annotations,
+    viewport: params.viewport,
   });
 }
 
@@ -267,6 +270,7 @@ async function saveBrowserMediaResponse(params: {
   labelsCount?: number;
   labelsSkipped?: number;
   annotations?: AnnotationItem[];
+  viewport?: BrowserViewportSize;
 }) {
   await ensureMediaDir();
   const saved = await saveMediaBuffer(
@@ -286,6 +290,7 @@ async function saveBrowserMediaResponse(params: {
     ...(params.annotations && params.annotations.length > 0
       ? { annotations: params.annotations }
       : {}),
+    ...(params.viewport ? { viewport: params.viewport } : {}),
   });
 }
 
@@ -502,7 +507,7 @@ export function registerBrowserAgentSnapshotRoutes(
             return;
           }
 
-          let buffer: Buffer;
+          let capture: { buffer: Buffer; viewport?: BrowserViewportSize };
           const shouldUsePlaywright =
             labels ||
             shouldUsePlaywrightForScreenshot({
@@ -542,10 +547,11 @@ export function registerBrowserAgentSnapshotRoutes(
                 labelsCount: labeled.labels,
                 labelsSkipped: labeled.skipped,
                 annotations: labeled.annotations,
+                viewport: labeled.viewport,
               });
               return;
             }
-            const snap = await pw.takeScreenshotViaPlaywright({
+            capture = await pw.takeScreenshotViaPlaywright({
               cdpUrl,
               targetId: tab.targetId,
               ref,
@@ -554,9 +560,8 @@ export function registerBrowserAgentSnapshotRoutes(
               type,
               timeoutMs,
             });
-            buffer = snap.buffer;
           } else {
-            buffer = await captureScreenshot({
+            capture = await captureScreenshot({
               wsUrl: tab.wsUrl ?? "",
               fullPage,
               format: type,
@@ -567,10 +572,11 @@ export function registerBrowserAgentSnapshotRoutes(
 
           await saveNormalizedScreenshotResponse({
             res,
-            buffer,
+            buffer: capture.buffer,
             type,
             targetId: tab.targetId,
             url: tab.url,
+            viewport: capture.viewport,
           });
         },
       });

@@ -1,9 +1,10 @@
 // Browser tests cover cdp.screenshot params plugin behavior.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withCdpSocket } from "./cdp.helpers.js";
 import { captureScreenshot } from "./cdp.js";
 import type { ResolvedBrowserProfile } from "./config.js";
 import { shouldUsePlaywrightForScreenshot } from "./profile-capabilities.js";
+import { VIEWPORT_MEASURE_TIMEOUT_MS } from "./screenshot-viewport.js";
 
 const sentMessages = vi.hoisted(() => {
   const msgs: Array<{ method: string; params?: Record<string, unknown> }> = [];
@@ -17,7 +18,12 @@ const mockState = vi.hoisted(() => ({
   emulatedTab: true,
   viewport: { w: 800, h: 600, dpr: 2, sw: 800, sh: 600 } as Record<string, unknown>,
   naturalViewport: { w: 1920, h: 1080, dpr: 1 },
+  measuredViewport: { width: 1300, height: 900 } as unknown,
+  measureFails: false,
+  measureHangs: false,
 }));
+
+const VIEWPORT_MEASURE_EXPRESSION = "({ width: window.innerWidth, height: window.innerHeight })";
 
 vi.mock("./cdp.helpers.js", () => ({
   withCdpSocket: vi.fn(
@@ -46,6 +52,14 @@ vi.mock("./cdp.helpers.js", () => ({
           return Promise.resolve({});
         }
         if (method === "Runtime.evaluate") {
+          if (params?.expression === VIEWPORT_MEASURE_EXPRESSION) {
+            if (mockState.measureHangs) {
+              return new Promise(() => {});
+            }
+            return mockState.measureFails
+              ? Promise.reject(new Error("evaluate failed"))
+              : Promise.resolve({ result: { value: mockState.measuredViewport } });
+          }
           if (mockState.emulationCleared && mockState.emulatedTab) {
             return Promise.resolve({
               result: {
@@ -93,6 +107,13 @@ beforeEach(() => {
   mockState.emulatedTab = true;
   mockState.viewport = { w: 800, h: 600, dpr: 2, sw: 800, sh: 600 };
   mockState.naturalViewport = { w: 1920, h: 1080, dpr: 1 };
+  mockState.measuredViewport = { width: 1300, height: 900 };
+  mockState.measureFails = false;
+  mockState.measureHangs = false;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 function requireSentMessage(method: string) {
@@ -194,6 +215,73 @@ describe("CDP screenshot params", () => {
     const expandCall = requireSentMessage("Emulation.setDeviceMetricsOverride");
     expect(Number(expandCall.params?.width)).toBeGreaterThanOrEqual(800);
     expect(Number(expandCall.params?.height)).toBeGreaterThanOrEqual(600);
+  });
+});
+
+describe("CDP screenshot viewport measurement", () => {
+  const wsUrl = "ws://localhost:9222/devtools/page/X";
+
+  function viewportMeasureCalls() {
+    return sentMessages.filter(
+      (m) =>
+        m.method === "Runtime.evaluate" && m.params?.expression === VIEWPORT_MEASURE_EXPRESSION,
+    );
+  }
+
+  it("measures the viewport after the capture on the same socket", async () => {
+    const socketCallsBefore = vi.mocked(withCdpSocket).mock.calls.length;
+
+    const result = await captureScreenshot({ wsUrl, format: "png" });
+
+    expect(result.buffer).toEqual(Buffer.from("AAAA", "base64"));
+    expect(result.viewport).toEqual({ width: 1300, height: 900 });
+    expect(vi.mocked(withCdpSocket).mock.calls.length - socketCallsBefore).toBe(1);
+    const captureIndex = sentMessages.findIndex((m) => m.method === "Page.captureScreenshot");
+    const measureIndex = sentMessages.findIndex(
+      (m) =>
+        m.method === "Runtime.evaluate" && m.params?.expression === VIEWPORT_MEASURE_EXPRESSION,
+    );
+    expect(captureIndex).toBeGreaterThanOrEqual(0);
+    expect(measureIndex).toBeGreaterThan(captureIndex);
+    expect(sentMessages[measureIndex]?.params?.returnByValue).toBe(true);
+  });
+
+  it("does not measure the viewport for fullPage captures", async () => {
+    const result = await captureScreenshot({ wsUrl, fullPage: true });
+
+    expect(result.buffer).toEqual(Buffer.from("AAAA", "base64"));
+    expect(result).not.toHaveProperty("viewport");
+    expect(viewportMeasureCalls()).toHaveLength(0);
+  });
+
+  it("returns the screenshot without viewport when the measurement fails", async () => {
+    mockState.measureFails = true;
+
+    const result = await captureScreenshot({ wsUrl });
+
+    expect(result.buffer).toEqual(Buffer.from("AAAA", "base64"));
+    expect(result).not.toHaveProperty("viewport");
+  });
+
+  it("returns the screenshot without viewport when the measurement is invalid", async () => {
+    mockState.measuredViewport = { width: 0, height: "900" };
+
+    const result = await captureScreenshot({ wsUrl });
+
+    expect(result.buffer).toEqual(Buffer.from("AAAA", "base64"));
+    expect(result).not.toHaveProperty("viewport");
+  });
+
+  it("returns the screenshot without viewport when the measurement hangs", async () => {
+    vi.useFakeTimers();
+    mockState.measureHangs = true;
+
+    const capture = captureScreenshot({ wsUrl });
+    await vi.advanceTimersByTimeAsync(VIEWPORT_MEASURE_TIMEOUT_MS);
+    const result = await capture;
+
+    expect(result.buffer).toEqual(Buffer.from("AAAA", "base64"));
+    expect(result).not.toHaveProperty("viewport");
   });
 });
 

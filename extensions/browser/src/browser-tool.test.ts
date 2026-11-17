@@ -161,6 +161,9 @@ const toolCommonMocks = vi.hoisted(() => ({
   describeImageFile: vi.fn(async () => ({ text: undefined, decision: { outcome: "skipped" } })),
   normalizeBrowserScreenshot: vi.fn(async (buffer: Buffer) => ({ buffer })),
   saveMediaBuffer: vi.fn(async () => ({ path: "/tmp/openclaw-media/resized.jpg" })),
+  getImageMetadata: vi.fn(
+    async (_buffer: Buffer): Promise<{ width?: number; height?: number } | null> => null,
+  ),
 }));
 vi.mock("./sdk-setup-tools.js", async () => {
   const actual =
@@ -296,6 +299,7 @@ function resetBrowserToolMocks() {
     buffer,
   }));
   toolCommonMocks.saveMediaBuffer.mockResolvedValue({ path: "/tmp/openclaw-media/resized.jpg" });
+  toolCommonMocks.getImageMetadata.mockResolvedValue(null);
   browserToolTesting.setDepsForTest({
     browserAct: browserActionsMocks.browserAct as never,
     browserArmDialog: browserActionsMocks.browserArmDialog as never,
@@ -312,6 +316,7 @@ function resetBrowserToolMocks() {
     browserStatus: browserClientMocks.browserStatus as never,
     browserStop: browserClientMocks.browserStop as never,
     describeImageFile: toolCommonMocks.describeImageFile as never,
+    getImageMetadata: toolCommonMocks.getImageMetadata as never,
     imageResultFromFile: toolCommonMocks.imageResultFromFile as never,
     getRuntimeConfig: configMocks.loadConfig as never,
     listNodes: nodesUtilsMocks.listNodes as never,
@@ -1321,6 +1326,126 @@ describe("browser tool snapshot maxChars", () => {
     const opts = lastMockCallArg<{ profile?: string }>(browserClientMocks.browserStatus, 1);
     expect(opts.profile).toBe("user");
     expect(gatewayMocks.callGatewayTool).not.toHaveBeenCalled();
+  });
+});
+
+describe("browser tool screenshot scale note", () => {
+  registerBrowserToolAfterEachReset();
+
+  const SCALED_NOTE =
+    "[Screenshot scale: this image is 1200x831 px; the page viewport is 1300x900 CSS px. act kind=clickCoords takes viewport CSS px, not image px. Convert: x = image_x * 1.0833, y = image_y * 1.0830 (example: image point 600,416 -> x=650, y=451). Prefer snapshot refs when the target has one.]";
+  const IMAGE_BLOCK = { type: "image", data: "aW1hZ2U=", mimeType: "image/png" };
+
+  function mockScreenshot(result: Record<string, unknown>) {
+    browserActionsMocks.browserScreenshotAction.mockResolvedValueOnce({
+      ok: true,
+      path: "/tmp/screen.png",
+      ...result,
+    } as never);
+  }
+
+  function mockImageResult(content: unknown[] = [IMAGE_BLOCK]) {
+    toolCommonMocks.imageResultFromFile.mockResolvedValueOnce({
+      content,
+      details: { path: "/tmp/screen.png" },
+    });
+  }
+
+  async function runScreenshot(params: Record<string, unknown> = {}) {
+    const tool = createBrowserTool();
+    return await tool.execute?.("call-1", {
+      action: "screenshot",
+      target: "host",
+      targetId: "tab-1",
+      ...params,
+    });
+  }
+
+  it("adds the scale note before a shrunk screenshot image", async () => {
+    mockScreenshot({ viewport: { width: 1300, height: 900 } });
+    mockImageResult();
+    toolCommonMocks.getImageMetadata.mockResolvedValueOnce({ width: 1200, height: 831 });
+
+    const result = await runScreenshot();
+
+    expect(result?.content).toEqual([{ type: "text", text: SCALED_NOTE }, IMAGE_BLOCK]);
+    expect(toolCommonMocks.getImageMetadata).toHaveBeenCalledWith(
+      Buffer.from(IMAGE_BLOCK.data, "base64"),
+    );
+  });
+
+  it("does not add a note when the image matches the viewport", async () => {
+    mockScreenshot({ viewport: { width: 1300, height: 900 } });
+    mockImageResult();
+    toolCommonMocks.getImageMetadata.mockResolvedValueOnce({ width: 1300, height: 900 });
+
+    const result = await runScreenshot();
+
+    expect(result?.content).toEqual([IMAGE_BLOCK]);
+  });
+
+  it.each([
+    ["missing", {}],
+    ["zero width", { viewport: { width: 0, height: 900 } }],
+    ["string sides", { viewport: { width: "1300", height: "900" } }],
+  ])("does not add a note when the viewport is %s", async (_name, extra) => {
+    mockScreenshot(extra);
+    mockImageResult();
+    toolCommonMocks.getImageMetadata.mockResolvedValue({ width: 1200, height: 831 });
+
+    const result = await runScreenshot();
+
+    expect(result?.content).toEqual([IMAGE_BLOCK]);
+  });
+
+  it.each([
+    ["fullPage", { fullPage: true }],
+    ["ref", { ref: "e1" }],
+    ["element", { element: "#main" }],
+  ])("does not add a note for %s screenshots", async (_name, params) => {
+    mockScreenshot({ viewport: { width: 1300, height: 900 } });
+    mockImageResult();
+    toolCommonMocks.getImageMetadata.mockResolvedValue({ width: 1200, height: 831 });
+
+    const result = await runScreenshot(params);
+
+    expect(result?.content).toEqual([IMAGE_BLOCK]);
+  });
+
+  it("puts the note after the vision failure text and before the image", async () => {
+    configMocks.loadConfig.mockReturnValue({
+      browser: {},
+      tools: { media: { image: { models: [{ provider: "openai", model: "gpt-vision" }] } } },
+    } as never);
+    toolCommonMocks.describeImageFile.mockRejectedValueOnce(new Error("vision unavailable"));
+    mockScreenshot({ viewport: { width: 1300, height: 900 } });
+    const failureText = { type: "text", text: "[browser screenshot vision failed: unavailable]" };
+    mockImageResult([failureText, IMAGE_BLOCK]);
+    toolCommonMocks.getImageMetadata.mockResolvedValueOnce({ width: 1200, height: 831 });
+
+    const result = await runScreenshot();
+
+    expect(result?.content).toEqual([
+      failureText,
+      { type: "text", text: SCALED_NOTE },
+      IMAGE_BLOCK,
+    ]);
+  });
+
+  it("adds the scale note for node proxy screenshots", async () => {
+    mockSingleBrowserProxyNode();
+    gatewayMocks.callGatewayTool.mockResolvedValueOnce({
+      ok: true,
+      payload: {
+        result: { ok: true, path: "/tmp/test.png", viewport: { width: 1300, height: 900 } },
+      },
+    });
+    mockImageResult();
+    toolCommonMocks.getImageMetadata.mockResolvedValueOnce({ width: 1200, height: 831 });
+
+    const result = await runScreenshot({ target: "node" });
+
+    expect(result?.content).toEqual([{ type: "text", text: SCALED_NOTE }, IMAGE_BLOCK]);
   });
 });
 

@@ -95,6 +95,7 @@ vi.mock("./agent.shared.js", () => ({
 }));
 
 const { registerBrowserAgentSnapshotRoutes } = await import("./agent.snapshot.js");
+const agentShared = await import("./agent.shared.js");
 
 function getSnapshotHandler() {
   const { app, getHandlers } = createBrowserRouteApp();
@@ -155,7 +156,7 @@ describe("browser agent snapshot timeout routing", () => {
   });
 
   it("caps screenshot timeoutMs before dispatching to CDP", async () => {
-    cdpMocks.captureScreenshot.mockResolvedValueOnce(Buffer.from("png"));
+    cdpMocks.captureScreenshot.mockResolvedValueOnce({ buffer: Buffer.from("png") });
     const handler = getScreenshotHandler();
     const response = createBrowserRouteResponse();
 
@@ -184,5 +185,102 @@ describe("browser agent snapshot timeout routing", () => {
     expect(response.statusCode).toBe(400);
     expect(response.body).toEqual({ error: "timeoutMs must be a positive integer." });
     expect(cdpMocks.captureScreenshot).not.toHaveBeenCalled();
+  });
+});
+
+describe("browser agent screenshot viewport", () => {
+  const viewport = { width: 1300, height: 900 };
+
+  beforeEach(() => {
+    cdpMocks.captureScreenshot.mockReset();
+  });
+
+  function usePlaywrightTabWithoutWsUrl() {
+    vi.mocked(agentShared.withRouteTabContext).mockImplementationOnce(async (params) => {
+      await params.run({
+        profileCtx: profileContext,
+        tab: { targetId: "tab-1", url: "https://example.com" },
+        cdpUrl: "http://127.0.0.1:18800",
+      } as never);
+    });
+  }
+
+  it("returns the raw CDP capture viewport", async () => {
+    cdpMocks.captureScreenshot.mockResolvedValueOnce({
+      buffer: Buffer.from("png"),
+      viewport,
+    });
+    const handler = getScreenshotHandler();
+    const response = createBrowserRouteResponse();
+
+    await handler?.({ params: {}, query: {}, body: { type: "png" } }, response.res);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      ok: true,
+      path: "/tmp/fake.png",
+      targetId: "tab-1",
+      url: "https://example.com",
+      viewport,
+    });
+  });
+
+  it("omits viewport when the raw CDP capture has none", async () => {
+    cdpMocks.captureScreenshot.mockResolvedValueOnce({ buffer: Buffer.from("png") });
+    const handler = getScreenshotHandler();
+    const response = createBrowserRouteResponse();
+
+    await handler?.({ params: {}, query: {}, body: { fullPage: true } }, response.res);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).not.toHaveProperty("viewport");
+  });
+
+  it("returns the Playwright capture viewport", async () => {
+    const takeScreenshotViaPlaywright = vi.fn(async () => ({
+      buffer: Buffer.from("png"),
+      viewport,
+    }));
+    vi.mocked(agentShared.requirePwAi).mockResolvedValueOnce({
+      takeScreenshotViaPlaywright,
+    } as never);
+    usePlaywrightTabWithoutWsUrl();
+    const handler = getScreenshotHandler();
+    const response = createBrowserRouteResponse();
+
+    await handler?.({ params: {}, query: {}, body: { type: "png" } }, response.res);
+
+    expect(response.statusCode).toBe(200);
+    expect(takeScreenshotViaPlaywright).toHaveBeenCalledTimes(1);
+    expect(cdpMocks.captureScreenshot).not.toHaveBeenCalled();
+    expect(response.body).toMatchObject({ ok: true, viewport });
+  });
+
+  it("returns the Playwright labeled capture viewport", async () => {
+    const screenshotWithLabelsViaPlaywright = vi.fn(async () => ({
+      buffer: Buffer.from("png"),
+      labels: 0,
+      skipped: 0,
+      annotations: [],
+      viewport,
+    }));
+    vi.mocked(agentShared.requirePwAi).mockResolvedValueOnce({
+      snapshotRoleViaPlaywright: vi.fn(async () => ({ refs: {} })),
+      screenshotWithLabelsViaPlaywright,
+    } as never);
+    const { app, postHandlers } = createBrowserRouteApp();
+    registerBrowserAgentSnapshotRoutes(app, {
+      state: () => ({ resolved: { extraArgs: [], ssrfPolicy: undefined } }),
+    } as never);
+    const response = createBrowserRouteResponse();
+
+    await postHandlers.get("/screenshot")?.(
+      { params: {}, query: {}, body: { labels: true } },
+      response.res,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(screenshotWithLabelsViaPlaywright).toHaveBeenCalledTimes(1);
+    expect(response.body).toMatchObject({ ok: true, labels: true, viewport });
   });
 });

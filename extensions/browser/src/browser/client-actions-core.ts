@@ -11,8 +11,8 @@ import {
 } from "openclaw/plugin-sdk/number-runtime";
 import type {
   BrowserActionOk,
-  BrowserActionPathResult,
   BrowserActionTabResult,
+  BrowserScreenshotResult,
 } from "./client-actions-types.js";
 import { buildProfileQuery, withBaseUrl } from "./client-actions-url.js";
 import type { BrowserActRequest } from "./client-actions.types.js";
@@ -159,11 +159,11 @@ export async function browserScreenshotAction(
     timeoutMs?: number;
     profile?: string;
   },
-): Promise<BrowserActionPathResult> {
+): Promise<BrowserScreenshotResult> {
   const q = buildProfileQuery(opts.profile);
   const timeoutMs = clampPositiveTimerTimeoutMs(opts.timeoutMs);
   const effectiveTimeoutMs = timeoutMs ?? DEFAULT_BROWSER_SCREENSHOT_TIMEOUT_MS;
-  return await fetchBrowserJson<BrowserActionPathResult>(withBaseUrl(baseUrl, `/screenshot${q}`), {
+  return await fetchBrowserJson<BrowserScreenshotResult>(withBaseUrl(baseUrl, `/screenshot${q}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
