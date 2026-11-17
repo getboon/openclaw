@@ -59,6 +59,10 @@ const BROWSER_IMAGE_TYPES = ["png", "jpeg"] as const;
 
 const TAB_REFERENCE_DESCRIPTION =
   "Tab reference. Prefer suggestedTargetId, tabId, or label from tabs output; raw CDP targetId and unique raw prefixes remain supported for compatibility.";
+const CLICK_COORDS_X_DESCRIPTION =
+  "clickCoords x in viewport CSS pixels (same space as getBoundingClientRect). Screenshot image pixels may differ; apply the scale from the screenshot note.";
+const CLICK_COORDS_Y_DESCRIPTION =
+  "clickCoords y in viewport CSS pixels (same space as getBoundingClientRect). Screenshot image pixels may differ; apply the scale from the screenshot note.";
 
 // NOTE: Using a flattened object schema instead of Type.Union([Type.Object(...), ...])
 // because Claude API on Vertex AI rejects nested anyOf schemas as invalid JSON Schema.
@@ -72,8 +76,8 @@ const BrowserActSchema = Type.Object({
   doubleClick: Type.Optional(Type.Boolean()),
   button: Type.Optional(Type.String()),
   modifiers: Type.Optional(Type.Array(Type.String())),
-  x: optionalFiniteNumberSchema(),
-  y: optionalFiniteNumberSchema(),
+  x: optionalFiniteNumberSchema({ description: CLICK_COORDS_X_DESCRIPTION }),
+  y: optionalFiniteNumberSchema({ description: CLICK_COORDS_Y_DESCRIPTION }),
   // type
   text: Type.Optional(Type.String()),
   submit: Type.Optional(Type.Boolean()),
@@ -143,8 +147,8 @@ export const BrowserToolSchema = Type.Object({
   doubleClick: Type.Optional(Type.Boolean()),
   button: Type.Optional(Type.String()),
   modifiers: Type.Optional(Type.Array(Type.String())),
-  x: optionalFiniteNumberSchema(),
-  y: optionalFiniteNumberSchema(),
+  x: optionalFiniteNumberSchema({ description: CLICK_COORDS_X_DESCRIPTION }),
+  y: optionalFiniteNumberSchema({ description: CLICK_COORDS_Y_DESCRIPTION }),
   text: Type.Optional(Type.String()),
   submit: Type.Optional(Type.Boolean()),
   slowly: Type.Optional(Type.Boolean()),

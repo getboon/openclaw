@@ -10,6 +10,7 @@ import {
   setPwToolsCoreCurrentPage,
   setPwToolsCoreCurrentRefLocator,
 } from "./pw-tools-core.test-harness.js";
+import { VIEWPORT_MEASURE_TIMEOUT_MS } from "./screenshot-viewport.js";
 
 installPwToolsCoreTestHooks();
 const sessionMocks = getPwToolsCoreSessionMocks();
@@ -101,6 +102,84 @@ describe("pw-tools-core", () => {
         fullPage: true,
       }),
     ).rejects.toThrow(/fullPage is not supported/i);
+  });
+  it("measures the viewport after a plain viewport screenshot", async () => {
+    const screenshot = vi.fn(async () => Buffer.from("P"));
+    const evaluate = vi.fn(async () => ({ width: 1300, height: 900 }));
+    setPwToolsCoreCurrentPage({ screenshot, evaluate });
+
+    const res = await mod.takeScreenshotViaPlaywright({
+      cdpUrl: "http://127.0.0.1:18792",
+      targetId: "T1",
+      type: "png",
+    });
+
+    expect(res.buffer.toString()).toBe("P");
+    expect(res.viewport).toEqual({ width: 1300, height: 900 });
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect(evaluate.mock.invocationCallOrder[0]).toBeGreaterThan(
+      screenshot.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+  });
+  it("returns the plain screenshot without viewport when the measurement fails", async () => {
+    setPwToolsCoreCurrentPage({
+      screenshot: vi.fn(async () => Buffer.from("P")),
+      evaluate: vi.fn(async () => {
+        throw new Error("evaluate failed");
+      }),
+    });
+
+    const res = await mod.takeScreenshotViaPlaywright({
+      cdpUrl: "http://127.0.0.1:18792",
+      targetId: "T1",
+    });
+
+    expect(res.buffer.toString()).toBe("P");
+    expect(res).not.toHaveProperty("viewport");
+  });
+  it("returns the plain screenshot without viewport when the measurement hangs", async () => {
+    vi.useFakeTimers();
+    try {
+      setPwToolsCoreCurrentPage({
+        screenshot: vi.fn(async () => Buffer.from("P")),
+        evaluate: vi.fn(() => new Promise(() => {})),
+      });
+
+      const capture = mod.takeScreenshotViaPlaywright({
+        cdpUrl: "http://127.0.0.1:18792",
+        targetId: "T1",
+      });
+      await vi.advanceTimersByTimeAsync(VIEWPORT_MEASURE_TIMEOUT_MS);
+      const res = await capture;
+
+      expect(res.buffer.toString()).toBe("P");
+      expect(res).not.toHaveProperty("viewport");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("does not measure the viewport for fullPage, ref, or element screenshots", async () => {
+    const evaluate = vi.fn(async () => ({ width: 1300, height: 900 }));
+    setPwToolsCoreCurrentRefLocator({ screenshot: vi.fn(async () => Buffer.from("R")) });
+    setPwToolsCoreCurrentPage({
+      evaluate,
+      locator: vi.fn(() => ({
+        first: () => ({ screenshot: vi.fn(async () => Buffer.from("E")) }),
+      })),
+      screenshot: vi.fn(async () => Buffer.from("P")),
+    });
+    const base = { cdpUrl: "http://127.0.0.1:18792", targetId: "T1" };
+
+    const results = [
+      await mod.takeScreenshotViaPlaywright({ ...base, fullPage: true }),
+      await mod.takeScreenshotViaPlaywright({ ...base, ref: "76" }),
+      await mod.takeScreenshotViaPlaywright({ ...base, element: "#main" }),
+    ];
+
+    for (const res of results) {
+      expect(res).not.toHaveProperty("viewport");
+    }
+    expect(evaluate).not.toHaveBeenCalled();
   });
   it("arms the next file chooser and sets files (default timeout)", async () => {
     const uploadPath = path.join(DEFAULT_UPLOAD_DIR, `vitest-upload-${crypto.randomUUID()}.txt`);
