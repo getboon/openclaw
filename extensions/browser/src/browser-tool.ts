@@ -840,8 +840,7 @@ export function createBrowserTool(opts?: {
               });
           touchTrackedTab(readStringValue(result.targetId) ?? targetId);
           const screenshotPath = result.path;
-          const viewport =
-            fullPage || ref || element ? undefined : toBrowserViewportSize(result.viewport);
+          const viewport = toBrowserViewportSize(result.viewport);
           const screenshotCfg = browserToolDeps.getRuntimeConfig();
           const imageSanitization = resolveRuntimeImageSanitization();
           try {

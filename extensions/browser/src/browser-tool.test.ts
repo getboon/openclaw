@@ -1398,20 +1398,6 @@ describe("browser tool screenshot scale note", () => {
     expect(result?.content).toEqual([IMAGE_BLOCK]);
   });
 
-  it.each([
-    ["fullPage", { fullPage: true }],
-    ["ref", { ref: "e1" }],
-    ["element", { element: "#main" }],
-  ])("does not add a note for %s screenshots", async (_name, params) => {
-    mockScreenshot({ viewport: { width: 1300, height: 900 } });
-    mockImageResult();
-    toolCommonMocks.getImageMetadata.mockResolvedValue({ width: 1200, height: 831 });
-
-    const result = await runScreenshot(params);
-
-    expect(result?.content).toEqual([IMAGE_BLOCK]);
-  });
-
   it("puts the note after the vision failure text and before the image", async () => {
     configMocks.loadConfig.mockReturnValue({
       browser: {},

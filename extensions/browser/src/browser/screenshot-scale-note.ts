@@ -45,6 +45,9 @@ export async function addScreenshotScaleNote<T extends AgentToolResult<unknown>>
   const imageIndex = result.content.findIndex(
     (block) => block.type === "image" && typeof block.data === "string",
   );
+  if (imageIndex < 0) {
+    return result;
+  }
   const imageBlock = result.content[imageIndex];
   if (imageBlock?.type !== "image") {
     return result;

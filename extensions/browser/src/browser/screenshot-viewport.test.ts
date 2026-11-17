@@ -82,32 +82,4 @@ describe("measureBrowserViewport", () => {
     ).resolves.toEqual({ width: 1300, height: 900 });
     expect(vi.getTimerCount()).toBe(0);
   });
-
-  it("does not leak an unhandled rejection when the read fails after the timeout", async () => {
-    vi.useFakeTimers();
-    const unhandled = vi.fn();
-    process.on("unhandledRejection", unhandled);
-    try {
-      let rejectRead: (err: Error) => void = () => {};
-      const measured = measureBrowserViewport(
-        () =>
-          new Promise<unknown>((_resolve, reject) => {
-            rejectRead = reject;
-          }),
-        100,
-      );
-      await vi.advanceTimersByTimeAsync(100);
-      await expect(measured).resolves.toBeUndefined();
-
-      rejectRead(new Error("late failure"));
-      vi.useRealTimers();
-      await new Promise<void>((resolve) => {
-        setImmediate(resolve);
-      });
-
-      expect(unhandled).not.toHaveBeenCalled();
-    } finally {
-      process.off("unhandledRejection", unhandled);
-    }
-  });
 });

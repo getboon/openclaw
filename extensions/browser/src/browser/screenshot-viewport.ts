@@ -28,7 +28,7 @@ export async function measureBrowserViewport(
   read: () => Promise<unknown>,
   timeoutMs = VIEWPORT_MEASURE_TIMEOUT_MS,
 ): Promise<BrowserViewportSize | undefined> {
-  // Runs after a successful capture, so it must never delay or fail that capture.
+  // Runs after a successful capture: it must not fail the capture or delay it past timeoutMs.
   const reading = Promise.resolve()
     .then(read)
     .then(toBrowserViewportSize)
