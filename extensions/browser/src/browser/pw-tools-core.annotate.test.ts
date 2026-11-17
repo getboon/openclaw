@@ -210,8 +210,26 @@ describe("screenshotWithLabelsViaPlaywright (viewport measurement)", () => {
   const functionEvaluateCalls = (evaluate: ReturnType<typeof vi.fn>) =>
     evaluate.mock.calls.filter(([arg]) => typeof arg === "function");
 
-  it("reports the viewport from the pre-capture view read", async () => {
-    const evaluate = evaluateMockReturning({ x: 0, y: 0, width: 1300, height: 900 });
+  function evaluateSequence(functionResults: Array<unknown>) {
+    let functionCalls = 0;
+    return vi.fn(async (arg: EvaluateArg) => {
+      if (typeof arg !== "function") {
+        return true;
+      }
+      const next = functionResults[Math.min(functionCalls, functionResults.length - 1)];
+      functionCalls += 1;
+      if (next instanceof Error) {
+        throw next;
+      }
+      return next;
+    });
+  }
+
+  it("reads the viewport after the capture because the capture can resize the page", async () => {
+    const evaluate = evaluateSequence([
+      { x: 0, y: 0, width: 780, height: 493 },
+      { width: 1300, height: 900 },
+    ]);
     const screenshot = vi.fn(async () => Buffer.from("PNG"));
     setPwToolsCoreCurrentPage({ evaluate, screenshot });
     setPwToolsCoreCurrentRefLocator({
@@ -226,11 +244,20 @@ describe("screenshotWithLabelsViaPlaywright (viewport measurement)", () => {
 
     expect(result.buffer.toString()).toBe("PNG");
     expect(result.viewport).toEqual({ width: 1300, height: 900 });
-    expect(functionEvaluateCalls(evaluate)).toHaveLength(1);
+    const calls = evaluate.mock.calls;
+    const clearCall = calls.at(-2)?.[0];
+    expect(typeof calls.at(-1)?.[0]).toBe("function");
+    expect(typeof clearCall === "string" && clearCall.includes("data-openclaw-labels")).toBe(true);
+    expect(evaluate.mock.invocationCallOrder.at(-1)).toBeGreaterThan(
+      screenshot.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
   });
 
-  it("omits viewport when the view read reports no size", async () => {
-    const evaluate = evaluateMockReturning({ x: 0, y: 0, width: 0, height: 0 });
+  it("omits viewport when the post-capture read fails", async () => {
+    const evaluate = evaluateSequence([
+      { x: 0, y: 0, width: 1300, height: 900 },
+      new Error("evaluate failed"),
+    ]);
     setPwToolsCoreCurrentPage({ evaluate, screenshot: vi.fn(async () => Buffer.from("PNG")) });
     setPwToolsCoreCurrentRefLocator({
       boundingBox: async () => ({ x: 10, y: 20, width: 30, height: 40 }),

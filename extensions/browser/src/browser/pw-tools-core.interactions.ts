@@ -50,11 +50,7 @@ import {
   planAnnotations,
   type RawAnnotationInput,
 } from "./screenshot-annotate.js";
-import {
-  type BrowserViewportSize,
-  measureBrowserViewport,
-  toBrowserViewportSize,
-} from "./screenshot-viewport.js";
+import { type BrowserViewportSize, measureBrowserViewport } from "./screenshot-viewport.js";
 
 type TargetOpts = {
   cdpUrl: string;
@@ -1422,7 +1418,8 @@ export async function screenshotWithLabelsViaPlaywright(opts: {
   } finally {
     await page.evaluate(buildOverlayClearScript()).catch(() => {});
   }
-  const viewport = space === "viewport" ? toBrowserViewportSize(view) : undefined;
+  // The capture can re-apply Playwright's viewport, so the pre-capture `view` may be stale.
+  const viewport = space === "viewport" ? await readViewportSize(page) : undefined;
   return {
     // `labels` reports overlay boxes actually drawn on the captured image
     // (in-viewport, within budget); off-viewport refs are surfaced via
