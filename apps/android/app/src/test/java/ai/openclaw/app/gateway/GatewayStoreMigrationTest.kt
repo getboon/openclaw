@@ -61,6 +61,22 @@ class GatewayStoreMigrationTest {
   }
 
   @Test
+  fun invalidManualConfigStaysDisconnectedInsteadOfFallingBackToDiscovered() {
+    val fixture = fixture()
+    fixture.plain
+      .edit()
+      .putBoolean("gateway.manual.enabled", true)
+      .putString("gateway.manual.host", "")
+      .putString("gateway.lastDiscoveredStableID", "bonjour-gateway")
+      .commit()
+
+    val prefs = SecurePrefs(fixture.context, fixture.secure)
+
+    assertNull(prefs.gatewayRegistry.activeStableId.value)
+    assertNull(prefs.gatewayRegistry.activeEntry())
+  }
+
+  @Test
   fun discoveredOnlyStateBecomesActivePlaceholderEntry() {
     val fixture = fixture()
     fixture.plain

@@ -43,6 +43,9 @@ internal class GatewayStoreMigration(
           tls = prefs.getPlainBoolean("gateway.manual.tls", true),
         )
       }
+      // Manual mode is enabled but misconfigured: stay disconnected rather than
+      // falling back to a previously discovered gateway the user did not choose.
+      return null
     }
 
     val stableId = prefs.getPlainString("gateway.lastDiscoveredStableID").orEmpty().trim()

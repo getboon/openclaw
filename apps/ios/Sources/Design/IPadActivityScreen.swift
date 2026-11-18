@@ -221,6 +221,7 @@ struct IPadActivityScreen: View {
             let transport = self.appModel.makeChatTransport()
             let response = try await transport.listSessions(limit: CommandCenterTab.recentSessionsFetchLimit)
             self.sessions = response.sessions
+            self.appModel.reconcileChatSessionReadState(response.sessions)
             await self.appModel.storeCachedChatSessions(response.sessions)
         } catch {
             self.sessions = await self.appModel.loadCachedChatSessions()

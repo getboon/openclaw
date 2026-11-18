@@ -83,9 +83,11 @@ Reject:
    - `git pull --ff-only`
    - verify branch is expected, usually `main`
 2. Build candidate clusters:
-   - `gitcrawl` open issues/PRs, neighbors, and search
-   - live `gh issue/pr view`
-   - include PRs linked from issues and duplicates
+   - In `source_mode=provided-prs`, seed clusters from `provided_prs` plus their directly
+     linked duplicate/canonical refs only; run `gitcrawl`/broad issue-PR search only when
+     that is required to prove the best fix for one of the supplied PRs.
+   - Otherwise (`source_mode=discovery`): `gitcrawl` open issues/PRs, neighbors, and search;
+     live `gh issue/pr view`; include PRs linked from issues and duplicates
 3. For each cluster:
    - read issue/PR body, comments, labels, linked refs, current source, adjacent tests
    - suppress maintainer-owned queue noise unless it is the best fix path

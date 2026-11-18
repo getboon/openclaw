@@ -9,7 +9,17 @@ object GatewayCustomHeaders {
   // Connection-management headers the WebSocket upgrade owns. Operator overrides here would
   // corrupt the handshake or duplicate fields OkHttp sets itself.
   private val reservedNames =
-    setOf("connection", "content-length", "host", "proxy-connection", "upgrade")
+    setOf(
+      "connection",
+      "content-length",
+      "host",
+      "keep-alive",
+      "proxy-connection",
+      "te",
+      "trailer",
+      "transfer-encoding",
+      "upgrade",
+    )
   private const val RESERVED_PREFIX = "sec-websocket-"
   private const val TOKEN_PUNCTUATION = "!#$%&'*+-.^_`|~"
 

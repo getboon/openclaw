@@ -240,14 +240,29 @@ def ensure_mobile_release_ref_available!(platform:, version:, build: nil, versio
 end
 
 def record_mobile_release_ref!(platform:, version:, build: nil, version_code: nil, sha: nil)
-  mobile_release_ref_command(
-    "record",
-    platform: platform,
-    version: version,
-    build: build,
-    version_code: version_code,
-    sha: sha
-  )
+  # mobile-release-ref.ts's `record` command checks the remote ref first and is a
+  # no-op if it already points at this SHA, so retrying after a transient git/network
+  # failure is safe. Retry rather than let a store upload that already succeeded get
+  # reported as a lane failure while the release ref stays unrecorded.
+  attempts = 0
+  begin
+    attempts += 1
+    mobile_release_ref_command(
+      "record",
+      platform: platform,
+      version: version,
+      build: build,
+      version_code: version_code,
+      sha: sha
+    )
+  rescue StandardError => e
+    if attempts < 3
+      UI.important("record_mobile_release_ref! attempt #{attempts} failed (#{e.message}); retrying.")
+      sleep(5)
+      retry
+    end
+    raise
+  end
 end
 
 def read_android_release_signing_properties!(path)

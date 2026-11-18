@@ -897,11 +897,14 @@ node --import tsx scripts/openclaw-npm-postpublish-verify.ts <published-version>
     because the real publish requires it to reuse the prepared npm tarball.
 17. Before real publish, run Full Release Validation through the trusted
     current-`main` SHA-pinned helper for the exact release SHA with evidence
-    reuse disabled. Save the successful run ID and exact attempt as
-    `full_release_validation_run_attempt=<saved-attempt>`. Review the early
-    performance run if it has completed. Compare against earlier release
-    evidence or clawgrit reports where available. Call out minor regressions in
-    the release proof; block on major regressions unless waived or proven noisy.
+    reuse disabled. Set `OPENCLAW_RELEASE_REPO=getboon/openclaw` on the helper
+    invocation so dispatch and evidence lookup both resolve against this fork
+    instead of defaulting to `openclaw/openclaw`. Save the successful run ID
+    and exact attempt as `full_release_validation_run_attempt=<saved-attempt>`.
+    Review the early performance run if it has completed. Compare against
+    earlier release evidence or clawgrit reports where available. Call out
+    minor regressions in the release proof; block on major regressions unless
+    waived or proven noisy.
 18. For stable releases, start `.github/workflows/macos-release.yml` in
     `openclaw/openclaw` and wait for the public validation-only run to pass.
 19. For stable releases, start

@@ -1554,12 +1554,15 @@ jobs:
             head_sha="$(jq -r '.headSha // ""' <<< "$run_json")"
             echo "${label}: ${status}/${conclusion} attempt ${attempt} head ${head_sha}: ${url}"
 
-            # release-ci/extended-stable carrier branches are fast-forwarded to pin
-            # the exact target under validation, so their head_sha IS the content
-            # SHA, not the orchestrator's own code SHA; everywhere else (dispatched
-            # from the same ref as this orchestrator) the child must have run the
-            # same workflow-file version, so compare against PARENT_WORKFLOW_SHA.
-            if [[ ( "$CHILD_WORKFLOW_REF" == release-ci/* || "$CHILD_WORKFLOW_REF" =~ ^extended-stable/[0-9]{4}\.([1-9]|1[0-2])\.33$ ) && -n "${TARGET_SHA// }" ]]; then
+            # extended-stable carrier branches are fast-forwarded to pin the exact
+            # target under validation, so their head_sha IS the content SHA, not
+            # the orchestrator's own code SHA. release-ci/<workflowSha>-<ts> branches
+            # (scripts/full-release-validation-at-sha.mjs, scripts/release-ci-summary.mjs,
+            # scripts/github/find-reusable-release-validation.sh) are pushed to pin the
+            # TRUSTED WORKFLOW SHA instead -- the target SHA under test is only a
+            # dispatch input (`ref`), not the branch tip -- so they fall through to the
+            # PARENT_WORKFLOW_SHA check below like every other same-ref dispatch.
+            if [[ "$CHILD_WORKFLOW_REF" =~ ^extended-stable/[0-9]{4}\.([1-9]|1[0-2])\.33$ && -n "${TARGET_SHA// }" ]]; then
               if [[ "$head_sha" != "$TARGET_SHA" ]]; then
                 echo "::error::${label} child run used ${head_sha}, expected ${TARGET_SHA}. Dispatch Full Release Validation from a release-ci or extended-stable ref pinned to the target SHA, not a moving branch."
                 return 1
