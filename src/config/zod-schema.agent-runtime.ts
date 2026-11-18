@@ -400,6 +400,11 @@ const ToolsWebSearchSchema = z
       .object({
         enabled: z.boolean().optional(),
         provider: z.string().optional(),
+        // ENG-21224: one named recovery attempt when the explicit `provider`
+        // throws. Separately opt-in from `provider` (naming a provider here is
+        // its own explicit consent) — does not reopen general auto-detect
+        // fallback for explicit selections. See src/web-search/runtime.ts.
+        fallbackProvider: z.string().optional(),
         maxResults: z.number().int().positive().optional(),
         timeoutSeconds: z.number().int().positive().optional(),
         cacheTtlMinutes: z.number().nonnegative().optional(),
