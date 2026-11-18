@@ -697,9 +697,9 @@ describe("package acceptance workflow", () => {
     expect(workflow).toContain(
       "Child workflow ref ${CHILD_WORKFLOW_REF} moved to ${current_workflow_sha}, expected ${PARENT_WORKFLOW_SHA}; refusing dispatch.",
     );
-    expect(workflow).toContain('if [[ "$head_sha" != "$PARENT_WORKFLOW_SHA" ]]; then');
+    expect(workflow).toContain('elif [[ "$head_sha" != "$PARENT_WORKFLOW_SHA" ]]; then');
     expect(workflow).toContain(
-      '( "$CHILD_WORKFLOW_REF" == release-ci/* || "$CHILD_WORKFLOW_REF" =~ ^extended-stable/[0-9]{4}\\.([1-9]|1[0-2])\\.33$ ) && -n "${TARGET_SHA// }"',
+      '"$CHILD_WORKFLOW_REF" =~ ^extended-stable/[0-9]{4}\\.([1-9]|1[0-2])\\.33$ && -n "${TARGET_SHA// }"',
     );
     expect(workflow).toContain('if [[ "$head_sha" != "$TARGET_SHA" ]]; then');
     expect(workflow).toContain('gh workflow run "$workflow" --ref "$CHILD_WORKFLOW_REF" "$@" 2>&1');
