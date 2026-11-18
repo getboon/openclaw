@@ -326,6 +326,7 @@ export async function resolveBootstrapFilesForRun(params: {
   sessionKey?: string;
   sessionId?: string;
   agentId?: string;
+  senderId?: string;
   warn?: (message: string) => void;
   contextMode?: BootstrapContextMode;
   runKind?: BootstrapContextRunKind;
@@ -337,8 +338,9 @@ export async function resolveBootstrapFilesForRun(params: {
     ? await getOrLoadBootstrapFiles({
         workspaceDir: params.workspaceDir,
         sessionKey: params.sessionKey,
+        senderId: params.senderId,
       })
-    : await loadWorkspaceBootstrapFiles(params.workspaceDir);
+    : await loadWorkspaceBootstrapFiles(params.workspaceDir, { senderId: params.senderId });
   const bootstrapFiles = applyContextModeFilter({
     files: filterCompletedWorkspaceBootstrapFile(
       filterBootstrapFilesForSession(rawFiles, sessionKey),
@@ -379,6 +381,8 @@ export async function resolveBootstrapContextForRun(params: {
   sessionKey?: string;
   sessionId?: string;
   agentId?: string;
+  /** Partitions MEMORY.md/USER.md under the sender's identity dir; see loadWorkspaceBootstrapFiles. */
+  senderId?: string;
   warn?: (message: string) => void;
   contextMode?: BootstrapContextMode;
   runKind?: BootstrapContextRunKind;

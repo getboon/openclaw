@@ -57,7 +57,7 @@ export function rejectCanonicalPathChange(expected: unknown, actual: string) {
   };
 }
 
-function canonicalPathFromFsSafeError(err: unknown): string | undefined {
+export function canonicalPathFromFsSafeError(err: unknown): string | undefined {
   if (!(err instanceof FsSafeError) || !err.cause || typeof err.cause !== "object") {
     return undefined;
   }

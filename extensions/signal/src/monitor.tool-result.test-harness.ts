@@ -28,9 +28,15 @@ const streamMock = vi.hoisted(() => vi.fn()) as unknown as MockFn;
 const signalCheckMock = vi.hoisted(() => vi.fn()) as unknown as MockFn;
 const signalRpcRequestMock = vi.hoisted(() => vi.fn()) as unknown as MockFn;
 const spawnSignalDaemonMock = vi.hoisted(() => vi.fn()) as unknown as MockFn;
-const signalToolResultSessionStorePath = vi.hoisted(
-  () => `/tmp/openclaw-signal-tool-result-sessions-${process.pid}.json`,
-);
+// fs-safe 0.8 pins and chmods the session store directory on write, so keep
+// the store in a private temp dir rather than directly under /tmp.
+const signalToolResultSessionStorePath = vi.hoisted(() => {
+  const fs = process.getBuiltinModule("node:fs");
+  const os = process.getBuiltinModule("node:os");
+  const path = process.getBuiltinModule("node:path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-signal-tool-result-"));
+  return path.join(dir, `sessions-${process.pid}.json`);
+});
 
 export function getSignalToolResultTestMocks(): SignalToolResultTestMocks {
   return {

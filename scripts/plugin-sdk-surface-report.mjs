@@ -183,7 +183,10 @@ const defaultPublicDeprecatedExportsByEntrypointBudget = Object.freeze({
   "webhook-ingress": 2,
   "webhook-path": 2,
   zalouser: 5,
-  zod: 282,
+  // zod 4.4.3 -> 4.6.7 (GHSA-mrhx-c7xc-m3w5 security fix) added 21 new
+  // deprecated-marked exports to the package itself, all surfaced through
+  // src/plugin-sdk/zod.ts's `export * from "zod"` wildcard re-export.
+  zod: 303,
 });
 
 export function readPluginSdkSurfaceBudgets(env = process.env) {
@@ -198,17 +201,17 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
     ),
     publicExports: readPluginSdkSurfaceBudgetEnv(
       "OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_EXPORTS",
-      10516,
+      10537,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
       "OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_FUNCTION_EXPORTS",
-      5243,
+      5257,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
       "OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_DEPRECATED_EXPORTS",
-      3271,
+      3292,
       env,
     ),
     publicWildcardReexports: readPluginSdkSurfaceBudgetEnv(

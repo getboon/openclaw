@@ -13,9 +13,10 @@ ARG OPENCLAW_BUNDLED_PLUGIN_DIR=extensions
 ARG OPENCLAW_DOCKER_BUILD_NODE_OPTIONS="--max-old-space-size=8192"
 ARG OPENCLAW_DOCKER_BUILD_TSDOWN_MAX_OLD_SPACE_MB=""
 ARG OPENCLAW_DOCKER_BUILD_SKIP_DTS=1
-ARG OPENCLAW_NODE_BOOKWORM_IMAGE="docker.io/library/node:24-bookworm@sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584"
-ARG OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE="docker.io/library/node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03"
-ARG OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST="sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03"
+# boon#312 bumped these base digests to Node 24.22.1, this fork's runtime floor.
+ARG OPENCLAW_NODE_BOOKWORM_IMAGE="docker.io/library/node:24-bookworm@sha256:6449e19d8184d84062525b6a7524def03146c2cb04a7f08b076680d0e8e4240a"
+ARG OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE="docker.io/library/node:24-bookworm-slim@sha256:8579e5fce559544b50072d05cc5d3b84b6a14d0989ae56c331d9e983a36a21f1"
+ARG OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST="sha256:8579e5fce559544b50072d05cc5d3b84b6a14d0989ae56c331d9e983a36a21f1"
 # Keep in sync with .github/actions/setup-node-env/action.yml bun-version.
 # To update: docker buildx imagetools inspect docker.io/oven/bun:<version> and use the manifest-list digest.
 ARG OPENCLAW_BUN_IMAGE="docker.io/oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6"

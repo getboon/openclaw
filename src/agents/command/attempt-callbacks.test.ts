@@ -58,4 +58,59 @@ describe("createAgentAttemptLifecycleCallbacks", () => {
     expect(state.lifecycleFinishing).toBe(true);
     expect(state.lifecycleEnded).toBe(false);
   });
+
+  it("clears the lifecycle error when a later finishing event has no error", () => {
+    const state: AgentAttemptLifecycleState = {
+      currentTurnUserMessagePersisted: false,
+      lifecycleFinishing: false,
+      lifecycleEnded: false,
+    };
+    const callbacks = createAgentAttemptLifecycleCallbacks(state);
+
+    callbacks.onAgentEvent({
+      stream: "lifecycle",
+      data: {
+        phase: "finishing",
+        error: "Context overflow: prompt too large for the model (precheck).",
+      },
+    });
+    callbacks.onAgentEvent({ stream: "lifecycle", data: { phase: "finishing" } });
+
+    expect(state.lifecycleError).toBeUndefined();
+    expect(state.lifecycleFinishing).toBe(true);
+  });
+
+  it("keeps the error from the last finishing event", () => {
+    const state: AgentAttemptLifecycleState = {
+      currentTurnUserMessagePersisted: false,
+      lifecycleFinishing: false,
+      lifecycleEnded: false,
+    };
+    const callbacks = createAgentAttemptLifecycleCallbacks(state);
+
+    callbacks.onAgentEvent({ stream: "lifecycle", data: { phase: "finishing" } });
+    callbacks.onAgentEvent({
+      stream: "lifecycle",
+      data: { phase: "finishing", error: "provider failed" },
+    });
+
+    expect(state.lifecycleError).toBe("provider failed");
+  });
+
+  it("keeps the error from an error phase", () => {
+    const state: AgentAttemptLifecycleState = {
+      currentTurnUserMessagePersisted: false,
+      lifecycleFinishing: false,
+      lifecycleEnded: false,
+    };
+    const callbacks = createAgentAttemptLifecycleCallbacks(state);
+
+    callbacks.onAgentEvent({
+      stream: "lifecycle",
+      data: { phase: "error", error: "provider failed" },
+    });
+
+    expect(state.lifecycleError).toBe("provider failed");
+    expect(state.lifecycleEnded).toBe(true);
+  });
 });

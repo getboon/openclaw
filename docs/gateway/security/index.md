@@ -64,6 +64,123 @@ Each finding has a structured `checkId` (for example `gateway.bind_no_auth`, `to
 5. Plugins: load only what you explicitly trust.
 6. Model choice: prefer modern, instruction-hardened models for any bot with tools.
 
+### Published package dependency lock
+
+OpenClaw source checkouts use `pnpm-lock.yaml`. The published `openclaw` npm
+package and OpenClaw-owned npm plugin packages include `npm-shrinkwrap.json`,
+npm's publishable dependency lockfile, so package installs use the reviewed
+transitive dependency graph from the release instead of resolving a fresh graph
+at install time.
+
+Shrinkwrap is a supply-chain hardening and release reproducibility boundary,
+not a sandbox. For the plain-English model, maintainer commands, and package
+inspection checks, see [npm shrinkwrap](/gateway/security/shrinkwrap).
+
+### Deployment and host trust
+
+OpenClaw assumes the host and config boundary are trusted:
+
+- If someone can modify Gateway host state/config (`~/.openclaw`, including `openclaw.json`), treat them as a trusted operator.
+- Running one Gateway for multiple mutually untrusted/adversarial operators is **not a recommended setup**.
+- For mixed-trust teams, split trust boundaries with separate gateways (or at minimum separate OS users/hosts).
+- Recommended default: one user per machine/host (or VPS), one gateway for that user, and one or more agents in that gateway.
+- Inside one Gateway instance, authenticated operator access is a trusted control-plane role, not a per-user tenant role.
+- Session identifiers (`sessionKey`, session IDs, labels) are routing selectors, not authorization tokens.
+- If several people can message one tool-enabled agent, each of them can steer that same permission set. Per-user session/memory isolation helps privacy, but does not convert a shared agent into per-user host authorization.
+
+### Secure file operations
+
+OpenClaw uses `@openclaw/fs-safe` for root-bounded file access, atomic writes, archive extraction, temp workspaces, and secret-file helpers. OpenClaw defaults fs-safe's optional native acceleration to **off**; set `OPENCLAW_FS_SAFE_NATIVE_MODE=auto` to use an installed platform binding or `require` to fail closed when native support is unavailable.
+
+Details: [Secure file operations](/gateway/security/secure-file-operations).
+
+### Shared Slack workspace: real risk
+
+If "everyone in Slack can message the bot," the core risk is delegated tool authority:
+
+- any allowed sender can induce tool calls (`exec`, browser, network/file tools) within the agent's policy;
+- prompt/content injection from one sender can cause actions that affect shared state, devices, or outputs;
+- if one shared agent has sensitive credentials/files, any allowed sender can potentially drive exfiltration via tool usage.
+
+Use separate agents/gateways with minimal tools for team workflows; keep personal-data agents private.
+
+### Company-shared agent: acceptable pattern
+
+This is acceptable when everyone using that agent is in the same trust boundary (for example one company team) and the agent is strictly business-scoped.
+
+- run it on a dedicated machine/VM/container;
+- use a dedicated OS user + dedicated browser/profile/accounts for that runtime;
+- do not sign that runtime into personal Apple/Google accounts or personal password-manager/browser profiles.
+
+If you mix personal and company identities on the same runtime, you collapse the separation and increase personal-data exposure risk.
+
+## Gateway and node trust concept
+
+Treat Gateway and node as one operator trust domain, with different roles:
+
+- **Gateway** is the control plane and policy surface (`gateway.auth`, tool policy, routing).
+- **Node** is remote execution surface paired to that Gateway (commands, device actions, host-local capabilities).
+- A caller authenticated to the Gateway is trusted at Gateway scope. After pairing, node actions are trusted operator actions on that node.
+- Operator scope levels and approval-time checks are summarized in
+  [Operator scopes](/gateway/operator-scopes).
+- Direct loopback backend clients authenticated with the shared gateway
+  token/password can make internal control-plane RPCs without presenting a user
+  device identity. This is not a remote or browser pairing bypass: network
+  clients, node clients, device-token clients, and explicit device identities
+  still go through pairing and scope-upgrade enforcement.
+- `sessionKey` is routing/context selection, not per-user auth.
+- Exec approvals (allowlist + ask) are guardrails for operator intent, not hostile multi-tenant isolation.
+- OpenClaw's product default for trusted single-operator setups is that host exec on `gateway`/`node` is allowed without approval prompts (`security="full"`, `ask="off"` unless you tighten it). That default is intentional UX, not a vulnerability by itself.
+- Exec approvals bind exact request context and best-effort direct local file operands; they do not semantically model every runtime/interpreter loader path. Use sandboxing and host isolation for strong boundaries.
+
+If you need hostile-user isolation, split trust boundaries by OS user/host and run separate gateways.
+
+## Trust boundary matrix
+
+Use this as the quick model when triaging risk:
+
+| Boundary or control                                       | What it means                                     | Common misread                                                                |
+| --------------------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `gateway.auth` (token/password/trusted-proxy/device auth) | Authenticates callers to gateway APIs             | "Needs per-message signatures on every frame to be secure"                    |
+| `sessionKey`                                              | Routing key for context/session selection         | "Session key is a user auth boundary"                                         |
+| Prompt/content guardrails                                 | Reduce model abuse risk                           | "Prompt injection alone proves auth bypass"                                   |
+| `canvas.eval` / browser evaluate                          | Intentional operator capability when enabled      | "Any JS eval primitive is automatically a vuln in this trust model"           |
+| Local TUI `!` shell                                       | Explicit operator-triggered local execution       | "Local shell convenience command is remote injection"                         |
+| Node pairing and node commands                            | Operator-level remote execution on paired devices | "Remote device control should be treated as untrusted user access by default" |
+| `gateway.nodes.pairing.autoApproveCidrs`                  | Opt-in trusted-network node enrollment policy     | "A disabled-by-default allowlist is an automatic pairing vulnerability"       |
+
+## Not vulnerabilities by design
+
+<Accordion title="Common findings that are out of scope">
+
+These patterns get reported often and are usually closed as no-action unless
+a real boundary bypass is demonstrated:
+
+- Prompt-injection-only chains without a policy, auth, or sandbox bypass.
+- Claims that assume hostile multi-tenant operation on one shared host or
+  config.
+- Claims that classify normal operator read-path access (for example
+  `sessions.list` / `sessions.preview` / `chat.history`) as IDOR in a
+  shared-gateway setup.
+- Localhost-only deployment findings (for example HSTS on a loopback-only
+  gateway).
+- Discord inbound webhook signature findings for inbound paths that do not
+  exist in this repo.
+- Reports that treat node pairing metadata as a hidden second per-command
+  approval layer for `system.run`, when the real execution boundary is still
+  the gateway's global node command policy plus the node's own exec
+  approvals.
+- Reports that treat configured `gateway.nodes.pairing.autoApproveCidrs` as a
+  vulnerability by itself. This setting is disabled by default, requires
+  explicit CIDR/IP entries, only applies to first-time `role: node` pairing with
+  no requested scopes, and does not auto-approve operator/browser/Control UI,
+  WebChat, role upgrades, scope upgrades, metadata changes, public-key changes,
+  or same-host loopback trusted-proxy header paths unless loopback trusted-proxy auth was explicitly enabled.
+- "Missing per-user authorization" findings that treat `sessionKey` as an
+  auth token.
+
+</Accordion>
+
 ## Hardened baseline in 60 seconds
 
 ```json5

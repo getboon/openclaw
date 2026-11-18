@@ -20,6 +20,7 @@ import {
   withCdpSocket,
 } from "./cdp.helpers.js";
 import { assertBrowserNavigationAllowed, withBrowserNavigationPolicy } from "./navigation-guard.js";
+import { type BrowserViewportSize, measureBrowserViewport } from "./screenshot-viewport.js";
 import { CONTENT_ROLES, INTERACTIVE_ROLES, STRUCTURAL_ROLES } from "./snapshot-roles.js";
 
 export {
@@ -70,14 +71,24 @@ export function normalizeCdpWsUrl(wsUrl: string, cdpUrl: string): string {
   return ws.toString();
 }
 
-/** Capture a PNG or JPEG screenshot through CDP, optionally full-page. */
+async function readCdpViewportSize(send: CdpSendFn): Promise<BrowserViewportSize | undefined> {
+  return await measureBrowserViewport(async () => {
+    const result = (await send("Runtime.evaluate", {
+      expression: "({ width: window.innerWidth, height: window.innerHeight })",
+      returnByValue: true,
+    })) as { result?: { value?: unknown } };
+    return result?.result?.value;
+  });
+}
+
+/** Capture a PNG or JPEG screenshot through CDP, plus the CSS-pixel viewport for viewport captures. */
 export async function captureScreenshot(opts: {
   wsUrl: string;
   fullPage?: boolean;
   format?: "png" | "jpeg";
   quality?: number; // jpeg only (0..100)
   timeoutMs?: number;
-}): Promise<Buffer> {
+}): Promise<{ buffer: Buffer; viewport?: BrowserViewportSize }> {
   return await withCdpSocket(
     opts.wsUrl,
     async (send) => {
@@ -152,7 +163,9 @@ export async function captureScreenshot(opts: {
         if (!base64) {
           throw new Error("Screenshot failed: missing data");
         }
-        return Buffer.from(base64, "base64");
+        const buffer = Buffer.from(base64, "base64");
+        const viewport = opts.fullPage ? undefined : await readCdpViewportSize(send);
+        return viewport ? { buffer, viewport } : { buffer };
       } finally {
         if (savedVp) {
           // Clear the temporary viewport expansion first.  If the tab had

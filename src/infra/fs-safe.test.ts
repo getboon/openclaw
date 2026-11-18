@@ -200,7 +200,9 @@ describe("fs-safe", () => {
 
         const resolved = await resolveOpenedFileRealPathForHandle(handle, originalPath);
 
-        expect(resolved).toBe(movedPath);
+        // fs-safe 0.8 resolves the fd identity to its canonical real path (macOS
+        // reports /private/var for /var); it must still be the moved inside file.
+        expect(resolved).toBe(await originalRealpath(movedPath));
         await expect(handle.readFile({ encoding: "utf8" })).resolves.toBe("inside");
       } finally {
         await handle.close().catch(() => {});
@@ -551,6 +553,7 @@ describe("fs-safe", () => {
       });
 
       await withRealpathSymlinkRebindRace({
+        realpathApi: "native-sync",
         shouldFlip: (realpathInput) => realpathInput.endsWith(path.join("slot")),
         symlinkPath: slot,
         symlinkTarget: outside,
@@ -581,6 +584,7 @@ describe("fs-safe", () => {
       });
 
       await withRealpathSymlinkRebindRace({
+        realpathApi: "native-sync",
         shouldFlip: (realpathInput) => realpathInput.endsWith(path.join("slot")),
         symlinkPath: slot,
         symlinkTarget: outside,

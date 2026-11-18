@@ -12,6 +12,15 @@ const mockUserInfo = () => ({ username: MOCK_USERNAME });
 const emptyUserInfo = () => ({ username: "" });
 const DEFAULT_ICACLS = `${DEFAULT_WINDOWS_SYSTEM_ROOT}\\System32\\icacls.exe`;
 const DEFAULT_WHOAMI = `${DEFAULT_WINDOWS_SYSTEM_ROOT}\\System32\\whoami.exe`;
+// PowerShell NTAccount -> SID translation output fs-safe 0.8 requests for
+// principals that icacls printed by name.
+const principalSidTranslation = {
+  stdout: JSON.stringify([
+    { name: "BUILTIN\\Administrators", sid: "S-1-5-32-544" },
+    { name: "NT AUTHORITY\\SYSTEM", sid: "S-1-5-18" },
+  ]),
+  stderr: "",
+};
 
 let createIcaclsResetCommand: typeof import("./windows-acl.js").createIcaclsResetCommand;
 let formatIcaclsResetCommand: typeof import("./windows-acl.js").formatIcaclsResetCommand;
@@ -494,20 +503,41 @@ Successfully processed 1 files`;
 
   describe("inspectWindowsAcl", () => {
     it("returns parsed ACL entries on success", async () => {
-      const mockExec = vi.fn().mockResolvedValue({
-        stdout: `C:\\test\\file.txt BUILTIN\\Administrators:(F)
+      const mockExec = vi
+        .fn()
+        .mockResolvedValueOnce({
+          stdout: `C:\\test\\file.txt BUILTIN\\Administrators:(F)
                 NT AUTHORITY\\SYSTEM:(F)`,
-        stderr: "",
-      });
+          stderr: "",
+        })
+        .mockResolvedValueOnce(principalSidTranslation);
 
       const result = await inspectWindowsAcl("C:\\test\\file.txt", {
         exec: mockExec,
         env: {},
       });
       expectInspectSuccess(result, 2);
-      // /sid is passed so that account names are printed as SIDs, making the
-      // audit locale-independent (fixes #35834).
-      expect(mockExec).toHaveBeenCalledWith(DEFAULT_ICACLS, ["C:\\test\\file.txt", "/sid"]);
+      // fs-safe 0.8 no longer passes /sid to icacls; it keeps the audit
+      // locale-independent (#35834) by translating every principal name to a
+      // SID through PowerShell and failing closed if any name cannot be verified.
+      expect(mockExec).toHaveBeenNthCalledWith(1, DEFAULT_ICACLS, ["C:\\test\\file.txt"]);
+      expect(result.entries.map((entry) => entry.sid)).toEqual(["s-1-5-32-544", "s-1-5-18"]);
+      expect(result.trusted).toHaveLength(2);
+    });
+
+    it("fails closed when a principal name cannot be translated to a SID", async () => {
+      const mockExec = vi
+        .fn()
+        .mockResolvedValueOnce({
+          stdout: "C:\\test\\file.txt BUILTIN\\Administrators:(F)",
+          stderr: "",
+        })
+        .mockResolvedValueOnce({ stdout: "[]", stderr: "" });
+
+      const result = await inspectWindowsAcl("C:\\test\\file.txt", { exec: mockExec, env: {} });
+
+      expect(result.ok).toBe(false);
+      expect(result.entries).toHaveLength(0);
     });
 
     it("uses the discovered process SystemRoot when env options are omitted", async () => {
@@ -526,7 +556,6 @@ Successfully processed 1 files`;
         expectInspectSuccess(result, 1);
         expect(mockExec).toHaveBeenCalledWith("D:\\Windows\\System32\\icacls.exe", [
           "C:\\test\\file.txt",
-          "/sid",
         ]);
       });
     });
@@ -573,7 +602,7 @@ Successfully processed 1 files`;
       expectInspectSuccess(result, 2);
       expect(result.trusted).toHaveLength(2);
       expect(result.untrustedGroup).toHaveLength(0);
-      expect(mockExec).toHaveBeenNthCalledWith(1, DEFAULT_ICACLS, ["C:\\test\\file.txt", "/sid"]);
+      expect(mockExec).toHaveBeenNthCalledWith(1, DEFAULT_ICACLS, ["C:\\test\\file.txt"]);
       expect(mockExec).toHaveBeenNthCalledWith(2, DEFAULT_WHOAMI, ["/user", "/fo", "csv", "/nh"]);
     });
 
@@ -589,10 +618,13 @@ Successfully processed 1 files`;
     });
 
     it("combines stdout and stderr for parsing", async () => {
-      const mockExec = vi.fn().mockResolvedValue({
-        stdout: "C:\\test\\file.txt BUILTIN\\Administrators:(F)",
-        stderr: "C:\\test\\file.txt NT AUTHORITY\\SYSTEM:(F)",
-      });
+      const mockExec = vi
+        .fn()
+        .mockResolvedValueOnce({
+          stdout: "C:\\test\\file.txt BUILTIN\\Administrators:(F)",
+          stderr: "C:\\test\\file.txt NT AUTHORITY\\SYSTEM:(F)",
+        })
+        .mockResolvedValueOnce(principalSidTranslation);
 
       const result = await inspectWindowsAcl("C:\\test\\file.txt", {
         exec: mockExec,
@@ -643,7 +675,6 @@ Successfully processed 1 files`;
       expectInspectSuccess(result, 1);
       expect(mockExec).toHaveBeenNthCalledWith(1, "D:\\Windows\\System32\\icacls.exe", [
         "C:\\test\\file.txt",
-        "/sid",
       ]);
       expect(mockExec).toHaveBeenNthCalledWith(2, "D:\\Windows\\System32\\whoami.exe", [
         "/user",
@@ -670,7 +701,6 @@ Successfully processed 1 files`;
       expectInspectSuccess(result, 1);
       expect(mockExec).toHaveBeenCalledWith(`${root}\\System32\\icacls.exe`, [
         "C:\\test\\file.txt",
-        "/sid",
       ]);
     });
 
@@ -692,7 +722,7 @@ Successfully processed 1 files`;
       });
 
       expectInspectSuccess(result, 1);
-      expect(mockExec).toHaveBeenNthCalledWith(1, DEFAULT_ICACLS, ["C:\\test\\file.txt", "/sid"]);
+      expect(mockExec).toHaveBeenNthCalledWith(1, DEFAULT_ICACLS, ["C:\\test\\file.txt"]);
       expect(mockExec).toHaveBeenNthCalledWith(2, DEFAULT_WHOAMI, ["/user", "/fo", "csv", "/nh"]);
     });
 
@@ -710,7 +740,6 @@ Successfully processed 1 files`;
       expectInspectSuccess(result, 1);
       expect(mockExec).toHaveBeenCalledWith("E:\\Windows\\System32\\icacls.exe", [
         "C:\\test\\file.txt",
-        "/sid",
       ]);
     });
   });

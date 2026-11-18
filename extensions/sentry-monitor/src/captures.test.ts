@@ -1,3 +1,4 @@
+import { PREEMPTIVE_OVERFLOW_ERROR_TEXT } from "openclaw/plugin-sdk/agent-harness-runtime";
 import type {
   PluginHookAfterToolCallEvent,
   PluginHookAgentEndEvent,
@@ -18,7 +19,9 @@ import {
   buildModelCallEndedCapture,
   buildSessionEndCapture,
   buildSubagentEndedCapture,
+  PRECHECK_OVERFLOW_ERROR_TEXT,
 } from "./captures.js";
+import { fingerprintOf, normalizeFingerprintText } from "./format.js";
 
 const HOST = "gw-1";
 
@@ -252,6 +255,35 @@ describe("buildAgentEndCapture", () => {
     );
     expect(withCtx?.fingerprint).toEqual(withoutCtx?.fingerprint);
     expect(withCtx?.fingerprint).toEqual(["agent_end", "boom"]);
+  });
+
+  it("reports the mid-turn precheck overflow as a warning message with the exception fingerprint", () => {
+    const capture = buildAgentEndCapture(
+      { messages: [], success: false, error: PREEMPTIVE_OVERFLOW_ERROR_TEXT, runId: "r9" },
+      HOST,
+    );
+    expect(capture?.kind).toBe("message");
+    if (capture?.kind !== "message") {
+      throw new Error("expected a message-kind capture");
+    }
+    expect(capture.level).toBe("warning");
+    expect(capture.message).toBe(PREEMPTIVE_OVERFLOW_ERROR_TEXT);
+    expect(capture.fingerprint).toEqual(
+      fingerprintOf("agent_end", normalizeFingerprintText(PREEMPTIVE_OVERFLOW_ERROR_TEXT)),
+    );
+    expect(capture.tags).toMatchObject({ hook: "agent_end", host: HOST, run_id: "r9" });
+  });
+
+  it("keeps other agent_end errors as exceptions", () => {
+    const capture = buildAgentEndCapture(
+      { messages: [], success: false, error: "request timed out" },
+      HOST,
+    );
+    expect(capture?.kind).toBe("exception");
+  });
+
+  it("matches the precheck overflow text exported by the runtime", () => {
+    expect(PRECHECK_OVERFLOW_ERROR_TEXT).toBe(PREEMPTIVE_OVERFLOW_ERROR_TEXT);
   });
 });
 

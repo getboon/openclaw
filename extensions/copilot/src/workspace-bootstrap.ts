@@ -93,6 +93,7 @@ export async function resolveCopilotWorkspaceBootstrapContext(params: {
       warn: params.warn,
       contextMode: attempt.bootstrapContextMode,
       runKind: attempt.bootstrapContextRunKind,
+      senderId: readNonEmptyString(attempt.senderId),
     });
     // Remap context-file paths from the workspace we LOADED them
     // from (`workspaceDir`, the canonical host workspace where

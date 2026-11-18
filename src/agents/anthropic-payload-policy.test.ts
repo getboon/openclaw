@@ -138,6 +138,88 @@ describe("anthropic payload policy", () => {
     });
   });
 
+  it("skips opted-out carrier blocks merged into the active user turn", () => {
+    const policy = resolveAnthropicPayloadPolicy({
+      provider: "anthropic",
+      api: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com/v1",
+      cacheRetention: "short",
+      enableCacheControl: true,
+    });
+    const carrierBlock = textBlock("volatile current-turn metadata");
+    const payload: TestPayload = {
+      system: [{ type: "text", text: "system" }],
+      messages: [{ role: "user", content: [textBlock("stable question"), carrierBlock] }],
+    };
+
+    applyAnthropicPayloadPolicyToParams(payload, policy, new Set(), new Set([carrierBlock]));
+
+    expect(payload.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          textBlock("stable question", { type: "ephemeral" }),
+          textBlock("volatile current-turn metadata"),
+        ],
+      },
+    ]);
+  });
+
+  it("keeps tool_result and user markers when a carrier block trails the tool results", () => {
+    const policy = resolveAnthropicPayloadPolicy({
+      provider: "anthropic",
+      api: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com/v1",
+      cacheRetention: "short",
+      enableCacheControl: true,
+    });
+    const buildPayload = (trailing: Array<Record<string, unknown>>): TestPayload => ({
+      system: [{ type: "text", text: "system" }],
+      messages: [
+        { role: "user", content: [textBlock("Investigate the cache writes.")] },
+        {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "tool_1", name: "read", input: {} }],
+        },
+        {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "tool_1", content: "log chunk" },
+            ...trailing,
+          ],
+        },
+      ],
+    });
+    const carrierBlock = textBlock("volatile current-turn metadata");
+    const withCarrier = buildPayload([carrierBlock]);
+    const withoutCarrier = buildPayload([]);
+
+    applyAnthropicPayloadPolicyToParams(withCarrier, policy, new Set(), new Set([carrierBlock]));
+    applyAnthropicPayloadPolicyToParams(withoutCarrier, policy, new Set());
+
+    expect(withCarrier.messages[2]?.content).toEqual([
+      {
+        type: "tool_result",
+        tool_use_id: "tool_1",
+        content: "log chunk",
+        cache_control: { type: "ephemeral" },
+      },
+      textBlock("volatile current-turn metadata"),
+    ]);
+    expect(withCarrier.messages[0]?.content).toEqual([
+      textBlock("Investigate the cache writes.", { type: "ephemeral" }),
+    ]);
+    expect(withCarrier.messages.slice(0, 2)).toEqual(withoutCarrier.messages.slice(0, 2));
+    expect(withoutCarrier.messages[2]?.content).toEqual([
+      {
+        type: "tool_result",
+        tool_use_id: "tool_1",
+        content: "log chunk",
+        cache_control: { type: "ephemeral" },
+      },
+    ]);
+  });
+
   it("keeps a stable user marker while advancing through trailing tool results", () => {
     const policy = resolveAnthropicPayloadPolicy({
       provider: "anthropic",

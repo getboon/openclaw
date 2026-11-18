@@ -16,7 +16,7 @@ import {
   type FileIdentity,
   type PathBinding,
 } from "../shared/path-binding.js";
-import { rejectCanonicalPathChange } from "./path-errors.js";
+import { canonicalPathFromFsSafeError, rejectCanonicalPathChange } from "./path-errors.js";
 
 const MAX_CONTENT_BYTES = 16 * 1024 * 1024; // 16 MB
 
@@ -58,18 +58,29 @@ function err(code: string, message: string, canonicalPath?: string): FileWriteEr
   return { ok: false, code, message, ...(canonicalPath ? { canonicalPath } : {}) };
 }
 
-function symlinkRedirectError(error: FsSafeError): FileWriteError {
-  const canonicalTarget =
-    error.cause &&
-    typeof error.cause === "object" &&
-    "canonicalPath" in error.cause &&
-    typeof error.cause.canonicalPath === "string"
-      ? error.cause.canonicalPath
-      : undefined;
+async function canonicalTargetForSymlinkError(
+  error: FsSafeError,
+  targetPath: string,
+): Promise<string | undefined> {
+  // fs-safe may attach the canonical target to the error cause; when it does
+  // not, resolve it here: realpath covers a final-component symlink, and the
+  // existing-ancestor walk covers a symlinked parent of a missing leaf.
+  const causeCanonical = canonicalPathFromFsSafeError(error);
+  if (causeCanonical) {
+    return causeCanonical;
+  }
+  try {
+    return await fs.realpath(targetPath);
+  } catch {
+    return await canonicalPathFromExistingAncestor(targetPath).catch(() => undefined);
+  }
+}
+
+function symlinkRedirectError(code: string, canonicalPath?: string): FileWriteError {
   return err(
-    "SYMLINK_REDIRECT",
+    code,
     "path traverses a symlink; refusing because followSymlinks=false (set plugins.entries.file-transfer.config.nodes.<node>.followSymlinks=true to allow, or update allowWritePaths to the canonical path)",
-    canonicalTarget,
+    canonicalPath,
   );
 }
 
@@ -372,7 +383,10 @@ export async function handleFileWrite(
     parentExists = resolved.parentExists;
   } catch (error) {
     if (error instanceof FsSafeError && error.code === "symlink") {
-      return symlinkRedirectError(error);
+      return symlinkRedirectError(
+        "SYMLINK_REDIRECT",
+        await canonicalTargetForSymlinkError(error, rawPath),
+      );
     }
     throw error;
   }
@@ -432,7 +446,10 @@ export async function handleFileWrite(
     });
   } catch (error) {
     if (error instanceof FsSafeError && error.code === "symlink") {
-      return symlinkRedirectError(error);
+      return symlinkRedirectError(
+        "SYMLINK_REDIRECT",
+        await canonicalTargetForSymlinkError(error, targetPath),
+      );
     }
     throw error;
   }

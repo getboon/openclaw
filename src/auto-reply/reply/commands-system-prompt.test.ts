@@ -164,6 +164,29 @@ describe("resolveCommandsSystemPromptBundle", () => {
     expect(toolParams.senderE164).toBe("+15551234567");
   });
 
+  it("resolves bootstrap context under the sender's identity partition", async () => {
+    await resolveCommandsSystemPromptBundle(makeParams());
+
+    const bootstrapParams = requireFirstArg(
+      vi.mocked(resolveBootstrapContextForRun),
+      "resolveBootstrapContextForRun",
+    );
+    expect(bootstrapParams.senderId).toBe("sender-1");
+  });
+
+  it("omits senderId from bootstrap context when the sender is unknown", async () => {
+    const params = makeParams();
+    params.ctx.SenderId = undefined;
+
+    await resolveCommandsSystemPromptBundle(params);
+
+    const bootstrapParams = requireFirstArg(
+      vi.mocked(resolveBootstrapContextForRun),
+      "resolveBootstrapContextForRun",
+    );
+    expect(bootstrapParams.senderId).toBeUndefined();
+  });
+
   it("uses the canonical target session for sandbox runtime resolution", async () => {
     const params = makeParams();
     params.ctx.SessionKey = "agent:main:telegram:slash-session";

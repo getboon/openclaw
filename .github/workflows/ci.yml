@@ -512,11 +512,24 @@ jobs:
             local ref="$1"
             local fetch_status
             for attempt in 1 2 3; do
+              # depth=2 (not 1): the later "Ensure security base commit" step
+              # needs the PR base SHA already materialized as a real commit
+              # object, and a PR's test-merge commit's second parent is the base
+              # tip by construction — depth=2 almost always satisfies that via
+              # the action's "already present" fast path, instead of falling
+              # through to its branch-name --deepen fallback, which has proven
+              # unreliable against this fork's boon ref right after a merge
+              # (observed 2026-10-26: 4x30s timeouts fetching boon's own
+              # just-merged tip). That fallback has no hard-fail path of its
+              # own, so when it can't resolve the base commit it degrades
+              # silently (exit 0) — this job's own next step then hard-fails,
+              # since it needs the base commit's zizmor.yml for a real security
+              # reason: a PR must not be able to supply its own trust policy.
               timeout --signal=TERM --kill-after=10s 120s git -C "$GITHUB_WORKSPACE" \
               -c protocol.version=2 \
               -c "http.https://github.com/${CHECKOUT_REPO}.git.extraheader=AUTHORIZATION: basic ${auth_header}" \
               -c "http.https://github.com/${CHECKOUT_REPO}.git.followRedirects=false" \
-              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              fetch --no-tags --prune --no-recurse-submodules --depth=2 origin \
                 "+${ref}:refs/remotes/origin/checkout" && return 0
               fetch_status="$?"
               if [ "$fetch_status" != "124" ] && [ "$fetch_status" != "137" ]; then
@@ -709,7 +722,61 @@ jobs:
       core-support-boundary-result: ${{ steps.built_artifact_checks.outputs['core-support-boundary-result'] }}
       gateway-watch-result: ${{ steps.built_artifact_checks.outputs['gateway-watch-result'] }}
     steps:
-      - *linux_node_checkout_step
+      - name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          auth_header="$(printf 'x-access-token:%s' "$CHECKOUT_TOKEN" | base64 | tr -d '\n')"
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            # depth=2 (not 1): this checkout is followed by "Ensure secrets base
+            # commit", which needs the PR base SHA already materialized as a real
+            # commit object. A PR's test-merge commit's second parent is the base
+            # tip by construction, so depth=2 almost always satisfies it via the
+            # action's own "already present" fast path, instead of falling through
+            # to its branch-name --deepen fallback, which has proven unreliable
+            # against this fork's boon ref right after a merge (observed
+            # 2026-10-26: 4x30s timeouts fetching boon's own just-merged tip).
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              -c "http.https://github.com/${CHECKOUT_REPO}.git.extraheader=AUTHORIZATION: basic ${auth_header}" \
+              -c "http.https://github.com/${CHECKOUT_REPO}.git.followRedirects=false" \
+              fetch --no-tags --prune --no-recurse-submodules --depth=2 origin \
+              "+${CHECKOUT_SHA}:refs/remotes/origin/ci-target" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
       - name: Ensure secrets base commit (PR fast path)
         if: github.event_name == 'pull_request'
         uses: ./.github/actions/ensure-base-commit
@@ -2308,3 +2375,48 @@ jobs:
           name: ci-timings-summary
           path: ci-timings-summary.txt
           retention-days: 14
+
+  # One stable check name for the `boon` ruleset to require: the
+  # matrix jobs above are routed per PR by preflight, so their names come and
+  # go. Skipped jobs are fine (preflight routed them out); a failed or
+  # cancelled one fails the gate. Without a required check, GitHub auto-merge
+  # (dependabot-auto-merge.yml) would merge on approval alone, even on red CI.
+  ci-gate:
+    permissions: {}
+    name: ci-gate
+    needs:
+      - runner-admission
+      - preflight
+      - security-fast
+      - pnpm-store-warmup
+      - build-artifacts
+      - checks-fast-core
+      - checks-fast-plugin-contracts-shard
+      - checks-fast-channel-contracts-shard
+      - checks-node-compat
+      - checks-node-core-test-nondist-shard
+      - check-shard
+      - check-additional-shard
+      - check-docs
+      - skills-python
+      - checks-windows
+      - macos-node
+      - macos-swift
+      - ios-build
+      - android
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Fail if any CI job failed or was cancelled
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          set -euo pipefail
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "::error::a required CI job finished with '$result'"; exit 1 ;;
+            esac
+          done

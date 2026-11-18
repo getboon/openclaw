@@ -1,4 +1,5 @@
 // Covers durable JSON read/write helpers, parse failures, and atomic update behavior.
+import fsSync from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -102,16 +103,46 @@ describe("json file helpers", () => {
     });
   });
 
-  it("can skip durable fsync work for hot state writes", async () => {
-    await withTempDir({ prefix: "openclaw-json-files-" }, async (base) => {
-      const filePath = path.join(base, "state.json");
-      const openSpy = vi.spyOn(fsPromises, "open");
-
-      await writeTextAtomic(filePath, "new", { durable: false });
-
-      expect(openSpy).not.toHaveBeenCalled();
-      await expect(fsPromises.readFile(filePath, "utf8")).resolves.toBe("new");
+  it.each([
+    { durable: false, expectedSync: false },
+    { durable: undefined, expectedSync: true },
+  ])("forwards durable=$durable to fs-safe's fsync options", async ({ durable, expectedSync }) => {
+    // fs-safe opens pinned descriptors even for non-durable writes, so assert the
+    // fsync options at the replaceFileAtomic seam instead of counting opens.
+    vi.resetModules();
+    const replaceSpy = vi.fn();
+    vi.doMock("./replace-file.js", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("./replace-file.js")>();
+      return {
+        ...actual,
+        replaceFileAtomic: (...args: Parameters<typeof actual.replaceFileAtomic>) => {
+          replaceSpy(...args);
+          return actual.replaceFileAtomic(...args);
+        },
+      };
     });
+    try {
+      const { writeTextAtomic: writeTextAtomicWithSpy } = await import("./json-files.js");
+      await withTempDir({ prefix: "openclaw-json-files-" }, async (base) => {
+        const filePath = path.join(base, "state.json");
+
+        await writeTextAtomicWithSpy(
+          filePath,
+          "new",
+          durable === undefined ? undefined : { durable },
+        );
+
+        await expect(fsPromises.readFile(filePath, "utf8")).resolves.toBe("new");
+      });
+      expect(replaceSpy).toHaveBeenCalledTimes(1);
+      expect(replaceSpy.mock.calls[0]?.[0]).toMatchObject({
+        syncTempFile: expectedSync,
+        syncParentDir: expectedSync,
+      });
+    } finally {
+      vi.doUnmock("./replace-file.js");
+      vi.resetModules();
+    }
   });
 
   it("preserves text when Windows rename reports EPERM", async () => {
@@ -214,17 +245,18 @@ describe("json file helpers", () => {
 
   describe("retry behaviors on 'File changed during read'", () => {
     /**
-     * Helper: spy on fsPromises.lstat for our target file path.
-     * Returns a real Stats object with a modified ino to trigger
-     * verifyStableReadTarget in @openclaw/fs-safe.
+     * Helper: spy on fs.lstatSync for our target file path.
+     * Returns a real Stats object with a modified ino to trigger the
+     * identity check in @openclaw/fs-safe (0.8 reads the pre-open identity
+     * with lstatSync; earlier versions used fs.promises.lstat).
      * Object.assign + Object.create preserves the Stats prototype.
      */
     function setupLstatSpy(targetPath: string, targetCallCount: number): () => number {
-      const origLstat = fsPromises.lstat.bind(fsPromises);
+      const origLstat = fsSync.lstatSync.bind(fsSync);
       let callCount = 0;
 
-      vi.spyOn(fsPromises, "lstat").mockImplementation(async (p, ...args) => {
-        const stat = await origLstat(p, ...args);
+      vi.spyOn(fsSync, "lstatSync").mockImplementation(((p: fsSync.PathLike, ...args: never[]) => {
+        const stat = origLstat(p, ...args) as fsSync.Stats | fsSync.BigIntStats;
         const pathStr = typeof p === "string" ? p : String(p);
         if (pathStr === targetPath) {
           callCount++;
@@ -239,7 +271,7 @@ describe("json file helpers", () => {
           }
         }
         return stat;
-      });
+      }) as typeof fsSync.lstatSync);
 
       return () => callCount;
     }

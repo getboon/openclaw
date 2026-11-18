@@ -20408,6 +20408,16 @@
       "hasChildren": false
     },
     {
+      "path": "models.providers.*.models.*.compat.requiresGoogleThoughtSignatures",
+      "kind": "core",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "hasChildren": false
+    },
+    {
       "path": "models.providers.*.models.*.compat.requiresMistralToolIds",
       "kind": "core",
       "type": "boolean",

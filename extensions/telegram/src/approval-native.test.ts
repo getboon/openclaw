@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
@@ -23,7 +24,13 @@ function buildConfig(
   } as OpenClawConfig;
 }
 
-const STORE_PATH = path.join(os.tmpdir(), "openclaw-telegram-approval-native-test.json");
+// fs-safe 0.8 pins and chmods the store directory, so keep the store in a
+// private temp dir rather than directly in the shared OS temp root.
+const STORE_PATH = path.join(
+  // openclaw-temp-dir: allow extension tests cannot import root test helpers
+  fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-telegram-approval-native-")),
+  "sessions.json",
+);
 
 async function writeStore(store: Record<string, unknown>) {
   await saveSessionStore(STORE_PATH, store as Record<string, SessionEntry>, {

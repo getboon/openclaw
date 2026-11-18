@@ -1,127 +1,177 @@
-# Dependabot configuration
-# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+---
+# Dependabot config for getboon/openclaw.
+# Options: https://docs.github.com/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+#
+# Rules this file follows (scripts/dependabot/verify-dependabot-coverage
+# enforces them in CI):
+# - Every tracked lockfile / go.mod / Package.resolved / Gradle build has an
+#   entry for its ecosystem. Add one when you add a new package directory.
+#   The pnpm workspace is one npm entry at "/": Dependabot updates every
+#   workspace package.json and pnpm-lock.yaml together. The npm-shrinkwrap.json
+#   files are generated from pnpm-lock.yaml (scripts/generate-npm-shrinkwrap.mjs)
+#   and need no entry of their own.
+# - Every entry has a cooldown: version updates wait 5 days (14 for majors)
+#   after a release, so a hijacked package version (the 2025 npm chalk/debug
+#   and Shai-Hulud attacks) is usually pulled before we take it. Security
+#   updates ignore the cooldown and arrive immediately. pnpm's own
+#   minimumReleaseAge in pnpm-workspace.yaml is the same 5 days, and it does
+#   apply to a security PR: see the note there for a fix younger than that.
+# - github-actions and docker support only cooldown.default-days; a
+#   semver-*-days key on them makes Dependabot reject the WHOLE file.
+# - Base images are rebuilt on their own schedule; the docker entry below is
+#   kept as it was, only with the shared schedule and cooldown.
+# - Dependabot does not rewrite pnpm `overrides` in pnpm-workspace.yaml. A
+#   package pinned there only moves when someone bumps the override, so the
+#   coverage checker also flags an override that pins a version with an open
+#   Dependabot alert (run with --alerts).
+# - open-pull-requests-limit is 7 per entry (not per directory). Majors open
+#   one PR each and fill these slots, so the first weeks drain a backlog.
+#   Security updates have their own fixed limit (10) and are not held back.
+# - npm splits minor/patch bumps into production and development groups
+#   (dependency-type), so a broken dev tool can't hold back app libraries in
+#   the same PR. The other ecosystems don't distinguish the two, so they keep
+#   one minor/patch group per entry.
+# - Every entry runs Monday 06:00 UTC, so its PRs exist (and
+#   dependabot-auto-merge has decided them) before dependabot-digest.yml posts
+#   the week's Slack thread at 13:00 UTC.
+# Safe patch/minor PRs are merged by .github/workflows/dependabot-auto-merge.yml.
 
 version: 2
 
-registries:
-  npm-npmjs:
-    type: npm-registry
-    url: https://registry.npmjs.org
-    token: ${{secrets.NPM_NPMJS_TOKEN}}
-    replaces-base: true
-
 updates:
-  # npm dependencies (root)
-  - package-ecosystem: npm
-    directory: /
+  - package-ecosystem: "github-actions"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
-      interval: daily
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    # github-actions supports only default-days; a semver-*-days key here makes
+    # Dependabot reject the whole file.
     cooldown:
-      default-days: 2
+      default-days: 5
+    open-pull-requests-limit: 7
     groups:
-      production:
-        dependency-type: production
-        update-types:
-          - minor
-          - patch
-      development:
-        dependency-type: development
-        update-types:
-          - minor
-          - patch
-    open-pull-requests-limit: 20
-    registries:
-      - npm-npmjs
+      github-actions-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      github-actions-security:
+        applies-to: security-updates
+        patterns: ["*"]
 
-  # GitHub Actions
-  - package-ecosystem: github-actions
-    directory: /
+  - package-ecosystem: "npm"
+    directories:
+      - "/"
     schedule:
-      interval: daily
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
     cooldown:
-      default-days: 2
+      default-days: 5
+      semver-major-days: 14
+    open-pull-requests-limit: 7
     groups:
-      actions:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-    open-pull-requests-limit: 5
+      npm-production-minor-patch:
+        applies-to: version-updates
+        dependency-type: "production"
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      npm-development-minor-patch:
+        applies-to: version-updates
+        dependency-type: "development"
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      npm-security:
+        applies-to: security-updates
+        patterns: ["*"]
 
-  # Swift Package Manager - macOS app
-  - package-ecosystem: swift
-    directory: /apps/macos
+  - package-ecosystem: "swift"
+    directories:
+      - "/apps/macos"
+      - "/apps/macos-mlx-tts"
+      - "/apps/shared/OpenClawKit"
+      - "/apps/swabble"
     schedule:
-      interval: daily
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
     cooldown:
-      default-days: 2
+      default-days: 5
+      semver-major-days: 14
+    open-pull-requests-limit: 7
     groups:
-      swift-deps:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-    open-pull-requests-limit: 5
+      swift-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      swift-security:
+        applies-to: security-updates
+        patterns: ["*"]
 
-  # Swift Package Manager - shared MoltbotKit
-  - package-ecosystem: swift
-    directory: /apps/shared/MoltbotKit
+  - package-ecosystem: "gradle"
+    directories:
+      - "/apps/android"
     schedule:
-      interval: daily
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
     cooldown:
-      default-days: 2
+      default-days: 5
+      semver-major-days: 14
+    open-pull-requests-limit: 7
     groups:
-      swift-deps:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-    open-pull-requests-limit: 5
+      gradle-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      gradle-security:
+        applies-to: security-updates
+        patterns: ["*"]
 
-  # Swift Package Manager - Swabble
-  - package-ecosystem: swift
-    directory: /apps/swabble
+  - package-ecosystem: "gomod"
+    directories:
+      - "/scripts/docs-i18n"
     schedule:
-      interval: daily
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
     cooldown:
-      default-days: 2
+      default-days: 5
+      semver-major-days: 14
+    open-pull-requests-limit: 7
     groups:
-      swift-deps:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-    open-pull-requests-limit: 5
+      gomod-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      gomod-security:
+        applies-to: security-updates
+        patterns: ["*"]
 
-  # Gradle - Android app
-  - package-ecosystem: gradle
-    directory: /apps/android
+  # Base images: see the header. `directory` (not
+  # `directories`): src/docker-image-digests.test.ts reads this entry.
+  - package-ecosystem: "docker"
+    directory: "/"
     schedule:
-      interval: daily
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    # docker supports only default-days, like github-actions.
     cooldown:
-      default-days: 2
-    groups:
-      android-deps:
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-    open-pull-requests-limit: 5
-
-  # Docker base images
-  - package-ecosystem: docker
-    directory: /
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 2
+      default-days: 5
+    open-pull-requests-limit: 7
     groups:
       docker-images:
-        patterns:
-          - "*"
-    open-pull-requests-limit: 5
+        applies-to: version-updates
+        patterns: ["*"]
+      docker-security:
+        applies-to: security-updates
+        patterns: ["*"]

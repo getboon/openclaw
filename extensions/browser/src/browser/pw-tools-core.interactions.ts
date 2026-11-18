@@ -54,6 +54,7 @@ import {
   planAnnotations,
   type RawAnnotationInput,
 } from "./screenshot-annotate.js";
+import { type BrowserViewportSize, measureBrowserViewport } from "./screenshot-viewport.js";
 
 type TargetOpts = {
   cdpUrl: string;
@@ -1264,7 +1265,7 @@ export async function takeScreenshotViaPlaywright(opts: {
   fullPage?: boolean;
   type?: "png" | "jpeg";
   timeoutMs?: number;
-}): Promise<{ buffer: Buffer }> {
+}): Promise<{ buffer: Buffer; viewport?: BrowserViewportSize }> {
   const page = await getPageForTargetId(opts);
   ensurePageState(page);
   restoreRoleRefsForTarget({ cdpUrl: opts.cdpUrl, targetId: opts.targetId, page });
@@ -1290,7 +1291,14 @@ export async function takeScreenshotViaPlaywright(opts: {
     fullPage: Boolean(opts.fullPage),
     timeout: opts.timeoutMs,
   });
-  return { buffer };
+  const viewport = opts.fullPage ? undefined : await readViewportSize(page);
+  return viewport ? { buffer, viewport } : { buffer };
+}
+
+async function readViewportSize(page: Page): Promise<BrowserViewportSize | undefined> {
+  return await measureBrowserViewport(() =>
+    page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
+  );
 }
 
 /** Captures a screenshot with Browser plugin labels over interactive elements. */
@@ -1309,6 +1317,7 @@ export async function screenshotWithLabelsViaPlaywright(opts: {
   labels: number;
   skipped: number;
   annotations: AnnotationItem[];
+  viewport?: BrowserViewportSize;
 }> {
   const page = await getPageForTargetId(opts);
   ensurePageState(page);
@@ -1391,12 +1400,13 @@ export async function screenshotWithLabelsViaPlaywright(opts: {
     maxLabels,
   });
 
+  let buffer: Buffer;
   try {
     if (plan.overlayItems.length > 0) {
       const captureY = space === "element" ? elementRect?.y : space === "viewport" ? scroll.y : 0;
       await page.evaluate(buildOverlayInjectionScript({ items: plan.overlayItems, captureY }));
     }
-    const buffer =
+    buffer =
       space === "element"
         ? await captureElementScreenshotForLabels(
             page,
@@ -1410,18 +1420,21 @@ export async function screenshotWithLabelsViaPlaywright(opts: {
             fullPage: Boolean(opts.fullPage),
             timeout: opts.timeoutMs,
           });
-    return {
-      // `labels` reports overlay boxes actually drawn on the captured image
-      // (in-viewport, within budget); off-viewport refs are surfaced via
-      // `annotations` but not drawn, and are reflected in `skipped`.
-      buffer,
-      labels: plan.overlayItems.length,
-      skipped: plan.skipped + bboxFailures,
-      annotations: plan.annotations,
-    };
   } finally {
     await page.evaluate(buildOverlayClearScript()).catch(() => {});
   }
+  // The capture can re-apply Playwright's viewport, so the pre-capture `view` may be stale.
+  const viewport = space === "viewport" ? await readViewportSize(page) : undefined;
+  return {
+    // `labels` reports overlay boxes actually drawn on the captured image
+    // (in-viewport, within budget); off-viewport refs are surfaced via
+    // `annotations` but not drawn, and are reflected in `skipped`.
+    buffer,
+    labels: plan.overlayItems.length,
+    skipped: plan.skipped + bboxFailures,
+    annotations: plan.annotations,
+    ...(viewport ? { viewport } : {}),
+  };
 }
 
 async function resolveElementBoundingBoxForLabels(

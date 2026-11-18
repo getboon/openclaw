@@ -254,7 +254,12 @@ function expandScopedOverrideChildren(overrides) {
 }
 
 function readPnpmLockScopedVersionOverrides() {
-  const lockfile = parseYaml(readFileSync(path.join(ROOT_DIR, "pnpm-lock.yaml"), "utf8"));
+  return collectPnpmLockScopedVersionOverrides(
+    parseYaml(readFileSync(path.join(ROOT_DIR, "pnpm-lock.yaml"), "utf8")),
+  );
+}
+
+function collectPnpmLockScopedVersionOverrides(lockfile) {
   const versionsByName = collectPnpmLockPackageVersions(lockfile);
   if (versionsByName.size === 0) {
     throw new Error("pnpm-lock.yaml is missing package resolution data.");
@@ -289,7 +294,10 @@ function readPnpmLockScopedVersionOverrides() {
       if (!forkedPackageNames.has(dependencyName)) {
         continue;
       }
-      const version = exactVersionFromOverrideSpec(String(dependencySpec));
+      // Snapshot dependency specs carry pnpm's peer suffix, e.g.
+      // "2.11.0(@opentelemetry/api@1.9.1)"; strip it so peer-bearing forked
+      // packages get scoped overrides too (otherwise npm floats them).
+      const version = exactVersionFromOverrideSpec(String(dependencySpec).replace(/\(.*$/u, ""));
       if (!version || !versionsByName.get(dependencyName)?.has(version)) {
         continue;
       }
@@ -1532,6 +1540,7 @@ export {
   generateShrinkwrap,
   updateOrCheckPackage,
   collectOverrideViolations,
+  collectPnpmLockScopedVersionOverrides,
   collectPnpmLockViolations,
   disableShrinkwrappedOverrideConflictSources,
   exactOverrideRulesFromOverrides,

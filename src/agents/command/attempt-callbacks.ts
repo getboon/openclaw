@@ -31,14 +31,17 @@ export function createAgentAttemptLifecycleCallbacks(state: AgentAttemptLifecycl
       if (evt.stream !== "lifecycle" || typeof evt.data?.phase !== "string") {
         return;
       }
-      if (typeof evt.data.error === "string" && evt.data.error.trim()) {
-        state.lifecycleError = evt.data.error;
-      }
+      const error =
+        typeof evt.data.error === "string" && evt.data.error.trim() ? evt.data.error : undefined;
       // Finishing means output ended but transcript/session persistence may still
       // need to run; end/error means the runtime lifecycle is complete.
       if (evt.data.phase === "finishing") {
+        state.lifecycleError = error;
         state.lifecycleFinishing = true;
         return;
+      }
+      if (error) {
+        state.lifecycleError = error;
       }
       if (evt.data.phase === "end" || evt.data.phase === "error") {
         state.lifecycleEnded = true;

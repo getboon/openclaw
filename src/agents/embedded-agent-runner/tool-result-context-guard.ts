@@ -23,6 +23,7 @@ import {
   invalidateMessageCharsCacheEntry,
   isToolResultMessage,
 } from "./tool-result-char-estimator.js";
+import { getToolResultTextLength, truncateToolResultMessage } from "./tool-result-truncation.js";
 
 const SINGLE_TOOL_RESULT_CONTEXT_SHARE = 0.5;
 const PREEMPTIVE_OVERFLOW_RATIO = 0.9;
@@ -291,6 +292,23 @@ function enforceToolResultLimitInPlace(params: {
   }
 }
 
+function toolResultsExceedTextCap(messages: AgentMessage[], maxTextChars: number): boolean {
+  return messages.some((message) => getToolResultTextLength(message) > maxTextChars);
+}
+
+function enforceToolResultTextCapInPlace(messages: AgentMessage[], maxTextChars: number): void {
+  for (const message of messages) {
+    if (getToolResultTextLength(message) <= maxTextChars) {
+      continue;
+    }
+    const truncated = truncateToolResultMessage(message, maxTextChars, {
+      suffix: (truncatedChars) => formatContextLimitTruncationNotice(truncatedChars),
+      minKeepChars: 2_000,
+    });
+    applyMessageMutationInPlace(message, truncated);
+  }
+}
+
 function hasNewToolResultAfterFence(params: {
   messages: AgentMessage[];
   prePromptMessageCount: number;
@@ -470,8 +488,15 @@ export function installContextEngineLoopHook(params: {
 export function installToolResultContextGuard(params: {
   agent: GuardableAgent;
   contextWindowTokens: number;
+  liveToolResultMaxChars?: number;
   midTurnPrecheck?: MidTurnPrecheckOptions;
 }): () => void {
+  const liveToolResultMaxChars =
+    params.liveToolResultMaxChars !== undefined &&
+    Number.isFinite(params.liveToolResultMaxChars) &&
+    params.liveToolResultMaxChars > 0
+      ? params.liveToolResultMaxChars
+      : undefined;
   const contextWindowTokens = Math.max(1, Math.floor(params.contextWindowTokens));
   const maxContextChars = Math.max(
     1_024,
@@ -496,13 +521,21 @@ export function installToolResultContextGuard(params: {
       : messages;
 
     const sourceMessages = Array.isArray(transformed) ? transformed : messages;
-    const contextMessages = toolResultsNeedTruncation({
-      messages: sourceMessages,
-      maxSingleToolResultChars,
-    })
-      ? cloneMessagesForGuard(sourceMessages)
-      : sourceMessages;
+    const exceedsLiveTextCap =
+      liveToolResultMaxChars !== undefined &&
+      toolResultsExceedTextCap(sourceMessages, liveToolResultMaxChars);
+    const contextMessages =
+      exceedsLiveTextCap ||
+      toolResultsNeedTruncation({
+        messages: sourceMessages,
+        maxSingleToolResultChars,
+      })
+        ? cloneMessagesForGuard(sourceMessages)
+        : sourceMessages;
     if (contextMessages !== sourceMessages) {
+      if (liveToolResultMaxChars !== undefined) {
+        enforceToolResultTextCapInPlace(contextMessages, liveToolResultMaxChars);
+      }
       enforceToolResultLimitInPlace({
         messages: contextMessages,
         maxSingleToolResultChars,

@@ -2870,7 +2870,8 @@ async function appendTranscriptTurnMessages(
       const lock = await acquireSessionWriteLock({
         sessionFile: target.sessionFile,
         ...resolveSessionWriteLockOptions(options.config),
-        allowReentrant: true,
+        // Join this process's current holder (the enclosing operation) or contend with a fresh owner.
+        joinInProcessHolder: true,
       });
       try {
         await runBatchWithOwnedLock();

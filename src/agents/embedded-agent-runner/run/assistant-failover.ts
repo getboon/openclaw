@@ -136,6 +136,7 @@ export async function handleAssistantFailover(params: {
   timedOutDuringCompaction: boolean;
   timedOutDuringToolExecution: boolean;
   timedOutByRunBudget: boolean;
+  timedOutByRunDeadline?: boolean;
   allowSameModelIdleTimeoutRetry: boolean;
   allowSameModelRateLimitRetry: boolean;
   assistantProfileFailureReason: AuthProfileFailureReason | null;
@@ -316,6 +317,7 @@ export async function handleAssistantFailover(params: {
       timedOutDuringCompaction: params.timedOutDuringCompaction,
       timedOutDuringToolExecution: params.timedOutDuringToolExecution,
       timedOutByRunBudget: params.timedOutByRunBudget,
+      timedOutByRunDeadline: params.timedOutByRunDeadline,
       profileRotated: true,
     });
   }

@@ -2693,6 +2693,11 @@ async function runEmbeddedAgentInternal(
             );
             throw new LiveSessionModelSwitchError(requestedSelection);
           }
+          // ── Timeout-triggered compaction ──────────────────────────────────
+          // When the LLM times out with high context usage, compact before
+          // retrying to break the death spiral of repeated timeouts.
+          // oxlint-disable-next-line eslint/no-warning-comments -- deferred gap, kept visible until fixed
+          // TODO(okka): skip this compaction retry when attempt.timedOutByRunDeadline is set; it starts a fresh full timeout after the run deadline.
           if (
             timedOut &&
             !timedOutDuringCompaction &&
@@ -3718,6 +3723,7 @@ async function runEmbeddedAgentInternal(
             profileId: failedAssistantProfileId,
             fallbackConfigured,
             timedOut,
+            timedOutByRunDeadline: attempt.timedOutByRunDeadline === true,
             aborted,
           });
 
@@ -3762,6 +3768,7 @@ async function runEmbeddedAgentInternal(
             idleTimedOut,
             timedOutDuringCompaction,
             timedOutDuringToolExecution,
+            timedOutByRunDeadline: attempt.timedOutByRunDeadline === true,
             harnessOwnsTransport: pluginHarnessOwnsTransport,
             timedOutByRunBudget,
             profileRotated: false,
@@ -3778,6 +3785,7 @@ async function runEmbeddedAgentInternal(
             timedOutDuringCompaction,
             timedOutDuringToolExecution,
             timedOutByRunBudget,
+            timedOutByRunDeadline: attempt.timedOutByRunDeadline === true,
             allowSameModelIdleTimeoutRetry:
               timedOut &&
               idleTimedOut &&

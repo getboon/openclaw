@@ -3,6 +3,7 @@
  */
 import type { BrowserDownloadResult } from "./download-types.js";
 import type { AnnotationItem } from "./screenshot-annotate.js";
+import type { BrowserViewportSize } from "./screenshot-viewport.js";
 
 /** Generic success result for action endpoints. */
 export type BrowserActionOk = { ok: true };
@@ -31,3 +32,6 @@ export type BrowserActionPathResult = {
    */
   annotations?: AnnotationItem[];
 };
+
+/** Screenshot result; viewport is the CSS-pixel viewport for plain viewport captures. */
+export type BrowserScreenshotResult = BrowserActionPathResult & { viewport?: BrowserViewportSize };

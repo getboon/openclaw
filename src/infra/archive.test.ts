@@ -1,4 +1,5 @@
 // Tests archive creation and extraction helpers.
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import JSZip from "jszip";
@@ -13,6 +14,9 @@ import { extractArchive, resolvePackedRootDir } from "./archive.js";
 const fixtureRootTracker = createSuiteTempRootTracker({ prefix: "openclaw-archive-" });
 const directorySymlinkType = process.platform === "win32" ? "junction" : undefined;
 const ARCHIVE_EXTRACT_TIMEOUT_MS = 15_000;
+// fs-safe >= 0.5 rejects traversing / absolute tar members with this ArchiveSecurityError code
+// (message "archive-entry-path-invalid"; 0.3.0 said "escapes destination").
+const TAR_ENTRY_PATH_REJECTED_CODE = "entry-path";
 
 async function makeTempDir(prefix = "case") {
   return await fixtureRootTracker.make(prefix);
@@ -254,10 +258,13 @@ describe("archive utils", () => {
           "payload.bin",
         );
 
+        // fs-safe >= 0.5 verifies the published file through the caller's destination path
+        // (0.3.0 used the realpath), so race on either spelling of the extracted file.
+        const extractedPaths = new Set([extractedRealPath, path.resolve(extractedPath)]);
         const realLstat = fs.lstat.bind(fs);
         let linked = false;
         const lstatSpy = vi.spyOn(fs, "lstat").mockImplementation(async (...args) => {
-          if (!linked && String(args[0]) === extractedRealPath) {
+          if (!linked && extractedPaths.has(String(args[0]))) {
             await fs.link(extractedRealPath, outsideAlias);
             linked = true;
           }
@@ -277,8 +284,12 @@ describe("archive utils", () => {
           lstatSpy.mockRestore();
         }
 
-        await expect(fs.readFile(outsideAlias, "utf8")).resolves.toBe("");
-        await expectPathMissing(extractedPath);
+        // fs-safe 0.8.x rejects without unlinking or truncating the now-shared published inode:
+        // truncating would mutate a path outside the destination boundary, and the raced alias
+        // only ever holds the archive's own bytes (same expectation as upstream openclaw).
+        await expect(fs.readFile(outsideAlias, "utf8")).resolves.toBe("owned");
+        await expect(fs.readFile(extractedPath, "utf8")).resolves.toBe("owned");
+        expect((await fs.stat(extractedPath)).nlink).toBe(2);
       });
     },
   );
@@ -290,14 +301,20 @@ describe("archive utils", () => {
       await fs.writeFile(path.join(workDir, "outside.txt"), "pwnd");
 
       await tar.c({ cwd: insideDir, file: archivePath }, ["../outside.txt"]);
+      await fs.writeFile(path.join(workDir, "outside.txt"), "outside sentinel");
 
-      await expect(
+      await expectRejectedCode(
         extractArchive({
           archivePath,
           destDir: extractDir,
           timeoutMs: ARCHIVE_EXTRACT_TIMEOUT_MS,
         }),
-      ).rejects.toThrow(/escapes destination/i);
+        TAR_ENTRY_PATH_REJECTED_CODE,
+      );
+      await expect(fs.readdir(extractDir)).resolves.toEqual([]);
+      await expect(fs.readFile(path.join(workDir, "outside.txt"), "utf8")).resolves.toBe(
+        "outside sentinel",
+      );
     });
   });
 
@@ -372,10 +389,11 @@ describe("archive utils", () => {
 
   it("rejects zip archives whose actual central directory exceeds the entry limit before parsing", async () => {
     await withArchiveCase("zip", async ({ archivePath, extractDir }) => {
+      // The fixture carries valid local records (upstream v2026.9.4), so fs-safe 0.8's
+      // metadata checks pass and the physical central-directory scan must trip the limit.
       const archiveBytes = createZipCentralDirectoryArchive({
         actualEntryCount: 2,
         declaredEntryCount: 1,
-        declaredCentralDirectorySize: 0,
       });
       await fs.writeFile(archivePath, archiveBytes);
 
@@ -387,8 +405,96 @@ describe("archive utils", () => {
           limits: { maxEntries: 1 },
         }),
       ).rejects.toThrow("archive entry count exceeds limit");
+      await expect(fs.readdir(extractDir)).resolves.toEqual([]);
     });
   });
+
+  // Pins npm-pack style extraction through the public facade using the system `tar`
+  // binary, so the @openclaw/fs-safe tar backend can change without silently changing
+  // what lands on disk for plugin/package installs.
+  it.runIf(process.platform !== "win32")(
+    "installs an npm-pack tarball with nested dirs, a symlink-free tree and a PAX long path",
+    async () => {
+      const workDir = await makeTempDir("npm-pack");
+      const srcRoot = path.join(workDir, "src");
+      const longName = `${"l".repeat(117)}.js`;
+      expect(longName).toHaveLength(120);
+      const files: Record<string, string> = {
+        "package/package.json": '{"name":"fixture","version":"1.0.0"}\n',
+        "package/dist/a/b/c.js": "export const c = 1;\n",
+        [`package/${longName}`]: "export const long = true;\n",
+      };
+      for (const [rel, content] of Object.entries(files)) {
+        const abs = path.join(srcRoot, rel);
+        await fs.mkdir(path.dirname(abs), { recursive: true });
+        await fs.writeFile(abs, content);
+        await fs.chmod(abs, 0o644);
+      }
+      const tarEnv = { ...process.env, COPYFILE_DISABLE: "1" };
+      const archivePath = path.join(workDir, "fixture-1.0.0.tgz");
+      execFileSync("tar", ["--format=pax", "-czf", archivePath, "-C", srcRoot, "package"], {
+        env: tarEnv,
+      });
+      const listing = execFileSync("tar", ["-tzf", archivePath], { encoding: "utf8" });
+      expect(listing).toContain(`package/${longName}`);
+
+      const extractDir = path.join(workDir, "extract");
+      await fs.mkdir(extractDir, { recursive: true });
+      await extractArchive({
+        archivePath,
+        destDir: extractDir,
+        timeoutMs: ARCHIVE_EXTRACT_TIMEOUT_MS,
+      });
+
+      for (const [rel, content] of Object.entries(files)) {
+        const extracted = path.join(extractDir, rel);
+        const stat = await fs.lstat(extracted);
+        expect(stat.isFile(), rel).toBe(true);
+        expect(stat.mode & 0o777, rel).toBe(0o644);
+        await expect(fs.readFile(extracted, "utf8")).resolves.toBe(content);
+      }
+      const walk = async (dir: string): Promise<string[]> => {
+        const out: string[] = [];
+        for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+          const abs = path.join(dir, entry.name);
+          expect(entry.isSymbolicLink(), abs).toBe(false);
+          if (entry.isDirectory()) {
+            out.push(...(await walk(abs)));
+          } else {
+            out.push(path.relative(extractDir, abs).split(path.sep).join("/"));
+          }
+        }
+        return out;
+      };
+      expect((await walk(extractDir)).toSorted()).toEqual(Object.keys(files).toSorted());
+
+      const escapeRoot = path.join(workDir, "escape-root");
+      const escapeCwd = path.join(escapeRoot, "inner");
+      await fs.mkdir(escapeCwd, { recursive: true });
+      await fs.writeFile(path.join(escapeRoot, "escape.js"), "pwnd\n");
+      const escapeArchive = path.join(workDir, "escape-1.0.0.tgz");
+      execFileSync("tar", ["--format=pax", "-czPf", escapeArchive, "../escape.js"], {
+        cwd: escapeCwd,
+        env: tarEnv,
+      });
+      expect(execFileSync("tar", ["-tzf", escapeArchive], { encoding: "utf8" })).toContain(
+        "../escape.js",
+      );
+      const escapeExtractDir = path.join(workDir, "escape-extract");
+      await fs.mkdir(escapeExtractDir, { recursive: true });
+      await expectRejectedCode(
+        extractArchive({
+          archivePath: escapeArchive,
+          destDir: escapeExtractDir,
+          timeoutMs: ARCHIVE_EXTRACT_TIMEOUT_MS,
+        }),
+        TAR_ENTRY_PATH_REJECTED_CODE,
+      );
+      // "../escape.js" relative to escapeExtractDir would land here.
+      await expectPathMissing(path.join(workDir, "escape.js"));
+      await expect(fs.readdir(escapeExtractDir)).resolves.toEqual([]);
+    },
+  );
 
   it("rejects tar entries with absolute extraction paths", async () => {
     await withArchiveCase("tar", async ({ workDir, archivePath, extractDir }) => {
@@ -397,14 +503,18 @@ describe("archive utils", () => {
       await fs.mkdir(inputDir, { recursive: true });
       await fs.writeFile(outsideFile, "owned");
       await tar.c({ file: archivePath, preservePaths: true }, [outsideFile]);
+      await fs.writeFile(outsideFile, "outside sentinel");
 
-      await expect(
+      await expectRejectedCode(
         extractArchive({
           archivePath,
           destDir: extractDir,
           timeoutMs: ARCHIVE_EXTRACT_TIMEOUT_MS,
         }),
-      ).rejects.toThrow(/absolute|drive path|escapes destination/i);
+        TAR_ENTRY_PATH_REJECTED_CODE,
+      );
+      await expect(fs.readdir(extractDir)).resolves.toEqual([]);
+      await expect(fs.readFile(outsideFile, "utf8")).resolves.toBe("outside sentinel");
     });
   });
 });

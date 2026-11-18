@@ -57,8 +57,11 @@ import {
 } from "./browser-tool.runtime.js";
 import { DEFAULT_BROWSER_SCREENSHOT_TIMEOUT_MS } from "./browser/constants.js";
 import { parseBrowserNavigationUrl } from "./browser/navigation-guard.js";
+import { addScreenshotScaleNote } from "./browser/screenshot-scale-note.js";
+import { toBrowserViewportSize } from "./browser/screenshot-viewport.js";
 import { normalizeBrowserScreenshot } from "./browser/screenshot.js";
 import { describeBrowserScreenshot, neutralizeMediaDirectives } from "./browser/vision.js";
+import { getImageMetadata } from "./media/media-services.js";
 import { wrapExternalContent } from "./sdk-security-runtime.js";
 
 const browserToolDeps = {
@@ -77,6 +80,7 @@ const browserToolDeps = {
   browserStatus,
   browserStop,
   describeImageFile,
+  getImageMetadata,
   getRuntimeConfig,
   imageResultFromFile,
   listNodes,
@@ -107,6 +111,7 @@ export const testing = {
       browserStatus: typeof browserStatus;
       browserStop: typeof browserStop;
       describeImageFile: typeof describeImageFile;
+      getImageMetadata: typeof getImageMetadata;
       imageResultFromFile: typeof imageResultFromFile;
       getRuntimeConfig: typeof getRuntimeConfig;
       listNodes: typeof listNodes;
@@ -136,6 +141,7 @@ export const testing = {
     browserToolDeps.browserStatus = overrides?.browserStatus ?? browserStatus;
     browserToolDeps.browserStop = overrides?.browserStop ?? browserStop;
     browserToolDeps.describeImageFile = overrides?.describeImageFile ?? describeImageFile;
+    browserToolDeps.getImageMetadata = overrides?.getImageMetadata ?? getImageMetadata;
     browserToolDeps.imageResultFromFile = overrides?.imageResultFromFile ?? imageResultFromFile;
     browserToolDeps.getRuntimeConfig = overrides?.getRuntimeConfig ?? getRuntimeConfig;
     browserToolDeps.listNodes = overrides?.listNodes ?? listNodes;
@@ -849,6 +855,7 @@ export function createBrowserTool(opts?: {
               });
           touchTrackedTab(readStringValue(result.targetId) ?? targetId);
           const screenshotPath = result.path;
+          const viewport = toBrowserViewportSize(result.viewport);
           const screenshotCfg = browserToolDeps.getRuntimeConfig();
           const imageSanitization = resolveRuntimeImageSanitization();
           let shareHint = SCREENSHOT_SHARE_UNAVAILABLE;
@@ -926,22 +933,32 @@ export function createBrowserTool(opts?: {
             // input too, so defang line-start final-reply media directives.
             const rawReason = err instanceof Error ? err.message : String(err);
             const reason = neutralizeMediaDirectives(rawReason);
-            const extraText = `[browser screenshot vision failed: ${reason}]\n${shareHint}`;
-            return await browserToolDeps.imageResultFromFile({
+            const extraText = `[browser screenshot vision failed: ${reason}]`;
+            const fallbackResult = await browserToolDeps.imageResultFromFile({
               label: "browser:screenshot",
               path: screenshotPath,
               extraText,
               details: screenshotDetails,
               imageSanitization,
             });
+            return await addScreenshotScaleNote(
+              fallbackResult,
+              viewport,
+              browserToolDeps.getImageMetadata,
+            );
           }
-          return await browserToolDeps.imageResultFromFile({
+          const imageResult = await browserToolDeps.imageResultFromFile({
             label: "browser:screenshot",
             path: screenshotPath,
             extraText: shareHint,
             details: screenshotDetails,
             imageSanitization,
           });
+          return await addScreenshotScaleNote(
+            imageResult,
+            viewport,
+            browserToolDeps.getImageMetadata,
+          );
         }
         case "navigate": {
           const targetUrl = readTargetUrlParam(params);

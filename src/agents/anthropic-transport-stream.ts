@@ -417,11 +417,37 @@ function convertAnthropicMessages(
   isOAuthToken: boolean,
   options: {
     allowReasoningContentReplay?: boolean;
+    cacheBreakpointOptOutBlocks: Set<object>;
     cacheBreakpointOptOutMessageIndexes: Set<number>;
     replayThinkingEnabled?: boolean;
   },
 ): Array<Record<string, unknown>> {
   const params: Array<Record<string, unknown>> = [];
+  let previousUserMessageParam: Record<string, unknown> | undefined;
+  const pushUserParam = (content: string | object[], isRuntimeContextCarrier: boolean) => {
+    const previous = previousUserMessageParam;
+    // Claude 5.x on non-direct routes can answer a standalone trailing carrier turn instead of
+    // the user, so the carrier rides the preceding user turn as uncached trailing text blocks.
+    if (isRuntimeContextCarrier && previous) {
+      const carrierBlocks =
+        typeof content === "string" ? [{ type: "text", text: content }] : content;
+      const previousContent = previous.content as string | object[];
+      const previousBlocks =
+        typeof previousContent === "string"
+          ? [{ type: "text", text: previousContent }]
+          : previousContent;
+      previous.content = [...previousBlocks, ...carrierBlocks];
+      for (const block of carrierBlocks) {
+        options.cacheBreakpointOptOutBlocks.add(block);
+      }
+      return;
+    }
+    if (isRuntimeContextCarrier) {
+      options.cacheBreakpointOptOutMessageIndexes.add(params.length);
+    }
+    previousUserMessageParam = { role: "user", content };
+    params.push(previousUserMessageParam);
+  };
   const allowReasoningContentReplay = options.allowReasoningContentReplay === true;
   const replayThinkingEnabled = options.replayThinkingEnabled !== false;
   const transformedMessages = transformTransportMessages(messages, model, normalizeToolCallId);
@@ -434,14 +460,7 @@ function convertAnthropicMessages(
       const isRuntimeContextCarrier = msg.runtimeContextCarrier === true;
       if (typeof msg.content === "string") {
         if (msg.content.trim().length > 0) {
-          const userParam = {
-            role: "user",
-            content: sanitizeTransportPayloadText(msg.content),
-          };
-          if (isRuntimeContextCarrier) {
-            options.cacheBreakpointOptOutMessageIndexes.add(params.length);
-          }
-          params.push(userParam);
+          pushUserParam(sanitizeTransportPayloadText(msg.content), isRuntimeContextCarrier);
         }
         continue;
       }
@@ -475,14 +494,7 @@ function convertAnthropicMessages(
       if (filteredBlocks.length === 0) {
         continue;
       }
-      const userParam = {
-        role: "user",
-        content: filteredBlocks,
-      };
-      if (isRuntimeContextCarrier) {
-        options.cacheBreakpointOptOutMessageIndexes.add(params.length);
-      }
-      params.push(userParam);
+      pushUserParam(filteredBlocks, isRuntimeContextCarrier);
       continue;
     }
     if (msg.role === "assistant") {
@@ -570,6 +582,7 @@ function convertAnthropicMessages(
           });
         }
         params.push(assistantMsg);
+        previousUserMessageParam = undefined;
       }
       continue;
     }
@@ -602,6 +615,7 @@ function convertAnthropicMessages(
         role: "user",
         content: toolResults,
       });
+      previousUserMessageParam = undefined;
     }
   }
   return params;
@@ -1037,11 +1051,13 @@ function buildAnthropicParams(
     cacheRetention: options?.cacheRetention,
     enableCacheControl: true,
   });
-  // Transient runtime-context carrier indexes skip cache anchoring so the breakpoint
-  // stays on the last stable user turn; conversion-to-policy must not splice messages.
+  // Transient runtime-context carrier indexes and merged carrier blocks skip cache anchoring so
+  // the breakpoint stays on the last stable user turn; conversion-to-policy must not splice messages.
   const cacheBreakpointOptOutMessageIndexes = new Set<number>();
+  const cacheBreakpointOptOutBlocks = new Set<object>();
   const messages = convertAnthropicMessages(context.messages, model, isOAuthToken, {
     allowReasoningContentReplay: supportsReasoningContentReplay(model),
+    cacheBreakpointOptOutBlocks,
     cacheBreakpointOptOutMessageIndexes,
     replayThinkingEnabled,
   });
@@ -1142,7 +1158,12 @@ function buildAnthropicParams(
       params.tool_choice = projectedToolChoice;
     }
   }
-  applyAnthropicPayloadPolicyToParams(params, payloadPolicy, cacheBreakpointOptOutMessageIndexes);
+  applyAnthropicPayloadPolicyToParams(
+    params,
+    payloadPolicy,
+    cacheBreakpointOptOutMessageIndexes,
+    cacheBreakpointOptOutBlocks,
+  );
   return { params, toolProjection };
 }
 

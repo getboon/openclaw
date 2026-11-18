@@ -26,6 +26,8 @@ type CdpReplyHandler = (
 ) => void;
 type CdpMockMessage = Parameters<CdpReplyHandler>[0];
 
+const VIEWPORT_MEASURE_EXPRESSION = "({ width: window.innerWidth, height: window.innerHeight })";
+
 function sendCdpResult(socket: WebSocket, id: number | undefined, result: Record<string, unknown>) {
   socket.send(JSON.stringify({ id, result }));
 }
@@ -86,6 +88,13 @@ async function startMockWsServer(handle: CdpReplyHandler) {
       };
       handle(msg, socket);
       if (
+        msg.method === "Runtime.evaluate" &&
+        msg.params?.expression === VIEWPORT_MEASURE_EXPRESSION
+      ) {
+        sendCdpResult(socket, msg.id, { result: { value: { width: 1300, height: 900 } } });
+        return;
+      }
+      if (
         msg.method === "Page.enable" ||
         msg.method === "Page.bringToFront" ||
         msg.method === "Runtime.enable" ||
@@ -131,7 +140,7 @@ describe("cdp internal", () => {
       }
     });
     wss = server.wss;
-    const buf = await captureScreenshot({ wsUrl: server.wsUrl, ...options });
+    const { buffer: buf } = await captureScreenshot({ wsUrl: server.wsUrl, ...options });
     return { buf, observed };
   }
 
@@ -154,8 +163,9 @@ describe("cdp internal", () => {
         }
       });
       wss = server.wss;
-      const buf = await captureScreenshot({ wsUrl: server.wsUrl });
-      expect(buf.toString("utf8")).toBe("PNGDATA");
+      const { buffer, viewport } = await captureScreenshot({ wsUrl: server.wsUrl });
+      expect(buffer.toString("utf8")).toBe("PNGDATA");
+      expect(viewport).toEqual({ width: 1300, height: 900 });
     });
 
     it("clamps out-of-range JPEG quality values into [0, 100]", async () => {
@@ -204,7 +214,7 @@ describe("cdp internal", () => {
         replyToViewportCommandOrScreenshot(msg, socket, "FULL");
       });
       wss = server.wss;
-      const buf = await captureScreenshot({ wsUrl: server.wsUrl, fullPage: true });
+      const { buffer: buf } = await captureScreenshot({ wsUrl: server.wsUrl, fullPage: true });
       expect(buf.toString("utf8")).toBe("FULL");
       expect(events).toContain("Emulation.setDeviceMetricsOverride");
       expect(events).toContain("Emulation.clearDeviceMetricsOverride");
@@ -294,7 +304,7 @@ describe("cdp internal", () => {
         }
       });
       wss = server.wss;
-      const buf = await captureScreenshot({ wsUrl: server.wsUrl, fullPage: true });
+      const { buffer: buf } = await captureScreenshot({ wsUrl: server.wsUrl, fullPage: true });
       expect(buf.toString("utf8")).toBe("Z");
     });
 
@@ -719,7 +729,7 @@ describe("cdp internal", () => {
         }
       });
       wss = server.wss;
-      const buf = await captureScreenshot({ wsUrl: server.wsUrl, fullPage: true });
+      const { buffer: buf } = await captureScreenshot({ wsUrl: server.wsUrl, fullPage: true });
       expect(buf.toString("utf8")).toBe("N");
     });
 
@@ -747,7 +757,7 @@ describe("cdp internal", () => {
         replyToViewportCommandOrScreenshot(msg, socket, "C");
       });
       wss = server.wss;
-      const buf = await captureScreenshot({ wsUrl: server.wsUrl, fullPage: true });
+      const { buffer: buf } = await captureScreenshot({ wsUrl: server.wsUrl, fullPage: true });
       expect(buf.toString("utf8")).toBe("C");
     });
   });
@@ -942,7 +952,7 @@ describe("cdp internal", () => {
         }
       });
       wss = server.wss;
-      const buf = await captureScreenshot({ wsUrl: server.wsUrl, fullPage: true });
+      const { buffer: buf } = await captureScreenshot({ wsUrl: server.wsUrl, fullPage: true });
       expect(buf.toString("utf8")).toBe("S");
     });
   });

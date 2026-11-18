@@ -25,11 +25,22 @@ execution, streaming, persistence.
 
 ## Queueing and concurrency
 
-Runs are serialized per session key (session lane) and optionally through a global lane, preventing tool/session races. Messaging channels choose a queue mode (steer/followup/collect/interrupt) that feeds this lane system; see [Command Queue](/concepts/queue).
-
-Transcript writes are additionally protected by a session write lock on the session file. The lock is process-aware and file-based, so it catches writers that bypass the in-process queue or come from another process. Writers wait up to `session.writeLock.acquireTimeoutMs` (default `60000` ms; env override `OPENCLAW_SESSION_WRITE_LOCK_ACQUIRE_TIMEOUT_MS`) before reporting the session as busy.
-
-Session write locks are non-reentrant by default. A helper that intentionally nests acquisition of the same lock while preserving one logical writer must opt in with `allowReentrant: true`.
+- Runs are serialized per session key (session lane) and optionally through a global lane.
+- This prevents tool/session races and keeps session history consistent.
+- Messaging channels can choose queue modes (steer/followup/collect/interrupt) that feed this lane system.
+  See [Command Queue](/concepts/queue).
+- Transcript writes are also protected by a session write lock on the session file. The lock is
+  process-aware and file-based, so it catches writers that bypass the in-process queue or come from
+  another process. Session transcript writers wait up to `session.writeLock.acquireTimeoutMs`
+  (env override `OPENCLAW_SESSION_WRITE_LOCK_ACQUIRE_TIMEOUT_MS`) before reporting the session as
+  busy; the default is `60000` ms.
+- Session write locks are non-reentrant by default: every acquisition gets its own logical owner,
+  and different owners contend. A helper that intentionally nests acquisition of the same lock
+  within one logical operation passes that operation's `reentrantOwner`. Transcript writers pass
+  `joinInProcessHolder: true`, which joins the operation that currently holds the session lock in
+  this process (agent attempt, compaction, transcript rewrite) or contends with a fresh owner when
+  there is none. The holder is looked up immediately before each acquire attempt.
+  The removed `allowReentrant: true` option now throws a `TypeError`.
 
 ## Session and workspace preparation
 

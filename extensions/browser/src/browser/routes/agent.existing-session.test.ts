@@ -228,6 +228,19 @@ describe("existing-session browser routes", () => {
     expect(navigationGuardMocks.assertBrowserNavigationResultAllowed).not.toHaveBeenCalled();
   });
 
+  it("does not report a viewport for existing-session screenshots", async () => {
+    const handler = getSnapshotPostHandler();
+    const response = createBrowserRouteResponse();
+
+    await handler?.({ params: {}, query: {}, body: { type: "png" } }, response.res);
+
+    expect(response.statusCode).toBe(200);
+    const body = requireRecord(response.body, "response body");
+    expect(body.ok).toBe(true);
+    expect(body).not.toHaveProperty("viewport");
+    expect(chromeMcpMocks.takeChromeMcpScreenshot).toHaveBeenCalled();
+  });
+
   it("checks existing-session snapshot URL when SSRF policy is configured", async () => {
     const handler = getSnapshotGetHandler({ allowPrivateNetwork: false });
     const response = createBrowserRouteResponse();

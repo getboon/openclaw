@@ -1244,7 +1244,7 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     });
   });
 
-  it("keeps before_prompt_build context in the model prompt and out of transcript messages", async () => {
+  it("routes before_prompt_build context into the runtime-context carrier and out of transcript messages", async () => {
     const runBeforePromptBuild = vi.fn(async () => ({
       prependContext: "dynamic hook context",
       appendContext: "dynamic hook tail",
@@ -1298,15 +1298,24 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
 
     expect(seen.prompt).toBe("visible ask");
     expect(result.finalPromptText).toBe("visible ask");
-    expect(JSON.stringify(seen.modelMessages)).toContain("dynamic hook context");
-    expect(JSON.stringify(seen.modelMessages)).toContain("dynamic hook tail");
-    expect(JSON.stringify(seen.preprocessedModelMessages)).toContain("dynamic hook context");
-    expect(JSON.stringify(seen.preprocessedModelMessages)).toContain("session preprocessed");
-    expect(JSON.stringify(seen.preprocessedModelMessages)).toContain("dynamic hook tail");
+    // Carrier turns install no model prompt transform, so the active user message stays bare.
+    expect(seen.modelMessages).toBeUndefined();
+    expect(seen.preprocessedModelMessages).toBeUndefined();
     expect(seen.systemPrompt).not.toContain("dynamic hook context");
     expect(seen.systemPrompt).not.toContain("dynamic hook tail");
-    expect(JSON.stringify(seen.messages)).not.toContain("dynamic hook context");
-    expect(JSON.stringify(seen.messages)).not.toContain("dynamic hook tail");
+    const runtimeContext = findRecord(
+      requireRecords(seen.messages, "seen messages"),
+      (message) => message.customType === "openclaw.runtime-context",
+      "runtime context message",
+    );
+    expect(String(runtimeContext.content)).toContain("dynamic hook context\n\ndynamic hook tail");
+    expect(
+      JSON.stringify(
+        requireRecords(seen.messages, "seen messages").filter(
+          (message) => message.customType !== "openclaw.runtime-context",
+        ),
+      ),
+    ).not.toContain("dynamic hook");
     expect(JSON.stringify(result.messagesSnapshot)).not.toContain("dynamic hook context");
     expect(JSON.stringify(result.messagesSnapshot)).not.toContain("dynamic hook tail");
   });
@@ -1359,10 +1368,15 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     expect(seen.prompt).not.toContain("dynamic hook context");
     expect(seen.prompt).not.toContain("dynamic hook tail");
     expect(result.finalPromptText).toBe(seen.prompt);
-    expect(JSON.stringify(seen.modelMessages)).toContain("dynamic hook context");
-    expect(JSON.stringify(seen.modelMessages)).toContain("orphaned ask");
-    expect(JSON.stringify(seen.modelMessages)).toContain("dynamic hook tail");
-    expect(JSON.stringify(seen.messages)).not.toContain("dynamic hook context");
+    expect(seen.modelMessages).toBeUndefined();
+    const runtimeContext = findRecord(
+      requireRecords(seen.messages, "seen messages"),
+      (message) => message.customType === "openclaw.runtime-context",
+      "runtime context message",
+    );
+    expect(String(runtimeContext.content)).toContain("dynamic hook context\n\ndynamic hook tail");
+    expect(String(runtimeContext.content)).not.toContain("orphaned ask");
+    expect(JSON.stringify(result.messagesSnapshot)).not.toContain("dynamic hook context");
     expect(JSON.stringify(result.messagesSnapshot)).not.toContain("dynamic hook tail");
     expect(hoisted.sessionManager.branch).toHaveBeenCalledWith("parent-leaf");
   });
@@ -1675,7 +1689,7 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     expect(promptSubmitted?.data?.prompt).not.toContain("secret runtime context");
   });
 
-  it("keeps hook prompt context visible while hiding inter-session provenance", async () => {
+  it("carries hook prompt context with hidden inter-session provenance", async () => {
     const runBeforePromptBuild = vi.fn(async () => ({
       prependContext: "dynamic hook context",
       appendContext: "dynamic hook tail",
@@ -1734,10 +1748,7 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     expect(result.finalPromptText).toBe("visible ask");
     expect(seen.prompt).not.toContain("[Inter-session message]");
     expect(seen.prompt).not.toContain("secret runtime context");
-    expect(JSON.stringify(seen.modelMessages)).toContain("dynamic hook context");
-    expect(JSON.stringify(seen.modelMessages)).toContain("dynamic hook tail");
-    expect(JSON.stringify(seen.modelMessages)).not.toContain("[Inter-session message]");
-    expect(JSON.stringify(seen.modelMessages)).not.toContain("secret runtime context");
+    expect(seen.modelMessages).toBeUndefined();
     const runtimeContext = findRecord(
       requireRecords(seen.messages, "seen messages"),
       (message) => message.customType === "openclaw.runtime-context",
@@ -1748,8 +1759,9 @@ describe("runEmbeddedAttempt context engine sessionKey forwarding", () => {
     expect(runtimeContext.content).toContain("isUser=false");
     expect(runtimeContext.content).not.toContain("visible ask");
     expect(runtimeContext.content).toContain("secret runtime context");
-    expect(runtimeContext.content).not.toContain("dynamic hook context");
-    expect(runtimeContext.content).not.toContain("dynamic hook tail");
+    expect(String(runtimeContext.content)).toContain(
+      "secret runtime context\n<<<END_OPENCLAW_INTERNAL_CONTEXT>>>\n\ndynamic hook context\n\ndynamic hook tail",
+    );
     expect(JSON.stringify(result.messagesSnapshot)).not.toContain("dynamic hook context");
     expect(JSON.stringify(result.messagesSnapshot)).not.toContain("dynamic hook tail");
   });
@@ -3062,6 +3074,56 @@ describe("runEmbeddedAttempt context engine mid-turn precheck integration", () =
   });
 });
 
+describe("runEmbeddedAttempt run deadline flag", () => {
+  const sessionKey = "agent:main:guildchat:channel:run-deadline-flag";
+  const tempPaths: string[] = [];
+
+  beforeEach(() => {
+    resetEmbeddedAttemptHarness();
+    clearMemoryPluginState();
+  });
+
+  afterEach(async () => {
+    await cleanupTempPaths(tempPaths);
+    clearMemoryPluginState();
+    vi.restoreAllMocks();
+  });
+
+  it("marks an attempt aborted by its own run deadline timer", async () => {
+    const result = await createContextEngineAttemptRunner({
+      contextEngine: createContextEngineBootstrapAndAssemble(),
+      sessionKey,
+      tempPaths,
+      attemptOverrides: { timeoutMs: 50 },
+      sessionPrompt: () => new Promise<void>(() => {}),
+    });
+
+    expect(result.timedOut).toBe(true);
+    expect(result.externalAbort).toBe(false);
+    expect(result.timedOutByRunDeadline).toBe(true);
+  });
+
+  it("does not mark an attempt aborted by an external timeout signal", async () => {
+    const controller = new AbortController();
+    const result = await createContextEngineAttemptRunner({
+      contextEngine: createContextEngineBootstrapAndAssemble(),
+      sessionKey,
+      tempPaths,
+      attemptOverrides: { abortSignal: controller.signal },
+      sessionPrompt: () => {
+        const timeoutReason = new Error("caller deadline");
+        timeoutReason.name = "TimeoutError";
+        controller.abort(timeoutReason);
+        return new Promise<void>(() => {});
+      },
+    });
+
+    expect(result.timedOut).toBe(true);
+    expect(result.externalAbort).toBe(true);
+    expect(result.timedOutByRunDeadline).not.toBe(true);
+  });
+});
+
 describe("runEmbeddedAttempt tool-result guard budget wiring", () => {
   const sessionKey = "agent:main:guildchat:channel:tool-result-guard-budget";
   const tempPaths: string[] = [];
@@ -3094,10 +3156,40 @@ describe("runEmbeddedAttempt tool-result guard budget wiring", () => {
       },
     });
 
+    const guardParams = mockParams(
+      hoisted.installToolResultContextGuardMock,
+      0,
+      "tool-result guard params",
+    );
+    expect(guardParams.contextWindowTokens).toBe(1_000_000);
+    expect(guardParams.liveToolResultMaxChars).toBe(64_000);
+  });
+
+  it("passes the live tool-result cap to the guard when the context engine owns compaction", async () => {
+    await createContextEngineAttemptRunner({
+      contextEngine: {
+        ...createContextEngineBootstrapAndAssemble(),
+        info: { ownsCompaction: true },
+      },
+      sessionKey,
+      tempPaths,
+      attemptOverrides: {
+        contextTokenBudget: 1_000_000,
+        model: {
+          api: "openai-completions",
+          provider: "openai",
+          compat: {},
+          contextWindow: 200_000,
+          input: ["text"],
+        } as never,
+      },
+    });
+
+    expect(hoisted.installContextEngineLoopHookMock).toHaveBeenCalledTimes(1);
     expect(
       mockParams(hoisted.installToolResultContextGuardMock, 0, "tool-result guard params")
-        .contextWindowTokens,
-    ).toBe(1_000_000);
+        .liveToolResultMaxChars,
+    ).toBe(64_000);
   });
 
   it("passes context engines the message budget after reserve and rendered prompt pressure", async () => {

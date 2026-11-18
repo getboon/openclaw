@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { isFileMissingError } from "./fs-utils.js";
 import { readMemoryFile } from "./read-file.js";
 
 async function createDirectorySymlink(target: string, linkPath: string): Promise<boolean> {
@@ -17,6 +18,16 @@ async function createDirectorySymlink(target: string, linkPath: string): Promise
     throw err;
   }
 }
+
+describe("isFileMissingError", () => {
+  it("treats fs-safe not-file (an existing directory or special file) as present, not missing", () => {
+    expect(isFileMissingError(Object.assign(new Error("not a file"), { code: "not-file" }))).toBe(
+      false,
+    );
+    expect(isFileMissingError(Object.assign(new Error("gone"), { code: "not-found" }))).toBe(true);
+    expect(isFileMissingError(Object.assign(new Error("gone"), { code: "ENOTDIR" }))).toBe(true);
+  });
+});
 
 describe("readMemoryFile", () => {
   it("returns empty text for missing files under extra path directories", async () => {

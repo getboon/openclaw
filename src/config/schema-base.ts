@@ -120,6 +120,60 @@ function applyFieldDocumentation(
   }
 }
 
+/**
+ * Expand the compact `type: ["string", "number"]` shorthand zod's toJSONSchema
+ * emits for a union of two-or-more bare primitive types back into an
+ * equivalent `anyOf` of single-type branches. The shorthand and `anyOf` forms
+ * are both valid JSON Schema, but config-form union handling (Control UI and
+ * CLI form renderers) only recognizes `anyOf`/`oneOf` as a multi-type field;
+ * left as the shorthand, those renderers silently collapse the field to its
+ * first listed type via `schemaType()`, dropping the other accepted types
+ * from the UI. The common `[T, "null"]` nullable shape (exactly one
+ * non-null type) is left untouched -- that pattern is already handled
+ * directly by `schemaType()`/nullable checks throughout the config form.
+ */
+function expandMultiTypeUnions(node: JsonSchemaObject): void {
+  const type = node.type;
+  if (Array.isArray(type) && new Set(type.filter((entry) => entry !== "null")).size >= 2) {
+    node.anyOf = type.map((entry) => ({ type: entry }));
+    delete node.type;
+  }
+
+  if (node.properties) {
+    for (const child of Object.values(node.properties)) {
+      const childObj = asJsonSchemaObject(child);
+      if (childObj) {
+        expandMultiTypeUnions(childObj);
+      }
+    }
+  }
+  if (node.additionalProperties && typeof node.additionalProperties === "object") {
+    const addObj = asJsonSchemaObject(node.additionalProperties);
+    if (addObj) {
+      expandMultiTypeUnions(addObj);
+    }
+  }
+  if (node.items) {
+    for (const itemsEntry of Array.isArray(node.items) ? node.items : [node.items]) {
+      const itemsObj = asJsonSchemaObject(itemsEntry);
+      if (itemsObj) {
+        expandMultiTypeUnions(itemsObj);
+      }
+    }
+  }
+  for (const keyword of ["anyOf", "oneOf", "allOf"] as const) {
+    const branches = node[keyword];
+    if (Array.isArray(branches)) {
+      for (const branch of branches) {
+        const branchObj = asJsonSchemaObject(branch);
+        if (branchObj) {
+          expandMultiTypeUnions(branchObj);
+        }
+      }
+    }
+  }
+}
+
 function applyNodeDocumentation(
   node: JsonSchemaObject,
   documentation: FieldDocumentation,
@@ -238,6 +292,7 @@ function computeBaseConfigSchemaStablePayload(): BaseConfigSchemaStablePayload {
   schema.title = "OpenClawConfig";
   const schemaRoot = asJsonSchemaObject(schema);
   if (schemaRoot) {
+    expandMultiTypeUnions(schemaRoot);
     applyFieldDocumentation(schemaRoot, buildFieldDocumentation());
   }
   const baseHints = mapSensitivePaths(OpenClawSchema, "", buildBaseHints());

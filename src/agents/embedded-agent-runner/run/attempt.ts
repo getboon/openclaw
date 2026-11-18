@@ -186,7 +186,7 @@ import { runAgentEndSideEffects } from "../../harness/agent-end-side-effects.js"
 import { runAgentHarnessBeforeAgentFinalizeHook } from "../../harness/lifecycle-hook-helpers.js";
 import { resolveHeartbeatPromptForSystemPrompt } from "../../heartbeat-system-prompt.js";
 import { resolveImageSanitizationLimits } from "../../image-sanitization.js";
-import { relocateCurrentRuntimeContextCarrierToTail } from "../../internal-runtime-context.js";
+import { relocateCurrentRuntimeContextCarrierAfterActiveUser } from "../../internal-runtime-context.js";
 import {
   applyLocalModelLeanToolSearchDefaults,
   filterLocalModelLeanTools,
@@ -277,8 +277,10 @@ import {
 } from "../../workspace.js";
 import {
   classifyAsyncTaskWaitTimeout,
+  classifyCompactionRetryWaitAbort,
   isExternalTimeoutAbortRejection,
   isRunnerAbortError,
+  resolveAgentEndErrorText,
 } from "../abort.js";
 import { isCacheTtlEligibleProvider, readLastCacheTtlTimestamp } from "../cache-ttl.js";
 import { resolveCompactionTimeoutMs } from "../compaction-safety-timeout.js";
@@ -537,9 +539,8 @@ import {
 } from "./preemptive-compaction.js";
 import { resolveRunPromptPolicy } from "./prompt-policy.js";
 import {
-  buildCurrentInboundPrompt,
   buildRuntimeContextCustomMessage,
-  resolveRuntimeContextPromptParts,
+  resolveCurrentTurnPromptParts,
 } from "./runtime-context-prompt.js";
 import { resolveEmbeddedHostOwnedToolMediaUrls } from "./tool-media-payloads.js";
 import type { EmbeddedRunAttemptParams, EmbeddedRunAttemptResult } from "./types.js";
@@ -1001,6 +1002,7 @@ export async function runEmbeddedAttempt(
   let idleTimedOut = false;
   let timedOutDuringCompaction = false;
   let timedOutDuringToolExecution = false;
+  let timedOutByRunDeadline = false;
   // Set once the prompt catch classifies a rejection as a clean external
   // timeout abort. Guards the completion-required async-task wait below:
   // that wait's own deadline collapses to ~now once the run is already
@@ -1546,6 +1548,7 @@ export async function runEmbeddedAttempt(
         warn: bootstrapWarn,
         contextMode: params.bootstrapContextMode,
         runKind: params.bootstrapContextRunKind,
+        senderId: params.senderId ?? undefined,
       });
       bootstrapRouting = await resolveBootstrapRouting(preloadedBootstrapFiles);
     }
@@ -1576,6 +1579,7 @@ export async function runEmbeddedAttempt(
             warn: bootstrapWarn,
             contextMode: params.bootstrapContextMode,
             runKind: params.bootstrapContextRunKind,
+            senderId: params.senderId ?? undefined,
           }));
         return {
           bootstrapFiles,
@@ -2724,13 +2728,12 @@ export async function runEmbeddedAttempt(
         const baseConvertToLlm = activeSession.agent.convertToLlm.bind(activeSession.agent);
         activeSession.agent.convertToLlm = async (messages) =>
           await baseConvertToLlm(
-            // Wire-only: move the current-turn runtime-context carrier to the
-            // absolute tail so the request is an append-only prefix-extension
-            // through the active user turn (see the function's cache rationale).
+            // Wire-only: the carrier follows the active user turn, not the tail, so the
+            // model does not reread it after each tool result and repeat its answer.
             // Applied here, not inside normalizeMessagesForLlmBoundary, because
             // normalizeMessagesForCurrentPromptBoundary slices off its appended
             // prompt by position and must not see the carrier relocated past it.
-            relocateCurrentRuntimeContextCarrierToTail(
+            relocateCurrentRuntimeContextCarrierAfterActiveUser(
               normalizeMessagesForLlmBoundary(messages, buildBoundaryOptions()),
             ),
           );
@@ -2872,6 +2875,7 @@ export async function runEmbeddedAttempt(
         const removeGuard = installToolResultContextGuard({
           agent: activeSession.agent,
           contextWindowTokens: contextTokenBudgetForGuard,
+          liveToolResultMaxChars: toolResultMaxCharsForGuard,
           ...midTurnPrecheckOptions,
         });
         removeToolResultContextGuard = () => {
@@ -2882,6 +2886,7 @@ export async function runEmbeddedAttempt(
         removeToolResultContextGuard = installToolResultContextGuard({
           agent: activeSession.agent,
           contextWindowTokens: contextTokenBudgetForGuard,
+          liveToolResultMaxChars: toolResultMaxCharsForGuard,
           ...midTurnPrecheckOptions,
         });
       }
@@ -4035,6 +4040,12 @@ export async function runEmbeddedAttempt(
             ) {
               timedOutDuringCompaction = true;
             }
+            // Upstream renews the gateway deadline for each fallback attempt instead
+            // (openclaw/openclaw#141869); boon deliberately does not (#313) - rotating
+            // to a fresh-timeout fallback here let an orphan scan later resume the
+            // original run and send the parent stale corrections minutes/hours after
+            // it had already been reported as timed out.
+            timedOutByRunDeadline = true;
             timedOutByRunBudget = true;
             abortRun(true);
             if (!abortWarnTimer) {
@@ -4224,8 +4235,6 @@ export async function runEmbeddedAttempt(
         const promptBeforePromptBuildHooks = effectivePrompt;
         const promptBuildPrependContext = hookResult?.prependContext;
         const promptBuildAppendContext = hookResult?.appendContext;
-        const hasPromptBuildContext =
-          Boolean(promptBuildPrependContext?.trim()) || Boolean(promptBuildAppendContext?.trim());
         {
           if (hookResult?.prependContext) {
             effectivePrompt = `${hookResult.prependContext}\n\n${effectivePrompt}`;
@@ -4421,7 +4430,6 @@ export async function runEmbeddedAttempt(
           }
         }
         const promptForModelBeforeRuntimeContextSplit = effectivePrompt;
-        const promptForRuntimeContextBeforeAnnotation = promptForRuntimeContextSplit;
         if (!isRawModelRun) {
           promptForRuntimeContextSplit = annotateInterSessionPromptText(
             promptForRuntimeContextSplit,
@@ -4498,55 +4506,19 @@ export async function runEmbeddedAttempt(
             }
           }
 
-          const promptSubmission = resolveRuntimeContextPromptParts({
+          const currentTurnPrompt = resolveCurrentTurnPromptParts({
             effectivePrompt: promptForRuntimeContextSplit,
             transcriptPrompt: transcriptPromptForRuntimeSplit,
-            modelPrompt: hasPromptBuildContext
-              ? promptForModelBeforeRuntimeContextSplit
-              : undefined,
-            modelPromptBuildContext:
-              hasPromptBuildContext && effectiveTranscriptPrompt !== undefined
-                ? {
-                    promptBeforeHooks: promptBeforePromptBuildHooks,
-                    transcriptPromptBeforeTransforms: effectiveTranscriptPrompt,
-                    promptBeforeAnnotation: promptForRuntimeContextBeforeAnnotation,
-                    prependContext: promptBuildPrependContext ?? "",
-                    appendContext: promptBuildAppendContext ?? "",
-                  }
-                : undefined,
-            emptyTranscriptMode: params.suppressNextUserMessagePersistence
-              ? "model-prompt"
-              : "runtime-event",
+            modelPromptWithBuildContext: promptForModelBeforeRuntimeContextSplit,
+            promptBuildContext: {
+              prependContext: promptBuildPrependContext,
+              appendContext: promptBuildAppendContext,
+            },
+            currentInboundContext: params.currentInboundContext,
+            suppressUserMessagePersistence: params.suppressNextUserMessagePersistence,
           });
-          const isRuntimeOnlyTurn = promptSubmission.runtimeOnly === true;
-          const currentInboundContextText = isRuntimeOnlyTurn
-            ? undefined
-            : params.currentInboundContext?.text?.trim() || undefined;
-          // Normal user turns keep the user prompt BARE and route current-turn
-          // inbound metadata into the runtime-context carrier (relocated after the
-          // active user turn on the wire), so the persisted/replayed user message
-          // is byte-identical whether active or historical — the cache-stability
-          // fix. Runtime-only turns (room events, etc.) have no bare user turn to
-          // protect, so their inbound context stays inline exactly as before. That
-          // inline path stays byte-stable because a runtime-only turn only ever
-          // carries room-event/system context, which is NOT strip-eligible: the
-          // historical strip only removes the `buildInboundUserContextPrefix`
-          // blocks (Conversation info / Reply target / Sender / …), and those are
-          // produced only for non-room turns — which always have a non-empty body
-          // and so are never runtime-only. So inline-active and inline-historical
-          // serialize identically (verified in the cache-stability tests).
-          const promptForSession = isRuntimeOnlyTurn
-            ? buildCurrentInboundPrompt({
-                context: params.currentInboundContext,
-                prompt: promptSubmission.prompt,
-              })
-            : promptSubmission.prompt;
-          const promptForModel = isRuntimeOnlyTurn
-            ? buildCurrentInboundPrompt({
-                context: params.currentInboundContext,
-                prompt: promptSubmission.modelPrompt ?? promptSubmission.prompt,
-              })
-            : (promptSubmission.modelPrompt ?? promptSubmission.prompt);
+          const promptSubmission = currentTurnPrompt.submission;
+          const { promptForSession, promptForModel } = currentTurnPrompt;
           currentUserTimestampOverride =
             !isRawModelRun && typeof preparedUserTurnMessage?.timestamp === "number"
               ? {
@@ -4565,11 +4537,7 @@ export async function runEmbeddedAttempt(
               setActiveSessionSystemPrompt(runtimeSystemPrompt);
             }
           }
-          const runtimeContextForHook = isRuntimeOnlyTurn
-            ? undefined
-            : [currentInboundContextText, promptSubmission.runtimeContext?.trim()]
-                .filter((value): value is string => Boolean(value))
-                .join("\n\n") || undefined;
+          const runtimeContextForHook = currentTurnPrompt.runtimeContext;
           const runtimeContextMessageForCurrentTurn =
             buildRuntimeContextCustomMessage(runtimeContextForHook);
           const messagesForCurrentPrompt = runtimeContextMessageForCurrentTurn
@@ -5141,8 +5109,8 @@ export async function runEmbeddedAttempt(
               session: activeSession,
               transcriptPrompt: promptForSession,
               modelPrompt: promptForModel,
-              prependContext: promptBuildPrependContext,
-              appendContext: promptBuildAppendContext,
+              prependContext: currentTurnPrompt.inlinePromptBuildContext?.prependContext,
+              appendContext: currentTurnPrompt.inlinePromptBuildContext?.appendContext,
               shouldCapturePrompt: () => captureCurrentPromptForModel,
             });
             const armModelPromptTransform = (submitted: boolean) => {
@@ -5193,6 +5161,8 @@ export async function runEmbeddedAttempt(
             releaseLeasedSteering(promptError ?? "prompt submission skipped");
           }
         } catch (err) {
+          // oxlint-disable-next-line eslint/no-warning-comments -- deferred gap, kept visible until fixed
+          // TODO(okka): a sessions_yield abort lands here, so leased steering items return to the queue although this turn's persisted prompt already holds them. Each later wake replays and persists them again.
           releaseLeasedSteering(err);
           yieldAborted =
             yieldDetected &&
@@ -5385,7 +5355,25 @@ export async function runEmbeddedAttempt(
             }
           }
         } catch (err) {
-          if (isRunnerAbortError(err)) {
+          const compactionAbortOutcome = classifyCompactionRetryWaitAbort({
+            err,
+            externalAbort,
+            timedOut,
+          });
+          if (compactionAbortOutcome.kind === "rethrow") {
+            throw err;
+          }
+          if (compactionAbortOutcome.kind === "externalTimeoutClassified") {
+            // Same caller-driven stop already in progress, not a new failure:
+            // leave promptError untouched (classification above already
+            // handles reporting) instead of repopulating it from this wait.
+            externalTimeoutAbortClassified = true;
+            if (!isProbeSession) {
+              log.debug(
+                `compaction wait aborted by caller's external timeout: runId=${params.runId} sessionId=${params.sessionId}`,
+              );
+            }
+          } else {
             if (!promptError) {
               promptError = err;
               promptErrorSource = "compaction";
@@ -5395,8 +5383,6 @@ export async function runEmbeddedAttempt(
                 `compaction wait aborted: runId=${params.runId} sessionId=${params.sessionId}`,
               );
             }
-          } else {
-            throw err;
           }
         }
 
@@ -5657,7 +5643,7 @@ export async function runEmbeddedAttempt(
             event: {
               messages: messagesSnapshot,
               success: !aborted && !promptError,
-              error: promptError ? formatErrorMessage(promptError) : undefined,
+              error: resolveAgentEndErrorText({ promptError, externalTimeoutAbortClassified }),
               durationMs: Date.now() - promptStartedAt,
             },
             ctx: {
@@ -6020,6 +6006,7 @@ export async function runEmbeddedAttempt(
         aborted,
         externalAbort,
         timedOut,
+        timedOutByRunDeadline,
         idleTimedOut,
         timedOutDuringCompaction,
         timedOutDuringToolExecution,

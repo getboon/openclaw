@@ -1,4 +1,5 @@
 // Web media tests cover loading media for web UI and browser surfaces.
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -335,6 +336,39 @@ describe("loadWebMedia", () => {
     },
   ] as const)("$name", async (testCase) => {
     await expectRejectedWebMediaWithoutFilesystemAccess(testCase);
+  });
+
+  it("reports a file swapped during open as a retryable invalid-path error, not a denial", async () => {
+    const realLstatSync = fsSync.lstatSync.bind(fsSync);
+    const lstatSpy = vi.spyOn(fsSync, "lstatSync").mockImplementation(((
+      target: fsSync.PathLike,
+      ...args: never[]
+    ) => {
+      const stat = realLstatSync(target, ...args) as fsSync.Stats | fsSync.BigIntStats;
+      if (String(target) !== tinyPngFile) {
+        return stat;
+      }
+      // Simulate the file being replaced between fs-safe's pre-open identity check and the open.
+      const ino = typeof stat.ino === "bigint" ? stat.ino + 100n : stat.ino + 100;
+      return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { ino });
+    }) as typeof fsSync.lstatSync);
+    try {
+      let mediaError: unknown;
+      try {
+        await loadWebMedia(tinyPngFile, createLocalWebMediaOptions());
+      } catch (error) {
+        mediaError = error;
+      }
+      expect(lstatSpy).toHaveBeenCalled();
+      expect(mediaError).toBeInstanceOf(LocalMediaAccessError);
+      expect((mediaError as InstanceType<typeof LocalMediaAccessError>).code).toBe("invalid-path");
+      expect((mediaError as Error).message).toMatch(/changed while it was being opened; retry/);
+      expect(((mediaError as Error).cause as { code?: string } | undefined)?.code).toBe(
+        "path-mismatch",
+      );
+    } finally {
+      lstatSpy.mockRestore();
+    }
   });
 
   it("loads browser-style canvas media paths as managed local files", async () => {
