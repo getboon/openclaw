@@ -12,6 +12,11 @@ const ALLOWED_PATCHED_DEPENDENCIES = new Map([
   ["@openclaw/fs-safe@0.4.1", "patches/@openclaw__fs-safe@0.4.1.patch"],
   ["baileys@7.0.0-rc12", "patches/baileys@7.0.0-rc12.patch"],
   ["baileys@7.0.0-rc13", "patches/baileys@7.0.0-rc13.patch"],
+  // Remove once a released picomatch version fixes the extglob ReDoS (GHSA-fc5q-39xc-vjpf,
+  // advisory 1247710). micromatch/picomatch#194 is unmerged and its own author confirms it does
+  // not cover this `+(*a)` branch shape, so there is no upstream version to bump to yet.
+  ["picomatch@4.0.4", "patches/picomatch@4.0.4.patch"],
+  ["picomatch@4.0.7", "patches/picomatch@4.0.7.patch"],
 ]);
 
 const ALLOWED_PATCH_FILES = new Set(["patches/.gitkeep", ...ALLOWED_PATCHED_DEPENDENCIES.values()]);
