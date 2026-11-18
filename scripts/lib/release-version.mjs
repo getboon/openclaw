@@ -122,6 +122,40 @@ export function parseReleaseVersion(version) {
   return null;
 }
 
+const FORK_VERSION_REGEX = /^(?<base>.+)-boon\.(?<forkPatch>[1-9]\d*)$/;
+
+/**
+ * @typedef {ParsedReleaseVersion & { forkPatch: number }} ParsedForkReleaseVersion
+ */
+
+/**
+ * The `getboon/openclaw` fork appends `-boon.<N>` to the upstream base
+ * version it tracks (e.g. `2026.6.35-boon.7`). Upstream's own release
+ * tooling reads `package.json`'s version directly and knows nothing about
+ * that suffix, so strip it before validating against the upstream grammar.
+ *
+ * @param {string} version
+ * @returns {ParsedForkReleaseVersion | ParsedReleaseVersion | null}
+ */
+export function parseForkReleaseVersion(version) {
+  const trimmed = version.trim();
+  const forkMatch = FORK_VERSION_REGEX.exec(trimmed);
+  if (!forkMatch?.groups) {
+    return parseReleaseVersion(trimmed);
+  }
+
+  const baseVersion = parseReleaseVersion(forkMatch.groups.base);
+  if (baseVersion === null) {
+    return null;
+  }
+
+  return {
+    ...baseVersion,
+    version: trimmed,
+    forkPatch: Number(forkMatch.groups.forkPatch),
+  };
+}
+
 /**
  * Patch 33 and later final releases belong to the trailing-month
  * extended-stable line; correction suffixes are not valid on that line.

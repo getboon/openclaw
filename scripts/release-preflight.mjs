@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { runManagedCommand } from "./lib/managed-child-process.mjs";
-import { parseReleaseVersion } from "./lib/release-version.mjs";
+import { parseForkReleaseVersion } from "./lib/release-version.mjs";
 
 const parsedArgs = parseArgs(process.argv.slice(2));
 const fix = parsedArgs.fix;
@@ -167,7 +167,7 @@ function collectMacosVersionErrors(rootDir = resolve(".")) {
     return [`unable to read package.json: ${formatError(error)}`];
   }
 
-  const releaseVersion = parseReleaseVersion(packageVersion);
+  const releaseVersion = parseForkReleaseVersion(packageVersion);
   if (!releaseVersion) {
     return [`package.json has invalid release version ${JSON.stringify(packageVersion)}`];
   }
@@ -334,7 +334,7 @@ function collectNpmVersionErrors(rootDir = resolve(".")) {
   } catch (error) {
     return [`unable to read package.json: ${formatError(error)}`];
   }
-  if (!parseReleaseVersion(rootVersion)) {
+  if (!parseForkReleaseVersion(rootVersion)) {
     return [`package.json has invalid release version ${JSON.stringify(rootVersion)}`];
   }
 
