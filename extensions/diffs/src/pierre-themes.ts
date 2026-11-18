@@ -23,13 +23,8 @@ async function loadPierreTheme(
   } as ThemeRegistrationResolved;
 }
 
-// `@pierre/diffs` registers its own bundled loaders for "pierre-dark"/"pierre-light"
-// as an import-time side effect (shared_highlighter.js), before any application code
-// runs, so `registerCustomTheme` always rejects a Node-safe loader for these exact
-// names as a duplicate. Seeding the resolved-theme cache directly (rather than
-// registering a loader) is the one path that still wins: `attachResolvedThemes` only
-// seeds a theme that nothing has resolved yet, so this must happen before the first
-// real preload/resolve call for these themes -- callers await this before rendering.
+// `@pierre/diffs` pre-registers these names, so `registerCustomTheme` cannot replace its loaders.
+// Seed the resolved-theme cache before preload so SSR uses the Node-safe JSON themes.
 let pierreThemesRegistered: Promise<void> | undefined;
 
 export function ensurePierreThemesRegistered(): Promise<void> {
