@@ -8,7 +8,7 @@
       "name": "@openclaw/pixverse-provider",
       "version": "2026.7.35-boon.1",
       "peerDependencies": {
-        "openclaw": ">=2026.7.35"
+        "openclaw": ">=2026.7.35-boon.1"
       },
       "peerDependenciesMeta": {
         "openclaw": {

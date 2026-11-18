@@ -16,7 +16,7 @@
         "ws": "8.21.0"
       },
       "peerDependencies": {
-        "openclaw": ">=2026.7.35"
+        "openclaw": ">=2026.7.35-boon.1"
       },
       "peerDependenciesMeta": {
         "openclaw": {
