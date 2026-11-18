@@ -143,6 +143,20 @@ class ShellScreenLogicTest {
   }
 
   @Test
+  fun shellNavigationSaverFallsBackOnIncompatibleLegacyState() {
+    // The three values this saveable replaced (activeTab, settingsRoute,
+    // returnToOverviewFromSettings) were never a List<String>; a process
+    // recreated from a pre-upgrade saved instance state bundle must not crash.
+    assertEquals(ShellNavigation().activeTab, ShellNavigation.Saver.restore(true)!!.activeTab)
+    assertEquals(ShellNavigation().activeTab, ShellNavigation.Saver.restore("Overview")!!.activeTab)
+    assertEquals(ShellNavigation().activeTab, ShellNavigation.Saver.restore(listOf("Chat"))!!.activeTab)
+    assertEquals(
+      ShellNavigation().activeTab,
+      ShellNavigation.Saver.restore(listOf("NotARealTab", "Home", "", "false"))!!.activeTab,
+    )
+  }
+
+  @Test
   fun homeAttentionRowsSurfaceGatewayWhenDisconnected() {
     val rows =
       homeAttentionRows(

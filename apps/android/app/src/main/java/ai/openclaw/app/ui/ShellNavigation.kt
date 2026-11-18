@@ -2,7 +2,7 @@ package ai.openclaw.app.ui
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.setValue
 
 /**
@@ -71,19 +71,33 @@ internal class ShellNavigation(
   }
 
   companion object {
-    /** Persists shell navigation across process death for rememberSaveable. */
+    /**
+     * Persists shell navigation across process death for rememberSaveable.
+     *
+     * This replaced three separately-saved values (activeTab, settingsRoute,
+     * returnToOverviewFromSettings) at the same call site. Positional scoping means
+     * a saved-instance-state bundle from before that change can still hand this
+     * restorer one of those old, differently-shaped values if the process is
+     * recreated after an app upgrade; wrap the whole decode so any shape mismatch
+     * (wrong type, short list, unrecognized enum name) falls back to a fresh
+     * ShellNavigation() instead of crashing the restore.
+     */
     val Saver =
-      listSaver<ShellNavigation, String>(
+      Saver<ShellNavigation, Any>(
         save = { nav ->
           listOf(nav.activeTab.name, nav.settingsRoute.name, nav.returnTab?.name.orEmpty(), nav.settingsRouteFromHome.toString())
         },
-        restore = { saved ->
-          ShellNavigation(
-            activeTab = Tab.valueOf(saved[0]),
-            settingsRoute = SettingsRoute.valueOf(saved[1]),
-            returnTab = saved[2].takeIf { it.isNotEmpty() }?.let(Tab::valueOf),
-            settingsRouteFromHome = saved[3].toBoolean(),
-          )
+        restore = { raw ->
+          runCatching {
+            @Suppress("UNCHECKED_CAST")
+            val saved = raw as List<String>
+            ShellNavigation(
+              activeTab = Tab.valueOf(saved[0]),
+              settingsRoute = SettingsRoute.valueOf(saved[1]),
+              returnTab = saved[2].takeIf { it.isNotEmpty() }?.let(Tab::valueOf),
+              settingsRouteFromHome = saved[3].toBoolean(),
+            )
+          }.getOrElse { ShellNavigation() }
         },
       )
   }
