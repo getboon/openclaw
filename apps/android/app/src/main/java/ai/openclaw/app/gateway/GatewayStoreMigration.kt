@@ -12,10 +12,8 @@ internal class GatewayStoreMigration(
 
   fun run() {
     if (prefs.containsSecureKey(GatewayRegistryStore.STORAGE_KEY)) return
-    // Defer the entire migration (including legacy-key cleanup) while manual mode is
-    // enabled but misconfigured: the legacy keys likely hold a real, user-entered
-    // credential, not orphaned data, so run() retries on every launch until the host
-    // or port is fixed, or manual mode is turned off.
+    // Defer migration while manual mode is invalid so legacy credentials are not
+    // discarded before a valid host/port can receive them.
     if (isManualModeEnabledAndInvalid()) return
 
     val activeEntry = legacyActiveEntry()
