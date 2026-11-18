@@ -427,11 +427,9 @@ describe("subagent registry lifecycle hardening", () => {
   });
 
   it("keeps the kill's own outcome canonical when a low-confidence grace retry arrives after it", async () => {
-    // A delayed lifecycle-error/timeout grace-timer retry is a low-confidence
-    // fallback guess (no further event arrived within the grace window). It
-    // must not overwrite the operator kill's outcome/reason with its own
-    // guessed classification, but it is still the signal that closes the
-    // kill's provisional window and fires the ended hook exactly once.
+    // A low-confidence grace-timer retry must not overwrite the kill's own
+    // outcome/reason, but still closes the kill's provisional window and
+    // fires the ended hook exactly once.
     const entry = createRunEntry({
       endedAt: 4_000,
       endedReason: SUBAGENT_ENDED_REASON_KILLED,

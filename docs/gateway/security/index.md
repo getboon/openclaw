@@ -210,48 +210,6 @@ Keeps the Gateway local-only, isolates DMs, and disables control-plane/runtime t
 
 Built-in baseline for chat-driven agent turns: non-owner senders cannot use the `cron` or `gateway` tools regardless of config.
 
-## Trust boundary matrix
-
-Quick model for triaging risk reports:
-
-| Boundary or control                                       | What it means                                     | Common misread                                                                |
-| --------------------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `gateway.auth` (token/password/trusted-proxy/device auth) | Authenticates callers to gateway APIs             | "Needs per-message signatures on every frame to be secure"                    |
-| `sessionKey`                                              | Routing key for context/session selection         | "Session key is a user auth boundary"                                         |
-| Prompt/content guardrails                                 | Reduce model abuse risk                           | "Prompt injection alone proves auth bypass"                                   |
-| `canvas.eval` / browser evaluate                          | Intentional operator capability when enabled      | "Any JS eval primitive is automatically a vuln in this trust model"           |
-| Local TUI `!` shell                                       | Explicit operator-triggered local execution       | "Local shell convenience command is remote injection"                         |
-| Node pairing and node commands                            | Operator-level remote execution on paired devices | "Remote device control should be treated as untrusted user access by default" |
-| `gateway.nodes.pairing.autoApproveCidrs`                  | Opt-in trusted-network node enrollment policy     | "A disabled-by-default allowlist is an automatic pairing vulnerability"       |
-
-## Not vulnerabilities by design
-
-<Accordion title="Common findings closed as no-action">
-
-- Prompt-injection-only chains without a policy, auth, or sandbox bypass.
-- Claims that assume hostile multi-tenant operation on one shared host or config.
-- Normal operator read-path access (for example `sessions.list` / `sessions.preview` / `chat.history`) classified as IDOR in a shared-gateway setup.
-- Localhost-only deployment findings (for example missing HSTS on a loopback-only gateway).
-- Discord inbound webhook signature findings for inbound paths that do not exist in this repo.
-- Node pairing metadata treated as a hidden second per-command approval layer for `system.run`; the real execution boundary is the gateway's global node command policy plus the node's own exec approvals.
-- `gateway.nodes.pairing.autoApproveCidrs` treated as a vulnerability by itself. It is disabled by default, requires explicit CIDR/IP entries, only applies to first-time `role: node` pairing with no requested scopes, and never auto-approves operator/browser/Control UI, WebChat, role/scope upgrades, metadata or public-key changes, or same-host loopback trusted-proxy header paths (even when loopback trusted-proxy auth is enabled).
-- "Missing per-user authorization" findings that treat `sessionKey` as an auth token.
-
-</Accordion>
-
-## Gateway and node trust
-
-Treat Gateway and node as one operator trust domain with different roles:
-
-- **Gateway**: control plane and policy surface (`gateway.auth`, tool policy, routing).
-- **Node**: remote execution surface paired to that Gateway (commands, device actions, host-local capabilities).
-- A caller authenticated to the Gateway is trusted at Gateway scope; after pairing, node actions are trusted operator actions on that node. See [Operator scopes](/gateway/operator-scopes).
-- Direct loopback backend clients authenticated with the shared gateway token/password can make internal control-plane RPCs without presenting a user device identity. This is not a remote or browser pairing bypass - network clients, node clients, device-token clients, and explicit device identities still go through pairing and scope-upgrade enforcement.
-- Exec approvals (allowlist + ask) are guardrails for operator intent, not hostile multi-tenant isolation. They bind exact request context and best-effort direct local file operands; they do not semantically model every runtime/interpreter loader path. Use sandboxing and host isolation for strong boundaries.
-- Trusted single-operator default: host exec on `gateway`/`node` is allowed without approval prompts (`security="full"`, `ask="off"`). That is intentional UX, not a vulnerability by itself.
-
-For hostile-user isolation, split trust boundaries by OS user/host and run separate gateways.
-
 ## Threat model
 
 Your AI assistant can execute arbitrary shell commands, read/write files, access network services, and send messages to anyone (if given channel access). People who message it can try to trick it into doing bad things, social-engineer access to your data, or probe for infrastructure details.
@@ -816,7 +774,7 @@ The Control UI needs a secure context (HTTPS or localhost) to generate device id
   </Accordion>
 </AccordionGroup>
 
-## Deployment and host trust
+## Deployment and host trust recap
 
 - Full-disk encryption on the gateway host; prefer a dedicated OS user account for the Gateway if the host is shared.
 - Published package dependency lock: source checkouts use `pnpm-lock.yaml`; the published `openclaw` npm package and OpenClaw-owned npm plugin packages include `npm-shrinkwrap.json` so installs use the reviewed transitive dependency graph from the release instead of resolving a fresh graph at install time. This is a supply-chain hardening and release reproducibility boundary, not a sandbox - see [npm shrinkwrap](/gateway/security/shrinkwrap).

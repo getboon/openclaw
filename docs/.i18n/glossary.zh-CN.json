@@ -1418,5 +1418,45 @@
   {
     "source": "Zalo personal channel config",
     "target": "Zalo 个人渠道配置"
+  },
+  {
+    "source": "Parallel specialist lanes",
+    "target": "并行专家通道"
+  },
+  {
+    "source": "Sentry monitoring",
+    "target": "Sentry 监控"
+  },
+  {
+    "source": "Prometheus metrics",
+    "target": "Prometheus 指标"
+  },
+  {
+    "source": "OpenTelemetry export",
+    "target": "OpenTelemetry 导出"
+  },
+  {
+    "source": "Health and readiness",
+    "target": "健康检查与就绪状态"
+  },
+  {
+    "source": "Boon Pdf Prep plugin",
+    "target": "Boon Pdf Prep 插件"
+  },
+  {
+    "source": "Browser Handoff plugin",
+    "target": "Browser Handoff 插件"
+  },
+  {
+    "source": "Sentry Monitor plugin",
+    "target": "Sentry Monitor 插件"
+  },
+  {
+    "source": "Retry",
+    "target": "重试"
+  },
+  {
+    "source": "Slash commands",
+    "target": "斜杠命令"
   }
 ]

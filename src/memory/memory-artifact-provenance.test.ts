@@ -162,4 +162,15 @@ describe("memory artifact provenance", () => {
     expect(normalizeMemoryArtifactRelativePath("memory/dreaming/state.md")).toBeUndefined();
     expect(normalizeMemoryArtifactRelativePath("../memory/escape.md")).toBeUndefined();
   });
+
+  it("accepts sender-identity-scoped MEMORY.md/USER.md paths", () => {
+    expect(normalizeMemoryArtifactRelativePath("identities/42/USER.md")).toBe(
+      "identities/42/USER.md",
+    );
+    expect(normalizeMemoryArtifactRelativePath("identities/42/MEMORY.md")).toBe(
+      "identities/42/MEMORY.md",
+    );
+    expect(normalizeMemoryArtifactRelativePath("identities/42/other.md")).toBeUndefined();
+    expect(normalizeMemoryArtifactRelativePath("identities/42/nested/USER.md")).toBeUndefined();
+  });
 });

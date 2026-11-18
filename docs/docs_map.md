@@ -3775,10 +3775,15 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: openclaw security audit
   - H3: What the audit checks (high level)
   - H3: Priority order when triaging findings
-  - H2: Hardened baseline in 60 seconds
+  - H3: Published package dependency lock
+  - H3: Deployment and host trust
+  - H3: Secure file operations
+  - H3: Shared Slack workspace: real risk
+  - H3: Company-shared agent: acceptable pattern
+  - H2: Gateway and node trust concept
   - H2: Trust boundary matrix
   - H2: Not vulnerabilities by design
-  - H2: Gateway and node trust
+  - H2: Hardened baseline in 60 seconds
   - H2: Threat model
   - H2: DM access: pairing, allowlist, open, disabled
   - H3: Allowlists (two layers)
@@ -3812,7 +3817,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H3: HSTS and origin notes
   - H3: Control UI over HTTP
   - H3: Insecure/dangerous flags
-  - H2: Deployment and host trust
+  - H2: Deployment and host trust recap
   - H2: Secrets on disk
   - H3: Credential storage map
   - H3: File permissions
@@ -3832,9 +3837,9 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
 
 - Route: /gateway/security/secure-file-operations
 - Headings:
-  - H2: Default: no Python helper
-  - H2: What stays protected without Python
-  - H2: What Python adds
+  - H2: Default: JavaScript fallback
+  - H2: What stays protected without native acceleration
+  - H2: What native acceleration adds
   - H2: Plugin and core guidance
 
 ## gateway/security/shrinkwrap.md

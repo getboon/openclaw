@@ -9,6 +9,7 @@ import {
   normalizeDiffViewerPayloadLanguages,
   normalizeSupportedLanguageHint,
 } from "./language-hints.js";
+import { ensurePierreThemesRegistered } from "./pierre-themes.js";
 import type {
   DiffInput,
   DiffRenderOptions,
@@ -549,6 +550,8 @@ async function renderBeforeAfterDiff(
   fileCount: number;
   usesLanguagePack: boolean;
 }> {
+  ensurePierreThemesRegistered();
+
   const languagePackAvailable = options.languagePackAvailable === true;
   const lang = await normalizeSupportedLanguageHint(input.lang, { languagePackAvailable });
   const fileName = resolveBeforeAfterFileName({ input, lang });
@@ -611,6 +614,8 @@ async function renderPatchDiff(
   fileCount: number;
   usesLanguagePack: boolean;
 }> {
+  ensurePierreThemesRegistered();
+
   const languagePackAvailable = options.languagePackAvailable === true;
   const files = await Promise.all(
     parsePatchFiles(input.patch)

@@ -62,6 +62,12 @@ export function normalizeMemoryArtifactRelativePath(relativePath: string): strin
   if (["MEMORY.md", "memory.md", "USER.md"].includes(normalized)) {
     return normalized;
   }
+  // Sender-identity-scoped MEMORY.md/USER.md (workspace.ts's
+  // `identities/<sanitized senderId>/` partition) are the same artifacts as
+  // their workspace-root counterparts, just addressed per sender.
+  if (/^identities\/[^/]+\/(?:MEMORY\.md|USER\.md)$/.test(normalized)) {
+    return normalized;
+  }
   if (!normalized.startsWith("memory/") || !normalized.endsWith(".md")) {
     return undefined;
   }
