@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.6.35-boon.7
+
+Stops browser agent clicks from landing on the wrong element when the browser viewport is wider or taller than the model image limit.
+
+- **#333 (ENG-22960):** a plain viewport screenshot that is scaled down to the model image limit (`agents.defaults.imageMaxDimensionPx`, 1200 px by default) now carries a text note before the image. The note states the image size, the page viewport in CSS pixels, the exact x/y factors to convert image pixels to viewport CSS pixels, and a worked example. Before, nothing told the model about the scale, so `act kind=clickCoords` coordinates read off a screenshot landed toward the top-left: at a 1300x900 viewport a dropdown click landed one row up, and the agent waited and retried, which looked like a slow browser. `clickCoords` keeps its viewport CSS pixel contract, so coordinates taken from page JavaScript (`getBoundingClientRect`) stay correct; the `x`/`y` schema descriptions now say so. Viewport screenshots with `labels` get the note too. The viewport is read with `window.innerWidth`/`innerHeight` after a successful capture, bounded to 1.5 s and best-effort: a failed or timed-out read returns the screenshot without the note. An unscaled screenshot gets no note. Full-page, element, and ref screenshots and existing-session profiles carry no viewport and get no note.
+- Base = `2026.6.35-boon.6`. Fork gateway and every bundled plugin bumped to `2026.6.35-boon.7` in lockstep. Plugin changes beyond the version: `browser` carries the #333 screenshot scale note. Everything else in plugins is version-only.
+
 ## 2026.6.35-boon.6
 
 Fixes a cross-user privacy leak where one employee's identity, preferences, or conversation history could surface in a different employee's private Boon Agent chat.
