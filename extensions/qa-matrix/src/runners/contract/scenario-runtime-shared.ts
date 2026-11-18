@@ -2,7 +2,11 @@
 import { randomUUID } from "node:crypto";
 import { createMatrixQaClient, type MatrixQaRoomObserver } from "../../substrate/client.js";
 import type { MatrixQaObservedEvent } from "../../substrate/events.js";
-import type { MatrixQaFaultProxy } from "../../substrate/fault-proxy.js";
+import type {
+  MatrixQaFaultProxyObserver,
+  MatrixQaFaultProxyRule,
+  MatrixQaFaultProxyRuleHandle,
+} from "../../substrate/fault-proxy.js";
 import { createMatrixQaRoomObserver } from "../../substrate/sync.js";
 import type { MatrixQaProvisionedTopology } from "../../substrate/topology.js";
 import { resolveMatrixQaScenarioRoomId } from "./scenario-catalog.js";
@@ -24,6 +28,9 @@ export type MatrixQaScenarioContext = {
   driverDeviceId?: string;
   driverPassword?: string;
   driverUserId: string;
+  faultProxyObserver?: MatrixQaFaultProxyObserver;
+  faultProxyTargetBaseUrl?: string;
+  installFaultRule?: (rule: MatrixQaFaultProxyRule) => MatrixQaFaultProxyRuleHandle;
   observedEvents: MatrixQaObservedEvent[];
   observerAccessToken: string;
   observerDeviceId?: string;
@@ -37,7 +44,6 @@ export type MatrixQaScenarioContext = {
     params?: Record<string, unknown>,
     opts?: { expectFinal?: boolean; timeoutMs?: number },
   ) => Promise<unknown>;
-  faultProxy?: Pick<MatrixQaFaultProxy, "hits" | "installRule" | "removeRule">;
   outputDir?: string;
   registrationToken?: string;
   restartGateway?: () => Promise<void>;
@@ -192,16 +198,9 @@ export function buildMatrixReplyArtifact(
     eventId: event.eventId,
     mentions: event.mentions,
     relatesTo: event.relatesTo,
+    replacesEventId: event.replacesEventId,
     sender: event.sender,
     ...(token ? { tokenMatched: doesMatrixQaReplyBodyMatchToken(event, token) } : {}),
-  };
-}
-
-export function buildMatrixNoticeArtifact(event: MatrixQaObservedEvent) {
-  return {
-    bodyPreview: event.body?.trim().slice(0, 200),
-    eventId: event.eventId,
-    sender: event.sender,
   };
 }
 
@@ -212,6 +211,7 @@ export function buildMatrixReplyDetails(label: string, artifact: MatrixQaReplyAr
       artifact.tokenMatched === undefined ? "n/a" : artifact.tokenMatched ? "yes" : "no"
     }`,
     `${label} rel_type: ${artifact.relatesTo?.relType ?? "<none>"}`,
+    `${label} replaces: ${artifact.replacesEventId ?? "<none>"}`,
     `${label} in_reply_to: ${artifact.relatesTo?.inReplyToId ?? "<none>"}`,
     `${label} is_falling_back: ${artifact.relatesTo?.isFallingBack === true ? "true" : "false"}`,
   ];
@@ -418,7 +418,7 @@ export async function assertNoSutReplyWindow(params: {
   };
 }
 
-export async function runConfigurableTopLevelScenario(params: {
+async function runConfigurableTopLevelScenario(params: {
   accessToken: string;
   actorId: MatrixQaActorId;
   baseUrl: string;

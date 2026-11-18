@@ -3,8 +3,8 @@
  *
  * Routes models that need OpenClaw-managed proxy/TLS/local-service semantics onto built-in transport implementations.
  */
+import { resolveOpencodeSessionHeaders } from "../../packages/ai/src/providers/session-affinity.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { resolveOpencodeSessionHeaders } from "../llm/providers/session-affinity.js";
 import type { Api, Model } from "../llm/types.js";
 import { resolveProviderStreamFn } from "../plugins/provider-runtime.js";
 import { createAnthropicMessagesTransportStreamFn } from "./anthropic-transport-stream.js";

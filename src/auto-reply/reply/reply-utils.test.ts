@@ -214,6 +214,50 @@ describe("normalizeReplyPayload", () => {
     expect(expectNormalizedReply(result).text).toBe("The user is saying hello");
   });
 
+  it.each([
+    ["NO_REPLY\n\nThe user is saying hello", "The user is saying hello"],
+    ["NO_REPLY\r\nThe user is saying hello", "The user is saying hello"],
+    ["NO_REPLY NO_REPLY\nThe user is saying hello", "The user is saying hello"],
+    ["NO_REPLY\n✅ Done", "✅ Done"],
+    ["NO_REPLY\n- Done", "- Done"],
+    ["NO_REPLY\n—note", "—note"],
+    ["NO_REPLY\n: explanation", ": explanation"],
+    ["NO_REPLY\n**Done**", "**Done**"],
+    ['NO_REPLY\n"Hello"', '"Hello"'],
+    ["NO_REPLY\n```ts\nconst done = true;\n```", "```ts\nconst done = true;\n```"],
+  ])("strips newline-separated leading silent tokens: %j", (text, expected) => {
+    expect(expectNormalizedReply(normalizeReplyPayload({ text })).text).toBe(expected);
+  });
+
+  it.each([
+    "Done as requested!NO_REPLY",
+    "question?NO_REPLY",
+    "note,NO_REPLY",
+    "item;NO_REPLY",
+    "label:NO_REPLY",
+  ])("preserves punctuation-attached silent-token literals in delivery: %j", (text) => {
+    expect(expectNormalizedReply(normalizeReplyPayload({ text })).text).toBe(text);
+  });
+
+  it("strips repeated trailing silent tokens from visible replies", () => {
+    expect(
+      expectNormalizedReply(normalizeReplyPayload({ text: "Done. NO_REPLY NO_REPLY" })).text,
+    ).toBe("Done.");
+  });
+
+  it.each([
+    "interject.NO_REPLY",
+    "The example is interject.NO_REPLY",
+    "Done as requested.NO_REPLY",
+    "NO_REPLY NO_REPLY: explanation",
+    "NO_REPLY\nNO_REPLY: explanation",
+    "NO_REPLY\nNO_REPLY—note",
+    "NO_REPLY\nNO_REPLY-note",
+    "NO_REPLY\nNO_REPLY -- nope",
+  ])("preserves substantive dotted and punctuation-start silent-token literals: %j", (text) => {
+    expect(expectNormalizedReply(normalizeReplyPayload({ text })).text).toBe(text);
+  });
+
   it("keeps NO_REPLY when used as leading substantive text", () => {
     const result = normalizeReplyPayload({ text: "NO_REPLY -- nope" });
     expect(expectNormalizedReply(result).text).toBe("NO_REPLY -- nope");
@@ -483,6 +527,27 @@ describe("typing controller", () => {
     await vi.advanceTimersByTimeAsync(5_000);
     expect(onReplyStart).toHaveBeenCalledTimes(1);
   });
+
+  it("can send the first typing signal without periodic keepalive refreshes", async () => {
+    vi.useFakeTimers();
+    const onReplyStart = vi.fn();
+    const typing = createTypingController({
+      onReplyStart,
+      typingIntervalSeconds: 1,
+      typingTtlMs: 30_000,
+      keepalive: false,
+    });
+
+    await typing.startTypingLoop();
+    expect(onReplyStart).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(onReplyStart).toHaveBeenCalledTimes(1);
+
+    await typing.startTypingLoop();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(onReplyStart).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("resolveTypingMode", () => {
@@ -529,6 +594,17 @@ describe("resolveTypingMode", () => {
           sourceReplyDeliveryMode: "message_tool_only" as const,
         },
         expected: "message",
+      },
+      {
+        name: "configured instant typing mode wins over message-tool-only default",
+        input: {
+          configured: "instant" as const,
+          isGroupChat: true,
+          wasMentioned: false,
+          isHeartbeat: false,
+          sourceReplyDeliveryMode: "message_tool_only" as const,
+        },
+        expected: "instant",
       },
       {
         name: "default mentioned group chat",
@@ -848,6 +924,19 @@ describe("createTypingSignaler", () => {
     }
   });
 
+  it("starts typing on execution activity for active reply modes", async () => {
+    for (const mode of ["instant", "message", "thinking"] as const) {
+      const typing = createMockTypingController();
+      const signaler = createTypingSignaler({ typing, mode, isHeartbeat: false });
+
+      await signaler.signalExecutionActivity?.();
+
+      expect(typing.startTypingLoop, `mode=${mode}`).toHaveBeenCalledTimes(1);
+      expect(typing.refreshTypingTtl, `mode=${mode}`).toHaveBeenCalledTimes(1);
+      expect(typing.startTypingOnText, `mode=${mode}`).not.toHaveBeenCalled();
+    }
+  });
+
   it("suppresses typing when disabled", async () => {
     const disabledCases = [
       { mode: "instant" as const, isHeartbeat: true },
@@ -860,6 +949,7 @@ describe("createTypingSignaler", () => {
       await signaler.signalRunStart();
       await signaler.signalTextDelta("hi");
       await signaler.signalReasoningDelta();
+      await signaler.signalExecutionActivity?.();
 
       expect(typing.startTypingLoop, `mode=${params.mode}`).not.toHaveBeenCalled();
       expect(typing.startTypingOnText, `mode=${params.mode}`).not.toHaveBeenCalled();

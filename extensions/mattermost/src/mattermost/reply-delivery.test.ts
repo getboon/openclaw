@@ -216,11 +216,11 @@ describe("deliverMattermostReplyPayload", () => {
     expect(sendMessage).toHaveBeenCalledWith(
       "channel:town-square",
       "Intro line\nReasoning: appears in content but is not a prefix",
-      {
+      expect.objectContaining({
         cfg,
         accountId: "default",
         replyToId: "root-post",
-      },
+      }),
     );
   });
 
@@ -302,11 +302,15 @@ describe("deliverMattermostReplyPayload", () => {
     });
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(sendMessage).toHaveBeenCalledWith("channel:town-square", "hello", {
-      cfg,
-      accountId: "default",
-      replyToId: "root-post",
-    });
+    expect(sendMessage).toHaveBeenCalledWith(
+      "channel:town-square",
+      "hello",
+      expect.objectContaining({
+        cfg,
+        accountId: "default",
+        replyToId: "root-post",
+      }),
+    );
     expect(outcome).toBe("text");
   });
 });

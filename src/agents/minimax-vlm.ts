@@ -6,6 +6,7 @@ import { ensureGlobalUndiciEnvProxyDispatcher } from "../infra/net/undici-global
 import { resolvePositiveTimerTimeoutMs } from "../shared/number-coercion.js";
 import { isRecord } from "../utils.js";
 import { normalizeSecretInput } from "../utils/normalize-secret-input.js";
+import { readProviderJsonResponse } from "./provider-http-errors.js";
 
 type MinimaxBaseResp = {
   status_code?: number;
@@ -55,7 +56,10 @@ function coerceApiHost(params: {
   try {
     const url = new URL(raw);
     return url.origin;
-  } catch {}
+  } catch {
+    // Bare hosts are retried with https:// below; malformed absolute URLs fall
+    // back to provider defaults instead of sending requests to invalid endpoints.
+  }
 
   if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
     return defaultHost;
@@ -140,7 +144,10 @@ export async function minimaxUnderstandImage(params: {
     );
   }
 
-  const json = (await res.json().catch(() => null)) as unknown;
+  const responseLabel = traceId
+    ? `MiniMax VLM response [Trace-Id=${traceId}]`
+    : "MiniMax VLM response";
+  const json = await readProviderJsonResponse<unknown>(res, responseLabel);
   if (!isRecord(json)) {
     const trace = traceId ? ` Trace-Id: ${traceId}` : "";
     throw new Error(`MiniMax VLM response was not JSON.${trace}`);

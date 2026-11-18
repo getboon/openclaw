@@ -3,6 +3,7 @@ packages:
   - ui
   - packages/*
   - extensions/*
+  - examples/*
 
 # 5 days, the same supply-chain wait as the Dependabot cooldown in
 # .github/dependabot.yml: hijacked npm releases (chalk/debug,
@@ -16,24 +17,26 @@ packages:
 minimumReleaseAge: 7200
 
 minimumReleaseAgeExclude:
+  - "@openclaw/crabline@0.1.9"
   # GHSA-vp8m-p9jh-q5pm / GHSA-w293-vg96-wgc3 security fix; remove after 2026-09-12.
   - "undici@8.10.2"
   - "undici@7.29.1"
-  - "@openclaw/crabline@0.1.6"
   - "@openclaw/proxyline@0.3.3"
+  - "@openclaw/uirouter@0.1.0"
   - "acpx"
   - "tokenjuice"
-  - "@agentclientprotocol/claude-agent-acp@0.39.0"
   - "@agentclientprotocol/sdk"
   - "axios"
   - "basic-ftp"
   - "baileys@7.0.0-rc13"
   - "hono"
+  - "ip-address@10.7.0"
   - "libopus-wasm@0.2.0"
   - "libsignal@6.0.0"
   - "nanoid@3.3.18"
   - "openclaw"
   - "protobufjs"
+  - "proxy-addr@2.0.8"
   - "vite"
   - "@cloudflare/workers-types"
   - "@hono/node-server"
@@ -106,11 +109,12 @@ nodeLinker: hoisted
 blockExoticSubdeps: true
 
 overrides:
-  "@anthropic-ai/sdk": 0.100.1
+  "@anthropic-ai/sdk": 0.109.1
   "@opentelemetry/core": 2.9.0
-  "@aws-sdk/core": 3.974.13
-  "@aws-sdk/credential-provider-node": 3.972.52
-  "@aws-sdk/xml-builder": 3.972.25
+  "@opentelemetry/propagator-jaeger": 2.10.0
+  "@aws-sdk/core": 3.974.27
+  "@aws-sdk/credential-provider-node": 3.972.61
+  "@aws-sdk/xml-builder": 3.972.33
   # GHSA-5r4p-p66f-jhc7 / GHSA-hxh3-vqpv-xpqv / GHSA-gqvv-2mrq-wpjv /
   # GHSA-g6gw-c38x-mqfc / GHSA-crvj-82cr-hjcx / GHSA-8j4g-w8fx-2239 and
   # earlier: hono <4.13.11 (serveStatic double-decode, JSX XSS, toSSG path
@@ -159,7 +163,7 @@ overrides:
   # boon-agent-signup-container image, ENG-21880). Fixed at 6.16.0.
   qs: 6.16.1
   node-domexception: "npm:@nolyfill/domexception@1.0.28"
-  typebox: 1.1.39
+  typebox: 1.3.3
   tar: 7.5.22
   tough-cookie: 4.1.3
   protobufjs: 7.6.5
@@ -167,7 +171,11 @@ overrides:
   # Security-audit bumps (security-fast / pnpm-audit-prod): force transitive
   # deps off versions with high/critical advisories. Conservative in-range
   # targets where possible (no major bumps). See PR for advisory list.
-  linkify-it: 5.0.2
+  "@grpc/grpc-js": 1.14.4
+  # GHSA-22p9-wv53-3rq4: linkify-it <5.0.2 quadratic-complexity ReDoS in
+  # LinkifyIt#match. markdown-it@15 requires linkify-it ^6.0.0; 6.1.0 carries
+  # no known advisories, so the pin moves up with it instead of conflicting.
+  linkify-it: 6.1.0
   # GHSA-mh99-v99m-4gvg: brace-expansion <=5.0.7 DoS via unbounded expansion.
   # GHSA-rgw5-rvv9-x895: brace-expansion <5.0.9 DoS via unbounded intermediate arrays.
   # GHSA-qhr7-859c-m2p7: brace-expansion <5.0.11 DoS via uncontrolled recursion
@@ -256,11 +264,14 @@ overrides:
   # GHSA-587h-7wmj-h5pm: vite's bundled launch-editor <=8.1.5 has an
   # fs.existsSync() check that can be bypassed on Windows. Fixed at 8.1.6.
   vite: 8.1.6
-  # GHSA-gfr2-rv44-r23c / GHSA-r7fv-28h4-cvq7: markdown-it has quadratic-time
-  # rendering of multi-line link reference definitions (regression since
-  # 14.1.0) and quadratic complexity in smartquotes with unmatched closing
-  # quotes. Both fixed at 14.3.3; staying on the 14.x line (no major bump).
-  markdown-it: 14.3.3
+  # GHSA-gfr2-rv44-r23c: markdown-it quadratic-time rendering of multi-line
+  # link reference definitions has independent vulnerable ranges per major
+  # line (>=14.1.0,<14.3.3 and >=15.0.0,<15.0.3); GHSA-r7fv-28h4-cvq7's
+  # smartquotes quadratic complexity is fixed by <14.3.2 / >=15.0.0,<15.0.2.
+  # Direct deps moved to the 15.x line (markdown-it@15 needs linkify-it ^6,
+  # see linkify-it below); force transitive resolutions to the same safe
+  # version so nothing pulls in an older vulnerable copy.
+  markdown-it: 15.0.3
   ws: 8.21.0
   # GHSA-qxg6-89mg-rqv8 / GHSA-xp26-3454-mjgp: @vitest/mocker <4.1.12 manual
   # mock code injection and Windows redirect-allowlist bypass. Keep every
@@ -300,4 +311,5 @@ packageExtensions:
         optional: true
 
 patchedDependencies:
-  "@agentclientprotocol/claude-agent-acp@0.39.0": patches/@agentclientprotocol__claude-agent-acp@0.39.0.patch
+  picomatch@4.0.4: patches/picomatch@4.0.4.patch
+  picomatch@4.0.7: patches/picomatch@4.0.7.patch

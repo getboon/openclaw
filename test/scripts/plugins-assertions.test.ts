@@ -617,9 +617,9 @@ test -d "$OPENCLAW_PLUGINS_TMP_DIR"
     mkdirSync(packageDir);
     writeJson(path.join(packageDir, "package.json"), {
       name: "openclaw",
-      version: "2026.6.33",
+      version: "2026.7.1-beta.3",
       dependencies: {
-        "@example/runtime": "1.2.3",
+        "@openclaw/ai": "2026.7.1-beta.3",
         zod: "4.3.6",
       },
       optionalDependencies: {
@@ -637,7 +637,7 @@ test -d "$OPENCLAW_PLUGINS_TMP_DIR"
         "scripts/e2e/lib/plugins/npm-registry-server.mjs",
         portFile,
         "openclaw",
-        "2026.6.33",
+        "2026.7.1-beta.3",
         tarballPath,
       ],
       {
@@ -654,14 +654,14 @@ test -d "$OPENCLAW_PLUGINS_TMP_DIR"
       const metadata = JSON.parse(response.body);
 
       expect(response.statusCode).toBe(200);
-      expect(metadata.versions["2026.6.33"].dependencies).toEqual({
-        "@example/runtime": "1.2.3",
+      expect(metadata.versions["2026.7.1-beta.3"].dependencies).toEqual({
+        "@openclaw/ai": "2026.7.1-beta.3",
         zod: "4.3.6",
       });
-      expect(metadata.versions["2026.6.33"].optionalDependencies).toEqual({
+      expect(metadata.versions["2026.7.1-beta.3"].optionalDependencies).toEqual({
         "sqlite-vec": "0.1.7-alpha.2",
       });
-      expect(metadata.versions["2026.6.33"].dist.tarball).toBe(
+      expect(metadata.versions["2026.7.1-beta.3"].dist.tarball).toBe(
         `http://192.0.2.2:${port}/openclaw/-/openclaw.tgz`,
       );
     } finally {

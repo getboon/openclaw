@@ -2,6 +2,7 @@
 import type { InboundMediaFailure } from "../../runtime-api.js";
 
 export type MSTeamsAttachmentLike = {
+  id?: string | null;
   contentType?: string | null;
   contentUrl?: string | null;
   name?: string | null;

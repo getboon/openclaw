@@ -86,8 +86,8 @@ describe("handleFileFetch — fs errors", () => {
 });
 
 describe("handleFileFetch — zero-byte round-trip", () => {
-  it("fetches an empty file with size=0 and base64=''", async () => {
-    const target = path.join(tmpRoot, "empty.bin");
+  it("fetches an empty image-named file with extension-derived MIME", async () => {
+    const target = path.join(tmpRoot, "empty.png");
     await fs.writeFile(target, "");
 
     const r = await handleFileFetch({ path: target });
@@ -95,6 +95,7 @@ describe("handleFileFetch — zero-byte round-trip", () => {
       throw new Error(`expected ok, got ${r.code}: ${r.message}`);
     }
     expect(r.size).toBe(0);
+    expect(r.mimeType).toBe("image/png");
     expect(r.base64).toBe("");
     // SHA-256 of empty input.
     expect(r.sha256).toBe("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
@@ -134,6 +135,55 @@ describe("handleFileFetch — happy path", () => {
     expect(r.sha256).toBe("");
     expect(r.preflightOnly).toBe(true);
     expect(readFileSpy).not.toHaveBeenCalled();
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "rejects a retargeted path before reading file bytes",
+    async () => {
+      const first = path.join(tmpRoot, "first.txt");
+      const second = path.join(tmpRoot, "second.txt");
+      const link = path.join(tmpRoot, "current.txt");
+      await fs.writeFile(first, "approved");
+      await fs.writeFile(second, "not approved");
+      await fs.symlink(first, link);
+
+      const preflight = await handleFileFetch({
+        path: link,
+        followSymlinks: true,
+        preflightOnly: true,
+      });
+      expectSuccess(preflight);
+      await fs.unlink(link);
+      await fs.symlink(second, link);
+
+      const result = await handleFileFetch({
+        path: link,
+        followSymlinks: true,
+        expectedCanonicalPath: preflight.path,
+      });
+
+      expectFailureCode(result, "CANONICAL_PATH_CHANGED");
+      expect(result.canonicalPath).toBe(second);
+    },
+  );
+
+  it("rejects a replacement at the same canonical pathname before reading bytes", async () => {
+    const target = path.join(tmpRoot, "target.txt");
+    const moved = path.join(tmpRoot, "moved.txt");
+    await fs.writeFile(target, "approved");
+    const preflight = await handleFileFetch({ path: target, preflightOnly: true });
+    expectSuccess(preflight);
+    await fs.rename(target, moved);
+    await fs.writeFile(target, "not approved");
+
+    const result = await handleFileFetch({
+      path: target,
+      expectedCanonicalPath: preflight.path,
+      expectedBinding: preflight.binding,
+    });
+
+    expectFailureCode(result, "CANONICAL_PATH_CHANGED");
+    expect(await fs.readFile(target, "utf8")).toBe("not approved");
   });
 
   it("returns a sensible mime type for known extensions", async () => {

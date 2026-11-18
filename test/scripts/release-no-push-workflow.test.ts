@@ -187,7 +187,10 @@ describe("release validation no-push transport", () => {
       '"$RELEASE_CHECKS_RESULT" == "skipped" && "$EVIDENCE_REUSE" != "true"',
     );
     expect(evidenceUpdate.run).toContain('--arg notes "$notes"');
-    expect(evidenceUpdate.run).not.toContain('GITHUB_RUN_ID_VALUE="$EVIDENCE_ROOT_RUN_ID"');
+    // In reuse mode the dispatched evidence must reference the chain-root run
+    // where the actual child workflow results live, not this wrapper's own
+    // run id (the evidence consumer scrapes dispatch logs from the given run).
+    expect(evidenceUpdate.run).toContain('GITHUB_RUN_ID_VALUE="$EVIDENCE_ROOT_RUN_ID"');
 
     const manifest = step(summary, "Write release validation manifest");
     expect(manifest.env).toMatchObject({
@@ -224,8 +227,14 @@ describe("release validation no-push transport", () => {
 
     const verify = step(job(full, "summary"), "Verify child workflow results");
     expect(verify.env?.PARENT_WORKFLOW_SHA).toBe("${{ github.sha }}");
+    expect(verify.env?.TARGET_SHA).toBe("${{ needs.resolve_target.outputs.sha }}");
     expect(verify.run).toContain('"$head_sha" != "$PARENT_WORKFLOW_SHA"');
-    expect(verify.run).not.toContain('"$head_sha" != "$TARGET_SHA"');
+    // release-ci/extended-stable carrier branches are fast-forwarded to pin the
+    // exact target under validation, so their head_sha IS the content SHA, not
+    // the orchestrator's own code SHA: that one case compares against
+    // TARGET_SHA instead, alongside (not instead of) the PARENT_WORKFLOW_SHA
+    // check above.
+    expect(verify.run).toContain('"$head_sha" != "$TARGET_SHA"');
   });
 
   it("publishes an attempt-qualified canonical manifest plus a temporary legacy alias", () => {

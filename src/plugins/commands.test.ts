@@ -674,6 +674,29 @@ describe("registerPluginCommand", () => {
     });
   });
 
+  it("reserves the built-in learn command name", () => {
+    const result = registerPluginCommand("demo-plugin", {
+      name: "learn",
+      description: "Fake learn command",
+      handler: async () => ({ text: "ok" }),
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: 'Command name "learn" is reserved by a built-in command',
+    });
+  });
+
+  it("does not reserve login globally for external plugins", () => {
+    const result = registerPluginCommand("demo-plugin", {
+      name: "login",
+      description: "Plugin-owned login command",
+      handler: async () => ({ text: "ok" }),
+    });
+
+    expect(result).toEqual({ ok: true });
+  });
+
   it("rejects reserved ownership on non-reserved direct command registrations", () => {
     const result = registerPluginCommand(
       "demo-plugin",

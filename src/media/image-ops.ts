@@ -11,6 +11,7 @@ import {
 } from "rastermill";
 import { resolveSystemBin } from "../infra/resolve-system-bin.js";
 import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
+import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 
 export type { ImageMetadata, ImageProbe };
 
@@ -56,6 +57,8 @@ export const MAX_IMAGE_INPUT_PIXELS = 25_000_000;
  * image before any resize is attempted.
  */
 export const MAX_IMAGE_DECODE_PIXELS = 100_000_000;
+
+const loadPhotonRuntime = createLazyRuntimeModule(() => import("./photon.runtime.js"));
 
 /** Creates a Rastermill processor with OpenClaw temp-dir, pixel-limit, and command trust policy. */
 export function createImageProcessor() {
@@ -162,6 +165,30 @@ export async function convertHeicToJpeg(buffer: Buffer): Promise<Buffer> {
     return (await createImageProcessor().encode(buffer, { format: "jpeg" })).data;
   } catch (error) {
     return wrapRastermillUnavailable("convertHeicToJpeg", error);
+  }
+}
+
+/** Converts image bytes to PNG, including BMP fallback unsupported by Rastermill's Photon gate. */
+export async function convertImageToPng(buffer: Buffer): Promise<Buffer> {
+  try {
+    return (await createImageProcessor().encode(buffer, { format: "png" })).data;
+  } catch (error) {
+    const probe = readRastermillImageProbeFromHeader(buffer);
+    const withinPixelLimit =
+      probe &&
+      probe.format === "bmp" &&
+      probe.width > 0 &&
+      probe.height > 0 &&
+      probe.width <= MAX_IMAGE_INPUT_PIXELS / probe.height;
+    if (!withinPixelLimit) {
+      throw error;
+    }
+
+    try {
+      return (await loadPhotonRuntime()).convertBmpToPngWithPhoton(buffer);
+    } catch {
+      throw error;
+    }
   }
 }
 

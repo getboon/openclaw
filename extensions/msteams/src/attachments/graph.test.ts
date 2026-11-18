@@ -86,6 +86,10 @@ function mockBinaryResponse(data: Uint8Array, status = 200) {
   return new Response(Buffer.from(data) as BodyInit, { status });
 }
 
+function oversizedGraphJson(payload: Record<string, unknown>): string {
+  return JSON.stringify({ ...payload, padding: "x".repeat(16 * 1024 * 1024) });
+}
+
 type GuardedFetchParams = { url: string; init?: RequestInit };
 
 function guardedFetchResult(params: GuardedFetchParams, response: Response) {
@@ -117,6 +121,11 @@ function mockGraphMediaFetch(options: {
   vi.mocked(fetchWithSsrFGuard).mockImplementation(async (params: GuardedFetchParams) => {
     options.fetchCalls?.push(params.url);
     const url = params.url;
+    for (const [fragment, response] of Object.entries(options.valueResponses ?? {})) {
+      if (url.includes(fragment)) {
+        return guardedFetchResult(params, response);
+      }
+    }
     if (url.endsWith(`/messages/${options.messageId}`) && !url.includes("hostedContents")) {
       return guardedFetchResult(
         params,
@@ -125,11 +134,6 @@ function mockGraphMediaFetch(options: {
     }
     if (url.endsWith("/hostedContents")) {
       return guardedFetchResult(params, mockFetchResponse({ value: options.hostedContents ?? [] }));
-    }
-    for (const [fragment, response] of Object.entries(options.valueResponses ?? {})) {
-      if (url.includes(fragment)) {
-        return guardedFetchResult(params, response);
-      }
     }
     return guardedFetchResult(params, mockFetchResponse({}, 404));
   });
@@ -140,14 +144,14 @@ describe("downloadMSTeamsGraphMedia hosted content $value fallback", () => {
     vi.clearAllMocks();
   });
 
-  it("fetches $value endpoint when contentBytes is null but item.id exists", async () => {
+  it("fetches hosted bytes from the documented $value endpoint", async () => {
     const imageBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG magic bytes
 
     const fetchCalls: string[] = [];
 
     mockGraphMediaFetch({
       messageId: "msg-1",
-      hostedContents: [{ id: "hosted-123", contentType: "image/png", contentBytes: null }],
+      hostedContents: [{ id: "hosted-123", contentType: "image/png" }],
       valueResponses: {
         "/hostedContents/hosted-123/$value": mockBinaryResponse(imageBytes),
       },
@@ -168,10 +172,10 @@ describe("downloadMSTeamsGraphMedia hosted content $value fallback", () => {
     expect(result.hostedCount).toBe(1);
   });
 
-  it("skips hosted content when contentBytes is null and id is missing", async () => {
+  it("skips hosted content when the list item has no id", async () => {
     mockGraphMediaFetch({
       messageId: "msg-2",
-      hostedContents: [{ contentType: "image/png", contentBytes: null }],
+      hostedContents: [{ contentType: "image/png" }],
     });
 
     const result = await downloadMSTeamsGraphMedia({
@@ -180,7 +184,7 @@ describe("downloadMSTeamsGraphMedia hosted content $value fallback", () => {
       maxBytes: 10 * 1024 * 1024,
     });
 
-    // No media because there's no id to fetch $value from and no contentBytes
+    // No media because there is no id for the required $value fetch.
     expect(result.media).toHaveLength(0);
     // A malformed hostedContents entry still never reaches the agent — must
     // still be reported, not silently vanish (code-review finding).
@@ -194,7 +198,7 @@ describe("downloadMSTeamsGraphMedia hosted content $value fallback", () => {
 
     mockGraphMediaFetch({
       messageId: "msg-cl",
-      hostedContents: [{ id: "hosted-big", contentType: "image/png", contentBytes: null }],
+      hostedContents: [{ id: "hosted-big", contentType: "image/png" }],
       valueResponses: {
         "/hostedContents/hosted-big/$value": new Response(
           Buffer.from(new Uint8Array([0x89, 0x50, 0x4e, 0x47])) as BodyInit,
@@ -284,6 +288,35 @@ describe("downloadMSTeamsGraphMedia hosted content $value fallback", () => {
     expect(result.failures).toEqual([
       { name: undefined, contentType: "image/png", reason: "fetch_failed" },
     ]);
+  });
+
+  it("skips hosted content when the Graph collection response exceeds the byte cap", async () => {
+    const fetchCalls: string[] = [];
+    const hugeBody = oversizedGraphJson({
+      value: [{ id: "hosted-huge", contentType: "image/png" }],
+    });
+    const hugeResponse = new Response(hugeBody, {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+
+    mockGraphMediaFetch({
+      messageId: "msg-huge",
+      valueResponses: {
+        "/hostedContents": hugeResponse,
+      },
+      fetchCalls,
+    });
+
+    const result = await downloadMSTeamsGraphMedia({
+      messageUrl: "https://graph.microsoft.com/v1.0/chats/c/messages/msg-huge",
+      tokenProvider: { getAccessToken: vi.fn(async () => "test-token") },
+      maxBytes: 10 * 1024 * 1024,
+    });
+
+    expect(result.media).toHaveLength(0);
+    expect(result.hostedCount).toBe(0);
+    expect(hugeResponse.bodyUsed).toBe(true);
   });
 
   it("uses inline contentBytes when available instead of $value", async () => {
@@ -645,6 +678,29 @@ describe("downloadMSTeamsGraphMedia attachment sourcing and error logging", () =
     expect(result.failures).toEqual([
       { name: "dragged-in-reply.pdf", contentType: undefined, reason: "fetch_failed" },
     ]);
+  });
+
+  it("skips message metadata when the Graph response exceeds the byte cap", async () => {
+    mockGraphMediaFetch({
+      messageId: "msg-huge",
+      messageResponse: oversizedGraphJson({ attachments: [] }),
+    });
+    const logger = { warn: vi.fn() };
+
+    const result = await downloadMSTeamsGraphMedia({
+      messageUrl: "https://graph.microsoft.com/v1.0/chats/c/messages/msg-huge",
+      tokenProvider: { getAccessToken: vi.fn(async () => "test-token") },
+      maxBytes: 10 * 1024 * 1024,
+      logger,
+    });
+
+    expect(result.media).toHaveLength(0);
+    expect(result.attachmentCount).toBe(0);
+    const [message, context] = requireFirstMockCall(logger.warn, "message parse warning");
+    expect(message).toBe("msteams graph message parse failed");
+    expect((context as { error?: unknown }).error).toBe(
+      "MS Teams Graph message: JSON response exceeds 16777216 bytes",
+    );
   });
 
   it("logs a debug event when the message fetch throws instead of swallowing it", async () => {

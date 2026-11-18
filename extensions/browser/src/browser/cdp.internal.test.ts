@@ -96,6 +96,7 @@ async function startMockWsServer(handle: CdpReplyHandler) {
       }
       if (
         msg.method === "Page.enable" ||
+        msg.method === "Page.bringToFront" ||
         msg.method === "Runtime.enable" ||
         msg.method === "Network.enable" ||
         msg.method === "DOM.enable" ||

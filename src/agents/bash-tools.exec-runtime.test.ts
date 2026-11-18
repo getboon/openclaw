@@ -468,6 +468,39 @@ describe("exec notifyOnExit suppression", () => {
     expect(heartbeat.reason).toBe("exec-event");
     expect(heartbeat.sessionKey).toBe("agent:main:main");
   });
+
+  it("keeps background exec exit-notification snippets on a UTF-16 boundary", async () => {
+    // A backgrounded command whose tail output overflows the 180-char snippet
+    // cap with an emoji straddling the cut must not deliver a lone surrogate to
+    // the user's channel. The emoji's high surrogate lands at index 178, so a
+    // raw slice(0, 179) would keep the dangling half.
+    const head = "a".repeat(178);
+    const overflowingOutput = `${head}🎉${"b".repeat(30)}`;
+    await runBackgroundedExit({ reason: "manual-cancel", stdout: overflowingOutput });
+
+    const [message] = requireSystemEventCall();
+    const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+    expect(message).not.toMatch(loneSurrogate);
+    // The snippet stays truncated (ellipsis) while keeping the readable head.
+    expect(message).toContain("…");
+    expect(message).toContain(head);
+  });
+
+  it("keeps the notify tail source on a UTF-16 boundary", async () => {
+    // The notify path first takes a 400-char tail, then compacts that tail to a
+    // 180-char snippet. If the 400-char tail starts inside an emoji, the final
+    // compacted snippet must not preserve the dangling low surrogate.
+    const prefix = "a".repeat(101);
+    const tailHead = "b".repeat(179);
+    const overflowingOutput = `${prefix}🎉${tailHead}${"c".repeat(220)}`;
+    await runBackgroundedExit({ reason: "manual-cancel", stdout: overflowingOutput });
+
+    const [message] = requireSystemEventCall();
+    const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+    expect(message).not.toMatch(loneSurrogate);
+    expect(message).not.toContain("�");
+    expect(message).toContain(tailHead);
+  });
 });
 
 describe("formatExecFailureReason", () => {
@@ -710,4 +743,39 @@ describe("runExecProcess POSIX command wrapper", () => {
     expect(commandStr).not.toContain("export PATH=");
     expect(commandStr).toContain("echo test");
   });
+});
+
+describe("exec approval final spawn boundary", () => {
+  it.each([false, true])(
+    "does not spawn after final authorization denial (pty=%s)",
+    async (usePty) => {
+      const beforeSpawn = vi.fn(async () => ({
+        content: [{ type: "text" as const, text: "directory replaced" }],
+        details: {
+          status: "failed" as const,
+          exitCode: null,
+          durationMs: 0,
+          aggregated: "directory replaced",
+          timedOut: false,
+          cwd: process.cwd(),
+        },
+      }));
+      await expect(
+        runExecProcess({
+          command: "echo test",
+          workdir: process.cwd(),
+          env: { PATH: process.env.PATH ?? "" },
+          usePty,
+          warnings: [],
+          maxOutput: 1000,
+          pendingMaxOutput: 1000,
+          notifyOnExit: false,
+          timeoutSec: null,
+          beforeSpawn,
+        }),
+      ).rejects.toThrow("exec denied by final preflight");
+      expect(beforeSpawn).toHaveBeenCalledTimes(1);
+      expect(supervisorMock.spawn).not.toHaveBeenCalled();
+    },
+  );
 });

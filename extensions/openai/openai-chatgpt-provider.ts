@@ -15,7 +15,6 @@ import {
   normalizeProviderId,
   type ProviderPlugin,
 } from "openclaw/plugin-sdk/provider-model-shared";
-import { fetchCodexUsage } from "openclaw/plugin-sdk/provider-usage";
 import {
   normalizeLowercaseStringOrEmpty,
   readStringValue,
@@ -46,12 +45,14 @@ import {
   OPENAI_DEFAULT_RUNTIME_CONTEXT_TOKENS,
 } from "./shared.js";
 import { resolveOpenAICodexThinkingProfile } from "./thinking-policy.js";
+import { fetchOpenAIUsage, resolveOpenAIUsageAuth } from "./usage.js";
 
 const PROVIDER_ID = "openai";
 const OPENAI_CODEX_BASE_URL = OPENAI_CODEX_RESPONSES_BASE_URL;
 const OPENAI_CODEX_LOGIN_ASSISTANT_PRIORITY = -30;
 const OPENAI_CODEX_DEVICE_PAIRING_ASSISTANT_PRIORITY = -10;
 const OPENAI_CODEX_GPT_56_MODEL_IDS = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] as const;
+const OPENAI_GPT_6_ASTRA_MODEL_ID = "gpt-6-astra";
 const OPENAI_CODEX_GPT_56_THINKING_LEVEL_MAP = {
   off: null,
   xhigh: "xhigh",
@@ -110,6 +111,7 @@ const OPENAI_CODEX_GPT_55_PRO_TEMPLATE_MODEL_IDS = [
   ...OPENAI_CODEX_GPT_54_TEMPLATE_MODEL_IDS,
 ] as const;
 const OPENAI_CODEX_MODERN_MODEL_IDS = [
+  OPENAI_GPT_6_ASTRA_MODEL_ID,
   ...OPENAI_CODEX_GPT_56_MODEL_IDS,
   OPENAI_CODEX_GPT_55_MODEL_ID,
   OPENAI_CODEX_GPT_55_PRO_MODEL_ID,
@@ -119,6 +121,7 @@ const OPENAI_CODEX_MODERN_MODEL_IDS = [
   OPENAI_CODEX_GPT_53_SPARK_MODEL_ID,
 ] as const;
 const OPENAI_CODEX_IMAGE_CAPABLE_MODEL_IDS = [
+  OPENAI_GPT_6_ASTRA_MODEL_ID,
   ...OPENAI_CODEX_GPT_56_MODEL_IDS,
   OPENAI_CODEX_GPT_55_MODEL_ID,
   OPENAI_CODEX_GPT_55_PRO_MODEL_ID,
@@ -235,6 +238,34 @@ function resolveCodexForwardCompatModel(ctx: ProviderResolveDynamicModelContext)
   const trimmedModelId = ctx.modelId.trim();
   const lower = normalizeLowercaseStringOrEmpty(trimmedModelId);
   const synthBaseUrl = ctx.providerConfig?.baseUrl ?? OPENAI_CODEX_BASE_URL;
+
+  if (lower === OPENAI_GPT_6_ASTRA_MODEL_ID) {
+    const discovered = ctx.modelRegistry.find(PROVIDER_ID, trimmedModelId) as
+      | ProviderRuntimeModel
+      | undefined;
+    if (!discovered) {
+      return undefined;
+    }
+    return normalizeModelCompat({
+      ...discovered,
+      id: trimmedModelId,
+      api: "openai-chatgpt-responses",
+      provider: PROVIDER_ID,
+      baseUrl: synthBaseUrl,
+      reasoning: true,
+      input: ["text", "image"],
+      contextWindow: discovered.contextWindow ?? 1_050_000,
+      contextTokens: discovered.contextTokens ?? 272_000,
+      maxTokens: discovered.maxTokens ?? OPENAI_CODEX_GPT_54_MAX_TOKENS,
+      thinkingLevelMap: {
+        off: null,
+        minimal: "low",
+        xhigh: "xhigh",
+        max: "max",
+        ...discovered.thinkingLevelMap,
+      },
+    } as ProviderRuntimeModel);
+  }
 
   if (OPENAI_CODEX_GPT_56_MODEL_IDS.some((modelId) => modelId === lower)) {
     const model = ctx.modelRegistry.find(PROVIDER_ID, trimmedModelId) as
@@ -633,7 +664,8 @@ export function buildOpenAICodexProviderHooks(): Pick<
   return {
     resolveDynamicModel: (ctx) => resolveCodexForwardCompatModel(ctx),
     buildAuthDoctorHint: (ctx) => buildOpenAICodexAuthDoctorHint(ctx),
-    resolveThinkingProfile: ({ modelId }) => resolveOpenAICodexThinkingProfile(modelId),
+    resolveThinkingProfile: ({ modelId, agentRuntime, compat }) =>
+      resolveOpenAICodexThinkingProfile(modelId, agentRuntime, compat),
     isModernModelRef: ({ modelId }) => matchesExactOrPrefix(modelId, OPENAI_CODEX_MODERN_MODEL_IDS),
     preferRuntimeResolvedModel: (ctx) => {
       if (!isOpenAIOrLegacyCodexProvider(ctx.provider)) {
@@ -641,6 +673,7 @@ export function buildOpenAICodexProviderHooks(): Pick<
       }
       const id = ctx.modelId.trim().toLowerCase();
       return [
+        OPENAI_GPT_6_ASTRA_MODEL_ID,
         ...OPENAI_CODEX_GPT_56_MODEL_IDS,
         OPENAI_CODEX_GPT_55_MODEL_ID,
         OPENAI_CODEX_GPT_55_PRO_MODEL_ID,
@@ -674,9 +707,8 @@ export function buildOpenAICodexProviderHooks(): Pick<
       }
       return normalized;
     },
-    resolveUsageAuth: async (ctx) => await ctx.resolveOAuthToken(),
-    fetchUsageSnapshot: async (ctx) =>
-      await fetchCodexUsage(ctx.token, ctx.accountId, ctx.timeoutMs, ctx.fetchFn),
+    resolveUsageAuth: resolveOpenAIUsageAuth,
+    fetchUsageSnapshot: fetchOpenAIUsage,
     refreshOAuth: async (cred) => await refreshOpenAICodexOAuthCredential(cred),
     augmentModelCatalog: (ctx) => {
       const gpt54Template = findCatalogTemplate({

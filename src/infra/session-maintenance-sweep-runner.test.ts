@@ -35,6 +35,8 @@ function summaryFixture(over?: Partial<SessionCleanupSummary>): SessionCleanupSu
     dmScopeRetired: 0,
     pruned: 0,
     capped: 0,
+    repaired: 0,
+    modelRunPruned: 0,
     unreferencedArtifacts: { scannedFiles: 4, removedFiles: 0, freedBytes: 0, olderThanMs: 0 },
     diskBudget: null,
     wouldMutate: false,

@@ -1,5 +1,9 @@
 // Markdown Core module implements ir behavior.
-import MarkdownIt from "markdown-it";
+import MarkdownIt, {
+  type Env as MarkdownItEnv,
+  type MarkdownIt as MarkdownItParser,
+} from "markdown-it";
+import markdownItCjkFriendly from "markdown-it-cjk-friendly";
 import { chunkText } from "./chunk-text.js";
 import type { MarkdownTableMode } from "./types.js";
 
@@ -16,7 +20,7 @@ type LinkState = {
 
 const OPEN_MARKDOWN_HTML_TAG_PATTERN = /<\/?[a-zA-Z][a-zA-Z0-9-]*\b[^<>]*$/;
 
-type RenderEnv = {
+type RenderEnv = MarkdownItEnv & {
   listStack: ListState[];
 };
 
@@ -78,9 +82,12 @@ function createStyleSpan(params: MarkdownStyleSpan): MarkdownStyleSpan {
   return span;
 }
 
+type MarkdownTableAlignment = "left" | "center" | "right";
+
 export type MarkdownTableData = {
   headers: string[];
   rows: string[][];
+  aligns?: (MarkdownTableAlignment | undefined)[];
 };
 
 export type MarkdownTableCell = {
@@ -113,6 +120,7 @@ type TableCell = MarkdownTableCell;
 type TableState = {
   headers: TableCell[];
   rows: TableCell[][];
+  aligns: (MarkdownTableAlignment | undefined)[];
   currentRow: TableCell[];
   currentCell: RenderTarget | null;
   inHeader: boolean;
@@ -139,13 +147,15 @@ export type MarkdownParseOptions = {
   tableMode?: MarkdownTableMode;
 };
 
-function createMarkdownIt(options: MarkdownParseOptions): MarkdownIt {
+function createMarkdownIt(options: MarkdownParseOptions): MarkdownItParser {
   const md = new MarkdownIt({
     html: false,
     linkify: options.linkify ?? true,
     breaks: false,
     typographer: false,
   });
+  md.linkify.set({ fuzzyLink: true });
+  md.use(markdownItCjkFriendly);
   md.enable("strikethrough");
   if (options.tableMode && options.tableMode !== "off") {
     md.enable("table");
@@ -170,6 +180,20 @@ function getAttr(token: MarkdownToken, name: string): string | null {
     }
   }
   return null;
+}
+
+function markdownTableAlignmentFromToken(token: MarkdownToken): MarkdownTableAlignment | undefined {
+  const value = getAttr(token, "style") ?? "";
+  if (/text-align\s*:\s*left/i.test(value)) {
+    return "left";
+  }
+  if (/text-align\s*:\s*center/i.test(value)) {
+    return "center";
+  }
+  if (/text-align\s*:\s*right/i.test(value)) {
+    return "right";
+  }
+  return undefined;
 }
 
 function createTextToken(base: MarkdownToken, content: string): MarkdownToken {
@@ -432,6 +456,7 @@ function initTableState(): TableState {
   return {
     headers: [],
     rows: [],
+    aligns: [],
     currentRow: [],
     currentCell: null,
     inHeader: false,
@@ -517,13 +542,15 @@ function collectTableBlock(state: RenderState) {
   }
   const headerCells = state.table.headers.map(trimCell);
   const rowCells = state.table.rows.map((row) => row.map(trimCell));
-  state.collectedTables.push({
+  const table = {
     headers: headerCells.map((cell) => cell.text),
     rows: rowCells.map((row) => row.map((cell) => cell.text)),
     headerCells,
     rowCells,
     placeholderOffset: state.text.length,
-  });
+    ...(state.table.aligns.some(Boolean) ? { aligns: [...state.table.aligns] } : {}),
+  };
+  state.collectedTables.push(table);
 }
 
 function appendTableBulletValue(
@@ -874,6 +901,10 @@ function renderTokens(tokens: MarkdownToken[], state: RenderState): void {
       case "td_open":
         if (state.table) {
           state.table.currentCell = initRenderTarget();
+          if (token.type === "th_open" && state.table.inHeader) {
+            state.table.aligns[state.table.currentRow.length] =
+              markdownTableAlignmentFromToken(token);
+          }
         }
         break;
       case "th_close":
@@ -1042,7 +1073,7 @@ export function markdownToIRWithMeta(
 ): { ir: MarkdownIR; hasTables: boolean; tables: MarkdownTableMeta[] } {
   const env: RenderEnv = { listStack: [] };
   const md = createMarkdownIt(options);
-  const tokens = md.parse(markdown ?? "", env as unknown as object);
+  const tokens = md.parse(markdown ?? "", env);
   if (options.enableSpoilers) {
     applySpoilerTokens(tokens as MarkdownToken[]);
   }

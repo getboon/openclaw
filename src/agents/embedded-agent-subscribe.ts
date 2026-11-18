@@ -8,7 +8,7 @@ import {
   createInlineCodeState,
 } from "../../packages/markdown-core/src/code-spans.js";
 import type { FenceScanState } from "../../packages/markdown-core/src/fences.js";
-import { setReplyPayloadMetadata } from "../auto-reply/reply-payload.js";
+import { getReplyPayloadMetadata, setReplyPayloadMetadata } from "../auto-reply/reply-payload.js";
 import { createStreamingDirectiveAccumulator } from "../auto-reply/reply/streaming-directives.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { formatToolAggregate } from "../auto-reply/tool-meta.js";
@@ -182,7 +182,9 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
     includeReasoning: reasoningMode === "on" && canShowReasoning,
     shouldEmitPartialReplies: !(reasoningMode === "on" && !params.onBlockReply),
     streamReasoning:
-      reasoningMode === "stream" &&
+      (params.streamReasoningInNonStreamModes === true
+        ? reasoningMode !== "on"
+        : reasoningMode === "stream") &&
       canShowReasoning &&
       typeof params.onReasoningStream === "function",
     deltaBuffer: "",
@@ -234,6 +236,7 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
     successfulCronAdds: 0,
     pendingMessagingMediaUrls: new Map(),
     pendingToolMediaUrls: initialPendingToolMediaUrls,
+    hostOwnedToolMediaUrls: [],
     pendingToolAudioAsVoice: false,
     pendingToolTrustedLocalMedia: false,
     hasToolMediaBlockReply: false,
@@ -323,7 +326,13 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
               assistantMessageIndex: options.assistantMessageIndex,
             })
           : payload;
-      const maybeTask = params.onBlockReply(taggedPayload);
+      const assistantMessageIndex =
+        options?.assistantMessageIndex ??
+        getReplyPayloadMetadata(taggedPayload)?.assistantMessageIndex;
+      const context = assistantMessageIndex === undefined ? undefined : { assistantMessageIndex };
+      const maybeTask = context
+        ? params.onBlockReply(taggedPayload, context)
+        : params.onBlockReply(taggedPayload);
       if (!isPromiseLike<void>(maybeTask)) {
         return true;
       }
@@ -1168,9 +1177,6 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
     if (params.silentExpected) {
       return;
     }
-    if (!state.streamReasoning || !params.onReasoningStream) {
-      return;
-    }
     const trimmed = text.trim();
     if (!trimmed) {
       return;
@@ -1184,7 +1190,10 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
     const delta = trimmed.startsWith(prior) ? trimmed.slice(prior.length) : trimmed;
     state.lastStreamedReasoning = trimmed;
 
-    // Broadcast thinking event to WebSocket clients in real-time
+    // Emit-always: the thinking stream always reaches the bus and session
+    // archive. /reasoning (streamReasoning) gates only the rendering hook
+    // below; display surfaces (TUI showThinking, webchat isReasoning drops)
+    // gate presentation on their side.
     emitAgentEvent({
       runId: params.runId,
       stream: "thinking",
@@ -1194,9 +1203,17 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
       },
     });
 
-    void params.onReasoningStream({
-      text: trimmed,
-    });
+    // Message-tool-only delivery makes later reasoning private: once the
+    // user-facing reply has gone out via the message tool, the channel shows
+    // only what was explicitly sent, so trailing reasoning must stay out of the
+    // render hook — uniformly, whether the thinking block rode in on a tool call
+    // or arrived on its own. It still reaches the bus/archive above.
+    if (state.streamReasoning && !hasMessageToolOnlySourceDelivery() && params.onReasoningStream) {
+      void params.onReasoningStream({
+        text: trimmed,
+        ...(state.reasoningMode === "stream" ? {} : { requiresReasoningProgressOptIn: true }),
+      });
+    }
   };
 
   const resetForCompactionRetry = () => {
@@ -1229,6 +1246,7 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
     state.heartbeatToolResponse = undefined;
     state.pendingMessagingMediaUrls.clear();
     state.pendingToolMediaUrls = [];
+    state.hostOwnedToolMediaUrls = [];
     state.pendingToolAudioAsVoice = false;
     state.pendingToolTrustedLocalMedia = false;
     state.visibleBlockReplyCount = 0;
@@ -1342,6 +1360,7 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
       toolCallId: string;
       args: unknown;
       replaySafe?: boolean;
+      hideFromChannelProgress?: boolean;
       execute: () => Promise<T>;
     }): Promise<T> => {
       await handleToolExecutionStart(ctx, {
@@ -1350,6 +1369,7 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
         toolCallId: toolParams.toolCallId,
         args: toolParams.args,
         replaySafe: toolParams.replaySafe,
+        hideFromChannelProgress: toolParams.hideFromChannelProgress,
       } as never);
       try {
         const result = await toolParams.execute();
@@ -1360,6 +1380,7 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
           isError: false,
           executionStarted: true,
           result,
+          hideFromChannelProgress: toolParams.hideFromChannelProgress,
         } as never);
         return result;
       } catch (error) {
@@ -1370,6 +1391,7 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
           isError: true,
           executionStarted: true,
           result: buildToolLifecycleErrorResult(error),
+          hideFromChannelProgress: toolParams.hideFromChannelProgress,
         } as never);
         throw error;
       }
@@ -1415,6 +1437,7 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
     getHeartbeatToolResponse: () =>
       state.heartbeatToolResponse ? { ...state.heartbeatToolResponse } : undefined,
     getPendingToolMediaReply: () => readPendingToolMediaReply(state),
+    getHostOwnedToolMediaUrls: () => state.hostOwnedToolMediaUrls.slice(),
     hasToolMediaBlockReply: () => state.hasToolMediaBlockReply,
     getVisibleBlockReplyCount: () => state.visibleBlockReplyCount,
     getSuccessfulCronAdds: () => state.successfulCronAdds,

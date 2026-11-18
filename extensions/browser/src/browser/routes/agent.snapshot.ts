@@ -5,6 +5,7 @@
  * navigation policy checks, media storage, and screenshot normalization.
  */
 import path from "node:path";
+import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { getImageMetadata } from "../../media/media-services.js";
 import { ensureMediaDir, saveMediaBuffer } from "../../media/store.js";
 import { captureScreenshot, snapshotAria, snapshotRoleViaCdp } from "../cdp.js";
@@ -13,6 +14,7 @@ import {
   navigateChromeMcpPage,
   takeChromeMcpScreenshot,
   takeChromeMcpSnapshot,
+  type ChromeMcpOperationOptions,
   type ChromeMcpProfileOptions,
 } from "../chrome-mcp.js";
 import {
@@ -59,17 +61,18 @@ import { asyncBrowserRoute, jsonError, toBoolean, toStringOrEmpty } from "./util
 
 const CHROME_MCP_OVERLAY_ATTR = "data-openclaw-mcp-overlay";
 
-async function collectChromeMcpSnapshotUrls(params: {
+type ChromeMcpSnapshotOperation = ChromeMcpOperationOptions & {
   profileName: string;
   profile?: ChromeMcpProfileOptions;
   userDataDir?: string;
   targetId: string;
-}): Promise<SnapshotUrlEntry[]> {
+};
+
+async function collectChromeMcpSnapshotUrls(
+  params: ChromeMcpSnapshotOperation,
+): Promise<SnapshotUrlEntry[]> {
   const result = await evaluateChromeMcpScript({
-    profileName: params.profileName,
-    profile: params.profile,
-    userDataDir: params.userDataDir,
-    targetId: params.targetId,
+    ...params,
     fn: `() => {
       const seen = new Set();
       const out = [];
@@ -79,7 +82,7 @@ async function collectChromeMcpSnapshotUrls(params: {
         const text = (anchor.innerText || anchor.textContent || anchor.getAttribute("aria-label") || "")
           .replace(/\\s+/g, " ")
           .trim()
-          .slice(0, 120) || href;
+          .slice(0, 121) || href;
         seen.add(href);
         out.push({ text, url: href });
         if (out.length >= 100) break;
@@ -88,27 +91,26 @@ async function collectChromeMcpSnapshotUrls(params: {
     }`,
   }).catch(() => []);
   return Array.isArray(result)
-    ? result.filter(
-        (entry): entry is { text: string; url: string } =>
-          entry &&
-          typeof entry === "object" &&
-          typeof (entry as { text?: unknown }).text === "string" &&
-          typeof (entry as { url?: unknown }).url === "string",
-      )
+    ? result
+        .filter(
+          (entry): entry is { text: string; url: string } =>
+            entry &&
+            typeof entry === "object" &&
+            typeof (entry as { text?: unknown }).text === "string" &&
+            typeof (entry as { url?: unknown }).url === "string",
+        )
+        .map((entry) => {
+          entry.text = truncateUtf16Safe(entry.text, 120) || entry.url;
+          return entry;
+        })
     : [];
 }
 
-async function clearChromeMcpOverlay(params: {
-  profileName: string;
-  profile?: ChromeMcpProfileOptions;
-  userDataDir?: string;
-  targetId: string;
-}): Promise<void> {
+async function clearChromeMcpOverlay(params: ChromeMcpSnapshotOperation): Promise<void> {
   await evaluateChromeMcpScript({
-    profileName: params.profileName,
-    profile: params.profile,
-    userDataDir: params.userDataDir,
-    targetId: params.targetId,
+    ...params,
+    // Cleanup must outlive a route abort or injected labels remain in the user's tab.
+    signal: undefined,
     fn: `() => {
       document.querySelectorAll("[${CHROME_MCP_OVERLAY_ATTR}]").forEach((node) => node.remove());
       return true;
@@ -116,19 +118,14 @@ async function clearChromeMcpOverlay(params: {
   }).catch(() => {});
 }
 
-async function renderChromeMcpLabels(params: {
-  profileName: string;
-  profile?: ChromeMcpProfileOptions;
-  userDataDir?: string;
-  targetId: string;
-  refs: string[];
-}): Promise<{ labels: number; skipped: number }> {
+async function renderChromeMcpLabels(
+  params: ChromeMcpSnapshotOperation & {
+    refs: string[];
+  },
+): Promise<{ labels: number; skipped: number }> {
   const refList = JSON.stringify(params.refs);
   const result = await evaluateChromeMcpScript({
-    profileName: params.profileName,
-    profile: params.profile,
-    userDataDir: params.userDataDir,
-    targetId: params.targetId,
+    ...params,
     args: params.refs,
     fn: `(...elements) => {
       const refs = ${refList};
@@ -342,6 +339,7 @@ export function registerBrowserAgentSnapshotRoutes(
               profile: profileCtx.profile,
               targetId: tab.targetId,
               url,
+              signal: req.signal,
             });
             await assertBrowserNavigationResultAllowed({ url: result.url, ...ssrfPolicyOpts });
             return res.json({ ok: true, targetId: tab.targetId, ...result });
@@ -437,6 +435,13 @@ export function registerBrowserAgentSnapshotRoutes(
         enforceCurrentUrlAllowed: true,
         run: async ({ profileCtx, tab, cdpUrl }) => {
           if (getBrowserProfileCapabilities(profileCtx.profile).usesChromeMcp) {
+            const operation: ChromeMcpSnapshotOperation = {
+              profileName: profileCtx.profile.name,
+              profile: profileCtx.profile,
+              targetId: tab.targetId,
+              timeoutMs,
+              signal: req.signal,
+            };
             const ssrfPolicyOpts = browserNavigationPolicyForProfile(ctx, profileCtx);
             if (ssrfPolicyOpts.ssrfPolicy) {
               await assertBrowserNavigationResultAllowed({
@@ -448,26 +453,17 @@ export function registerBrowserAgentSnapshotRoutes(
               return jsonError(res, 400, EXISTING_SESSION_LIMITS.snapshot.screenshotElement);
             }
             if (labels) {
-              const snapshot = await takeChromeMcpSnapshot({
-                profileName: profileCtx.profile.name,
-                profile: profileCtx.profile,
-                targetId: tab.targetId,
-              });
+              const snapshot = await takeChromeMcpSnapshot(operation);
               const built = buildAiSnapshotFromChromeMcpSnapshot({ root: snapshot });
               const labelResult = await renderChromeMcpLabels({
-                profileName: profileCtx.profile.name,
-                profile: profileCtx.profile,
-                targetId: tab.targetId,
+                ...operation,
                 refs: Object.keys(built.refs),
               });
               try {
                 const buffer = await takeChromeMcpScreenshot({
-                  profileName: profileCtx.profile.name,
-                  profile: profileCtx.profile,
-                  targetId: tab.targetId,
+                  ...operation,
                   fullPage,
                   format: type,
-                  timeoutMs,
                 });
                 await saveNormalizedScreenshotResponse({
                   res,
@@ -480,22 +476,15 @@ export function registerBrowserAgentSnapshotRoutes(
                   labelsSkipped: labelResult.skipped,
                 });
               } finally {
-                await clearChromeMcpOverlay({
-                  profileName: profileCtx.profile.name,
-                  profile: profileCtx.profile,
-                  targetId: tab.targetId,
-                });
+                await clearChromeMcpOverlay(operation);
               }
               return;
             }
             const buffer = await takeChromeMcpScreenshot({
-              profileName: profileCtx.profile.name,
-              profile: profileCtx.profile,
-              targetId: tab.targetId,
+              ...operation,
               uid: ref,
               fullPage,
               format: type,
-              timeoutMs,
             });
             await saveNormalizedScreenshotResponse({
               res,
@@ -602,6 +591,8 @@ export function registerBrowserAgentSnapshotRoutes(
       try {
         const tab = await profileCtx.ensureTabAvailable(targetId || undefined, {
           allowPlaywrightFallback: hasPlaywright,
+          signal: req.signal,
+          timeoutMs: plan.timeoutMs,
         });
         const usesChromeMcp = getBrowserProfileCapabilities(profileCtx.profile).usesChromeMcp;
         const ssrfPolicyOpts = browserNavigationPolicyForProfile(ctx, profileCtx);
@@ -628,12 +619,14 @@ export function registerBrowserAgentSnapshotRoutes(
             .catch(() => undefined);
         }
         if (usesChromeMcp) {
-          const snapshot = await takeChromeMcpSnapshot({
+          const operation: ChromeMcpSnapshotOperation = {
             profileName: profileCtx.profile.name,
             profile: profileCtx.profile,
             targetId: tab.targetId,
             timeoutMs: plan.timeoutMs,
-          });
+            signal: req.signal,
+          };
+          const snapshot = await takeChromeMcpSnapshot(operation);
           if (plan.format === "aria") {
             return res.json({
               ok: true,
@@ -657,29 +650,20 @@ export function registerBrowserAgentSnapshotRoutes(
                 ...built,
                 snapshot: appendSnapshotUrls(
                   built.snapshot,
-                  await collectChromeMcpSnapshotUrls({
-                    profileName: profileCtx.profile.name,
-                    profile: profileCtx.profile,
-                    targetId: tab.targetId,
-                  }),
+                  await collectChromeMcpSnapshotUrls(operation),
                 ),
               }
             : built;
           if (plan.labels) {
             const refs = Object.keys(builtWithUrls.refs);
             const labelResult = await renderChromeMcpLabels({
-              profileName: profileCtx.profile.name,
-              profile: profileCtx.profile,
-              targetId: tab.targetId,
+              ...operation,
               refs,
             });
             try {
               const labeled = await takeChromeMcpScreenshot({
-                profileName: profileCtx.profile.name,
-                profile: profileCtx.profile,
-                targetId: tab.targetId,
+                ...operation,
                 format: "png",
-                timeoutMs: plan.timeoutMs,
               });
               const normalized = await normalizeBrowserScreenshot(labeled, {
                 maxSide: DEFAULT_BROWSER_SCREENSHOT_MAX_SIDE,
@@ -705,11 +689,7 @@ export function registerBrowserAgentSnapshotRoutes(
                 ...builtWithUrls,
               });
             } finally {
-              await clearChromeMcpOverlay({
-                profileName: profileCtx.profile.name,
-                profile: profileCtx.profile,
-                targetId: tab.targetId,
-              });
+              await clearChromeMcpOverlay(operation);
             }
           }
           return res.json({

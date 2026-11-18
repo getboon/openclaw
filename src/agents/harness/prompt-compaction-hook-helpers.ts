@@ -6,11 +6,13 @@
  */
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
+import type { PromptToolAuthorityInput } from "../../plugins/prompt-tool-authority.js";
 import type {
   PluginHookBeforeAgentStartResult,
   PluginHookBeforePromptBuildResult,
 } from "../../plugins/types.js";
 import { joinPresentTextSegments } from "../../shared/text/join-segments.js";
+import type { BootstrapContextRunKind } from "../bootstrap-mode.js";
 import { wrapPluginSystemContextSection } from "../hook-system-context-boundary.js";
 import type { AgentMessage } from "../runtime/index.js";
 import { buildAgentHookContext, type AgentHarnessHookContext } from "./hook-context.js";
@@ -32,6 +34,8 @@ export async function resolveAgentHarnessBeforePromptBuildResult(params: {
   messages: unknown[];
   ctx: AgentHarnessHookContext;
   beforeAgentStartResult?: PluginHookBeforeAgentStartResult;
+  bootstrapContextRunKind?: BootstrapContextRunKind;
+  toolAuthority?: PromptToolAuthorityInput;
 }): Promise<AgentHarnessPromptBuildResult> {
   const hookRunner = getGlobalHookRunner();
   const hasPrecomputedBeforeAgentStartResult = "beforeAgentStartResult" in params;
@@ -39,7 +43,8 @@ export async function resolveAgentHarnessBeforePromptBuildResult(params: {
   // (e.g. the Codex app-server) build the prompt through this helper rather than
   // the embedded runner's resolvePromptBuildHookResult, so the hook must run from
   // here too — otherwise it never fires on those runtimes.
-  const isHeartbeatTurn = params.ctx.trigger === "heartbeat";
+  const isHeartbeatTurn =
+    params.ctx.trigger === "heartbeat" && params.bootstrapContextRunKind !== "commitment-only";
   const hasHeartbeatContribution =
     isHeartbeatTurn && Boolean(hookRunner?.hasHooks("heartbeat_prompt_contribution"));
   if (
@@ -82,10 +87,12 @@ export async function resolveAgentHarnessBeforePromptBuildResult(params: {
   // Support the newer before_prompt_build hook plus the deprecated
   // before_agent_start hook during the prompt-build migration window.
   const promptBuildResult = hookRunner?.hasHooks("before_prompt_build")
-    ? await hookRunner.runBeforePromptBuild(promptEvent, hookCtx).catch((error: unknown) => {
-        log.warn(`before_prompt_build hook failed: ${String(error)}`);
-        return undefined;
-      })
+    ? await hookRunner
+        .runBeforePromptBuild(promptEvent, hookCtx, params.toolAuthority)
+        .catch((error: unknown) => {
+          log.warn(`before_prompt_build hook failed: ${String(error)}`);
+          return undefined;
+        })
     : undefined;
   // The runner resolves before_agent_start during model selection. Reuse that
   // result so legacy one-shot hooks do not run twice for the same turn.

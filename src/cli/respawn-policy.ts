@@ -38,7 +38,7 @@ function shouldKeepNativeHookRelayInProcess(argv: string[], platform: NodeJS.Pla
   return platform !== "win32" && isNativeHookRelayArgv(argv);
 }
 
-export function isInteractiveTtyCommandArgv(argv: string[]): boolean {
+function isInteractiveTtyCommandArgv(argv: string[]): boolean {
   const invocation = resolveCliArgvInvocation(argv);
   return invocation.primary !== null && INTERACTIVE_TTY_COMMANDS.has(invocation.primary);
 }

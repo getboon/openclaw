@@ -51,6 +51,7 @@ type PromptDecisionParams = {
   failoverReason: FailoverReason | null;
   harnessOwnsTransport?: boolean;
   promptTimeoutFallbackSafe?: boolean;
+  timedOutByRunBudget?: boolean;
   profileRotated: boolean;
 };
 
@@ -68,6 +69,7 @@ type AssistantDecisionParams = {
   timedOutDuringToolExecution: boolean;
   timedOutByRunDeadline?: boolean;
   harnessOwnsTransport?: boolean;
+  timedOutByRunBudget?: boolean;
   profileRotated: boolean;
 };
 
@@ -114,6 +116,9 @@ function isTerminalNonRetryableFailure(params: {
 }
 
 function shouldRotatePrompt(params: PromptDecisionParams): boolean {
+  if (params.timedOutByRunBudget) {
+    return false;
+  }
   return (
     params.failoverFailure &&
     params.failoverReason !== "timeout" &&
@@ -136,6 +141,9 @@ function isConcreteNonTimeoutAssistantFailure(params: AssistantDecisionParams): 
 
 function shouldRotateAssistant(params: AssistantDecisionParams): boolean {
   if (isTerminalNonRetryableFailure(params)) {
+    return false;
+  }
+  if (params.timedOutByRunBudget) {
     return false;
   }
   const timeoutFailure = isAssistantTimeoutFailure(params);
@@ -192,6 +200,12 @@ export function resolveRunFailoverDecision(params: RunFailoverDecisionParams): R
 
   if (params.stage === "prompt") {
     if (params.externalAbort) {
+      return {
+        action: "surface_error",
+        reason: params.failoverReason,
+      };
+    }
+    if (params.timedOutByRunBudget) {
       return {
         action: "surface_error",
         reason: params.failoverReason,

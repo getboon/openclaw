@@ -9,7 +9,11 @@ import {
   OPENAI_COMPATIBLE_REPLAY_HOOKS,
   PASSTHROUGH_GEMINI_REPLAY_HOOKS,
   resolveClaudeFable5ModelIdentity,
+  resolveClaudeMythos5ModelIdentity,
+  resolveClaudeOpus5ModelIdentity,
+  resolveClaudeSonnet5ModelIdentity,
   resolveClaudeThinkingProfile,
+  requiresClaudeDefaultSampling,
   supportsClaudeAdaptiveThinking,
   supportsClaudeNativeMaxEffort,
   supportsClaudeNativeXhighEffort,
@@ -45,11 +49,46 @@ describe("Claude model contracts", () => {
     );
     expect(supportsClaudeAdaptiveThinking({ id: "claude-sonnet-4-6@20260301" })).toBe(true);
     expect(supportsClaudeNativeXhighEffort({ id: "claude-opus-4-8@20260401" })).toBe(true);
+    expect(resolveClaudeSonnet5ModelIdentity({ id: "claude-sonnet-5@20260701" })).toBe(
+      "claude-sonnet-5@20260701",
+    );
+  });
+
+  it("recognizes Claude Mythos 5 as mandatory adaptive with native max effort", () => {
+    expect(resolveClaudeMythos5ModelIdentity({ id: "us.anthropic.claude-mythos-5-v1:0" })).toBe(
+      "claude-mythos-5-v1:0",
+    );
+    expect(supportsClaudeAdaptiveThinking({ id: "claude-mythos-5" })).toBe(true);
+    expect(supportsClaudeNativeMaxEffort({ id: "claude-mythos-5" })).toBe(true);
+    expect(supportsClaudeNativeXhighEffort({ id: "anthropic.claude-mythos-5" })).toBe(true);
+    expect(requiresClaudeDefaultSampling({ id: "claude-mythos-5" })).toBe(true);
+  });
+
+  it("recognizes Claude Opus 5 as adaptive-default with the full effort range", () => {
+    expect(resolveClaudeOpus5ModelIdentity({ id: "claude-opus-5" })).toBe("claude-opus-5");
+    expect(resolveClaudeOpus5ModelIdentity({ id: "us.anthropic.claude-opus-5" })).toBe(
+      "claude-opus-5",
+    );
+    expect(resolveClaudeOpus5ModelIdentity({ id: "claude-opus-4-8" })).toBeUndefined();
+    expect(supportsClaudeAdaptiveThinking({ id: "claude-opus-5" })).toBe(true);
+    expect(supportsClaudeNativeMaxEffort({ id: "claude-opus-5" })).toBe(true);
+    expect(supportsClaudeNativeXhighEffort({ id: "claude-opus-5" })).toBe(true);
+    expect(requiresClaudeDefaultSampling({ id: "claude-opus-5" })).toBe(true);
+    const profile = resolveClaudeThinkingProfile("claude-opus-5");
+    expectLevelIdsInclude(profile, ["off", "adaptive", "xhigh", "max"]);
+    expectFields(profile, { defaultLevel: "high" });
   });
 
   it("does not classify later numeric model versions as supported aliases", () => {
     expect(supportsClaudeAdaptiveThinking({ id: "claude-sonnet-4-60" })).toBe(false);
+    expect(supportsClaudeAdaptiveThinking({ id: "claude-sonnet-50" })).toBe(false);
+    expect(supportsClaudeAdaptiveThinking({ id: "claude-opus-50" })).toBe(false);
+    expect(resolveClaudeOpus5ModelIdentity({ id: "claude-opus-50" })).toBeUndefined();
+    expect(supportsClaudeAdaptiveThinking({ id: "claude-mythos-50" })).toBe(false);
     expect(supportsClaudeNativeXhighEffort({ id: "claude-opus-4-80" })).toBe(false);
+    expect(requiresClaudeDefaultSampling({ id: "claude-opus-4-8" })).toBe(true);
+    expect(requiresClaudeDefaultSampling({ id: "claude-mythos-preview" })).toBe(true);
+    expect(requiresClaudeDefaultSampling({ id: "claude-opus-4-6" })).toBe(false);
     expect(readLevelIds(resolveClaudeThinkingProfile("claude-opus-4-80"))).toEqual([
       "off",
       "minimal",
@@ -344,14 +383,23 @@ describe("buildProviderReplayFamilyHooks", () => {
 });
 
 describe("resolveClaudeThinkingProfile", () => {
-  it("exposes Fable 5's always-adaptive profile to Claude providers", () => {
-    const profile = resolveClaudeThinkingProfile("claude-fable-5");
-    expectFields(profile, {
-      defaultLevel: "high",
-      preserveWhenCatalogReasoningFalse: true,
-    });
-    expectLevelIdsInclude(profile, ["xhigh", "adaptive", "max"]);
+  it("defaults Sonnet 5 to high adaptive thinking with native effort levels", () => {
+    const profile = resolveClaudeThinkingProfile("claude-sonnet-5");
+    expectFields(profile, { defaultLevel: "high" });
+    expectLevelIdsInclude(profile, ["off", "xhigh", "adaptive", "max"]);
   });
+
+  it.each(["claude-fable-5", "claude-mythos-5"])(
+    "exposes %s's mandatory-adaptive profile to Claude providers",
+    (modelId) => {
+      const profile = resolveClaudeThinkingProfile(modelId);
+      expectFields(profile, {
+        defaultLevel: "high",
+        preserveWhenCatalogReasoningFalse: true,
+      });
+      expectLevelIdsInclude(profile, ["xhigh", "adaptive", "max"]);
+    },
+  );
 
   it("does not match longer unrelated Claude ids by prefix only", () => {
     expect(resolveClaudeThinkingProfile("vendor/claude-fable-500").defaultLevel).toBeUndefined();

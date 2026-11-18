@@ -7,7 +7,8 @@ title: "Agent workspace"
 sidebarTitle: "Agent workspace"
 ---
 
-The workspace is the agent's home. It is the only working directory used for file tools and for workspace context. Keep it private and treat it as memory.
+The workspace is the agent's home: the working directory used for file tools
+and workspace context. Keep it private and treat it as memory.
 
 This is separate from `~/.openclaw/`, which stores config, credentials, and sessions.
 
@@ -21,7 +22,10 @@ When sandboxing is enabled and `workspaceAccess` is not `"rw"`, tools operate in
 
 - Default: `~/.openclaw/workspace`
 - If `OPENCLAW_PROFILE` is set and not `"default"`, the default becomes `~/.openclaw/workspace-<profile>`.
-- Override in `~/.openclaw/openclaw.json`:
+- `OPENCLAW_WORKSPACE_DIR` overrides both of the above when set.
+- Non-default agents (`agents.list[]`) without an explicit workspace resolve to `<state-dir>/workspace-<agentId>`, not the shared default workspace.
+
+Override in `~/.openclaw/openclaw.json`:
 
 ```json5
 {
@@ -33,13 +37,15 @@ When sandboxing is enabled and `workspaceAccess` is not `"rw"`, tools operate in
 }
 ```
 
-`openclaw onboard`, `openclaw configure`, or `openclaw setup` will create the workspace and seed the bootstrap files if they are missing.
+Per-agent override: `agents.list[].workspace`.
+
+`openclaw onboard`, `openclaw configure`, or `openclaw setup` create the workspace and seed the bootstrap files if they are missing.
 
 <Note>
 Sandbox seed copies only accept regular in-workspace files; symlink/hardlink aliases that resolve outside the source workspace are ignored.
 </Note>
 
-If you already manage the workspace files yourself, you can disable bootstrap file creation:
+If you already manage the workspace files yourself, disable bootstrap file creation:
 
 ```json5
 { agents: { defaults: { skipBootstrap: true } } }
@@ -47,17 +53,15 @@ If you already manage the workspace files yourself, you can disable bootstrap fi
 
 ## Extra workspace folders
 
-Older installs may have created `~/openclaw`. Keeping multiple workspace directories around can cause confusing auth or state drift, because only one workspace is active at a time.
+Older installs may have created `~/openclaw`. Keeping multiple workspace directories around can cause confusing auth or state drift, since only one workspace is active at a time.
 
 <Note>
-**Recommendation:** keep a single active workspace. If you no longer use the extra folders, archive or move them to Trash (for example `trash ~/openclaw`). If you intentionally keep multiple workspaces, make sure `agents.defaults.workspace` points to the active one.
-
-`openclaw doctor` warns when it detects extra workspace directories.
+**Recommendation:** keep a single active workspace. If you no longer use the extra folders, archive or move them to Trash (for example `trash ~/openclaw`). If you intentionally keep multiple workspaces, make sure `agents.defaults.workspace` (or the per-agent `workspace` key) points to the active one.
 </Note>
 
 ## Workspace file map
 
-These are the standard files OpenClaw expects inside the workspace:
+Standard files OpenClaw expects inside the workspace:
 
 <AccordionGroup>
   <Accordion title="AGENTS.md - operating instructions">
@@ -94,7 +98,7 @@ These are the standard files OpenClaw expects inside the workspace:
     Per-sender `USER.md` and `MEMORY.md`, read from `identities/<senderId>/` when a turn carries a non-empty sender identity, so one agent serving several humans does not share one profile and one memory file across all of them. The directory name is a filesystem-safe encoding of the senderId, not the raw value — look for it by filtering `identities/` rather than matching the sender's literal ID. The encoding preserves letter case, so two senderIds that differ only in case still map to distinct directories on a case-sensitive filesystem, but collide on a case-insensitive one (for example, macOS's default volume format). A whitespace-only senderId falls back to the workspace root instead of creating a directory. A new sender starts with no file (reported as missing, not seeded from the root); existing root `USER.md`/`MEMORY.md` content is not migrated into `identities/` automatically. Every other bootstrap file (`AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`) stays at the workspace root and is shared. Turns without a sender identity keep reading `USER.md` and `MEMORY.md` from the workspace root.
   </Accordion>
   <Accordion title="skills/ - workspace skills (optional)">
-    Workspace-specific skills. Highest-precedence skill location for that workspace. Overrides project agent skills, personal agent skills, managed skills, bundled skills, and `skills.load.extraDirs` when names collide.
+    Workspace-specific skills. Highest-precedence skill location for that workspace, ahead of project agent skills, personal agent skills, managed skills, bundled skills, and `skills.load.extraDirs` when names collide.
   </Accordion>
   <Accordion title="canvas/ - Canvas UI files (optional)">
     Canvas UI files for node displays (for example `canvas/index.html`).
@@ -102,7 +106,7 @@ These are the standard files OpenClaw expects inside the workspace:
 </AccordionGroup>
 
 <Note>
-If any bootstrap file is missing, OpenClaw injects a "missing file" marker into the session and continues. Large bootstrap files are truncated when injected; adjust limits with `agents.defaults.bootstrapMaxChars` (default: 20000) and `agents.defaults.bootstrapTotalMaxChars` (default: 60000). `openclaw setup` can recreate missing defaults without overwriting existing files.
+If a bootstrap file is missing, OpenClaw injects a "missing file" marker into the session and continues. Large bootstrap files are truncated when injected; adjust limits with `agents.defaults.bootstrapMaxChars` (default: `20000`) and `agents.defaults.bootstrapTotalMaxChars` (default: `60000`). `openclaw setup` can recreate missing defaults without overwriting existing files.
 </Note>
 
 ## What is NOT in the workspace
@@ -224,7 +228,7 @@ Suggested `.gitignore` starter:
 
 ## Advanced notes
 
-- Multi-agent routing can use different workspaces per agent. See [Channel routing](/channels/channel-routing) for routing configuration.
+- Multi-agent routing can use different workspaces per agent via `agents.list[].workspace`. See [Channel routing](/channels/channel-routing) for routing configuration.
 - If `agents.defaults.sandbox` is enabled, non-main sessions can use per-session sandbox workspaces under `agents.defaults.sandbox.workspaceRoot`.
 
 ## Related

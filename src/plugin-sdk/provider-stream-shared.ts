@@ -1,5 +1,6 @@
 // Provider stream shared helpers implement reusable stream wrappers and payload policies.
 import { randomUUID } from "node:crypto";
+import { resolveOpenAIReasoningEffortForModel } from "@openclaw/ai/internal/openai";
 import { normalizeLowercaseStringOrEmpty } from "../../packages/normalization-core/src/string-coerce.js";
 import {
   extractStandalonePlainTextToolCallText,
@@ -10,16 +11,15 @@ import {
   type PlainTextToolCallMessageNormalization,
 } from "../../packages/tool-call-repair/src/index.js";
 import { resolveOpenAIReasoningEffortMap } from "../agents/openai-reasoning-compat.js";
-import { resolveOpenAIReasoningEffortForModel } from "../agents/openai-reasoning-effort.js";
 import type { StreamFn } from "../agents/runtime/index.js";
 import type { ThinkLevel } from "../auto-reply/thinking.js";
 import { mapThinkingLevelToReasoningEffort } from "../llm/providers/stream-wrappers/reasoning-effort-utils.js";
 import { streamWithPayloadPatch } from "../llm/providers/stream-wrappers/stream-payload-utils.js";
 import { streamSimple } from "../llm/stream.js";
 import { createAssistantMessageEventStream } from "../llm/utils/event-stream.js";
-export { applyAnthropicRefusal } from "../shared/anthropic-refusal.js";
-export { createDeferredEventBuffer } from "../shared/deferred-event-buffer.js";
-export { notifyLlmRequestActivity, onLlmRequestActivity } from "../shared/llm-request-activity.js";
+export { applyAnthropicRefusal } from "@openclaw/ai/internal/anthropic";
+export { createDeferredEventBuffer } from "@openclaw/ai/internal/runtime";
+export { notifyLlmRequestActivity, onLlmRequestActivity } from "@openclaw/ai/internal/runtime";
 
 type ProviderWrapStreamFnContext = import("../plugins/types.js").ProviderWrapStreamFnContext;
 
@@ -112,6 +112,7 @@ function emitPromotedToolCallEvents(
       delta: typeof record.partialArgs === "string" ? record.partialArgs : "{}",
       partial: message,
     });
+    stream.push({ type: "toolcall_end", contentIndex, toolCall: record, partial: message });
   });
 }
 
@@ -719,6 +720,13 @@ export function isGoogleGemini3ThinkingLevelModel(modelId: string): boolean {
   return isGoogleGemini3ProModel(modelId) || isGoogleGemini3FlashModel(modelId);
 }
 
+function googleFlashSupportsMinimalThinking(modelId: string): boolean {
+  const match = normalizeLowercaseStringOrEmpty(modelId).match(
+    /(?:^|\/)gemini-3\.(\d+)-flash(?:-|$)/,
+  );
+  return !match || Number.parseInt(match[1] ?? "0", 10) < 7;
+}
+
 /**
  * Maps legacy numeric/semantic thinking input onto Gemini 3's provider enum.
  * @deprecated Google provider-owned stream helper; do not use from third-party plugins.
@@ -761,7 +769,7 @@ export function resolveGoogleGemini3ThinkingLevel(params: {
   switch (params.thinkingLevel) {
     case "off":
     case "minimal":
-      return "MINIMAL";
+      return googleFlashSupportsMinimalThinking(params.modelId) ? "MINIMAL" : "LOW";
     case "low":
       return "LOW";
     case "medium":
@@ -782,7 +790,7 @@ export function resolveGoogleGemini3ThinkingLevel(params: {
     return undefined;
   }
   if (params.thinkingBudget <= 0) {
-    return "MINIMAL";
+    return googleFlashSupportsMinimalThinking(params.modelId) ? "MINIMAL" : "LOW";
   }
   if (params.thinkingBudget <= 2048) {
     return "LOW";

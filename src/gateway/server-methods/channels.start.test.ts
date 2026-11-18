@@ -112,7 +112,7 @@ describe("channelsHandlers channels.start", () => {
     expect(mocks.applyPluginAutoEnable).toHaveBeenCalledWith({
       config: {},
     });
-    expect(startChannel).toHaveBeenCalledWith("whatsapp", "default-account");
+    expect(startChannel).toHaveBeenCalledWith("whatsapp", "default-account", { manual: true });
     expect(respond).toHaveBeenCalledWith(
       true,
       {
@@ -127,7 +127,7 @@ describe("channelsHandlers channels.start", () => {
   it("reports started=false when the channel runtime remains stopped", async () => {
     const { respond, startChannel } = await runChannelsStart(false);
 
-    expect(startChannel).toHaveBeenCalledWith("whatsapp", "default-account");
+    expect(startChannel).toHaveBeenCalledWith("whatsapp", "default-account", { manual: true });
     expect(respond).toHaveBeenCalledWith(
       true,
       {
@@ -265,6 +265,51 @@ describe("channelsHandlers channels.logout", () => {
         loggedOut: true,
       },
       undefined,
+    );
+  });
+
+  it("does not clear channel auth when runtime teardown fails", async () => {
+    const stopChannel = vi.fn(async () => {
+      throw new Error("stop failed");
+    });
+    const logoutAccount = vi.fn(async () => ({ cleared: true, loggedOut: true }));
+    const markChannelLoggedOut = vi.fn();
+    const respond = vi.fn();
+    mocks.getChannelPlugin.mockReturnValue({
+      id: "whatsapp",
+      gateway: { logoutAccount },
+      config: {
+        defaultAccountId: () => "default-account",
+        listAccountIds: () => ["default-account"],
+        resolveAccount: () => ({}),
+      },
+    });
+
+    const logoutHandler = channelsHandlers["channels.logout"];
+    expect(logoutHandler).toBeDefined();
+    if (!logoutHandler) {
+      throw new Error('channelsHandlers["channels.logout"] test invariant');
+    }
+    await logoutHandler(
+      createOptions(
+        { channel: "whatsapp" },
+        {
+          respond,
+          context: {
+            getRuntimeConfig: mocks.getRuntimeConfig,
+            stopChannel,
+            markChannelLoggedOut,
+          } as unknown as GatewayRequestHandlerOptions["context"],
+        },
+      ),
+    );
+
+    expect(logoutAccount).not.toHaveBeenCalled();
+    expect(markChannelLoggedOut).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({ code: "UNAVAILABLE", message: "Error: stop failed" }),
     );
   });
 });

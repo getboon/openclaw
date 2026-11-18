@@ -1,6 +1,6 @@
 // Upgrade Survivor Assertions tests cover upgrade survivor assertions script behavior.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -146,6 +146,163 @@ function assertConfiguredPluginState(params: { installPath?: string } = {}): voi
 }
 
 describe("upgrade survivor assertions", () => {
+  it("seeds recent ordered legacy session timestamps", () => {
+    const root = mkdtempSync(join(tmpdir(), "openclaw-upgrade-survivor-seed-"));
+    try {
+      const stateDir = join(root, "state");
+      const workspace = join(root, "workspace");
+      mkdirSync(stateDir, { recursive: true });
+      mkdirSync(workspace, { recursive: true });
+
+      const beforeSeed = Date.now();
+      execFileSync(process.execPath, [ASSERTIONS_PATH, "seed"], {
+        env: {
+          ...process.env,
+          OPENCLAW_STATE_DIR: stateDir,
+          OPENCLAW_TEST_WORKSPACE_DIR: workspace,
+          OPENCLAW_UPGRADE_SURVIVOR_SCENARIO: "base",
+        },
+        stdio: "pipe",
+      });
+      const afterSeed = Date.now();
+
+      const sessions = JSON.parse(
+        readFileSync(join(stateDir, "sessions", "sessions.json"), "utf8"),
+      ) as Record<string, { sessionId?: unknown; updatedAt?: unknown }>;
+      const seededRows = [
+        sessions.main,
+        sessions["+15551234567"],
+        sessions["slack:channel:CUPGRADE"],
+      ];
+      expect(seededRows.map((row) => row?.sessionId)).toEqual([
+        "upgrade-main-session",
+        "upgrade-direct-session",
+        "upgrade-group-session",
+      ]);
+
+      const timestamps = seededRows.map((row) => row?.updatedAt);
+      for (const timestamp of timestamps) {
+        expect(typeof timestamp).toBe("number");
+      }
+      const [mainUpdatedAt, directUpdatedAt, groupUpdatedAt] = timestamps as [
+        number,
+        number,
+        number,
+      ];
+      expect(directUpdatedAt - mainUpdatedAt).toBe(100);
+      expect(groupUpdatedAt - mainUpdatedAt).toBe(200);
+      expect(mainUpdatedAt).toBeLessThan(directUpdatedAt);
+      expect(directUpdatedAt).toBeLessThan(groupUpdatedAt);
+
+      const dayMs = 24 * 60 * 60 * 1000;
+      const thirtyDaysMs = 30 * dayMs;
+      for (const [timestamp, offset] of [
+        [mainUpdatedAt, 0],
+        [directUpdatedAt, 100],
+        [groupUpdatedAt, 200],
+      ] as const) {
+        expect(timestamp).toBeGreaterThanOrEqual(beforeSeed - dayMs + offset);
+        expect(timestamp).toBeLessThanOrEqual(afterSeed - dayMs + offset);
+        expect(timestamp).toBeGreaterThan(afterSeed - thirtyDaysMs);
+        expect(timestamp).toBeLessThanOrEqual(afterSeed);
+      }
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("accepts agents migrated from list to entries", () => {
+    const root = mkdtempSync(join(tmpdir(), "openclaw-upgrade-survivor-agents-"));
+    try {
+      const configPath = join(root, "openclaw.json");
+      const coveragePath = join(root, "coverage.json");
+      writeJson(configPath, {
+        agents: {
+          defaults: { contextTokens: 64000 },
+          entries: {
+            main: {},
+            ops: { fastModeDefault: true },
+          },
+        },
+      });
+      writeJson(coveragePath, {
+        acceptedIntents: ["agents"],
+        skippedIntents: [],
+      });
+
+      execFileSync(process.execPath, [ASSERTIONS_PATH, "assert-config"], {
+        env: {
+          ...process.env,
+          OPENCLAW_CONFIG_PATH: configPath,
+          OPENCLAW_UPGRADE_SURVIVOR_CONFIG_COVERAGE_JSON: coveragePath,
+          OPENCLAW_UPGRADE_SURVIVOR_SCENARIO: "base",
+        },
+        stdio: "pipe",
+      });
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("accepts the ACPX OpenClaw tools bridge scenario during seed", () => {
+    const root = mkdtempSync(join(tmpdir(), "openclaw-upgrade-survivor-acpx-"));
+    try {
+      const stateDir = join(root, "state");
+      const workspace = join(root, "workspace");
+      mkdirSync(stateDir, { recursive: true });
+      mkdirSync(workspace, { recursive: true });
+
+      execFileSync(process.execPath, [ASSERTIONS_PATH, "seed"], {
+        env: {
+          ...process.env,
+          OPENCLAW_STATE_DIR: stateDir,
+          OPENCLAW_TEST_WORKSPACE_DIR: workspace,
+          OPENCLAW_UPGRADE_SURVIVOR_SCENARIO: "acpx-openclaw-tools-bridge",
+        },
+        stdio: "pipe",
+      });
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("asserts the ACPX OpenClaw tools bridge config survived", () => {
+    const root = mkdtempSync(join(tmpdir(), "openclaw-upgrade-survivor-acpx-config-"));
+    try {
+      const configPath = join(root, "openclaw.json");
+      const coveragePath = join(root, "coverage.json");
+      writeJson(configPath, {
+        plugins: {
+          allow: ["acpx"],
+          entries: {
+            acpx: {
+              enabled: true,
+              config: {
+                openClawToolsMcpBridge: true,
+              },
+            },
+          },
+        },
+      });
+      writeJson(coveragePath, {
+        acceptedIntents: ["acpx-openclaw-tools-bridge"],
+        skippedIntents: [],
+      });
+
+      execFileSync(process.execPath, [ASSERTIONS_PATH, "assert-config"], {
+        env: {
+          ...process.env,
+          OPENCLAW_CONFIG_PATH: configPath,
+          OPENCLAW_UPGRADE_SURVIVOR_CONFIG_COVERAGE_JSON: coveragePath,
+          OPENCLAW_UPGRADE_SURVIVOR_SCENARIO: "acpx-openclaw-tools-bridge",
+        },
+        stdio: "pipe",
+      });
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("accepts official ClawHub npm-pack installs for configured external plugins", () => {
     expect(() => assertConfiguredPluginState()).not.toThrow();
   });

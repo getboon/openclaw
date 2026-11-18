@@ -1,11 +1,10 @@
+import { clampPositiveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
 /**
  * Plugin Hook Runner
  *
  * Provides utilities for executing plugin lifecycle hooks with proper
  * error handling and priority ordering.
  */
-
-import { clampPositiveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
 import { copyReplyPayloadMetadata, type ReplyPayload } from "../auto-reply/reply-payload.js";
 import { formatHookErrorForLog } from "../hooks/fire-and-forget.js";
 import { formatErrorMessage } from "../infra/errors.js";
@@ -31,6 +30,7 @@ import type {
   PluginHookBeforeDispatchContext,
   PluginHookBeforeDispatchEvent,
   PluginHookBeforeDispatchResult,
+  PluginHookHandlerMap,
   PluginHookReplyPayloadSendingContext,
   PluginHookReplyPayloadSendingEvent,
   PluginHookReplyPayloadSendingResult,
@@ -95,6 +95,10 @@ import type {
   PluginHookResolveExecEnvContext,
   PluginHookResolveExecEnvEvent,
 } from "./hook-types.js";
+import {
+  createPromptToolAuthority,
+  type PromptToolAuthorityInput,
+} from "./prompt-tool-authority.js";
 
 // Re-export types for consumers
 export type {
@@ -209,6 +213,7 @@ export type HookRunnerOptions = {
 
 const DEFAULT_VOID_HOOK_TIMEOUT_MS_BY_HOOK: Partial<Record<PluginHookName, number>> = {
   agent_end: 30_000,
+  channel_pairing_requested: 2_000,
   // Defensive default for the compaction lifecycle hooks. Without a budget an
   // unresponsive handler runs fully unbounded, and in the codex agent harness
   // these hooks fire on the serialized notification queue
@@ -851,13 +856,26 @@ export function createHookRunner(
   async function runBeforePromptBuild(
     event: PluginHookBeforePromptBuildEvent,
     ctx: PluginHookAgentContext,
+    toolInput?: PromptToolAuthorityInput,
   ): Promise<PluginHookBeforePromptBuildResult | undefined> {
-    return runModifyingHook<"before_prompt_build", PluginHookBeforePromptBuildResult>(
-      "before_prompt_build",
-      event,
-      ctx,
-      { mergeResults: mergeBeforePromptBuild },
-    );
+    // Only the host's finalized surface may authorize automatic recall. Ignore
+    // a caller-supplied capability so legacy pre-policy dispatches fail closed.
+    const lease = toolInput ? createPromptToolAuthority(ctx, toolInput) : undefined;
+    try {
+      const result = await runModifyingHook<
+        "before_prompt_build",
+        PluginHookBeforePromptBuildResult
+      >(
+        "before_prompt_build",
+        event,
+        { ...ctx, toolAuthority: lease?.authority },
+        { mergeResults: mergeBeforePromptBuild },
+      );
+      lease?.authority.assertActive();
+      return result;
+    } finally {
+      lease?.close();
+    }
   }
 
   async function runAgentTurnPrepare(
@@ -1069,6 +1087,17 @@ export function createHookRunner(
     ctx: PluginHookMessageContext,
   ): Promise<void> {
     return runVoidHook("message_received", event, ctx);
+  }
+
+  /**
+   * Run channel_pairing_requested hook.
+   * Observation-only; slow/failing handlers must not block pairing flow.
+   */
+  async function runChannelPairingRequested(
+    event: Parameters<PluginHookHandlerMap["channel_pairing_requested"]>[0],
+    ctx: Parameters<PluginHookHandlerMap["channel_pairing_requested"]>[1],
+  ): Promise<void> {
+    return runVoidHook("channel_pairing_requested", event, ctx);
   }
 
   /**
@@ -1674,6 +1703,7 @@ export function createHookRunner(
     runInboundClaim,
     runInboundClaimForPlugin,
     runInboundClaimForPluginOutcome,
+    runChannelPairingRequested,
     runMessageReceived,
     runBeforeDispatch,
     runReplyDispatch,

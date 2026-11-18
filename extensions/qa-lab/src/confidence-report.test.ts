@@ -964,6 +964,34 @@ describe("qa confidence report", () => {
     expect(summary.canaries.every((canary) => canary.detected)).toBe(true);
   });
 
+  it("escapes backslashes before pipes in markdown table cells", () => {
+    const markdown = renderQaConfidenceMarkdownReport({
+      generatedAt: "2026-05-12T00:00:00.000Z",
+      profile: "codex-100",
+      strictZeroUnknowns: true,
+      strictGlobalPass: true,
+      pass: true,
+      zeroUnknowns: true,
+      globalPass: true,
+      counts: { total: 1, passed: 1, failed: 0, blocked: 0, missing: 0, unknown: 0 },
+      failures: [],
+      lanes: [
+        {
+          id: "escape-check",
+          title: "Escape check",
+          kind: "qa-suite-summary",
+          artifact: "escape-check.json",
+          artifactPath: "/tmp/escape-check.json",
+          required: true,
+          status: "pass",
+          details: "ends with backslash\\ | next cell",
+        },
+      ],
+    });
+
+    expect(markdown).toContain("ends with backslash\\\\ \\| next cell");
+  });
+
   it("writes confidence self-test artifacts", async () => {
     const result = await writeQaConfidenceSelfTestArtifacts({
       outputDir: tempRoot,

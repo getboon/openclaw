@@ -52,6 +52,10 @@ describe("package-changelog", () => {
     // (see src/infra/npm-registry-spec.ts OPENCLAW_BOON_FORK_VERSION_RE), not a
     // prerelease — so it resolves only to its own heading.
     expect(resolvePackageChangelogVersions("2026.6.11-boon.1")).toEqual(["2026.6.11-boon.1"]);
+    expect(resolvePackageChangelogVersions("2026.5.29", { allowUnreleased: true })).toEqual([
+      "2026.5.29",
+      "Unreleased",
+    ]);
   });
 
   it("extracts exact boon fork release sections", () => {
@@ -164,6 +168,22 @@ Docs: https://docs.openclaw.ai
 `);
   });
 
+  it("does not fall back when exact non-publish notes fail safety checks", () => {
+    const source = changelog`
+# Changelog
+## Unreleased
+- Pending development package notes with enough release detail.
+## 2026.5.29
+- Tiny.
+## 2026.5.28
+- Older stable release notes with enough detail.
+`;
+
+    expect(() =>
+      extractCurrentPackageChangelog(source, "2026.5.29", { allowUnreleased: true }),
+    ).toThrow("Packaged changelog section for 2026.5.29 is only 7 body bytes");
+  });
+
   it("fails closed when the packaged changelog is unexpectedly large", () => {
     const source = changelog`
 # Changelog
@@ -204,6 +224,24 @@ Docs: https://docs.openclaw.ai
 
       await expect(restorePackageChangelog(root)).resolves.toBe(true);
       expect(readFileSync(path.join(root, "CHANGELOG.md"), "utf8")).toBe(cumulativeChangelog);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers an interrupted ephemeral QA package with the default restore path", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "openclaw-package-changelog-"));
+    const unreleasedChangelog = cumulativeChangelog.replace(
+      "- Pending note.",
+      "- Pending release note with enough detail.",
+    );
+    try {
+      writeFileSync(path.join(root, "package.json"), '{"version":"2026.5.29"}\n', "utf8");
+      writeFileSync(path.join(root, "CHANGELOG.md"), unreleasedChangelog, "utf8");
+
+      await expect(preparePackageChangelog(root, { allowUnreleased: true })).resolves.toBe(true);
+      await expect(restorePackageChangelog(root)).resolves.toBe(true);
+      expect(readFileSync(path.join(root, "CHANGELOG.md"), "utf8")).toBe(unreleasedChangelog);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

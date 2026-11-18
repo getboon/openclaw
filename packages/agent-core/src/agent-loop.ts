@@ -1,6 +1,6 @@
-// Keep the runtime class on the package specifier so built agent-core shares
-// constructor identity with @openclaw/llm-core; source types keep SDK d.ts bundled.
-import { EventStream as LlmEventStream } from "@openclaw/llm-core";
+// Keep the runtime class on the public package specifier so OpenClaw and
+// external consumers share one constructor identity.
+import { EventStream as LlmEventStream } from "@openclaw/ai/event-stream";
 import type {
   AssistantMessage,
   AssistantMessageEvent,
@@ -9,6 +9,7 @@ import type {
   ToolResultMessage,
 } from "../../llm-core/src/index.js";
 import type { EventStream as SourceEventStream } from "../../llm-core/src/index.js";
+import { TranscriptNotContinuableError } from "./errors.js";
 import { resolveAgentReasoningOption } from "./reasoning.js";
 import { type AgentCoreStreamRuntimeDeps, resolveAgentCoreStreamFn } from "./runtime-deps.js";
 import type {
@@ -143,7 +144,7 @@ export function agentLoopContinue(
   }
 
   if (context.messages[context.messages.length - 1].role === "assistant") {
-    throw new Error("Cannot continue from message role: assistant");
+    throw new TranscriptNotContinuableError(context.messages[context.messages.length - 1].role);
   }
 
   const stream = createAgentStream();
@@ -209,7 +210,7 @@ export async function runAgentLoopContinue(
   }
 
   if (context.messages[context.messages.length - 1].role === "assistant") {
-    throw new Error("Cannot continue from message role: assistant");
+    throw new TranscriptNotContinuableError(context.messages[context.messages.length - 1].role);
   }
 
   const newMessages: AgentMessage[] = [];
@@ -605,6 +606,19 @@ type ResolvedToolCallOutcome =
   | { kind: "resolved"; tool?: AgentTool }
   | { kind: "error"; error: unknown };
 
+function hidesToolCallFromChannelProgress(
+  context: AgentContext,
+  toolCall: AgentToolCall,
+  resolvedToolCalls: Map<AgentToolCall, ResolvedToolCallOutcome>,
+): boolean {
+  const resolution = resolvedToolCalls.get(toolCall);
+  const tool =
+    resolution?.kind === "resolved"
+      ? resolution.tool
+      : context.tools?.find((candidate) => candidate.name === toolCall.name);
+  return tool?.hideFromChannelProgress === true;
+}
+
 async function executeToolCallsSequential(
   currentContext: AgentContext,
   assistantMessage: AssistantMessage,
@@ -618,11 +632,17 @@ async function executeToolCallsSequential(
   const messages: ToolResultMessage[] = [];
 
   for (const toolCall of toolCalls) {
+    const hideFromChannelProgress = hidesToolCallFromChannelProgress(
+      currentContext,
+      toolCall,
+      resolvedToolCalls,
+    );
     await emit({
       type: "tool_execution_start",
       toolCallId: toolCall.id,
       toolName: toolCall.name,
       args: toolCall.arguments,
+      ...(hideFromChannelProgress ? { hideFromChannelProgress: true } : {}),
     });
 
     const preparation = await prepareToolCall(
@@ -642,6 +662,7 @@ async function executeToolCallsSequential(
         preparation,
         config,
         signal,
+        hideFromChannelProgress,
       );
     } else {
       const executed = await executePreparedToolCall(preparation, signal, emit);
@@ -652,6 +673,7 @@ async function executeToolCallsSequential(
         executed,
         config,
         signal,
+        hideFromChannelProgress,
       );
     }
 
@@ -684,11 +706,17 @@ async function executeToolCallsParallel(
   const finalizedCalls: FinalizedToolCallEntry[] = [];
 
   for (const toolCall of toolCalls) {
+    const hideFromChannelProgress = hidesToolCallFromChannelProgress(
+      currentContext,
+      toolCall,
+      resolvedToolCalls,
+    );
     await emit({
       type: "tool_execution_start",
       toolCallId: toolCall.id,
       toolName: toolCall.name,
       args: toolCall.arguments,
+      ...(hideFromChannelProgress ? { hideFromChannelProgress: true } : {}),
     });
 
     const preparation = await prepareToolCall(
@@ -707,6 +735,7 @@ async function executeToolCallsParallel(
         preparation,
         config,
         signal,
+        hideFromChannelProgress,
       );
       await emitToolExecutionEnd(finalized, emit);
       finalizedCalls.push(finalized);
@@ -725,6 +754,7 @@ async function executeToolCallsParallel(
         executed,
         config,
         signal,
+        hideFromChannelProgress,
       );
       await emitToolExecutionEnd(finalized, emit);
       return finalized;
@@ -761,13 +791,13 @@ type ImmediateToolCallOutcome = {
   kind: "immediate";
   result: AgentToolResult<unknown>;
   isError: boolean;
+  errorKind?: "argument-validation";
 };
 
 type ExecutedToolCallOutcome = {
   result: AgentToolResult<unknown>;
   isError: boolean;
-  /** False for outcomes produced before `tool.execute` ran. Defaults to true. */
-  executionStarted?: boolean;
+  executionStarted: boolean;
 };
 
 type FinalizedToolCallOutcome = {
@@ -775,6 +805,8 @@ type FinalizedToolCallOutcome = {
   result: AgentToolResult<unknown>;
   isError: boolean;
   executionStarted: boolean;
+  errorKind?: "argument-validation";
+  hideFromChannelProgress?: boolean;
 };
 
 type FinalizedToolCallEntry = FinalizedToolCallOutcome | (() => Promise<FinalizedToolCallOutcome>);
@@ -882,9 +914,30 @@ async function prepareToolCall(
     };
   }
 
+  let preparedToolCall: AgentToolCall;
   try {
-    const preparedToolCall = prepareToolCallArguments(tool, toolCall);
-    const validatedArgs = validateToolArguments(tool, preparedToolCall);
+    preparedToolCall = prepareToolCallArguments(tool, toolCall);
+  } catch (error) {
+    return {
+      kind: "immediate",
+      result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
+      isError: true,
+    };
+  }
+
+  let validatedArgs: unknown;
+  try {
+    validatedArgs = validateToolArguments(tool, preparedToolCall);
+  } catch (error) {
+    return {
+      kind: "immediate",
+      result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
+      isError: true,
+      errorKind: "argument-validation",
+    };
+  }
+
+  try {
     if (config.beforeToolCall) {
       const beforeResult = await config.beforeToolCall(
         {
@@ -958,6 +1011,7 @@ async function executePreparedToolCall(
   }
 
   const updateEvents: Promise<void>[] = [];
+  let acceptingUpdates = true;
 
   try {
     const result = await prepared.tool.execute(
@@ -965,6 +1019,9 @@ async function executePreparedToolCall(
       prepared.args as never,
       signal,
       (partialResult) => {
+        if (!acceptingUpdates) {
+          return;
+        }
         updateEvents.push(
           Promise.resolve(
             emit({
@@ -973,19 +1030,72 @@ async function executePreparedToolCall(
               toolName: prepared.toolCall.name,
               args: prepared.toolCall.arguments,
               partialResult,
+              ...(prepared.tool.hideFromChannelProgress === true
+                ? { hideFromChannelProgress: true }
+                : {}),
             }),
           ),
         );
       },
     );
+    acceptingUpdates = false;
     await Promise.all(updateEvents);
     return { result, isError: false, executionStarted: true };
   } catch (error) {
+    acceptingUpdates = false;
     await Promise.all(updateEvents);
     return {
       result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
       isError: true,
       executionStarted: true,
+    };
+  } finally {
+    acceptingUpdates = false;
+  }
+}
+
+/** Invokes `afterToolCall` and applies any content/details/terminate/isError overrides. */
+async function invokeAfterToolCall(
+  currentContext: AgentContext,
+  assistantMessage: AssistantMessage,
+  prepared: Pick<PreparedToolCall, "toolCall" | "args">,
+  result: AgentToolResult<unknown>,
+  isError: boolean,
+  executionStarted: boolean,
+  config: AgentLoopConfig,
+  signal: AbortSignal | undefined,
+): Promise<{ result: AgentToolResult<unknown>; isError: boolean }> {
+  if (!config.afterToolCall) {
+    return { result, isError };
+  }
+  try {
+    const afterResult = await config.afterToolCall(
+      {
+        assistantMessage,
+        toolCall: prepared.toolCall,
+        args: prepared.args,
+        result,
+        isError,
+        executionStarted,
+        context: currentContext,
+      },
+      signal,
+    );
+    if (!afterResult) {
+      return { result, isError };
+    }
+    return {
+      result: {
+        content: afterResult.content ?? result.content,
+        details: afterResult.details ?? result.details,
+        terminate: afterResult.terminate ?? result.terminate,
+      },
+      isError: afterResult.isError ?? isError,
+    };
+  } catch (error) {
+    return {
+      result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
+      isError: true,
     };
   }
 }
@@ -1003,15 +1113,32 @@ async function finalizeImmediateToolCall(
   immediate: ImmediateToolCallOutcome,
   config: AgentLoopConfig,
   signal: AbortSignal | undefined,
+  hideFromChannelProgress: boolean,
 ): Promise<FinalizedToolCallOutcome> {
-  return await finalizeExecutedToolCall(
-    currentContext,
-    assistantMessage,
-    { toolCall, args: toolCall.arguments },
-    { result: immediate.result, isError: immediate.isError, executionStarted: false },
-    config,
-    signal,
-  );
+  const prepared = { toolCall, args: toolCall.arguments };
+  // An abort means the run was cancelled, not that the call was genuinely
+  // rejected — nothing happened, so there is nothing for the hook to count.
+  const { result, isError } = signal?.aborted
+    ? { result: immediate.result, isError: immediate.isError }
+    : await invokeAfterToolCall(
+        currentContext,
+        assistantMessage,
+        prepared,
+        immediate.result,
+        immediate.isError,
+        false,
+        config,
+        signal,
+      );
+
+  return {
+    toolCall,
+    result,
+    isError,
+    executionStarted: false,
+    ...(immediate.errorKind ? { errorKind: immediate.errorKind } : {}),
+    ...(hideFromChannelProgress ? { hideFromChannelProgress: true } : {}),
+  };
 }
 
 async function finalizeExecutedToolCall(
@@ -1021,43 +1148,29 @@ async function finalizeExecutedToolCall(
   executed: ExecutedToolCallOutcome,
   config: AgentLoopConfig,
   signal: AbortSignal | undefined,
+  hideFromChannelProgress: boolean,
 ): Promise<FinalizedToolCallOutcome> {
-  let result = executed.result;
-  let isError = executed.isError;
-
-  if (config.afterToolCall) {
-    try {
-      const afterResult = await config.afterToolCall(
-        {
-          assistantMessage,
-          toolCall: prepared.toolCall,
-          args: prepared.args,
-          result,
-          isError,
-          executionStarted: executed.executionStarted ?? true,
-          context: currentContext,
-        },
+  // A preflight abort before `tool.execute` ran must not fire the hook — the
+  // run never started, unlike an immediate pre-execution rejection above.
+  const { result, isError } = executed.executionStarted
+    ? await invokeAfterToolCall(
+        currentContext,
+        assistantMessage,
+        prepared,
+        executed.result,
+        executed.isError,
+        executed.executionStarted,
+        config,
         signal,
-      );
-      if (afterResult) {
-        result = {
-          content: afterResult.content ?? result.content,
-          details: afterResult.details ?? result.details,
-          terminate: afterResult.terminate ?? result.terminate,
-        };
-        isError = afterResult.isError ?? isError;
-      }
-    } catch (error) {
-      result = createErrorToolResult(error instanceof Error ? error.message : String(error));
-      isError = true;
-    }
-  }
+      )
+    : { result: executed.result, isError: executed.isError };
 
   return {
     toolCall: prepared.toolCall,
     result,
     isError,
-    executionStarted: executed.executionStarted !== false,
+    executionStarted: executed.executionStarted,
+    ...(hideFromChannelProgress ? { hideFromChannelProgress: true } : {}),
   };
 }
 
@@ -1082,6 +1195,8 @@ async function emitToolExecutionEnd(
     result: finalized.result,
     isError: finalized.isError,
     executionStarted: finalized.executionStarted,
+    ...(finalized.errorKind ? { errorKind: finalized.errorKind } : {}),
+    ...(finalized.hideFromChannelProgress === true ? { hideFromChannelProgress: true } : {}),
   });
 }
 

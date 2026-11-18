@@ -1,7 +1,12 @@
 // Proves the fixed, user-safe reason classification used by the non-terminal
 // step-failure note — never the raw error text.
 import { describe, expect, it } from "vitest";
-import { classifyToolFailureReason } from "./tool-error-summary.js";
+import {
+  classifyToolFailureReason,
+  createToolValidationErrorSummary,
+  readToolValidationErrorSummary,
+  summarizeToolValidationError,
+} from "./tool-error-summary.js";
 
 describe("classifyToolFailureReason", () => {
   it("classifies the explicit timedOut flag ahead of any text pattern", () => {
@@ -53,5 +58,51 @@ describe("classifyToolFailureReason", () => {
     });
     expect(result?.text).toBe("not found");
     expect(result?.text).not.toContain("extract_lines.py");
+  });
+});
+
+describe("createToolValidationErrorSummary", () => {
+  it("builds a static summary without validator details", () => {
+    expect(createToolValidationErrorSummary("edit")).toBe(
+      "edit tool validation failed: invalid arguments",
+    );
+    expect(createToolValidationErrorSummary(" custom   tool ")).toBe(
+      "custom tool tool validation failed: invalid arguments",
+    );
+  });
+
+  it("rejects unsafe or oversized tool names", () => {
+    expect(createToolValidationErrorSummary("edit\nsecret")).toBeUndefined();
+    expect(createToolValidationErrorSummary("x".repeat(200))).toBeUndefined();
+  });
+});
+
+describe("summarizeToolValidationError", () => {
+  it("accepts only a boundary-prepared summary", () => {
+    expect(
+      summarizeToolValidationError({
+        toolName: "edit",
+        validationErrorSummary: "edit tool validation failed: invalid arguments",
+        error:
+          'Validation failed for tool "edit":\n  - secret-field: rejected-secret\n\nReceived arguments:\n{}',
+      }),
+    ).toBe("edit tool validation failed: invalid arguments");
+    expect(
+      summarizeToolValidationError({
+        toolName: "edit",
+        error:
+          'Validation failed for tool "edit":\n  - secret-field: rejected-secret\n\nReceived arguments:\n{}',
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe("readToolValidationErrorSummary", () => {
+  it("accepts generated summaries and rejects unsafe boundary values", () => {
+    expect(readToolValidationErrorSummary("edit tool validation failed: path: invalid")).toBe(
+      "edit tool validation failed: path: invalid",
+    );
+    expect(readToolValidationErrorSummary("edit failed\nsecret")).toBeUndefined();
+    expect(readToolValidationErrorSummary(`edit failed: ${"x".repeat(200)}`)).toBeUndefined();
   });
 });

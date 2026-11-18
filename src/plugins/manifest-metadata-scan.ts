@@ -4,11 +4,18 @@ import os from "node:os";
 import path from "node:path";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeOptionalString as normalizeTrimmedString } from "@openclaw/normalization-core/string-coerce";
+import { resolveOpenClawPackageRootSync } from "../infra/openclaw-root.js";
 import { readRegularFileSync } from "../infra/regular-file.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { parseJsonWithJson5Fallback } from "../utils/parse-json-compat.js";
 import { resolveBundledPluginsDir } from "./bundled-dir.js";
 import { readPersistedInstalledPluginIndexSync } from "./installed-plugin-index-store.js";
+
+// Plugin manifest files are small metadata descriptors. Bound reads to prevent
+// a corrupted or hostile manifest from exhausting memory during metadata scan.
+const PLUGIN_MANIFEST_METADATA_MAX_BYTES = 256 * 1024;
+
+const log = createSubsystemLogger("plugins/manifest-metadata-scan");
 
 type PluginManifestMetadataRecord = {
   pluginDir: string;
@@ -24,10 +31,6 @@ type CandidateDir = {
 };
 
 const PLUGIN_MANIFEST_FILENAME = "openclaw.plugin.json";
-// Plugin manifest files are small metadata descriptors. Bound reads to prevent
-// a corrupted or hostile manifest from exhausting memory during metadata scan.
-const PLUGIN_MANIFEST_METADATA_MAX_BYTES = 256 * 1024;
-const log = createSubsystemLogger("plugins/manifest-metadata-scan");
 let manifestMetadataCache:
   | {
       key: string;
@@ -138,6 +141,41 @@ function listPersistedIndexPluginDirs(env: NodeJS.ProcessEnv, startOrder: number
   return dirs;
 }
 
+function isSourceCheckoutRoot(packageRoot: string): boolean {
+  return (
+    fs.existsSync(path.join(packageRoot, "pnpm-workspace.yaml")) &&
+    fs.existsSync(path.join(packageRoot, "src")) &&
+    fs.existsSync(path.join(packageRoot, "extensions"))
+  );
+}
+
+function resolvePackageRootsForSourceManifestMetadata(): string[] {
+  const roots: string[] = [];
+  for (const params of [
+    { argv1: process.argv[1] },
+    { moduleUrl: import.meta.url },
+  ] satisfies Array<{ argv1?: string; moduleUrl?: string }>) {
+    const root = resolveOpenClawPackageRootSync(params);
+    if (root && !roots.includes(root)) {
+      roots.push(root);
+    }
+  }
+  return roots;
+}
+
+function listSourceCheckoutPluginDirs(startOrder: number): CandidateDir[] {
+  const dirs: CandidateDir[] = [];
+  let order = startOrder;
+  for (const packageRoot of resolvePackageRootsForSourceManifestMetadata()) {
+    if (!isSourceCheckoutRoot(packageRoot)) {
+      continue;
+    }
+    dirs.push(...listChildPluginDirs(path.join(packageRoot, "extensions"), 3, order, "source"));
+    order = startOrder + dirs.length;
+  }
+  return dirs;
+}
+
 function resolveComparablePath(filePath: string): string {
   try {
     return fs.realpathSync(filePath);
@@ -169,6 +207,8 @@ export function listOpenClawPluginManifestMetadata(
   candidates.push(...listPersistedIndexPluginDirs(env, order));
   order = candidates.length;
   candidates.push(...listChildPluginDirs(resolveBundledPluginsDir(env), 2, order, "bundled"));
+  order = candidates.length;
+  candidates.push(...listSourceCheckoutPluginDirs(order));
   order = candidates.length;
   candidates.push(
     ...listChildPluginDirs(path.join(resolveStateDir(env), "extensions"), 4, order, "global"),

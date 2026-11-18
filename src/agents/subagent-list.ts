@@ -29,6 +29,7 @@ import {
 } from "./subagent-registry-read.js";
 import { getSubagentRunsSnapshotForRead } from "./subagent-registry-state.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
+import { compareSubagentRunGeneration } from "./subagent-run-generation.js";
 import {
   hasSubagentRunEnded,
   isLiveUnendedSubagentRun,
@@ -104,7 +105,7 @@ export function buildLatestSubagentRunIndex(
       continue;
     }
     const existing = latestByChildSessionKey.get(childSessionKey);
-    if (!existing || entry.createdAt > existing.createdAt) {
+    if (!existing || compareSubagentRunGeneration(entry, existing) > 0) {
       latestByChildSessionKey.set(childSessionKey, entry);
     }
   }

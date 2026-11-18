@@ -35,14 +35,18 @@ export type PluginStateSyncKeyedStore<T> = {
   lookup(key: string): T | undefined;
   consume(key: string): T | undefined;
   delete(key: string): boolean;
+  deleteIf?: (key: string, predicate: (current: T) => boolean) => boolean;
   entries(): PluginStateEntry<T>[];
   clear(): void;
 };
 
 /** Options for opening a keyed plugin-state namespace. */
+export type PluginStateOverflowPolicy = "evict-oldest" | "reject-new";
+
 export type OpenKeyedStoreOptions = {
   namespace: string;
   maxEntries: number;
+  overflowPolicy?: PluginStateOverflowPolicy;
   defaultTtlMs?: number;
   env?: NodeJS.ProcessEnv;
 };

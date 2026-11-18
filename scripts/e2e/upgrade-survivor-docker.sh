@@ -25,11 +25,47 @@ PROBE_ATTEMPT_TIMEOUT_MS="$(
 PROBE_MAX_BODY_BYTES="$(
   openclaw_e2e_read_positive_int_env OPENCLAW_UPGRADE_SURVIVOR_PROBE_MAX_BODY_BYTES 1048576
 )"
-LANE_ARTIFACT_SUFFIX="${OPENCLAW_DOCKER_ALL_LANE_NAME:-default}"
+ROOT_MANAGED_VPS="${OPENCLAW_UPGRADE_SURVIVOR_ROOT_MANAGED_VPS:-0}"
+
+resolve_lane_artifact_suffix() {
+  if [ -n "${OPENCLAW_DOCKER_ALL_LANE_NAME:-}" ]; then
+    printf "%s" "$OPENCLAW_DOCKER_ALL_LANE_NAME"
+    return
+  fi
+
+  if [ "$ROOT_MANAGED_VPS" = "1" ]; then
+    printf "root-managed-vps-upgrade"
+  elif [ "$UPDATE_RESTART_MODE" = "auto-auth" ]; then
+    printf "update-restart-auth"
+  elif [ "${OPENCLAW_UPGRADE_SURVIVOR_PUBLISHED_BASELINE:-0}" = "1" ]; then
+    printf "published-upgrade-survivor"
+  else
+    printf "upgrade-survivor"
+  fi
+
+  if [ -n "${BASELINE_SPEC// }" ]; then
+    printf -- "-%s" "$BASELINE_SPEC"
+  fi
+  if [ "$SCENARIO" != "base" ]; then
+    printf -- "-%s" "$SCENARIO"
+  fi
+}
+
+LANE_ARTIFACT_SUFFIX="$(resolve_lane_artifact_suffix)"
 LANE_ARTIFACT_SUFFIX="${LANE_ARTIFACT_SUFFIX//[^A-Za-z0-9_.-]/_}"
 ARTIFACT_DIR="${OPENCLAW_UPGRADE_SURVIVOR_ARTIFACT_DIR:-$ROOT_DIR/.artifacts/upgrade-survivor/$LANE_ARTIFACT_SUFFIX}"
-ROOT_MANAGED_VPS="${OPENCLAW_UPGRADE_SURVIVOR_ROOT_MANAGED_VPS:-0}"
 DOCKER_RUN_USER_ARGS=()
+PREPUBLISH_PLUGIN_REGISTRY_ARGS=()
+if [ -n "${OPENCLAW_PREPUBLISH_PLUGIN_REGISTRY_DIR:-}" ]; then
+  if [ ! -f "$OPENCLAW_PREPUBLISH_PLUGIN_REGISTRY_DIR/prepublish-plugin-registry.json" ]; then
+    echo "OPENCLAW_PREPUBLISH_PLUGIN_REGISTRY_DIR must contain prepublish-plugin-registry.json" >&2
+    exit 1
+  fi
+  PREPUBLISH_PLUGIN_REGISTRY_ARGS+=(
+    -e OPENCLAW_PREPUBLISH_PLUGIN_REGISTRY_DIR=/tmp/openclaw-prepublish-plugin-registry
+    -v "$OPENCLAW_PREPUBLISH_PLUGIN_REGISTRY_DIR:/tmp/openclaw-prepublish-plugin-registry:ro"
+  )
+fi
 PROBE_ENV_ARGS=(
   -e OPENCLAW_UPGRADE_SURVIVOR_PROBE_TIMEOUT_MS="$PROBE_TIMEOUT_MS"
   -e OPENCLAW_UPGRADE_SURVIVOR_PROBE_ATTEMPT_TIMEOUT_MS="$PROBE_ATTEMPT_TIMEOUT_MS"
@@ -136,6 +172,7 @@ if [ "${OPENCLAW_UPGRADE_SURVIVOR_PUBLISHED_BASELINE:-0}" = "1" ]; then
     -e OPENCLAW_UPGRADE_SURVIVOR_STATUS_BUDGET_SECONDS="$STATUS_BUDGET_SECONDS" \
     "${PROBE_ENV_ARGS[@]}" \
     -v "$ARTIFACT_DIR:/tmp/openclaw-upgrade-survivor-artifacts" \
+    "${PREPUBLISH_PLUGIN_REGISTRY_ARGS[@]}" \
     "${DOCKER_E2E_PACKAGE_ARGS[@]}" \
     "${DOCKER_RUN_USER_ARGS[@]}" \
     "$IMAGE_NAME" \
@@ -164,6 +201,7 @@ docker_e2e_run_with_harness \
   -e OPENCLAW_UPGRADE_SURVIVOR_STATUS_BUDGET_SECONDS="$STATUS_BUDGET_SECONDS" \
   "${PROBE_ENV_ARGS[@]}" \
   -v "$ARTIFACT_DIR:/tmp/openclaw-upgrade-survivor-artifacts" \
+  "${PREPUBLISH_PLUGIN_REGISTRY_ARGS[@]}" \
   "${DOCKER_E2E_PACKAGE_ARGS[@]}" \
   "${DOCKER_RUN_USER_ARGS[@]}" \
   "$IMAGE_NAME" \
@@ -225,6 +263,9 @@ cleanup() {
   openclaw_e2e_terminate_gateways "${gateway_pid:-}"
   if [ -s "$SYSTEMCTL_SHIM_PID_FILE" ]; then
     openclaw_e2e_terminate_gateways "$(cat "$SYSTEMCTL_SHIM_PID_FILE" 2>/dev/null || true)"
+  fi
+  if [ -n "${OPENCLAW_UPGRADE_SURVIVOR_RESTART_AUTHORED_CONFIG:-}" ] && [ -f "$OPENCLAW_UPGRADE_SURVIVOR_RESTART_AUTHORED_CONFIG" ]; then
+    node scripts/e2e/lib/upgrade-survivor/config-parking.mjs restore "$OPENCLAW_CONFIG_PATH" "$OPENCLAW_UPGRADE_SURVIVOR_RESTART_AUTHORED_CONFIG" || true
   fi
 }
 trap cleanup EXIT
@@ -289,7 +330,8 @@ fs.writeFileSync(
 );
 NODE
   tar -czf "$tarball" -C "$fixture_root" package
-  node scripts/e2e/lib/plugins/npm-registry-server.mjs \
+  OPENCLAW_NPM_REGISTRY_UPSTREAM=https://registry.npmjs.org \
+    node scripts/e2e/lib/plugins/npm-registry-server.mjs \
     "$port_file" \
     "@openclaw/brave-plugin" \
     "2026.5.2" \
@@ -344,11 +386,31 @@ set +e
 openclaw_e2e_maybe_timeout "$command_timeout" env -u OPENCLAW_GATEWAY_TOKEN -u OPENCLAW_GATEWAY_PASSWORD OPENCLAW_ALLOW_ROOT=1 openclaw "${update_args[@]}" >/tmp/openclaw-upgrade-survivor-update.json 2>/tmp/openclaw-upgrade-survivor-update.err
 update_status=$?
 set -e
+if [ "$UPDATE_RESTART_MODE" = "auto-auth" ] && [ -f "${OPENCLAW_UPGRADE_SURVIVOR_RESTART_AUTHORED_CONFIG:-}" ]; then
+  if ! node scripts/e2e/lib/upgrade-survivor/config-parking.mjs restore "$OPENCLAW_CONFIG_PATH" "$OPENCLAW_UPGRADE_SURVIVOR_RESTART_AUTHORED_CONFIG"; then
+    echo "failed to restore authored config after restart probe" >&2
+    exit 1
+  fi
+fi
 if [ "$update_status" -ne 0 ]; then
   echo "openclaw update failed" >&2
   openclaw_e2e_print_log /tmp/openclaw-upgrade-survivor-update.err >&2
   openclaw_e2e_print_log /tmp/openclaw-upgrade-survivor-update.json >&2
   exit "$update_status"
+fi
+
+if [ "$UPDATE_RESTART_MODE" = "auto-auth" ]; then
+  echo "Restarting gateway with restored authored configuration..."
+  if ! systemctl --user restart openclaw-gateway.service; then
+    echo "failed to restart gateway after restoring authored config" >&2
+    exit 1
+  fi
+  gateway_pid="$(cat "$OPENCLAW_UPGRADE_SURVIVOR_SYSTEMCTL_SHIM_PID_FILE")"
+  openclaw_e2e_wait_gateway_ready \
+    "$gateway_pid" \
+    "$OPENCLAW_UPGRADE_SURVIVOR_SYSTEMCTL_SHIM_DAEMON_LOG" \
+    360 \
+    "$PORT"
 fi
 
 if [ "$UPDATE_RESTART_MODE" = "auto-auth" ]; then
@@ -374,7 +436,7 @@ node scripts/e2e/lib/upgrade-survivor/assertions.mjs assert-state
 
 startup_summary="n/a"
 if [ "$UPDATE_RESTART_MODE" = "auto-auth" ]; then
-  echo "Gateway restart was handled by openclaw update."
+  echo "Gateway restart and authored configuration reload were verified."
 else
   echo "Starting gateway from upgraded state..."
   start_epoch="$(node -e "process.stdout.write(String(Date.now()))")"

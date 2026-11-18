@@ -1,3 +1,4 @@
+import { notifyLlmRequestActivity } from "@openclaw/ai/internal/runtime";
 // LLM idle-timeout tests cover timeout selection and stream wrapping for
 // embedded provider calls, including local-provider and cron exceptions.
 import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
@@ -7,12 +8,19 @@ import {
 } from "openclaw/plugin-sdk/llm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../../config/config.js";
-import { notifyLlmRequestActivity } from "../../../shared/llm-request-activity.js";
 import type { StreamFn } from "../../runtime/index.js";
-import { resolveLlmIdleTimeoutMs, streamWithIdleTimeout } from "./llm-idle-timeout.js";
+import { resolveAgentTimeoutMs } from "../../timeout.js";
+import {
+  resolveLlmFirstEventTimeoutMs,
+  resolveLlmIdleTimeoutMs,
+  streamWithIdleTimeout,
+} from "./llm-idle-timeout.js";
 
 const DEFAULT_LLM_IDLE_TIMEOUT_MS = 120_000;
+const SELF_HOSTED_LLM_IDLE_TIMEOUT_MS = 300_000;
 const CRON_LLM_IDLE_TIMEOUT_MS = 60_000;
+const CLOUD_LLM_FIRST_EVENT_TIMEOUT_MS = DEFAULT_LLM_IDLE_TIMEOUT_MS;
+const LOCAL_LLM_FIRST_EVENT_TIMEOUT_MS = 300_000;
 
 describe("resolveLlmIdleTimeoutMs", () => {
   it("returns default when config is undefined", () => {
@@ -24,17 +32,14 @@ describe("resolveLlmIdleTimeoutMs", () => {
     expect(resolveLlmIdleTimeoutMs({ cfg })).toBe(DEFAULT_LLM_IDLE_TIMEOUT_MS);
   });
 
-  it("honors agents.defaults.timeoutSeconds above the default idle watchdog", () => {
-    // An explicit turn budget governs the idle timeout — it is NOT clamped down
-    // to the 120s network-silence default. Heavy turns (large context + extended
-    // thinking) can legitimately be silent >120s; capping idle at 120s killed them.
+  it("caps agents.defaults.timeoutSeconds at the cloud idle default for cloud models", () => {
+    // A cloud-class turn budget above the 120s network-silence ceiling is
+    // still bounded by it; only local/self-hosted classes get a higher or no
+    // ceiling (see the "large agents.defaults.timeoutSeconds" table below).
     const cfg = { agents: { defaults: { timeoutSeconds: 300 } } } as OpenClawConfig;
-    expect(resolveLlmIdleTimeoutMs({ cfg })).toBe(300_000);
-  });
-
-  it("scales the idle watchdog with a larger agents.defaults.timeoutSeconds", () => {
-    const cfg = { agents: { defaults: { timeoutSeconds: 600 } } } as OpenClawConfig;
-    expect(resolveLlmIdleTimeoutMs({ cfg })).toBe(600_000);
+    expect(resolveLlmIdleTimeoutMs({ cfg })).toBe(DEFAULT_LLM_IDLE_TIMEOUT_MS);
+    const cfgLarger = { agents: { defaults: { timeoutSeconds: 600 } } } as OpenClawConfig;
+    expect(resolveLlmIdleTimeoutMs({ cfg: cfgLarger })).toBe(DEFAULT_LLM_IDLE_TIMEOUT_MS);
   });
 
   it("uses agents.defaults.timeoutSeconds when it is shorter than the default idle watchdog", () => {
@@ -48,6 +53,30 @@ describe("resolveLlmIdleTimeoutMs", () => {
 
   it("uses an explicit run timeout override when shorter than the default idle watchdog", () => {
     expect(resolveLlmIdleTimeoutMs({ runTimeoutMs: 30_000 })).toBe(30_000);
+  });
+
+  it.each([
+    [
+      "cloud",
+      { provider: "openai", baseUrl: "https://api.openai.com/v1" },
+      DEFAULT_LLM_IDLE_TIMEOUT_MS,
+    ],
+    [
+      "self-hosted",
+      { provider: "vllm", baseUrl: "https://gpu.example.com/v1" },
+      SELF_HOSTED_LLM_IDLE_TIMEOUT_MS,
+    ],
+  ])("uses the provider-class idle default for no-timeout %s models", (_label, model, expected) => {
+    expect(resolveLlmIdleTimeoutMs({ runTimeoutMs: MAX_TIMER_TIMEOUT_MS, model })).toBe(expected);
+  });
+
+  it("keeps local base URLs opted out of the implicit idle watchdog under no-timeout runs", () => {
+    expect(
+      resolveLlmIdleTimeoutMs({
+        runTimeoutMs: MAX_TIMER_TIMEOUT_MS,
+        model: { baseUrl: "http://127.0.0.1:11434" },
+      }),
+    ).toBe(0);
   });
 
   it("caps explicit cron run timeouts so stream stalls can reach model fallbacks", () => {
@@ -199,10 +228,6 @@ describe("resolveLlmIdleTimeoutMs", () => {
     ).toBe(CRON_LLM_IDLE_TIMEOUT_MS);
   });
 
-  it("disables the idle watchdog when an explicit run timeout disables timeouts", () => {
-    expect(resolveLlmIdleTimeoutMs({ runTimeoutMs: MAX_TIMER_TIMEOUT_MS })).toBe(0);
-  });
-
   it("honors an explicit models.providers.<id>.timeoutSeconds for cloud providers (#77744, #78361)", () => {
     // models.providers.<id>.timeoutSeconds is documented as the user-facing
     // knob to extend slow model responses. The idle watchdog must respect it
@@ -288,6 +313,38 @@ describe("resolveLlmIdleTimeoutMs", () => {
         runTimeoutMs: MAX_TIMER_TIMEOUT_MS,
       }),
     ).toBe(180_000);
+  });
+
+  it("keeps the cloud idle watchdog finite when config timeoutSeconds is unlimited", () => {
+    const cfg = { agents: { defaults: { timeoutSeconds: 0 } } } as OpenClawConfig;
+    const runTimeoutMs = resolveAgentTimeoutMs({ cfg });
+
+    expect(runTimeoutMs).toBe(MAX_TIMER_TIMEOUT_MS);
+    expect(
+      resolveLlmIdleTimeoutMs({
+        cfg,
+        runTimeoutMs,
+        model: { provider: "openai", baseUrl: "https://api.openai.com/v1" },
+      }),
+    ).toBe(DEFAULT_LLM_IDLE_TIMEOUT_MS);
+  });
+
+  it.each([
+    ["vllm", "https://gpu.example.com/v1"],
+    ["sglang-rig", "https://llm.example.net/v1"],
+    ["lmstudio", "http://llm.example.net/v1"],
+  ])("uses the self-hosted idle default for provider %s at %s", (provider, baseUrl) => {
+    expect(resolveLlmIdleTimeoutMs({ model: { provider, baseUrl } })).toBe(
+      SELF_HOSTED_LLM_IDLE_TIMEOUT_MS,
+    );
+  });
+
+  it("keeps the cloud provider idle default unchanged", () => {
+    expect(
+      resolveLlmIdleTimeoutMs({
+        model: { provider: "openai", baseUrl: "https://api.openai.com/v1" },
+      }),
+    ).toBe(DEFAULT_LLM_IDLE_TIMEOUT_MS);
   });
 
   it("uses provider request timeout for cron model calls", () => {
@@ -453,6 +510,133 @@ describe("resolveLlmIdleTimeoutMs", () => {
     expect(resolveLlmIdleTimeoutMs({ cfg, model: { baseUrl: "http://127.0.0.1:11434" } })).toBe(
       30_000,
     );
+  });
+
+  it.each([
+    ["local keeps no class ceiling", { baseUrl: "http://127.0.0.1:11434" }, 3_600_000],
+    [
+      "self-hosted keeps the 300s tier",
+      { provider: "vllm", baseUrl: "https://gpu.example.com/v1" },
+      300_000,
+    ],
+    ["cloud keeps the 120s default", { provider: "openai" }, 120_000],
+  ])("large agents.defaults.timeoutSeconds: %s", (_label, model, expected) => {
+    const cfg = { agents: { defaults: { timeoutSeconds: 3_600 } } } as OpenClawConfig;
+    expect(resolveLlmIdleTimeoutMs({ cfg, model })).toBe(expected);
+  });
+
+  it("cron exempts provider-id self-hosted models from the 60s clamp", () => {
+    expect(
+      resolveLlmIdleTimeoutMs({
+        trigger: "cron",
+        runTimeoutMs: 900_000,
+        model: { provider: "vllm", baseUrl: "https://gpu.example.com/v1" },
+      }),
+    ).toBe(900_000);
+    expect(
+      resolveLlmIdleTimeoutMs({
+        trigger: "cron",
+        runTimeoutMs: 900_000,
+        model: { provider: "openai" },
+      }),
+    ).toBe(60_000);
+  });
+});
+
+describe("resolveLlmFirstEventTimeoutMs", () => {
+  it("uses the cloud first-event timeout by default", () => {
+    expect(resolveLlmFirstEventTimeoutMs()).toBe(CLOUD_LLM_FIRST_EVENT_TIMEOUT_MS);
+  });
+
+  it("uses the longer local first-event timeout for loopback providers", () => {
+    expect(
+      resolveLlmFirstEventTimeoutMs({
+        model: { provider: "lmstudio", baseUrl: "http://127.0.0.1:1234/v1" },
+      }),
+    ).toBe(LOCAL_LLM_FIRST_EVENT_TIMEOUT_MS);
+  });
+
+  it("uses the longer local first-event timeout for self-hosted bare hostnames", () => {
+    expect(
+      resolveLlmFirstEventTimeoutMs({
+        model: { provider: "vllm", baseUrl: "http://gpu-box:8000/v1" },
+      }),
+    ).toBe(LOCAL_LLM_FIRST_EVENT_TIMEOUT_MS);
+  });
+
+  it("keeps Ollama cloud models on the cloud first-event timeout", () => {
+    expect(
+      resolveLlmFirstEventTimeoutMs({
+        model: { provider: "ollama", id: "ollama/kimi-k2.6:cloud", baseUrl: "http://127.0.0.1" },
+      }),
+    ).toBe(CLOUD_LLM_FIRST_EVENT_TIMEOUT_MS);
+  });
+
+  it("honors explicit provider request timeouts", () => {
+    expect(
+      resolveLlmFirstEventTimeoutMs({
+        model: { baseUrl: "http://127.0.0.1:11434" },
+        modelRequestTimeoutMs: 600_000,
+      }),
+    ).toBe(600_000);
+  });
+
+  it("caps first-event timeout by explicit run timeout", () => {
+    expect(
+      resolveLlmFirstEventTimeoutMs({
+        model: { baseUrl: "http://127.0.0.1:11434" },
+        runTimeoutMs: 45_000,
+      }),
+    ).toBe(45_000);
+  });
+
+  it("does not treat the no-timeout run sentinel as an unlimited first-event wait", () => {
+    expect(
+      resolveLlmFirstEventTimeoutMs({
+        model: { baseUrl: "http://127.0.0.1:11434" },
+        runTimeoutMs: MAX_TIMER_TIMEOUT_MS,
+      }),
+    ).toBe(LOCAL_LLM_FIRST_EVENT_TIMEOUT_MS);
+  });
+
+  it.each([
+    [
+      "cloud",
+      { provider: "openai", baseUrl: "https://api.openai.com/v1" },
+      CLOUD_LLM_FIRST_EVENT_TIMEOUT_MS,
+    ],
+    [
+      "self-hosted",
+      { provider: "vllm", baseUrl: "https://gpu.example.com/v1" },
+      LOCAL_LLM_FIRST_EVENT_TIMEOUT_MS,
+    ],
+  ])(
+    "uses the provider-class first-event default for no-timeout %s models",
+    (_label, model, expected) => {
+      expect(resolveLlmFirstEventTimeoutMs({ runTimeoutMs: MAX_TIMER_TIMEOUT_MS, model })).toBe(
+        expected,
+      );
+    },
+  );
+
+  it("honors explicit first-event provider request timeouts under no-timeout runs", () => {
+    expect(
+      resolveLlmFirstEventTimeoutMs({
+        runTimeoutMs: MAX_TIMER_TIMEOUT_MS,
+        modelRequestTimeoutMs: 600_000,
+        model: { provider: "openai", baseUrl: "https://api.openai.com/v1" },
+      }),
+    ).toBe(600_000);
+  });
+
+  it("caps first-event timeout by agents.defaults.timeoutSeconds when no explicit run timeout exists", () => {
+    const cfg = { agents: { defaults: { timeoutSeconds: 20 } } } as OpenClawConfig;
+    expect(
+      resolveLlmFirstEventTimeoutMs({
+        cfg,
+        model: { baseUrl: "http://127.0.0.1:11434" },
+      }),
+    ).toBe(20_000);
   });
 });
 

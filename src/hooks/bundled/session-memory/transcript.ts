@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { sanitizeModelSpecialTokens } from "../../../security/external-content.js";
 import { hasInterSessionUserProvenance } from "../../../sessions/input-provenance.js";
+import { isOpenClawDeliveryMirrorAssistantMessage } from "../../../shared/transcript-only-openclaw-assistant.js";
 
 const SESSION_MEMORY_TOOL_DIRECTIVE_PREFIX = String.raw`(?:(?:\|DSML\|)|(?:\uFF5CDSML\uFF5C))?`;
 const SESSION_MEMORY_TOOL_DIRECTIVE_KIND = String.raw`(?:tool_calls?|function_calls?|tool_use_error)`;
@@ -55,15 +56,19 @@ function extractTextMessageContent(content: unknown): string | undefined {
   return undefined;
 }
 
-export async function getRecentSessionContent(
+export type SessionMemoryProjection = { content: string; originClass: "agent" | "untrusted" };
+
+export async function getRecentSessionProjection(
   sessionFilePath: string,
   messageCount = 15,
-): Promise<string | null> {
+): Promise<SessionMemoryProjection | null> {
   try {
     const content = await fs.readFile(sessionFilePath, "utf-8");
     const lines = content.trim().split("\n");
 
-    const allMessages: string[] = [];
+    const allMessages: Array<{ text: string; trusted: boolean }> = [];
+    let trustedTurn = false;
+    let lastAssistantText: string | undefined;
     for (const line of lines) {
       try {
         const entry = JSON.parse(line);
@@ -72,16 +77,39 @@ export async function getRecentSessionContent(
             role?: unknown;
             content?: unknown;
             provenance?: unknown;
+            __openclaw?: { senderIsOwner?: unknown };
           };
           const role = msg.role;
+          if (role === "user") {
+            trustedTurn =
+              msg["__openclaw"]?.senderIsOwner === true && !hasInterSessionUserProvenance(msg);
+          } else if (role === "toolResult" || role === "tool") {
+            trustedTurn = false;
+          }
           if ((role === "user" || role === "assistant") && "content" in msg && msg.content) {
             if (role === "user" && hasInterSessionUserProvenance(msg)) {
               continue;
             }
+            if (role === "user") {
+              // New turn: reset even when slash commands are omitted from
+              // memory, so later standalone delivery mirrors are preserved.
+              lastAssistantText = undefined;
+            }
             const text = extractTextMessageContent(msg.content);
             const sanitized = text ? sanitizeSessionMemoryTranscriptText(text) : null;
+            // Skip delivery-mirror rows only when they duplicate the preceding
+            // assistant text. Delivery-mirror rows with unique visible content
+            // (e.g., message-tool replies) are preserved.
+            if (isOpenClawDeliveryMirrorAssistantMessage(msg)) {
+              if (sanitized && sanitized === lastAssistantText) {
+                continue;
+              }
+            }
             if (sanitized && !sanitized.startsWith("/")) {
-              allMessages.push(`${role}: ${sanitized}`);
+              allMessages.push({ text: `${role}: ${sanitized}`, trusted: trustedTurn });
+              if (role === "assistant") {
+                lastAssistantText = sanitized;
+              }
             }
           }
         }
@@ -90,18 +118,33 @@ export async function getRecentSessionContent(
       }
     }
 
-    return allMessages.slice(-messageCount).join("\n");
+    const limit = Number.isFinite(messageCount) ? Math.max(0, Math.floor(messageCount)) : 0;
+    if (limit === 0) {
+      return null;
+    }
+    const recent = allMessages.slice(-limit);
+    return {
+      content: recent.map((entry) => entry.text).join("\n"),
+      originClass: recent.every((entry) => entry.trusted) ? "agent" : "untrusted",
+    };
   } catch {
     return null;
   }
 }
 
-export async function getRecentSessionContentWithResetFallback(
+export async function getRecentSessionContent(
   sessionFilePath: string,
   messageCount = 15,
 ): Promise<string | null> {
-  const primary = await getRecentSessionContent(sessionFilePath, messageCount);
-  if (primary) {
+  return (await getRecentSessionProjection(sessionFilePath, messageCount))?.content ?? null;
+}
+
+export async function getRecentSessionProjectionWithResetFallback(
+  sessionFilePath: string,
+  messageCount = 15,
+): Promise<SessionMemoryProjection | null> {
+  const primary = await getRecentSessionProjection(sessionFilePath, messageCount);
+  if (primary?.content) {
     return primary;
   }
 
@@ -117,10 +160,21 @@ export async function getRecentSessionContentWithResetFallback(
     }
 
     const latestResetPath = path.join(dir, resetCandidates[resetCandidates.length - 1]);
-    return (await getRecentSessionContent(latestResetPath, messageCount)) || primary;
+    const reset = await getRecentSessionProjection(latestResetPath, messageCount);
+    return reset?.content ? reset : primary;
   } catch {
     return primary;
   }
+}
+
+export async function getRecentSessionContentWithResetFallback(
+  sessionFilePath: string,
+  messageCount = 15,
+): Promise<string | null> {
+  return (
+    (await getRecentSessionProjectionWithResetFallback(sessionFilePath, messageCount))?.content ??
+    null
+  );
 }
 
 function stripResetSuffix(fileName: string): string {
@@ -137,11 +191,15 @@ export async function findPreviousSessionFile(params: {
     const files = await fs.readdir(params.sessionsDir);
     const fileSet = new Set(files);
 
-    const baseFromReset = params.currentSessionFile
-      ? stripResetSuffix(path.basename(params.currentSessionFile))
+    const currentBaseName = params.currentSessionFile
+      ? path.basename(params.currentSessionFile)
       : undefined;
+    const baseFromReset = currentBaseName ? stripResetSuffix(currentBaseName) : undefined;
     if (baseFromReset && fileSet.has(baseFromReset)) {
       return path.join(params.sessionsDir, baseFromReset);
+    }
+    if (currentBaseName?.includes(".reset.") && fileSet.has(currentBaseName)) {
+      return path.join(params.sessionsDir, currentBaseName);
     }
 
     const trimmedSessionId = params.sessionId?.trim();
@@ -149,6 +207,14 @@ export async function findPreviousSessionFile(params: {
       const canonicalFile = `${trimmedSessionId}.jsonl`;
       if (fileSet.has(canonicalFile)) {
         return path.join(params.sessionsDir, canonicalFile);
+      }
+
+      const canonicalResetVariants = files
+        .filter((name) => name.startsWith(`${canonicalFile}.reset.`))
+        .toSorted()
+        .toReversed();
+      if (canonicalResetVariants.length > 0) {
+        return path.join(params.sessionsDir, canonicalResetVariants[0]);
       }
 
       const topicVariants = files
@@ -163,6 +229,16 @@ export async function findPreviousSessionFile(params: {
       if (topicVariants.length > 0) {
         return path.join(params.sessionsDir, topicVariants[0]);
       }
+
+      const topicResetVariants = files
+        .filter(
+          (name) => name.startsWith(`${trimmedSessionId}-topic-`) && name.includes(".jsonl.reset."),
+        )
+        .toSorted()
+        .toReversed();
+      if (topicResetVariants.length > 0) {
+        return path.join(params.sessionsDir, topicResetVariants[0]);
+      }
     }
 
     if (!params.currentSessionFile) {
@@ -175,6 +251,14 @@ export async function findPreviousSessionFile(params: {
       .toReversed();
     if (nonResetJsonl.length > 0) {
       return path.join(params.sessionsDir, nonResetJsonl[0]);
+    }
+
+    const resetJsonl = files
+      .filter((name) => name.includes(".jsonl.reset."))
+      .toSorted()
+      .toReversed();
+    if (resetJsonl.length > 0) {
+      return path.join(params.sessionsDir, resetJsonl[0]);
     }
   } catch {
     // Ignore directory read errors.

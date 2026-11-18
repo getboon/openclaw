@@ -40,6 +40,20 @@ function step(job: Job | undefined, name: string): Step {
 }
 
 describe("minimal npm extended-stable workflow", () => {
+  it("keeps the Plugin SDK API diff tooling on the trusted workflow revision", () => {
+    const parsed = workflow();
+    const checkout = step(
+      parsed.jobs?.preflight_openclaw_npm,
+      "Checkout trusted Plugin SDK API tooling",
+    );
+    const verify = step(parsed.jobs?.preflight_openclaw_npm, "Verify Plugin SDK API changes");
+
+    expect(checkout.with?.ref).toBe("${{ github.workflow_sha }}");
+    expect(verify.env?.WORKFLOW_SHA).toBe("${{ github.workflow_sha }}");
+    expect(verify.run).toContain('pnpm --dir "$tooling_dir" run plugin-sdk:api:diff');
+    expect(readFileSync("package.json", "utf8")).toContain('"plugin-sdk:api:diff"');
+  });
+
   it("adds extended-stable without adding policy or verifier contracts", () => {
     const raw = readFileSync(workflowPath, "utf8");
     const parsed = workflow();
@@ -127,7 +141,10 @@ describe("minimal npm extended-stable workflow", () => {
     expect(metadata.run).not.toContain("Validation-only SHA mode only supports");
 
     const plugins = step(preflight, "Exercise all extended-stable plugin npm packages");
-    expect(readFileSync(workflowPath, "utf8")).not.toContain("@openclaw/ai");
+    expect(step(preflight, "Verify release contents").env).toMatchObject({
+      OPENCLAW_RELEASE_CHECK_LOCAL_PACKAGE_TARBALL_DIR:
+        "${{ steps.core_package_tarballs.outputs.dir }}",
+    });
     expect(plugins.if).toBe("${{ inputs.npm_dist_tag == 'extended-stable' }}");
     expect(plugins.env).toMatchObject({
       OPENCLAW_PLUGIN_NPM_PUBLISH_TAG: "extended-stable",
@@ -172,20 +189,14 @@ describe("minimal npm extended-stable workflow", () => {
     expect(raw).toContain("--json workflowName,headBranch,headSha,event,conclusion,url");
     const fullValidationRun = step(
       parsed.jobs?.publish_openclaw_npm,
-      "Verify full release validation run metadata",
+      "Verify full release validation evidence",
     );
     expect(fullValidationRun.env?.FULL_RELEASE_VALIDATION_RUN_ATTEMPT).toBe(
       "${{ inputs.full_release_validation_run_attempt }}",
     );
-    expect(fullValidationRun.run).toContain(
-      "actions/runs/${FULL_RELEASE_VALIDATION_RUN_ID}/attempts/${FULL_RELEASE_VALIDATION_RUN_ATTEMPT}",
-    );
-    expect(fullValidationRun.run).toContain(
-      '"$run_attempt" != "$FULL_RELEASE_VALIDATION_RUN_ATTEMPT"',
-    );
-    expect(fullValidationRun.run).toContain('echo "attempt=$run_attempt" >> "$GITHUB_OUTPUT"');
-    expect(raw.match(/openclaw-npm-extended-stable-release\.mjs verify-run/g)).toHaveLength(3);
-    expect(raw).toContain("openclaw-npm-extended-stable-release.mjs verify-manifest");
+    expect(fullValidationRun.run).toContain("validate-full-release-validation-evidence.mjs");
+    expect(raw.match(/openclaw-npm-extended-stable-release\.mjs verify-run/g)).toHaveLength(2);
+    expect(raw).toContain("validate-full-release-validation-evidence.mjs");
   });
 
   it("requires and authenticates the plugin npm run before an extended-stable core publish", () => {
@@ -244,6 +255,38 @@ describe("minimal npm extended-stable workflow", () => {
     );
     expect(readFileSync(workflowPath, "utf8")).not.toContain(
       "find preflight-tarball -type f -name '*.tgz'",
+    );
+  });
+
+  it("isolates public-registry installation from publisher credentials and artifacts", () => {
+    const parsed = workflow();
+    const isolatedVerifier = readFileSync("scripts/verify-npm-tarball-install-isolated.sh", "utf8");
+    const preflightVerify = step(
+      parsed.jobs?.preflight_openclaw_npm,
+      "Verify prepared npm tarball install",
+    );
+    const publishRun = step(parsed.jobs?.publish_openclaw_npm, "Publish").run ?? "";
+
+    expect(preflightVerify.run).toContain("openclaw-npm-prepublish-verify.ts");
+    expect(publishRun).toContain(
+      'bash scripts/verify-npm-tarball-install-isolated.sh "$publish_target"',
+    );
+    expect(isolatedVerifier).toContain("docker run --rm");
+    expect(isolatedVerifier).toContain("--read-only");
+    expect(isolatedVerifier).toContain("--tmpfs /tmp:rw,exec,nosuid,nodev,size=4g,mode=1777");
+    expect(isolatedVerifier).toContain("--cap-drop ALL");
+    expect(isolatedVerifier).toContain("--security-opt no-new-privileges");
+    expect(isolatedVerifier).toContain("--user 65532:65532");
+    expect(isolatedVerifier).toContain("dst=/verifier,readonly");
+    expect(isolatedVerifier).toContain("dst=/input/openclaw.tgz,readonly");
+    expect(isolatedVerifier).toContain('grep -Eq "^(ACTIONS_|GITHUB_|GH_TOKEN=)"');
+    expect(isolatedVerifier).toContain("tarball_sha_before");
+    expect(isolatedVerifier).toContain("tarball_sha_after");
+    expect(isolatedVerifier).toContain(
+      "node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03",
+    );
+    expect(publishRun).not.toContain(
+      'node scripts/verify-npm-tarball-install.mjs "$publish_target"',
     );
   });
 });

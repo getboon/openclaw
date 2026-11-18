@@ -12,7 +12,7 @@ function createBackstop() {
   return createAgentLifecycleTerminalBackstop({
     runId: "run-1",
     getLifecycleGeneration: () => "gen-1",
-    resolveAbortLifecycleFields: () => ({}),
+    resolveTerminationFields: () => ({}),
   });
 }
 

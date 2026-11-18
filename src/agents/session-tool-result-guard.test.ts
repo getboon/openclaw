@@ -457,8 +457,12 @@ describe("installSessionToolResultGuard", () => {
 
   it("blocks persistence when before_message_write returns block=true", () => {
     const sm = SessionManager.inMemory();
+    const blockedUserMessages: AgentMessage[] = [];
     installSessionToolResultGuard(sm, {
       beforeMessageWriteHook: () => ({ block: true }),
+      onUserMessageBlocked: (message) => {
+        blockedUserMessages.push(message);
+      },
     });
 
     sm.appendMessage(
@@ -470,6 +474,46 @@ describe("installSessionToolResultGuard", () => {
     );
 
     expect(getPersistedMessages(sm)).toHaveLength(0);
+    expect(blockedUserMessages).toHaveLength(1);
+    expect(blockedUserMessages[0]).toMatchObject({ role: "user", content: "hidden" });
+  });
+
+  it("repairs a blocked real tool result before the next user message", () => {
+    const sm = SessionManager.inMemory();
+    const guard = installSessionToolResultGuard(sm, {
+      beforeMessageWriteHook: ({ message }) =>
+        message.role === "toolResult" && !message.isError ? { block: true } : undefined,
+    });
+
+    sm.appendMessage(toolCallMessage);
+    expect(
+      sm.appendMessage(
+        asAppendMessage({
+          role: "toolResult",
+          toolCallId: "call_1",
+          toolName: "read",
+          content: [{ type: "text", text: "blocked real result" }],
+          isError: false,
+        }),
+      ),
+    ).toBeUndefined();
+    expect(guard.getPendingIds()).toStrictEqual(["call_1"]);
+
+    sm.appendMessage(
+      asAppendMessage({
+        role: "user",
+        content: "next user message",
+        timestamp: Date.now(),
+      }),
+    );
+
+    const messages = expectPersistedRoles(sm, ["assistant", "toolResult", "user"]);
+    expect(messages[1]).toMatchObject({
+      toolCallId: "call_1",
+      toolName: "read",
+      isError: true,
+    });
+    expect(guard.getPendingIds()).toStrictEqual([]);
   });
 
   it("applies before_message_write message mutations before persistence", () => {

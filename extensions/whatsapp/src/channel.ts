@@ -8,7 +8,6 @@ import {
   createDefaultChannelRuntimeState,
 } from "openclaw/plugin-sdk/status-helpers";
 import { resolveWhatsAppAccount, type ResolvedWhatsAppAccount } from "./accounts.js";
-import { createWhatsAppLoginTool } from "./agent-tools-login.js";
 import { whatsappApprovalCapability } from "./approval-native.js";
 import type { WebChannelStatus } from "./auto-reply/types.js";
 import {
@@ -94,7 +93,6 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> =
           return (await channelRuntime.readWebAuthState(account.authDir)) === "linked";
         },
       }),
-      agentTools: () => [createWhatsAppLoginTool()],
       allowlist: buildDmGroupAccountAllowlistAdapter({
         channelId: "whatsapp",
         resolveAccount: resolveWhatsAppAccount,
@@ -227,6 +225,8 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> =
           lastInboundAt: null,
           lastMessageAt: null,
           lastEventAt: null,
+          busy: false,
+          lastRunActivityAt: null,
           healthState: "stopped",
         }),
         collectStatusIssues: collectWhatsAppStatusIssues,
@@ -282,8 +282,13 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> =
             lastInboundAt: snapshot.lastInboundAt ?? snapshot.lastMessageAt ?? null,
             lastMessageAt: snapshot.lastMessageAt ?? null,
             lastEventAt: snapshot.lastEventAt ?? null,
+            busy: snapshot.busy ?? false,
+            lastRunActivityAt: snapshot.lastRunActivityAt ?? null,
             lastError: snapshot.lastError ?? null,
             healthState: snapshot.healthState ?? undefined,
+            ...(snapshot.terminalDisconnect
+              ? { terminalDisconnect: snapshot.terminalDisconnect }
+              : {}),
           };
         },
         resolveAccountSnapshot: async ({ account, runtime }) => {
@@ -308,7 +313,12 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> =
               lastInboundAt: runtime?.lastInboundAt ?? runtime?.lastMessageAt ?? null,
               lastMessageAt: runtime?.lastMessageAt ?? null,
               lastEventAt: runtime?.lastEventAt ?? null,
+              busy: runtime?.busy ?? false,
+              lastRunActivityAt: runtime?.lastRunActivityAt ?? null,
               healthState: runtime?.healthState ?? undefined,
+              ...(runtime?.terminalDisconnect
+                ? { terminalDisconnect: runtime.terminalDisconnect }
+                : {}),
               dmPolicy: account.dmPolicy,
               allowFrom: account.allowFrom,
             },

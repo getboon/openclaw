@@ -5,12 +5,19 @@ type McpLoopbackRuntime = {
   nonOwnerToken: string;
 };
 
+export type McpLoopbackToolCallTerminalOutcome =
+  | { outcome: "blocked"; deniedReason: string }
+  | { outcome: "cancelled" | "failed" | "timed_out" | "unknown"; result?: unknown };
+
+export type McpLoopbackToolCallOutcome =
+  | { outcome: "completed"; result?: unknown }
+  | McpLoopbackToolCallTerminalOutcome;
+
 export type McpLoopbackToolCallResult = {
   toolName: string;
   args: Record<string, unknown>;
-  result?: unknown;
-  isError: boolean;
-};
+  correlationId?: string;
+} & McpLoopbackToolCallOutcome;
 
 export type McpLoopbackToolCallStart = Pick<McpLoopbackToolCallResult, "toolName" | "args">;
 
@@ -20,7 +27,7 @@ type McpLoopbackToolCallCapture = {
   onRequestStart?: () => void;
   onRequestClassified?: () => void;
   onRequestFinish?: () => void;
-  onToolCallStart?: (call: McpLoopbackToolCallStart) => void;
+  onToolCallStart?: (call: McpLoopbackToolCallStart) => string | void;
   onToolCallUpdate?: (calls: {
     previous: McpLoopbackToolCallStart;
     current: McpLoopbackToolCallStart;
@@ -41,6 +48,7 @@ export type McpLoopbackRequestCaptureHandle = {
 export type McpLoopbackToolCallCaptureHandle = {
   capture: McpLoopbackToolCallCapture;
   call: McpLoopbackToolCallStart;
+  correlationId?: string;
   prepared: boolean;
   finished: boolean;
 };
@@ -76,7 +84,7 @@ export function beginMcpLoopbackToolCallCapture(params: {
   onRequestStart?: () => void;
   onRequestClassified?: () => void;
   onRequestFinish?: () => void;
-  onToolCallStart?: (call: McpLoopbackToolCallStart) => void;
+  onToolCallStart?: (call: McpLoopbackToolCallStart) => string | void;
   onToolCallUpdate?: (calls: {
     previous: McpLoopbackToolCallStart;
     current: McpLoopbackToolCallStart;
@@ -196,12 +204,14 @@ export function markMcpLoopbackToolCallStarted(params: {
   const call = { toolName, args: params.args };
   capture.inFlight += 1;
   notifyMcpLoopbackToolCallCaptureActivity(capture);
+  let correlationId: string | undefined;
   try {
-    capture.onToolCallStart?.(call);
+    const observedCorrelationId = capture.onToolCallStart?.(call);
+    correlationId = typeof observedCorrelationId === "string" ? observedCorrelationId : undefined;
   } catch {
     // Delivery observation is diagnostic state; it must not alter tool execution.
   }
-  return { capture, call, prepared: false, finished: false };
+  return { capture, call, correlationId, prepared: false, finished: false };
 }
 
 /** Update an admitted call with the final arguments produced by gateway hooks. */
@@ -223,23 +233,29 @@ export function updateMcpLoopbackToolCallCapture(
 }
 
 /** Report a completed call without letting observer failures alter tool execution. */
-export function recordMcpLoopbackToolCallResult(params: {
-  captureHandle: McpLoopbackToolCallCaptureHandle;
-  toolName: string;
-  args: Record<string, unknown>;
-  result?: unknown;
-  isError: boolean;
-}): void {
+export function recordMcpLoopbackToolCallResult(
+  params: {
+    captureHandle: McpLoopbackToolCallCaptureHandle;
+    toolName: string;
+    args: Record<string, unknown>;
+  } & McpLoopbackToolCallOutcome,
+): void {
   const toolName = params.toolName.trim();
   if (!toolName) {
     return;
   }
   try {
+    const outcome: McpLoopbackToolCallOutcome =
+      params.outcome === "blocked"
+        ? { outcome: "blocked", deniedReason: params.deniedReason }
+        : { outcome: params.outcome, result: params.result };
     params.captureHandle.capture.onToolCallResult({
       toolName,
       args: params.args,
-      result: params.result,
-      isError: params.isError,
+      ...outcome,
+      ...(params.captureHandle.correlationId
+        ? { correlationId: params.captureHandle.correlationId }
+        : {}),
     });
   } catch {
     // Delivery observation is diagnostic state; it must not turn a successful tool call into error.
@@ -366,16 +382,34 @@ const MCP_CAPTURE_HEADERS = {
   "x-openclaw-cli-capture-key": "${OPENCLAW_MCP_CLI_CAPTURE_KEY}",
 } as const;
 
-/** Build the MCP server config injected into agents for loopback tool access. */
-export function createMcpLoopbackServerConfig(port: number) {
+function createMcpServerConfig(port: number, headers: Record<string, string>) {
   return {
     mcpServers: {
       openclaw: {
         type: "http",
         url: `http://127.0.0.1:${port}/mcp`,
         alwaysLoad: true,
-        headers: { ...MCP_AUTH_HEADERS, ...MCP_CAPTURE_HEADERS },
+        headers,
       },
     },
   };
+}
+
+/**
+ * Build the MCP server config injected into the gateway-launched cli-backend for loopback tool
+ * access. The capture-key header lets the loopback server resolve this execution attempt's
+ * server-bound context (mcp-grant-store's client-grant capture) instead of trusting any
+ * client-supplied session/channel/thread headers.
+ */
+export function createMcpLoopbackServerConfig(port: number) {
+  return createMcpServerConfig(port, { ...MCP_AUTH_HEADERS, ...MCP_CAPTURE_HEADERS });
+}
+
+/**
+ * Build the MCP server config for an external attach-grant harness (Claude Code, OpenCode, ...).
+ * Auth header only -- no capture-key header, since an attach grant has no client-grant capture to
+ * resolve and must not be able to present one for a different runtime's capture.
+ */
+export function createMcpAttachGrantServerConfig(port: number) {
+  return createMcpServerConfig(port, MCP_AUTH_HEADERS);
 }

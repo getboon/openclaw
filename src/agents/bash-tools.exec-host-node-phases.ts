@@ -10,6 +10,7 @@ import {
   type InterpreterInlineEvalHit,
 } from "../infra/command-analysis/inline-eval.js";
 import { detectPolicyInlineEval } from "../infra/command-analysis/policy.js";
+import { countObsoleteGeneratedExecApprovals } from "../infra/exec-approvals-generated-migration.js";
 import {
   type ExecApprovalsFile,
   type ExecAllowlistEntry,
@@ -39,7 +40,7 @@ import {
 } from "../infra/system-run-command.js";
 import { addSafeTimeoutDelayGraceMs } from "../utils/timer-delay.js";
 import type { ExecuteNodeHostCommandParams } from "./bash-tools.exec-host-node.types.js";
-import { renderExecOutputText } from "./bash-tools.exec-output.js";
+import { renderExecUpdateText } from "./bash-tools.exec-output.js";
 import type { ExecToolDetails } from "./bash-tools.exec-types.js";
 import type { AgentToolResult } from "./runtime/index.js";
 import { callGatewayTool } from "./tools/gateway.js";
@@ -59,6 +60,7 @@ type PreparedNodeRun = {
   plan: SystemRunApprovalPlan;
   argv: string[];
   rawCommand: string;
+  transportRawCommand: string;
   cwd: string | undefined;
   agentId: string | undefined;
   sessionKey: string | undefined;
@@ -225,6 +227,7 @@ export function formatNodeRunToolResult(params: {
   raw: unknown;
   startedAt: number;
   cwd: string | undefined;
+  warnings?: string[];
 }): AgentToolResult<ExecToolDetails> {
   const payload =
     params.raw && typeof params.raw === "object"
@@ -241,7 +244,10 @@ export function formatNodeRunToolResult(params: {
     content: [
       {
         type: "text",
-        text: renderExecOutputText(stdout || stderr || errorText),
+        text: renderExecUpdateText({
+          tailText: stdout || stderr || errorText,
+          warnings: params.warnings ?? [],
+        }),
       },
     ],
     details: {
@@ -404,7 +410,12 @@ export async function invokeNodeSystemRunDirect(params: {
       notifyOnExit: params.request.notifyOnExit,
     }),
   );
-  return formatNodeRunToolResult({ raw, startedAt, cwd: params.request.workdir });
+  return formatNodeRunToolResult({
+    raw,
+    startedAt,
+    cwd: params.request.workdir,
+    warnings: [...params.request.warnings, ...(params.request.foregroundWarnings ?? [])],
+  });
 }
 
 /** Prepares a node-host system run using remote prepare support or local fallback. */
@@ -442,6 +453,7 @@ export async function prepareNodeSystemRun(params: {
     plan: prepared.plan,
     argv: prepared.plan.argv,
     rawCommand: prepared.plan.commandText,
+    transportRawCommand: prepared.plan.commandText,
     cwd: prepared.plan.cwd ?? params.request.workdir,
     agentId: prepared.plan.agentId ?? params.request.agentId,
     sessionKey: prepared.plan.sessionKey ?? params.request.sessionKey,
@@ -480,6 +492,9 @@ function buildLocalPreparedNodeRun(params: {
     plan,
     argv: plan.argv,
     rawCommand: plan.commandText,
+    // Legacy macOS nodes parse the bound shell payload for allowlist matching.
+    // Analysis and approval binding remain anchored to the canonical plan text.
+    transportRawCommand: plan.commandPreview ?? plan.commandText,
     cwd: plan.cwd ?? params.request.workdir,
     agentId: plan.agentId ?? params.request.agentId,
     sessionKey: plan.sessionKey ?? params.request.sessionKey,
@@ -560,6 +575,7 @@ export async function analyzeNodeApprovalRequirement(params: {
   let allowlistSatisfied = false;
   let durableApprovalSatisfied = false;
   let nodeApprovalsFileKnown = false;
+  let obsoleteGeneratedApprovalCount = 0;
   const inlineEvalHit =
     params.request.strictInlineEval === true
       ? (policyCommandEvals
@@ -611,6 +627,7 @@ export async function analyzeNodeApprovalRequirement(params: {
           agentId: params.prepared.agentId,
           overrides: { security: "full" },
         });
+        obsoleteGeneratedApprovalCount = countObsoleteGeneratedExecApprovals(resolved.file);
         // Allowlist-only precheck; safe bins are node-local and may diverge.
         // POSIX node transport wraps commands, so mirror node policy by
         // accepting either the prepared wrapper or its semantic inner command.
@@ -667,6 +684,15 @@ export async function analyzeNodeApprovalRequirement(params: {
     } catch {
       // Fall back to requiring approval if node approvals cannot be fetched.
     }
+  }
+  if (
+    params.hostSecurity === "allowlist" &&
+    !allowlistSatisfied &&
+    obsoleteGeneratedApprovalCount > 0
+  ) {
+    params.request.warnings.push(
+      `${obsoleteGeneratedApprovalCount} older generated exec approvals are inactive on this node because they are not tied to a working directory. Run "openclaw doctor --fix" on the node, then approve again.`,
+    );
   }
   return {
     analysisOk,

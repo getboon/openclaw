@@ -3,10 +3,12 @@
 // Verifies Docker image attestations cover required platforms and predicates.
 import { execFileSync } from "node:child_process";
 import process from "node:process";
+import { isDirectRunUrl } from "./lib/direct-run.mjs";
 
 const ATTESTATION_REFERENCE_TYPE = "attestation-manifest";
 const EXPECTED_ATTESTATION_ARTIFACT_TYPE = "application/vnd.docker.attestation.manifest.v1+json";
 const REQUIRED_PREDICATES = ["https://spdx.dev/Document", "https://slsa.dev/provenance/v1"];
+const DOCKER_INSPECT_TIMEOUT_MS = 120_000;
 
 /**
  * Rewrites an image reference to use the provided digest.
@@ -161,11 +163,14 @@ export function collectDockerAttestationErrors(params) {
   return errors;
 }
 
-function inspectRaw(imageRef) {
-  return execFileSync("docker", ["buildx", "imagetools", "inspect", "--raw", imageRef], {
+export function inspectRaw(imageRef, params = {}) {
+  const execFileSyncImpl = params.execFileSyncImpl ?? execFileSync;
+  return execFileSyncImpl("docker", ["buildx", "imagetools", "inspect", "--raw", imageRef], {
     encoding: "utf8",
+    killSignal: "SIGKILL",
     maxBuffer: 20 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
+    timeout: DOCKER_INSPECT_TIMEOUT_MS,
   });
 }
 
@@ -223,7 +228,7 @@ async function main() {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectRunUrl(process.argv[1], import.meta.url)) {
   main().catch(
     /** @param {unknown} error */ (error) => {
       console.error(error instanceof Error ? error.message : String(error));

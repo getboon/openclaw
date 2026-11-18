@@ -65,7 +65,7 @@ type ParsedStateDirDotEnv = {
   skippedShellReferenceKeys: string[];
 };
 
-function parseStateDirDotEnvContent(content: string): ParsedStateDirDotEnv {
+function parseStateDirDotEnvContent(content: string | Buffer): ParsedStateDirDotEnv {
   const parsed = dotenv.parse(content);
   const entries: Record<string, string> = {};
   const skippedShellReferenceKeys: string[] = [];
@@ -110,7 +110,7 @@ export function readStateDirDotEnvFromStateDir(stateDir: string): ParsedStateDir
       filePath: resolved,
       maxBytes: MAX_STATE_DIR_DOTENV_BYTES,
     });
-    return parseStateDirDotEnvContent(buffer.toString("utf8"));
+    return parseStateDirDotEnvContent(buffer);
   } catch (err) {
     // Surface oversized files so operators know a configured .env was
     // skipped — unlike parse or permission errors which mean the file is

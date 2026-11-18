@@ -7,6 +7,9 @@
   "enabledByDefault": true,
   "providerCatalogEntry": "./provider-discovery.ts",
   "providers": ["deepseek"],
+  "contracts": {
+    "usageProviders": ["deepseek"]
+  },
   "providerEndpoints": [
     {
       "endpointClass": "deepseek-native",
@@ -65,6 +68,29 @@
             }
           },
           {
+            "id": "deepseek-v4-flash-vision-exp",
+            "name": "DeepSeek V4 Flash Vision (Experimental)",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "contextWindow": 1000000,
+            "maxTokens": 384000,
+            "cost": {
+              "input": 0.44,
+              "output": 1.32,
+              "cacheRead": 0.014,
+              "cacheWrite": 0
+            },
+            "compat": {
+              "supportsUsageInStreaming": true,
+              "supportsReasoningEffort": true,
+              "maxTokensField": "max_tokens",
+              "codeMode": "preferred"
+            }
+          },
+          {
             "id": "deepseek-chat",
             "name": "DeepSeek Chat",
             "input": ["text"],
@@ -120,6 +146,7 @@
       "provider": "deepseek",
       "method": "api-key",
       "choiceId": "deepseek-api-key",
+      "appGuidedSecret": true,
       "choiceLabel": "DeepSeek API key",
       "groupId": "deepseek",
       "groupLabel": "DeepSeek",

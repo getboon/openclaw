@@ -3,6 +3,7 @@ import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
 import { MAX_TIMER_TIMEOUT_MS, resolveTimerTimeoutMs } from "../shared/number-coercion.js";
 import { sleep } from "../utils.js";
 import { toErrorObject } from "./errors.js";
+import { getRetryAttemptErrors, recordRetryAttemptErrors } from "./retry-attempt-errors.js";
 import { generateSecureFraction } from "./secure-random.js";
 
 /** Retry timing knobs shared by generic retry runners and channel retry policies. */
@@ -27,6 +28,7 @@ export type RetryOptions = RetryConfig & {
   label?: string;
   shouldRetry?: (err: unknown, attempt: number) => boolean;
   retryAfterMs?: (err: unknown) => number | undefined;
+  retryAfterMaxDelayMs?: number;
   onRetry?: (info: RetryInfo) => void;
   sleep?: (ms: number) => Promise<void>;
 };
@@ -37,6 +39,24 @@ const DEFAULT_RETRY_CONFIG = {
   maxDelayMs: 30_000,
   jitter: 0,
 };
+
+function appendRetryAttemptError(attemptErrors: unknown[], err: unknown): void {
+  const nestedAttempts = getRetryAttemptErrors(err);
+  attemptErrors.push(...(nestedAttempts ?? [err]));
+}
+
+function createRetryFailure(attemptErrors: readonly unknown[]): Error {
+  const failure = toErrorObject(
+    attemptErrors.at(-1) ?? new Error("Retry failed"),
+    "Non-Error thrown",
+  );
+  if (attemptErrors.length > 1) {
+    // Preserve the public terminal-error identity while carrying every internal
+    // attempt into duplicate-send decisions made outside the channel adapter.
+    recordRetryAttemptErrors(failure, attemptErrors);
+  }
+  return failure;
+}
 
 const clampNumber = (value: unknown, fallback: number, min?: number, max?: number) => {
   const next = asFiniteNumber(value);
@@ -112,12 +132,12 @@ export async function retryAsync<T>(
 ): Promise<T> {
   if (typeof attemptsOrOptions === "number") {
     const attempts = resolveAttemptCount(attemptsOrOptions, DEFAULT_RETRY_CONFIG.attempts);
-    let lastErr: unknown;
+    const attemptErrors: unknown[] = [];
     for (let i = 0; i < attempts; i += 1) {
       try {
         return await fn();
       } catch (err) {
-        lastErr = err;
+        appendRetryAttemptError(attemptErrors, err);
         if (i === attempts - 1) {
           break;
         }
@@ -125,7 +145,7 @@ export async function retryAsync<T>(
         await sleep(delay);
       }
     }
-    throw toErrorObject(lastErr ?? new Error("Retry failed"), "Non-Error thrown");
+    throw createRetryFailure(attemptErrors);
   }
 
   const options = attemptsOrOptions;
@@ -137,16 +157,23 @@ export async function retryAsync<T>(
     Number.isFinite(resolved.maxDelayMs) && resolved.maxDelayMs > 0
       ? resolved.maxDelayMs
       : Number.POSITIVE_INFINITY;
+  const retryAfterMaxDelayMs =
+    options.retryAfterMaxDelayMs === undefined
+      ? maxDelayMs
+      : Math.max(
+          minDelayMs,
+          resolveRetryDelayMs(Math.round(clampNumber(options.retryAfterMaxDelayMs, maxDelayMs, 0))),
+        );
   const jitter = resolved.jitter;
   const sleepFn = options.sleep ?? sleep;
   const shouldRetry = options.shouldRetry ?? (() => true);
-  let lastErr: unknown;
+  const attemptErrors: unknown[] = [];
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       return await fn();
     } catch (err) {
-      lastErr = err;
+      appendRetryAttemptError(attemptErrors, err);
       if (attempt >= maxAttempts || !shouldRetry(err, attempt)) {
         break;
       }
@@ -156,7 +183,8 @@ export async function retryAsync<T>(
       const baseDelay = hasRetryAfter
         ? Math.max(retryAfterMs, minDelayMs)
         : minDelayMs * 2 ** (attempt - 1);
-      let delay = Math.min(baseDelay, maxDelayMs);
+      const delayCap = hasRetryAfter ? retryAfterMaxDelayMs : maxDelayMs;
+      let delay = Math.min(baseDelay, delayCap);
       // Server-supplied Retry-After is a lower-bound contract with the
       // upstream rate limiter; symmetric jitter would let roughly half the
       // retries land before the requested time and invite escalation. Use
@@ -183,9 +211,9 @@ export async function retryAsync<T>(
       // (`retryAfterMs > maxDelayMs`), where the contract is already
       // unsatisfiable and we gain spread without adding a violation.
       const canHonorRetryAfter =
-        hasRetryAfter && typeof retryAfterMs === "number" && retryAfterMs <= maxDelayMs;
+        hasRetryAfter && typeof retryAfterMs === "number" && retryAfterMs <= delayCap;
       delay = applyJitter(delay, jitter, canHonorRetryAfter ? "positive" : "symmetric");
-      delay = Math.min(Math.max(delay, minDelayMs), maxDelayMs);
+      delay = Math.min(Math.max(delay, minDelayMs), delayCap);
 
       options.onRetry?.({
         attempt,
@@ -200,5 +228,5 @@ export async function retryAsync<T>(
     }
   }
 
-  throw toErrorObject(lastErr ?? new Error("Retry failed"), "Non-Error thrown");
+  throw createRetryFailure(attemptErrors);
 }

@@ -47,11 +47,34 @@ type MemorySearchToolResult =
   | MemoryCorpusSearchResult;
 type MemoryManagerContext = Awaited<ReturnType<typeof getMemoryManagerContextWithPurpose>>;
 type ActiveMemoryManagerContext = Extract<MemoryManagerContext, { manager: unknown }>;
+type QmdRuntimeDebug = NonNullable<MemorySearchRuntimeDebug["qmd"]>;
 
 const MEMORY_SEARCH_TOOL_TIMEOUT_MS = 15_000;
 const MEMORY_SEARCH_TOOL_COOLDOWN_MS = 60_000;
 
 const memorySearchToolCooldowns = new Map<string, { until: number; error: string }>();
+
+function mergeQmdRuntimeDebug(
+  entries: readonly MemorySearchRuntimeDebug[],
+): MemorySearchRuntimeDebug["qmd"] | undefined {
+  const merged: QmdRuntimeDebug = {};
+  for (const entry of entries) {
+    const qmd = entry.qmd;
+    if (!qmd) {
+      continue;
+    }
+    if (!merged.collectionValidation && qmd.collectionValidation) {
+      merged.collectionValidation = qmd.collectionValidation;
+    }
+    if (qmd.multiCollectionProbe) {
+      merged.multiCollectionProbe = qmd.multiCollectionProbe;
+    }
+    if (qmd.searchPlan) {
+      merged.searchPlan = qmd.searchPlan;
+    }
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
 
 function resolveMemorySearchToolCooldownKey(options: {
   agentId?: string;
@@ -460,6 +483,7 @@ export function createMemorySearchTool(options: {
         const outcome = await runMemorySearchToolWithDeadline({
           timeoutMs: MEMORY_SEARCH_TOOL_TIMEOUT_MS,
           run: async (deadlineSignal) => {
+            const toolStartedAt = Date.now();
             const { resolveMemoryBackendConfig } = await loadMemoryToolRuntime();
             const shouldQuerySupplements = requestedCorpus === "wiki" || requestedCorpus === "all";
             const shouldQueryMemory = requestedCorpus !== "wiki" && !cooldown;
@@ -516,13 +540,20 @@ export function createMemorySearchTool(options: {
               let fallback: unknown;
               let searchMode: string | undefined;
               let pausedIndexIdentityReason: string | undefined;
+              let managerMs: number | undefined;
+              let managerCacheState: string | undefined;
               let searchDebug:
                 | {
                     backend: string;
                     configuredMode?: string;
                     effectiveMode?: string;
                     fallback?: string;
+                    toolMs?: number;
+                    managerMs?: number;
+                    outsideSearchMs?: number;
                     searchMs: number;
+                    managerCacheState?: string;
+                    qmd?: MemorySearchRuntimeDebug["qmd"];
                     hits: number;
                   }
                 | undefined;
@@ -551,6 +582,8 @@ export function createMemorySearchTool(options: {
                     },
                     ...(searchSources ? { sources: searchSources } : {}),
                   };
+                  managerMs = memory.debug?.managerMs;
+                  managerCacheState = memory.debug?.managerCacheState;
                   try {
                     rawResults = await activeMemory.manager.search(query, searchOptions);
                   } catch (error) {
@@ -567,6 +600,8 @@ export function createMemorySearchTool(options: {
                     if ("error" in refreshed) {
                       throw error;
                     }
+                    managerMs = refreshed.debug?.managerMs;
+                    managerCacheState = refreshed.debug?.managerCacheState;
                     activeMemory = refreshed;
                     rawResults = await activeMemory.manager.search(query, searchOptions);
                   }
@@ -576,7 +611,13 @@ export function createMemorySearchTool(options: {
                   if (pausedIndexIdentityReason) {
                     return;
                   }
-                  if (rawResults.length === 0 && activeMemory.manager.sync) {
+                  // One-shot CLI managers have no background lifecycle, so keep their bootstrap
+                  // retry. Long-lived QMD managers must not run update work in the tool hot path.
+                  if (
+                    rawResults.length === 0 &&
+                    activeMemory.manager.sync &&
+                    (statusBeforeRetry.backend !== "qmd" || options.oneShotCliRun === true)
+                  ) {
                     await activeMemory.manager.sync({ reason: "search", force: true });
                     rawResults = await activeMemory.manager.search(query, searchOptions);
                     pausedIndexIdentityReason = resolvePausedMemoryIndexIdentityReason(
@@ -625,7 +666,9 @@ export function createMemorySearchTool(options: {
                   model = status.model;
                   fallback = status.fallback;
                   const latestDebug = runtimeDebug.at(-1);
+                  const qmdDebug = mergeQmdRuntimeDebug(runtimeDebug);
                   searchMode = latestDebug?.effectiveMode;
+                  const searchMs = Math.max(0, Date.now() - searchStartedAt);
                   searchDebug = {
                     backend: status.backend,
                     configuredMode: latestDebug?.configuredMode,
@@ -634,7 +677,10 @@ export function createMemorySearchTool(options: {
                         ? (latestDebug?.effectiveMode ?? latestDebug?.configuredMode)
                         : "n/a",
                     fallback: latestDebug?.fallback,
-                    searchMs: Math.max(0, Date.now() - searchStartedAt),
+                    managerMs,
+                    searchMs,
+                    managerCacheState,
+                    qmd: qmdDebug,
                     hits: rawResults.length,
                   };
                 });
@@ -665,6 +711,14 @@ export function createMemorySearchTool(options: {
                 maxResults: effectiveMax,
                 balanceCorpora: requestedCorpus === "all",
               });
+              if (searchDebug) {
+                const finalToolMs = Math.max(0, Date.now() - toolStartedAt);
+                searchDebug = {
+                  ...searchDebug,
+                  toolMs: finalToolMs,
+                  outsideSearchMs: Math.max(0, finalToolMs - searchDebug.searchMs),
+                };
+              }
               return jsonResult({
                 results,
                 provider,

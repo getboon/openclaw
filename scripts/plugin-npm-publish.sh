@@ -3,12 +3,28 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: bash scripts/plugin-npm-publish.sh [--dry-run|--pack|--pack-dry-run|--publish] <package-dir>"
+  echo "usage: bash scripts/plugin-npm-publish.sh [--repo-root <dir>] [--dry-run|--pack|--pack-dry-run|--publish] <package-dir>"
 }
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   usage
   exit 0
+fi
+
+# --repo-root lets the publish step run this trusted script (and its own
+# scripts/lib/*.mjs helpers) from the pinned workflow checkout while reading
+# and publishing package content from a separate target-ref checkout, so a
+# modified package under <package-dir> can never substitute its own publish
+# logic for this script's.
+repo_root=""
+if [[ "${1:-}" == "--repo-root" ]]; then
+  shift
+  if [[ "$#" -eq 0 ]]; then
+    echo "--repo-root requires a value" >&2
+    exit 2
+  fi
+  repo_root="$1"
+  shift
 fi
 
 mode="${1:-}"
@@ -31,6 +47,13 @@ fi
 if [[ -z "${package_dir}" ]]; then
   echo "missing package dir" >&2
   exit 2
+fi
+if [[ -n "${repo_root}" ]]; then
+  if [[ ! -d "${repo_root}/${package_dir}" ]]; then
+    echo "package dir not found under --repo-root: ${repo_root}/${package_dir}" >&2
+    exit 2
+  fi
+  package_dir="$(cd "${repo_root}/${package_dir}" && pwd)"
 fi
 if [[ "$#" -gt 0 ]]; then
   echo "unexpected plugin npm publish argument: $1" >&2

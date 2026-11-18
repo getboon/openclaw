@@ -124,6 +124,8 @@ export type ChannelSetupWizardCredential = {
 
 /** Declarative non-secret text step that can depend on resolved credentials. */
 export type ChannelSetupWizardTextInput = {
+  /** Mask input and omit configured values from presentation. */
+  sensitive?: boolean;
   inputKey: keyof ChannelSetupInput;
   message: string;
   placeholder?: string;
@@ -302,6 +304,7 @@ export type ChannelSetupWizard = {
 /** Runtime options for selecting and configuring one or more channels. */
 export type SetupChannelsOptions = {
   allowDisable?: boolean;
+  allowIMessageInstall?: boolean;
   allowSignalInstall?: boolean;
   onSelection?: (selection: ChannelId[]) => void;
   onPostWriteHook?: (hook: ChannelOnboardingPostWriteHook) => void;

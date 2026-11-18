@@ -15,8 +15,11 @@ import type {
   SessionEventSubscriberRegistry,
   SessionMessageSubscriberRegistry,
 } from "./server-chat.js";
-import { hasTrackedActiveSessionRun } from "./server-methods/session-active-runs.js";
-import { buildGatewaySessionEventFields } from "./session-event-payload.js";
+import { resolveVisibleActiveSessionRunState } from "./server-methods/session-active-runs.js";
+import {
+  buildGatewaySessionEventFields,
+  buildGatewaySessionEventRow,
+} from "./session-event-payload.js";
 import { resolveSessionKeyForTranscriptFile } from "./session-transcript-key.js";
 import {
   attachOpenClawTranscriptMeta,
@@ -30,6 +33,11 @@ import {
 
 type SessionEventSubscribers = Pick<SessionEventSubscriberRegistry, "getAll">;
 type SessionMessageSubscribers = Pick<SessionMessageSubscriberRegistry, "get">;
+
+function readMessageIdempotencyKey(message: unknown): string | undefined {
+  const value = asOptionalRecord(message)?.idempotencyKey;
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
 
 function readMessageSenderIsOwner(message: unknown): boolean | undefined {
   const value = asOptionalRecord(asOptionalRecord(message)?.["__openclaw"])?.["senderIsOwner"];
@@ -61,12 +69,19 @@ function buildGatewaySessionSnapshot(params: {
   displayName?: string;
   parentSessionKey?: string;
   hasActiveRun?: boolean;
+  activeRunIds?: string[];
 }): Record<string, unknown> {
   const { sessionRow } = params;
   if (!sessionRow) {
     return {};
   }
-  const session = params.includeSession ? { ...sessionRow } : undefined;
+  // Nested snapshots are the UI merge source, so preserve explicit clear semantics there too.
+  const session = params.includeSession
+    ? {
+        ...buildGatewaySessionEventRow(sessionRow),
+        thinkingLevel: sessionRow.thinkingLevel ?? null,
+      }
+    : undefined;
   if (session && sessionRow.key === "global" && !params.agentId) {
     // The unscoped global row hides goal state to avoid presenting one agent's
     // scoped goal as the global/default session goal.
@@ -74,6 +89,9 @@ function buildGatewaySessionSnapshot(params: {
   }
   if (session && params.hasActiveRun !== undefined) {
     session.hasActiveRun = params.hasActiveRun;
+  }
+  if (session && params.activeRunIds !== undefined) {
+    session.activeRunIds = params.activeRunIds;
   }
   return {
     ...(session ? { session } : {}),
@@ -84,6 +102,7 @@ function buildGatewaySessionSnapshot(params: {
       displayName: params.displayName,
       parentSessionKey: params.parentSessionKey,
       hasActiveRun: params.hasActiveRun,
+      activeRunIds: params.activeRunIds,
     }),
     subagentRunState: sessionRow.subagentRunState,
     hasActiveSubagentRun: sessionRow.hasActiveSubagentRun,
@@ -164,24 +183,28 @@ async function handleTranscriptUpdateBroadcast(
     agentId: visibleAgentId,
     transcriptUsageMaxBytes: 64 * 1024,
   });
-  const hasActiveRun = sessionRow
-    ? hasTrackedActiveSessionRun({
+  const activeRunState = sessionRow
+    ? resolveVisibleActiveSessionRunState({
         context: params,
         requestedKey: sessionKey,
         canonicalKey: sessionRow.key,
+        sessionId: sessionRow.sessionId,
         ...(sessionRow.key === "global" && visibleAgentId ? { agentId: visibleAgentId } : {}),
         defaultAgentId: normalizeAgentId(resolveDefaultAgentId(getRuntimeConfig())),
       })
-    : false;
+    : null;
   const sessionSnapshot = buildGatewaySessionSnapshot({
     sessionRow,
     agentId: visibleAgentId,
     includeSession: true,
-    hasActiveRun,
+    hasActiveRun: activeRunState?.active,
+    activeRunIds: activeRunState?.runIds,
   });
+  const idempotencyKey = readMessageIdempotencyKey(update.message);
   const senderIsOwner = readMessageSenderIsOwner(update.message);
   const rawMessage = attachOpenClawTranscriptMeta(update.message, {
     ...(typeof update.messageId === "string" ? { id: update.messageId } : {}),
+    ...(idempotencyKey ? { idempotencyKey } : {}),
     ...(messageSeq !== undefined ? { seq: messageSeq } : {}),
   });
   const message = projectChatDisplayMessage(rawMessage);
@@ -229,12 +252,23 @@ async function handleTranscriptUpdateBroadcast(
 export function createLifecycleEventBroadcastHandler(params: {
   broadcastToConnIds: GatewayBroadcastToConnIdsFn;
   sessionEventSubscribers: SessionEventSubscribers;
+  chatAbortControllers: Map<string, ChatAbortControllerEntry>;
 }) {
   return (event: SessionLifecycleEvent): void => {
     const connIds = params.sessionEventSubscribers.getAll();
     if (connIds.size === 0) {
       return;
     }
+    const sessionRow = loadGatewaySessionRow(event.sessionKey);
+    const activeRunState = sessionRow
+      ? resolveVisibleActiveSessionRunState({
+          context: params,
+          requestedKey: event.sessionKey,
+          canonicalKey: sessionRow.key,
+          sessionId: sessionRow.sessionId,
+          defaultAgentId: normalizeAgentId(resolveDefaultAgentId(getRuntimeConfig())),
+        })
+      : null;
     params.broadcastToConnIds(
       "sessions.changed",
       {
@@ -245,10 +279,12 @@ export function createLifecycleEventBroadcastHandler(params: {
         displayName: event.displayName,
         ts: Date.now(),
         ...buildGatewaySessionSnapshot({
-          sessionRow: loadGatewaySessionRow(event.sessionKey),
+          sessionRow,
           label: event.label,
           displayName: event.displayName,
           parentSessionKey: event.parentSessionKey,
+          hasActiveRun: activeRunState?.active,
+          activeRunIds: activeRunState?.runIds,
         }),
       },
       connIds,

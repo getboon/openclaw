@@ -22,13 +22,37 @@ describe("mattermost monitor resources", () => {
   let createMattermostMonitorResources: typeof import("./monitor-resources.js").createMattermostMonitorResources;
   let MATTERMOST_MEDIA_RESPONSE_HEADER_TIMEOUT_MS: typeof import("./monitor-resources.js").MATTERMOST_MEDIA_RESPONSE_HEADER_TIMEOUT_MS;
   let MATTERMOST_MEDIA_READ_IDLE_TIMEOUT_MS: typeof import("./monitor-resources.js").MATTERMOST_MEDIA_READ_IDLE_TIMEOUT_MS;
+  let formatMattermostInboundMediaText: typeof import("./monitor-resources.js").formatMattermostInboundMediaText;
 
   beforeAll(async () => {
     ({
       createMattermostMonitorResources,
       MATTERMOST_MEDIA_RESPONSE_HEADER_TIMEOUT_MS,
       MATTERMOST_MEDIA_READ_IDLE_TIMEOUT_MS,
+      formatMattermostInboundMediaText,
     } = await import("./monitor-resources.js"));
+  });
+
+  it("keeps media-only download failures visible to the agent", () => {
+    expect(
+      formatMattermostInboundMediaText({
+        body: "",
+        mediaPlaceholder: "",
+        expectedCount: 1,
+        mediaCount: 0,
+      }),
+    ).toBe("[mattermost attachment unavailable]");
+  });
+
+  it("preserves successful media placeholders on partial failures", () => {
+    expect(
+      formatMattermostInboundMediaText({
+        body: "<media:document> (2 files)",
+        mediaPlaceholder: "<media:document> (2 files)",
+        expectedCount: 2,
+        mediaCount: 1,
+      }),
+    ).toBe("<media:document> (2 files)\n\n[mattermost attachment unavailable]");
   });
 
   beforeEach(() => {

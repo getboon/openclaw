@@ -3,9 +3,16 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { applyPatch } from "diff";
+import { Value } from "typebox/value";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Theme } from "../../modes/interactive/theme/theme.js";
-import { createEditTool, createEditToolDefinition, type EditOperations } from "./edit.js";
+import {
+  createEditTool,
+  createEditToolDefinition,
+  type EditOperations,
+  type EditToolDetails,
+} from "./edit.js";
 import type { EditToolInput } from "./tool-contracts.js";
 
 const testTheme = {
@@ -45,6 +52,23 @@ describe("edit tool", () => {
         undefined,
       ),
     ).rejects.toThrow(/Current file contents:\nactual current content/);
+  });
+
+  it("truncates exact-match mismatch hints without splitting UTF-16 surrogate pairs", async () => {
+    const boundaryEmoji = "🙂";
+    const filePath = await createTempFile(`${"a".repeat(799)}${boundaryEmoji}tail`);
+    const tool = createEditTool(tmpDir);
+
+    await expect(
+      tool.execute(
+        "call-1",
+        {
+          path: filePath,
+          edits: [{ oldText: "missing", newText: "replacement" }],
+        },
+        undefined,
+      ),
+    ).rejects.toThrow(`${"a".repeat(799)}\n... (truncated)`);
   });
 
   it("recovers success after a post-write throw when the edit already applied", async () => {
@@ -141,6 +165,85 @@ describe("edit tool", () => {
     });
   });
 
+  it("preserves untouched lines during fuzzy multi-edits", async () => {
+    const original = [
+      "keep before  ",
+      "first target  ",
+      "first after",
+      "keep middle   ",
+      "second target  ",
+      "second after",
+      "keep after  ",
+      "",
+    ].join("\n");
+    const filePath = await createTempFile(original);
+    const tool = createEditTool(tmpDir);
+
+    const result = await tool.execute(
+      "call-fuzzy",
+      {
+        path: filePath,
+        edits: [
+          { oldText: "first target\nfirst after", newText: "FIRST\nFIRST2" },
+          { oldText: "second target\nsecond after", newText: "SECOND\nSECOND2" },
+        ],
+      },
+      undefined,
+    );
+
+    const expected = [
+      "keep before  ",
+      "FIRST",
+      "FIRST2",
+      "keep middle   ",
+      "SECOND",
+      "SECOND2",
+      "keep after  ",
+      "",
+    ].join("\n");
+    await expect(fs.readFile(filePath, "utf-8")).resolves.toBe(expected);
+    const details = result.details as EditToolDetails;
+    expect(applyPatch(original, details.patch)).toBe(expected);
+  });
+
+  it("preserves the correct duplicate line after a fuzzy replacement", async () => {
+    const original = "replace me   \nafter   \n";
+    const filePath = await createTempFile(original);
+    const tool = createEditTool(tmpDir);
+
+    const result = await tool.execute(
+      "call-duplicate",
+      {
+        path: filePath,
+        edits: [{ oldText: "replace me\n", newText: "after\n" }],
+      },
+      undefined,
+    );
+
+    const expected = "after\nafter   \n";
+    await expect(fs.readFile(filePath, "utf-8")).resolves.toBe(expected);
+    const details = result.details as EditToolDetails;
+    expect(applyPatch(original, details.patch)).toBe(expected);
+  });
+
+  it("strips model-added metadata while retaining the strict edit schema", async () => {
+    const filePath = await createTempFile("before\n");
+    const tool = createEditTool(tmpDir);
+    const prepared = tool.prepareArguments?.({
+      path: filePath,
+      reason: "model explanation",
+      edits: [{ oldText: "before", newText: "after", reason: "why" }],
+    });
+
+    expect(prepared).toEqual({
+      path: filePath,
+      edits: [{ oldText: "before", newText: "after" }],
+    });
+    expect(Value.Check(tool.parameters, prepared)).toBe(true);
+    await tool.execute("call-metadata", prepared as never, undefined);
+    await expect(fs.readFile(filePath, "utf-8")).resolves.toBe("after\n");
+  });
+
   it("renders previews through custom edit operations", async () => {
     // Preview rendering must use injected operations so remote/sandbox files are
     // shown without accidentally reading from the host filesystem.
@@ -216,7 +319,7 @@ describe("edit tool", () => {
   });
 
   it("filters fuzzy no-op edits from mixed previews", async () => {
-    const readFile = vi.fn(async () => Buffer.from("foo bar\n"));
+    const readFile = vi.fn(async () => Buffer.from("foo\u00a0bar\n"));
     const operations: EditOperations = {
       access: async () => {},
       readFile,
@@ -227,7 +330,7 @@ describe("edit tool", () => {
       path: "remote.txt",
       edits: [
         { oldText: "foo bar", newText: "foo bar" },
-        { oldText: "foo ", newText: "baz" },
+        { oldText: "foo\u00a0", newText: "baz" },
       ],
     };
     const context = {
@@ -631,16 +734,18 @@ describe("prepareEditArguments alias normalization", () => {
   it("does not merge top-level old_string/new_string into an edits[] array that is already present", () => {
     // A model that (unusually) sends both would otherwise get its top-level
     // pair silently appended as an extra, unintended edit on top of the real
-    // edits[] array.
+    // edits[] array. The stray top-level pair is still discarded by the
+    // strict provider schema, same as any other model-added metadata.
     const prepared = prepare({
       path: "notes.txt",
       edits: [{ oldText: "alpha", newText: "ALPHA" }],
       old_string: "unrelated",
       new_string: "should not apply",
     });
-    expect(prepared.edits).toEqual([{ oldText: "alpha", newText: "ALPHA" }]);
-    expect((prepared as unknown as Record<string, unknown>).old_string).toBe("unrelated");
-    expect((prepared as unknown as Record<string, unknown>).new_string).toBe("should not apply");
+    expect(prepared).toEqual({
+      path: "notes.txt",
+      edits: [{ oldText: "alpha", newText: "ALPHA" }],
+    });
   });
 
   it("still rescues edits sent as a JSON string alongside snake_case fields", () => {

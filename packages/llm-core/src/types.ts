@@ -185,7 +185,7 @@ export type ProviderImagesOptions = ImagesOptions & Record<string, unknown>;
 
 /** Unified text options used by simple completion helpers. */
 export interface SimpleStreamOptions extends StreamOptions {
-  reasoning?: ThinkingLevel;
+  reasoning?: ModelThinkingLevel;
   /** Custom token budgets for thinking levels (token-based providers only) */
   thinkingBudgets?: ThinkingBudgets;
 }
@@ -263,6 +263,10 @@ export interface Usage {
   output: number;
   cacheRead: number;
   cacheWrite: number;
+  /** Exact context snapshot for the final provider iteration. */
+  contextUsage?:
+    | { state: "available"; promptTokens: number; totalTokens: number }
+    | { state: "unavailable" };
   totalTokens: number;
   cost: {
     input: number;
@@ -270,6 +274,8 @@ export interface Usage {
     cacheRead: number;
     cacheWrite: number;
     total: number;
+    /** Provenance for the recorded total cost; provider-billed totals are authoritative. */
+    totalOrigin?: "provider-billed";
   };
 }
 
@@ -473,6 +479,8 @@ export interface OpenAICompletionsCompat {
 
 /** Compatibility settings for OpenAI Responses APIs. */
 export interface OpenAIResponsesCompat {
+  /** Whether the model accepts the `temperature` parameter. Default: true. */
+  supportsTemperature?: boolean;
   /** Whether to send the OpenAI `session_id` cache-affinity header from `options.sessionId` when caching is enabled. Default: true. */
   sendSessionIdHeader?: boolean;
   /** Whether the provider supports `prompt_cache_retention: "24h"`. Default: true. */

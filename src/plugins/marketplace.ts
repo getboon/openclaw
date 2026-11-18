@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { redactSensitiveUrlLikeString } from "@openclaw/net-policy/redact-sensitive-url";
+import { hasHttpUrlPrefix } from "@openclaw/net-policy/url-protocol";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { sanitizeForLog } from "../../packages/terminal-core/src/ansi.js";
 import { resolveArchiveKind } from "../infra/archive.js";
@@ -116,10 +117,6 @@ export type MarketplaceShortcutResolution =
     }
   | null;
 
-function isHttpUrl(value: string): boolean {
-  return /^https?:\/\//i.test(value);
-}
-
 function isGitUrl(value: string): boolean {
   return (
     /^git@/i.test(value) || /^ssh:\/\//i.test(value) || /^https?:\/\/.+\.git(?:#.*)?$/i.test(value)
@@ -150,7 +147,7 @@ function normalizeEntrySource(
     if (!trimmed) {
       return { ok: false, error: "empty plugin source" };
     }
-    if (isHttpUrl(trimmed)) {
+    if (hasHttpUrlPrefix(trimmed)) {
       return { ok: true, source: { kind: "url", url: trimmed } };
     }
     return { ok: true, source: { kind: "path", path: trimmed } };
@@ -292,7 +289,7 @@ function marketplaceInstallPolicySource(params: {
     if (
       params.marketplaceOrigin === "remote" &&
       params.source.kind === "path" &&
-      !isHttpUrl(params.source.path)
+      !hasHttpUrlPrefix(params.source.path)
     ) {
       return {
         kind: "archive",
@@ -301,7 +298,7 @@ function marketplaceInstallPolicySource(params: {
         network: true,
       };
     }
-    if (params.source.kind === "path" && !isHttpUrl(params.source.path)) {
+    if (params.source.kind === "path" && !hasHttpUrlPrefix(params.source.path)) {
       return { kind: "archive", authority: "user", mutable: true, network: false };
     }
     return { kind: "archive", authority: "third-party", mutable: entryMutable, network: true };
@@ -310,13 +307,13 @@ function marketplaceInstallPolicySource(params: {
   if (
     params.marketplaceOrigin === "remote" &&
     params.source.kind === "path" &&
-    !isHttpUrl(params.source.path)
+    !hasHttpUrlPrefix(params.source.path)
   ) {
     return { kind: "git", authority: "third-party", mutable: marketplaceMutable, network: true };
   }
 
   if (params.source.kind === "path") {
-    if (isHttpUrl(params.source.path)) {
+    if (hasHttpUrlPrefix(params.source.path)) {
       return { kind: "archive", authority: "third-party", mutable: true, network: true };
     }
     return { kind: "local-path", authority: "user", mutable: true, network: false };
@@ -500,7 +497,7 @@ function normalizeGitCloneSource(
     };
   }
 
-  if (isHttpUrl(source)) {
+  if (hasHttpUrlPrefix(source)) {
     try {
       const url = new URL(split.base);
       if (url.hostname !== "github.com") {
@@ -1056,7 +1053,7 @@ async function validateMarketplaceManifest(params: {
   for (const plugin of params.manifest.plugins) {
     const source = plugin.source;
     if (source.kind === "path") {
-      if (isHttpUrl(source.path)) {
+      if (hasHttpUrlPrefix(source.path)) {
         return {
           ok: false,
           error:
@@ -1113,7 +1110,7 @@ async function resolveMarketplaceEntryInstallPath(params: {
     }
 > {
   if (params.source.kind === "path") {
-    if (isHttpUrl(params.source.path)) {
+    if (hasHttpUrlPrefix(params.source.path)) {
       if (resolveArchiveKind(params.source.path)) {
         return await downloadUrlToTempFile(params.source.path, params.timeoutMs);
       }

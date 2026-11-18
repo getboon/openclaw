@@ -14,6 +14,9 @@ export type GatewayServiceInstallArgs = {
   environment?: GatewayServiceEnv;
   environmentValueSources?: Record<string, GatewayServiceEnvironmentValueSource | undefined>;
   description?: string;
+  // Verified before a config rewrite; Windows uses this to bridge a transient
+  // listener gap while replacing a Startup-folder fallback.
+  startupFallbackTakeoverRuntime?: GatewayServiceRuntime;
 };
 
 export type GatewayServiceStageArgs = GatewayServiceInstallArgs;
@@ -28,6 +31,8 @@ export type GatewayServiceControlArgs = {
   env?: GatewayServiceEnv;
   disable?: boolean;
   warn?: (message: string) => void;
+  /** Called after the native supervisor mutation, before post-stop validation. */
+  onMutation?: () => void;
 };
 
 export type GatewayServiceRestartResult = { outcome: "completed" } | { outcome: "scheduled" };

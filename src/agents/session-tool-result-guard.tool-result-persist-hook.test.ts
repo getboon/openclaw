@@ -10,11 +10,13 @@ import {
   resetGlobalHookRunner,
 } from "../plugins/hook-runner-global.js";
 import { loadOpenClawPlugins } from "../plugins/loader.js";
+import { deleteTestEnvValue, setTestEnvValue } from "../test-utils/env.js";
 import { guardSessionManager } from "./session-tool-result-guard-wrapper.js";
 
 const EMPTY_PLUGIN_SCHEMA = { type: "object", additionalProperties: false, properties: {} };
 const originalBundledPluginsDir = process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
 const originalConfigPath = process.env.OPENCLAW_CONFIG_PATH;
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
 let tempDirs: string[] = [];
 
 function writeTempPlugin(params: { dir: string; id: string; body: string }): string {
@@ -51,6 +53,24 @@ function appendToolCallAndResult(sm: ReturnType<typeof SessionManager.inMemory>)
     isError: false,
     content: [{ type: "text", text: "ok" }],
     details: { big: "x".repeat(10_000) },
+  } as any);
+}
+
+function appendToolResultWithTail(
+  sm: ReturnType<typeof SessionManager.inMemory>,
+  tail: string,
+): void {
+  const appendMessage = sm.appendMessage.bind(sm) as unknown as (message: AgentMessage) => void;
+  appendMessage({
+    role: "assistant",
+    content: [{ type: "toolCall", id: "call_1", name: "exec", arguments: {} }],
+  } as AgentMessage);
+  appendMessage({
+    role: "toolResult",
+    toolCallId: "call_1",
+    isError: false,
+    content: [{ type: "text", text: "visible output stays small" }],
+    details: { status: "completed", tail },
   } as any);
 }
 
@@ -117,9 +137,9 @@ afterEach(() => {
     process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = originalBundledPluginsDir;
   }
   if (originalConfigPath === undefined) {
-    delete process.env.OPENCLAW_CONFIG_PATH;
+    deleteTestEnvValue("OPENCLAW_CONFIG_PATH");
   } else {
-    process.env.OPENCLAW_CONFIG_PATH = originalConfigPath;
+    setTestEnvValue("OPENCLAW_CONFIG_PATH", originalConfigPath);
   }
   for (const dir of tempDirs) {
     fs.rmSync(dir, { force: true, recursive: true });
@@ -259,9 +279,10 @@ describe("tool_result_persist hook", () => {
   it("keeps sensitive parent keys when custom value patterns match the key probe", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-redact-config-"));
     tempDirs.push(tempDir);
-    process.env.OPENCLAW_CONFIG_PATH = path.join(tempDir, "openclaw.json");
+    const configPath = path.join(tempDir, "openclaw.json");
+    setTestEnvValue("OPENCLAW_CONFIG_PATH", configPath);
     fs.writeFileSync(
-      process.env.OPENCLAW_CONFIG_PATH,
+      configPath,
       JSON.stringify({ logging: { redactPatterns: ["/[a-z0-9]{30,}/g"] } }),
       "utf-8",
     );
@@ -361,9 +382,33 @@ describe("tool_result_persist hook", () => {
     expectPersistedToolResultDetailsCapped(sm);
   });
 
+  const redactedScanBoundaryTail = () => {
+    const placeholders = Array.from({ length: 5 }, () => `ghp_${"a".repeat(140)}`).join(" ");
+    return `${placeholders}${"x".repeat(1_999 - placeholders.length)}😀${"z".repeat(9_000)}`;
+  };
+
+  it.each([
+    {
+      name: "retained-prefix surrogate boundary",
+      tail: `${"a".repeat(1_487)}😀${"b".repeat(9_000)}`,
+    },
+    { name: "redaction-scan surrogate boundary", tail: redactedScanBoundaryTail() },
+    { name: "ASCII negative control", tail: "a".repeat(10_000) },
+  ])("keeps $name well formed", ({ tail }) => {
+    const sm = guardSessionManager(SessionManager.inMemory(), {
+      agentId: "main",
+      sessionKey: "main",
+    });
+    appendToolResultWithTail(sm, tail);
+
+    const persistedTail = requirePersistedToolResult(sm).details.tail as string;
+    expect(persistedTail).toContain("boundary overlap omitted");
+    expect(persistedTail).not.toMatch(LONE_SURROGATE_RE);
+  });
+
   it("redacts summarized oversized toolResult details before persistence", () => {
     const tokenValue = "abcdefghijklmnopqrstuvwx1234567890";
-    const boundaryGhToken = "ghp_1234567890abcdefghij1234567890abcdef";
+    const boundaryGhToken = `ghp_${"a".repeat(36)}`;
     const leadingTailToken = "a".repeat(5_000);
     const omittedTailToken = "b".repeat(5_000);
     const sm = guardSessionManager(SessionManager.inMemory(), {
@@ -435,6 +480,8 @@ describe("tool_result_persist hook", () => {
         cwd: "/tmp/".concat("workspace/".repeat(400)),
         name: "oversized fallback command ".repeat(200),
         fullOutputPath: "/tmp/".concat("output/".repeat(400)),
+        spilledChars: 2_000_000,
+        spillTruncated: true,
         aggregated: "x".repeat(120_000),
         tail: "tail ".repeat(800),
         sessions: Array.from({ length: 10 }, (_, i) => ({
@@ -451,6 +498,8 @@ describe("tool_result_persist hook", () => {
     expect(details.persistedDetailsTruncated).toBe(true);
     expect(details.finalDetailsTruncated).toBe(true);
     expect(details.status?.token).toBe("***");
+    expect(details.spilledChars).toBe(2_000_000);
+    expect(details.spillTruncated).toBe(true);
     expect(serialized).not.toContain(tokenValue);
   });
 

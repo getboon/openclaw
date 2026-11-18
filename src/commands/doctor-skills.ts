@@ -40,7 +40,7 @@ function defaultGhConfigDiscoveryInput(): GhConfigDiscoveryInput {
 }
 
 /** Builds a GitHub CLI config-dir hint for eligible GitHub skill setups. */
-export function describeGhConfigDirHint(skills: SkillStatusEntry[]): string[] {
+function describeGhConfigDirHint(skills: SkillStatusEntry[]): string[] {
   return describeGhConfigDirHintFromDiscovery(skills, defaultGhConfigDiscoveryInput());
 }
 
@@ -105,7 +105,8 @@ export async function maybeRepairSkillReadiness(params: {
   }
 
   note(formatUnavailableSkillDoctorLines(unavailable).join("\n"), "Skills");
-  const shouldDisable = await params.prompter.confirmAutoFix({
+  // Updating may migrate required state, but must not disable optional skills for this environment.
+  const shouldDisable = await params.prompter.confirmRuntimeRepair({
     message: `Disable ${unavailable.length} unavailable skill${unavailable.length === 1 ? "" : "s"} in config?`,
     initialValue: false,
   });

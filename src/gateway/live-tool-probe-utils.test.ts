@@ -239,7 +239,7 @@ describe("live tool probe utils", () => {
       {
         name: "retains retries for legacy mistral nonce marker echoes",
         params: {
-          text: "nonceA= nonceB=",
+          text: "testMarkerA= testMarkerB=",
           nonceA: "nonce-a",
           nonceB: "nonce-b",
           provider: "mistral",

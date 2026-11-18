@@ -2,11 +2,16 @@
 // requirements, payload plans, gateway fallback, and optional mirroring.
 import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
 import { deriveDurableFinalDeliveryRequirements } from "../../channels/message/capabilities.js";
-import { sendDurableMessageBatch } from "../../channels/message/runtime.js";
+import {
+  sendDurableMessageBatch,
+  serializeDurableMessagePayloadOutcomes,
+  type SerializedDurableMessagePayloadOutcome,
+} from "../../channels/message/runtime.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { OutboundMediaAccess } from "../../media/load-options.js";
 import type { PollInput } from "../../polls.js";
 import { normalizePollInput } from "../../polls.js";
+import { createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
 import { formatErrorMessage } from "../errors.js";
 import { resolveOutboundChannelPlugin } from "./channel-resolution.js";
 import { resolveMessageChannelSelection } from "./channel-selection.js";
@@ -30,25 +35,19 @@ import {
 import { buildOutboundSessionContext } from "./session-context.js";
 import { resolveOutboundTarget } from "./targets.js";
 
-let messageConfigRuntimePromise: Promise<typeof import("./message.config.runtime.js")> | null =
-  null;
-let messageGatewayRuntimePromise: Promise<typeof import("./message.gateway.runtime.js")> | null =
-  null;
 const SEND_BUFFER_MEDIA_URL = "buffer://message-send/attachment";
 
-function loadMessageConfigRuntime() {
-  // Keep config/runtime loading lazy so importing message helpers does not
-  // bootstrap plugin registries or gateway clients.
-  messageConfigRuntimePromise ??= import("./message.config.runtime.js");
-  return messageConfigRuntimePromise;
-}
+const loadMessageConfigRuntime = createLazyRuntimeModule(
+  () => import("./message.config.runtime.js"),
+);
 
-function loadMessageGatewayRuntime() {
-  messageGatewayRuntimePromise ??= import("./message.gateway.runtime.js");
-  return messageGatewayRuntimePromise;
-}
+// Keep config/runtime loading lazy so importing message helpers does not
+// bootstrap plugin registries or gateway clients.
+const loadMessageGatewayRuntime = createLazyRuntimeModule(
+  () => import("./message.gateway.runtime.js"),
+);
 
-export type MessageGatewayOptions = OutboundMessageGatewayOptionsInput;
+type MessageGatewayOptions = OutboundMessageGatewayOptionsInput;
 
 type MessageSendParams = {
   to: string;
@@ -101,24 +100,27 @@ export type MessageSendResult = {
   mediaUrl: string | null;
   mediaUrls?: string[];
   result?: OutboundDeliveryResult | { messageId: string };
-  deliveryStatus?: "suppressed" | "failed";
+  deliveryStatus?: "sent" | "suppressed" | "partial_failed" | "failed";
   /**
-   * Underlying send error message when `deliveryStatus` is `"failed"` —
-   * present only for `bestEffort` sends, where the caller asked not to throw
-   * but still needs a real failure to be tellable from a delivered message.
-   * This result becomes a tool's `details` verbatim (see `jsonResult` in
-   * `src/agents/tools/common.ts`), and `isToolResultError`
-   * (`src/agents/tool-result-error.ts`) already treats a truthy `error` field
-   * as a failed tool call — naming it `error` (not e.g. `deliveryError`) is
-   * what makes a failed bestEffort send become a real `lastToolError` instead
-   * of silently reading as success. Formatted to a plain string (not the raw
-   * `Error`) because tool-result sanitization (`sanitizeToolResult` /
-   * `redactStringsDeep` in `src/agents/embedded-agent-subscribe.tools.ts`)
-   * walks objects via `Object.entries`, which never sees an `Error`
-   * instance's non-enumerable `message`/`stack` and would otherwise reduce it
-   * to `{}` before `extractToolErrorMessage` reads it.
+   * Underlying send error message when `deliveryStatus` is `"failed"` or
+   * `"partial_failed"` — present only for `bestEffort` sends, where the
+   * caller asked not to throw but still needs a real failure to be tellable
+   * from a delivered message. This result becomes a tool's `details`
+   * verbatim (see `jsonResult` in `src/agents/tools/common.ts`), and
+   * `isToolResultError` (`src/agents/tool-result-error.ts`) already treats a
+   * truthy `error` field as a failed tool call — naming it `error` (not e.g.
+   * `deliveryError`) is what makes a failed bestEffort send become a real
+   * `lastToolError` instead of silently reading as success. Formatted to a
+   * plain string (not the raw `Error`) because tool-result sanitization
+   * (`sanitizeToolResult` / `redactStringsDeep` in
+   * `src/agents/embedded-agent-subscribe.tools.ts`) walks objects via
+   * `Object.entries`, which never sees an `Error` instance's non-enumerable
+   * `message`/`stack` and would otherwise reduce it to `{}` before
+   * `extractToolErrorMessage` reads it.
    */
   error?: string;
+  sentBeforeError?: boolean;
+  payloadOutcomes?: SerializedDurableMessagePayloadOutcome[];
   dryRun?: boolean;
 };
 
@@ -148,7 +150,7 @@ export type MessagePollResult = {
   maxSelections: number;
   durationSeconds: number | null;
   durationHours: number | null;
-  via: "gateway";
+  via: "direct" | "gateway";
   result?: {
     messageId: string;
     toJid?: string;
@@ -169,6 +171,7 @@ function buildMessagePollResult(params: {
     durationSeconds?: number | null;
     durationHours?: number | null;
   };
+  via: MessagePollResult["via"];
   result?: MessagePollResult["result"];
   dryRun?: boolean;
 }): MessagePollResult {
@@ -180,9 +183,26 @@ function buildMessagePollResult(params: {
     maxSelections: params.normalized.maxSelections,
     durationSeconds: params.normalized.durationSeconds ?? null,
     durationHours: params.normalized.durationHours ?? null,
-    via: "gateway",
+    via: params.via,
     ...(params.dryRun ? { dryRun: true } : { result: params.result }),
   };
+}
+
+function assertPollOptionSupport(params: {
+  channel: string;
+  outbound: NonNullable<ReturnType<typeof resolveRequiredPlugin>["outbound"]>;
+  durationSeconds?: number;
+  isAnonymous?: boolean;
+}): void {
+  if (
+    typeof params.durationSeconds === "number" &&
+    params.outbound.supportsPollDurationSeconds !== true
+  ) {
+    throw new Error(`durationSeconds is not supported for ${params.channel} polls`);
+  }
+  if (typeof params.isAnonymous === "boolean" && params.outbound.supportsAnonymousPolls !== true) {
+    throw new Error(`isAnonymous is not supported for ${params.channel} polls`);
+  }
 }
 
 async function resolveRequiredChannel(params: {
@@ -382,7 +402,10 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       requesterSenderUsername: params.requesterSenderUsername,
       requesterSenderE164: params.requesterSenderE164,
     });
-    if (params.queuePolicy === "required") {
+    // Public queuePolicy:"required" is the exact-delivery contract preflighted below.
+    // Lower-level queue-required callers must leave this internal opt-in unset.
+    const requireUnknownSendReconciliation = params.queuePolicy === "required";
+    if (requireUnknownSendReconciliation) {
       await assertRequiredMessageSendDurability({
         cfg,
         channel: outboundChannel,
@@ -405,6 +428,7 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       forceDocument: params.forceDocument,
       deps: params.deps,
       bestEffort: params.bestEffort,
+      ...(requireUnknownSendReconciliation ? { requireUnknownSendReconciliation: true } : {}),
       durability:
         params.bestEffort || params.queuePolicy === "best_effort" ? "best_effort" : "required",
       signal: params.abortSignal,
@@ -424,14 +448,7 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       throw send.error;
     }
     const results = send.status === "sent" || send.status === "partial_failed" ? send.results : [];
-    // bestEffort suppresses the throw above, but the caller still needs to tell
-    // a real failure apart from a delivered message — otherwise a genuinely
-    // failed send (bad target, transport error) reports as success with no
-    // failure signal anywhere.
-    const bestEffortFailure =
-      params.bestEffort === true && (send.status === "failed" || send.status === "partial_failed")
-        ? { failed: true as const, error: formatErrorMessage(send.error) }
-        : { failed: false as const };
+    const payloadOutcomes = serializeDurableMessagePayloadOutcomes(send.payloadOutcomes);
 
     return {
       channel,
@@ -440,11 +457,12 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
       mediaUrl: primaryMediaUrl,
       mediaUrls: mirrorMediaUrls.length ? mirrorMediaUrls : undefined,
       result: results.at(-1),
-      ...(send.status === "suppressed"
-        ? { deliveryStatus: "suppressed" as const }
-        : bestEffortFailure.failed
-          ? { deliveryStatus: "failed" as const, error: bestEffortFailure.error }
-          : {}),
+      deliveryStatus: send.status,
+      ...(send.status === "failed" || send.status === "partial_failed"
+        ? { error: formatErrorMessage(send.error) }
+        : {}),
+      ...(send.status === "partial_failed" ? { sentBeforeError: true as const } : {}),
+      ...(payloadOutcomes ? { payloadOutcomes } : {}),
     };
   }
 
@@ -500,6 +518,7 @@ export async function sendPoll(params: MessagePollParams): Promise<MessagePollRe
   if (!outbound?.sendPoll) {
     throw new Error(`Unsupported poll channel: ${channel}`);
   }
+  const deliveryMode = outbound.deliveryMode ?? "direct";
   const normalized = outbound.pollMaxOptions
     ? normalizePollInput(pollInput, { maxOptions: outbound.pollMaxOptions })
     : normalizePollInput(pollInput);
@@ -509,7 +528,46 @@ export async function sendPoll(params: MessagePollParams): Promise<MessagePollRe
       channel,
       to: params.to,
       normalized,
+      via: deliveryMode === "gateway" ? "gateway" : "direct",
       dryRun: true,
+    });
+  }
+
+  assertPollOptionSupport({
+    channel,
+    outbound,
+    durationSeconds: params.durationSeconds,
+    isAnonymous: params.isAnonymous,
+  });
+
+  if (deliveryMode !== "gateway") {
+    const resolvedTarget = resolveOutboundTarget({
+      channel,
+      to: params.to,
+      cfg,
+      accountId: params.accountId,
+      mode: "explicit",
+    });
+    if (!resolvedTarget.ok) {
+      throw resolvedTarget.error;
+    }
+
+    const result = await outbound.sendPoll({
+      cfg,
+      to: resolvedTarget.to,
+      poll: normalized,
+      accountId: params.accountId,
+      threadId: params.threadId,
+      silent: params.silent,
+      isAnonymous: params.isAnonymous,
+    });
+
+    return buildMessagePollResult({
+      channel,
+      to: params.to,
+      normalized,
+      via: "direct",
+      result,
     });
   }
 
@@ -542,6 +600,7 @@ export async function sendPoll(params: MessagePollParams): Promise<MessagePollRe
     channel,
     to: params.to,
     normalized,
+    via: "gateway",
     result,
   });
 }

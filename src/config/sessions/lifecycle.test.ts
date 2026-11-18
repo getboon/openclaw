@@ -20,15 +20,23 @@ const baseParams = {
 } as const;
 
 describe("resolveTerminalMainSessionTranscriptRegistryCheck", () => {
-  it("returns a check for a terminal 'done' entry with a registry timestamp", () => {
+  it("returns a check for a terminal 'killed' entry with a registry timestamp", () => {
     const check = resolveTerminalMainSessionTranscriptRegistryCheck({
       ...baseParams,
-      entry: buildEntry({ status: "done", updatedAt: 1_000 }),
+      entry: buildEntry({ status: "killed", updatedAt: 1_000 }),
     });
     expect(check).toEqual({
       sessionId: "11111111-1111-1111-1111-111111111111",
       registryTimestampMs: 1_000,
     });
+  });
+
+  it("exempts a 'done' entry: transcript writes can land after registry updates without making the session stale", () => {
+    const check = resolveTerminalMainSessionTranscriptRegistryCheck({
+      ...baseParams,
+      entry: buildEntry({ status: "done", updatedAt: 1_000 }),
+    });
+    expect(check).toBeUndefined();
   });
 
   it("exempts a 'failed' entry so it stays reusable for retry/recovery", () => {
@@ -42,15 +50,15 @@ describe("resolveTerminalMainSessionTranscriptRegistryCheck", () => {
   it("exempts an entry whose last run was aborted (e.g. a concurrent-turn lock conflict or a gateway-restart interruption), so it stays reusable instead of forcing a fresh session that silently drops history", () => {
     const check = resolveTerminalMainSessionTranscriptRegistryCheck({
       ...baseParams,
-      entry: buildEntry({ status: "done", updatedAt: 1_000, abortedLastRun: true }),
+      entry: buildEntry({ status: "killed", updatedAt: 1_000, abortedLastRun: true }),
     });
     expect(check).toBeUndefined();
   });
 
-  it("still returns a check for a cleanly 'done' entry with abortedLastRun explicitly false", () => {
+  it("still returns a check for a cleanly 'killed' entry with abortedLastRun explicitly false", () => {
     const check = resolveTerminalMainSessionTranscriptRegistryCheck({
       ...baseParams,
-      entry: buildEntry({ status: "done", updatedAt: 1_000, abortedLastRun: false }),
+      entry: buildEntry({ status: "killed", updatedAt: 1_000, abortedLastRun: false }),
     });
     expect(check).toEqual({
       sessionId: "11111111-1111-1111-1111-111111111111",

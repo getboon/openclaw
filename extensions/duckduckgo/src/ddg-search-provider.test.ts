@@ -205,6 +205,31 @@ describe("duckduckgo web search provider", () => {
     );
   });
 
+  it("leaves out-of-range numeric html entities intact instead of throwing", () => {
+    expect(() => ddgClientTesting.decodeHtmlEntities("Result &#99999999; end")).not.toThrow();
+    expect(ddgClientTesting.decodeHtmlEntities("Result &#99999999; end")).toBe(
+      "Result &#99999999; end",
+    );
+    expect(ddgClientTesting.decodeHtmlEntities("Hex &#x110000; tail")).toBe("Hex &#x110000; tail");
+    // Surrogate-range entities would decode to lone UTF-16 surrogates; keep them intact.
+    expect(ddgClientTesting.decodeHtmlEntities("Bad &#55296; end")).toBe("Bad &#55296; end");
+    expect(ddgClientTesting.decodeHtmlEntities("Bad &#xD800; end")).toBe("Bad &#xD800; end");
+    expect(ddgClientTesting.decodeHtmlEntities("Bad &#xDFFF; end")).toBe("Bad &#xDFFF; end");
+    // A valid supplementary-plane entity still decodes.
+    expect(ddgClientTesting.decodeHtmlEntities("Smile &#128512;")).toBe("Smile 😀");
+  });
+
+  it("does not double-decode escaped entities (decodes &amp; last)", () => {
+    // A result whose text literally shows "&lt;" arrives double-encoded as
+    // "&amp;lt;". Decoding &amp; first would re-decode it into "<", corrupting
+    // the snippet; &amp; must be decoded last.
+    expect(ddgClientTesting.decodeHtmlEntities("How to escape &amp;lt; in HTML")).toBe(
+      "How to escape &lt; in HTML",
+    );
+    expect(ddgClientTesting.decodeHtmlEntities("a&amp;#39;b")).toBe("a&#39;b");
+    expect(ddgClientTesting.decodeHtmlEntities("a&#x26;amp;b")).toBe("a&amp;b");
+  });
+
   it("parses results when href appears before class", () => {
     const html = `
       <a href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com" class="result__a">

@@ -3,4 +3,4 @@ export {
   ToolArgumentValidationError,
   validateToolArguments,
   validateToolCall,
-} from "@openclaw/llm-core";
+} from "@openclaw/ai/validation";

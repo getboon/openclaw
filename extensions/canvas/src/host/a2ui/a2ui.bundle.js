@@ -137,21 +137,6 @@ function isResolvedVideo(props) {
 	return isObject(props) && "url" in props && isStringValue(props.url);
 }
 /**
-* Copyright 2025 Google LLC
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*      https://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
-/**
 * Event dispatched when an input component's validation state is updated.
 */
 var A2UIValidationEvent = class A2UIValidationEvent extends CustomEvent {
@@ -3698,21 +3683,6 @@ ZodNullable.create;
 ZodEffects.createWithPreprocess;
 ZodPipeline.create;
 /**
-* Copyright 2026 Google LLC
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
-* you may not use this file except in compliance with the License.
-* You may obtain a copy of the License at
-*
-*     http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
-/**
 * Base primitives
 */
 const exactlyOneKey = (val, ctx) => {
@@ -3744,35 +3714,23 @@ const DataValueMapItemSchema = lazyType(() => objectType({
 		message: `Value map item must have exactly one value property (valueString, valueNumber, valueBoolean, valueMap), found ${count}.`
 	});
 }));
-const DataValueSchema = objectType({
-	key: stringType(),
-	valueString: stringType().optional(),
-	valueNumber: numberType().optional(),
-	valueBoolean: booleanType().optional(),
-	valueMap: arrayType(DataValueMapItemSchema).optional()
-}).strict().superRefine((val, ctx) => {
-	let count = 0;
-	if (val.valueString !== void 0) count++;
-	if (val.valueNumber !== void 0) count++;
-	if (val.valueBoolean !== void 0) count++;
-	if (val.valueMap !== void 0) count++;
-	if (count !== 1) ctx.addIssue({
-		code: ZodIssueCode.custom,
-		message: `Value must have exactly one value property (valueString, valueNumber, valueBoolean, valueMap), found ${count}.`
+function createDataValueSchema(options = {}) {
+	const maxDepth = options.maxDepth ?? 5;
+	return DataValueMapItemSchema.superRefine((val, ctx) => {
+		const checkDepth = (v, currentDepth) => {
+			if (currentDepth > maxDepth) {
+				ctx.addIssue({
+					code: ZodIssueCode.custom,
+					message: `valueMap recursion exceeded maximum depth of ${maxDepth}.`
+				});
+				return;
+			}
+			if (v.valueMap && Array.isArray(v.valueMap)) for (const item of v.valueMap) checkDepth(item, currentDepth + 1);
+		};
+		checkDepth(val, 1);
 	});
-}).superRefine((val, ctx) => {
-	const checkDepth = (v, currentDepth) => {
-		if (currentDepth > 5) {
-			ctx.addIssue({
-				code: ZodIssueCode.custom,
-				message: "valueMap recursion exceeded maximum depth of 5."
-			});
-			return;
-		}
-		if (v.valueMap && Array.isArray(v.valueMap)) for (const item of v.valueMap) checkDepth(item, currentDepth + 1);
-	};
-	checkDepth(val, 1);
-});
+}
+const DataValueSchema = createDataValueSchema();
 objectType({
 	path: stringType().optional(),
 	literalNumber: numberType().optional(),
@@ -4344,7 +4302,7 @@ var A2uiMessageProcessor = class A2uiMessageProcessor {
 		const componentType = Object.keys(componentProps)[0];
 		const unresolvedProperties = componentProps[componentType];
 		const resolvedProperties = new this.objCtor();
-		if (isObject(unresolvedProperties)) for (const [key, value] of Object.entries(unresolvedProperties)) resolvedProperties[key] = this.resolvePropertyValue(value, surface, visited, dataContextPath, idSuffix);
+		if (isObject(unresolvedProperties)) for (const [key, value] of Object.entries(unresolvedProperties)) resolvedProperties[key] = this.resolvePropertyValue(value, surface, visited, dataContextPath, idSuffix, key === "action");
 		visited.delete(fullId);
 		const baseNode = {
 			id: fullId,
@@ -4490,9 +4448,9 @@ var A2uiMessageProcessor = class A2uiMessageProcessor {
 	* a child node (a string that matches a component ID), an explicitList of
 	* children, or a template, these will be built out here.
 	*/
-	resolvePropertyValue(value, surface, visited, dataContextPath, idSuffix = "") {
-		if (typeof value === "string" && surface.components.has(value)) return this.buildNodeRecursive(value, surface, visited, dataContextPath, idSuffix);
-		if (isComponentArrayReference(value)) {
+	resolvePropertyValue(value, surface, visited, dataContextPath, idSuffix = "", isInsideAction = false) {
+		if (!isInsideAction && typeof value === "string" && surface.components.has(value)) return this.buildNodeRecursive(value, surface, visited, dataContextPath, idSuffix);
+		if (!isInsideAction && isComponentArrayReference(value)) {
 			if (value.explicitList) return value.explicitList.map((id) => this.buildNodeRecursive(id, surface, visited, dataContextPath, idSuffix));
 			if (value.template) {
 				const fullDataPath = this.resolvePath(value.template.dataBinding, dataContextPath);
@@ -4511,7 +4469,7 @@ var A2uiMessageProcessor = class A2uiMessageProcessor {
 				return new this.arrayCtor();
 			}
 		}
-		if (Array.isArray(value)) return value.map((item) => this.resolvePropertyValue(item, surface, visited, dataContextPath, idSuffix));
+		if (Array.isArray(value)) return value.map((item) => this.resolvePropertyValue(item, surface, visited, dataContextPath, idSuffix, isInsideAction));
 		if (isObject(value)) {
 			const newObj = new this.objCtor();
 			for (const [key, propValue] of Object.entries(value)) {
@@ -4521,7 +4479,7 @@ var A2uiMessageProcessor = class A2uiMessageProcessor {
 					newObj[key] = propertyValue;
 					continue;
 				}
-				newObj[key] = this.resolvePropertyValue(propertyValue, surface, visited, dataContextPath, idSuffix);
+				newObj[key] = this.resolvePropertyValue(propertyValue, surface, visited, dataContextPath, idSuffix, isInsideAction || key === "action");
 			}
 			return newObj;
 		}
@@ -11542,7 +11500,7 @@ const markdown$1 = e$6(class MarkdownDirective extends i$5 {
 			try {
 				const { renderMarkdown } = await import("@a2ui/markdown-it");
 				return o(await renderMarkdown(value, markdownOptions));
-			} catch (e) {
+			} catch {
 				if (!MarkdownDirective.defaultMarkdownWarningLogged) {
 					console.warn("[MarkdownDirective] Failed to load optional `@a2ui/markdown-it` renderer. Using fallback regex.");
 					MarkdownDirective.defaultMarkdownWarningLogged = true;

@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { URL } from "node:url";
 import { normalizeRequestInitHeadersForFetch } from "../infra/fetch-headers.js";
+import { redactRegisteredSecretValues } from "../logging/secret-redaction-registry.js";
 import { resolveDebugProxySettings, type DebugProxySettings } from "./env.js";
 import {
   closeDebugProxyCaptureStore,
@@ -201,9 +202,77 @@ function redactedCaptureHeaders(
   for (const [name, value] of entries) {
     // Header names are matched exactly and by sensitive fragments because
     // providers use many token/key naming variants.
-    redacted[name] = isSensitiveCaptureHeaderName(name) ? REDACTED_CAPTURE_HEADER_VALUE : value;
+    redacted[name] = isSensitiveCaptureHeaderName(name)
+      ? REDACTED_CAPTURE_HEADER_VALUE
+      : redactRegisteredSecretValues(value, () => REDACTED_CAPTURE_HEADER_VALUE);
   }
   return redacted;
+}
+
+function redactCaptureUrl(rawUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return "https://redacted.invalid/%5BREDACTED%5D";
+  }
+  const redactComponent = (value: string) =>
+    redactRegisteredSecretValues(value, () => REDACTED_CAPTURE_HEADER_VALUE);
+  const decodeComponent = (value: string) => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  };
+  if (redactComponent(url.hostname) !== url.hostname) {
+    url.hostname = "redacted.invalid";
+  }
+  for (const key of ["username", "password"] as const) {
+    const decoded = decodeComponent(url[key]);
+    const redacted = redactComponent(decoded);
+    if (redacted !== decoded) {
+      url[key] = redacted;
+    }
+  }
+  url.pathname = url.pathname
+    .split("/")
+    .map((segment) => {
+      try {
+        const decoded = decodeURIComponent(segment);
+        const redacted = redactComponent(decoded);
+        return redacted === decoded ? segment : encodeURIComponent(redacted);
+      } catch {
+        return segment;
+      }
+    })
+    .join("/");
+  const searchParams = new URLSearchParams();
+  let searchChanged = false;
+  for (const [name, value] of url.searchParams.entries()) {
+    const redactedName = redactComponent(name);
+    const redactedValue = redactComponent(value);
+    searchParams.append(redactedName, redactedValue);
+    if (redactedName !== name || redactedValue !== value) {
+      searchChanged = true;
+    }
+  }
+  if (searchChanged) {
+    url.search = searchParams.toString();
+  }
+  const decodedHash = decodeComponent(url.hash.slice(1));
+  const redactedHash = redactComponent(decodedHash);
+  if (redactedHash !== decodedHash) {
+    url.hash = redactedHash;
+  }
+  const serialized = url.toString();
+  return redactComponent(serialized) === serialized
+    ? serialized
+    : `${url.protocol}//redacted.invalid/%5BREDACTED%5D`;
+}
+
+function redactCaptureText(value: string): string {
+  return redactRegisteredSecretValues(value, () => REDACTED_CAPTURE_HEADER_VALUE);
 }
 
 function createHttpCaptureEventBase(params: {
@@ -289,13 +358,14 @@ function installDebugProxyGlobalFetchPatch(
     } catch (error) {
       if (url && /^https?:/i.test(url)) {
         const store = runtime.getStore();
-        const parsed = new URL(url);
+        const captureUrl = redactCaptureUrl(url);
+        const parsed = new URL(captureUrl);
         store.recordEvent({
           sessionId: settings.sessionId,
           ts: Date.now(),
           sourceScope: "openclaw",
           sourceProcess: settings.sourceProcess,
-          protocol: protocolFromUrl(url),
+          protocol: protocolFromUrl(captureUrl),
           direction: "local",
           kind: "error",
           flowId: randomUUID(),
@@ -307,7 +377,7 @@ function installDebugProxyGlobalFetchPatch(
             "GET",
           host: parsed.host,
           path: `${parsed.pathname}${parsed.search}`,
-          errorText: error instanceof Error ? error.message : String(error),
+          errorText: redactCaptureText(error instanceof Error ? error.message : String(error)),
           metaJson: runtime.safeJsonString({ captureOrigin: "global-fetch" }),
         });
       }
@@ -393,7 +463,8 @@ export function captureHttpExchange(
   const runtime = resolveRuntimeDeps(deps);
   const store = runtime.getStore();
   const flowId = params.flowId ?? randomUUID();
-  const url = new URL(params.url);
+  const captureUrl = redactCaptureUrl(params.url);
+  const url = new URL(captureUrl);
   const requestBody =
     typeof params.requestBody === "string" || Buffer.isBuffer(params.requestBody)
       ? params.requestBody
@@ -408,7 +479,7 @@ export function captureHttpExchange(
   store.recordEvent({
     ...createHttpCaptureEventBase({
       settings,
-      rawUrl: params.url,
+      rawUrl: captureUrl,
       url,
       transport: params.transport,
       direction: "outbound",
@@ -431,7 +502,7 @@ export function captureHttpExchange(
     store.recordEvent({
       ...createHttpCaptureEventBase({
         settings,
-        rawUrl: params.url,
+        rawUrl: captureUrl,
         url,
         transport: params.transport,
         direction: "inbound",
@@ -488,7 +559,7 @@ export function captureHttpExchange(
       store.recordEvent({
         ...createHttpCaptureEventBase({
           settings,
-          rawUrl: params.url,
+          rawUrl: captureUrl,
           url,
           transport: params.transport,
           direction: "inbound",
@@ -507,7 +578,7 @@ export function captureHttpExchange(
       store.recordEvent({
         ...createHttpCaptureEventBase({
           settings,
-          rawUrl: params.url,
+          rawUrl: captureUrl,
           url,
           transport: params.transport,
           direction: "local",
@@ -515,7 +586,7 @@ export function captureHttpExchange(
           flowId,
           method: params.method,
         }),
-        errorText: error instanceof Error ? error.message : String(error),
+        errorText: redactCaptureText(error instanceof Error ? error.message : String(error)),
       });
     });
 }

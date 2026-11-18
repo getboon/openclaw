@@ -16,23 +16,18 @@ vi.mock("../tlon-api.js", () => ({
 const mockReadRemoteMediaBuffer = vi.mocked(readRemoteMediaBuffer);
 const mockUploadFile = vi.mocked(uploadFile);
 
-function mockSuccessfulFetch(params: { buffer: Buffer; contentType: string }) {
-  mockReadRemoteMediaBuffer.mockResolvedValue({
-    buffer: params.buffer,
-    contentType: params.contentType,
-  });
-}
-
 async function setupSuccessfulUpload(params?: { contentType?: string; uploadedUrl?: string }) {
   const contentType = params?.contentType ?? "image/png";
   const buffer = Buffer.from("fake-image");
-  mockSuccessfulFetch({
+  mockReadRemoteMediaBuffer.mockResolvedValue({
     buffer,
     contentType,
+    fileName: "image.png",
   });
   if (params?.uploadedUrl) {
     mockUploadFile.mockResolvedValue({ url: params.uploadedUrl });
   }
+  return { buffer };
 }
 
 function requireUploadParams(): { blob?: Blob; contentType?: string; fileName?: string } {
@@ -53,7 +48,7 @@ describe("uploadImageFromUrl", () => {
   });
 
   it("fetches image and calls uploadFile, returns uploaded URL", async () => {
-    await setupSuccessfulUpload({
+    const { buffer } = await setupSuccessfulUpload({
       uploadedUrl: "https://memex.tlon.network/uploaded.png",
     });
 
@@ -70,8 +65,10 @@ describe("uploadImageFromUrl", () => {
     });
     expect(mockUploadFile).toHaveBeenCalledTimes(1);
     const uploadParams = requireUploadParams();
-    expect(uploadParams.blob).toBeInstanceOf(Blob);
     expect(uploadParams.contentType).toBe("image/png");
+    const blob = uploadParams.blob;
+    expect(blob).toBeInstanceOf(Blob);
+    expect(Buffer.from(await blob!.arrayBuffer())).toEqual(buffer);
   });
 
   it("returns original URL if fetch fails", async () => {
@@ -80,6 +77,19 @@ describe("uploadImageFromUrl", () => {
     const result = await uploadImageFromUrl("https://example.com/image.png");
 
     expect(result).toBe("https://example.com/image.png");
+  });
+
+  it("returns original URL when the remote image exceeds the image cap", async () => {
+    mockReadRemoteMediaBuffer.mockRejectedValue(
+      new Error(
+        `Failed to fetch media from https://example.com/image.png: payload exceeds maxBytes ${MAX_IMAGE_BYTES}`,
+      ),
+    );
+
+    const result = await uploadImageFromUrl("https://example.com/image.png");
+
+    expect(result).toBe("https://example.com/image.png");
+    expect(mockUploadFile).not.toHaveBeenCalled();
   });
 
   it("returns original URL if upload fails", async () => {
@@ -97,20 +107,19 @@ describe("uploadImageFromUrl", () => {
 
     const result2 = await uploadImageFromUrl("ftp://example.com/image.png");
     expect(result2).toBe("ftp://example.com/image.png");
+    expect(mockReadRemoteMediaBuffer).not.toHaveBeenCalled();
   });
 
   it("handles invalid URLs gracefully", async () => {
     const result = await uploadImageFromUrl("not-a-valid-url");
     expect(result).toBe("not-a-valid-url");
+    expect(mockReadRemoteMediaBuffer).not.toHaveBeenCalled();
   });
 
   it("extracts filename from URL path", async () => {
-    const buffer = Buffer.from("fake-image");
-    mockSuccessfulFetch({
-      buffer,
+    await setupSuccessfulUpload({
       contentType: "image/jpeg",
     });
-
     mockUploadFile.mockResolvedValue({ url: "https://memex.tlon.network/uploaded.jpg" });
 
     await uploadImageFromUrl("https://example.com/path/to/my-image.jpg");
@@ -119,12 +128,9 @@ describe("uploadImageFromUrl", () => {
   });
 
   it("uses default filename when URL has no path", async () => {
-    const buffer = Buffer.from("fake-image");
-    mockSuccessfulFetch({
-      buffer,
+    await setupSuccessfulUpload({
       contentType: "image/png",
     });
-
     mockUploadFile.mockResolvedValue({ url: "https://memex.tlon.network/uploaded.png" });
 
     await uploadImageFromUrl("https://example.com/");

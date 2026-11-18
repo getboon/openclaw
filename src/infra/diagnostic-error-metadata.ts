@@ -1,6 +1,6 @@
 // Extracts provider diagnostic metadata from error objects and text.
-import crypto from "node:crypto";
 import { sanitizeControlCharsForLogging } from "./control-char-sanitize.js";
+import { sha256HexPrefix } from "./crypto-digest.js";
 
 const HTTP_STATUS_MIN = 100;
 const HTTP_STATUS_MAX = 599;
@@ -86,11 +86,7 @@ function normalizeProviderRequestId(value: unknown): string | undefined {
 }
 
 function hashDiagnosticIdentifier(value: string): string {
-  return `sha256:${crypto
-    .createHash("sha256")
-    .update(value)
-    .digest("hex")
-    .slice(0, REQUEST_ID_HASH_PREFIX_LEN)}`;
+  return `sha256:${sha256HexPrefix(value, REQUEST_ID_HASH_PREFIX_LEN)}`;
 }
 
 function readDirectProviderRequestId(err: unknown): string | undefined {
@@ -160,6 +156,19 @@ export function diagnosticErrorCategory(err: unknown): string {
     return "null";
   }
   return typeof err;
+}
+
+/**
+ * Human-readable error message for diagnostics. Complements
+ * {@link diagnosticErrorCategory} (low-cardinality class name) with the actual
+ * message so error spans carry a real status message instead of a bare
+ * category. Reads only an own data property so diagnostics never invoke a
+ * user-defined getter.
+ */
+export function diagnosticErrorMessage(err: unknown): string | undefined {
+  const text = readDirectMessage(err);
+  const trimmed = text?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 /** Extracts a safe HTTP status code from own `status` or `statusCode` data properties. */
