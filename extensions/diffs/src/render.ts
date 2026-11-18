@@ -550,7 +550,7 @@ async function renderBeforeAfterDiff(
   fileCount: number;
   usesLanguagePack: boolean;
 }> {
-  ensurePierreThemesRegistered();
+  await ensurePierreThemesRegistered();
 
   const languagePackAvailable = options.languagePackAvailable === true;
   const lang = await normalizeSupportedLanguageHint(input.lang, { languagePackAvailable });
@@ -614,7 +614,7 @@ async function renderPatchDiff(
   fileCount: number;
   usesLanguagePack: boolean;
 }> {
-  ensurePierreThemesRegistered();
+  await ensurePierreThemesRegistered();
 
   const languagePackAvailable = options.languagePackAvailable === true;
   const files = await Promise.all(
