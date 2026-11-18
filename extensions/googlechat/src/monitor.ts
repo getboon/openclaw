@@ -7,7 +7,9 @@ import { mergePairLoopGuardConfig } from "openclaw/plugin-sdk/pair-loop-guard-ru
 import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { OpenClawConfig } from "../runtime-api.js";
 import {
+  createInboundEnvelopeBuilder,
   resolveInboundRouteEnvelopeBuilderWithRuntime,
+  resolveThreadSessionKeys,
   resolveWebhookPath,
 } from "../runtime-api.js";
 import type { ResolvedGoogleChatAccount } from "./accounts.js";
@@ -114,6 +116,37 @@ function resolveGoogleChatBotLoopProtectionConfig(params: {
   return mergePairLoopGuardConfig(params.accountConfig, params.groupConfig);
 }
 
+// Google Chat delivers a `thread.name` for every message, but only THREADED
+// spaces give that name meaningful per-thread identity. In UNTHREADED /
+// GROUPED spaces (DMs, group chats) every message would otherwise become its
+// own session — that breaks conversation flow. We require an *explicit*
+// positive signal (`spaceThreadingState === "THREADED_MESSAGES"` or legacy
+// `type === "ROOM"`) before suffixing — `spaceType === "SPACE"` alone is not
+// sufficient because GROUPED_MESSAGES spaces also report as SPACE.
+function spaceSupportsThreading(
+  space: Pick<GoogleChatSpace, "spaceType" | "spaceThreadingState" | "type">,
+): boolean {
+  const threadingState = (space.spaceThreadingState ?? "").toUpperCase();
+  if (threadingState === "THREADED_MESSAGES") {
+    return true;
+  }
+  if (threadingState === "GROUPED_MESSAGES" || threadingState === "UNTHREADED_MESSAGES") {
+    return false;
+  }
+  // No threading-state signal — fall back to legacy `type === "ROOM"` (only
+  // emitted by rooms that supported threading at creation). Do NOT infer
+  // threading from `spaceType: "SPACE"` alone; GROUPED_MESSAGES is also SPACE.
+  return (space.type ?? "").toUpperCase() === "ROOM";
+}
+
+// `event.thread.name` (event-level) sometimes carries the canonical identity
+// for app-created threads ahead of `message.thread.name`. We use the SAME
+// source for inbound session scoping AND outbound reply targeting to avoid a
+// split-brain where the agent thinks it's in thread A but replies to thread B.
+function resolveGoogleChatThreadName(event: GoogleChatEvent): string | undefined {
+  return event.thread?.name?.trim() || event.message?.thread?.name?.trim() || undefined;
+}
+
 function shouldSuppressGoogleChatBotLoop(params: {
   botLoopProtection?: ChannelBotLoopProtectionFacts;
   core: GoogleChatCoreRuntime;
@@ -201,6 +234,19 @@ async function processMessageWithPipeline(params: {
     return;
   }
   const isGroup = isGoogleChatGroupSpace(space);
+  // Same source for inbound session scoping AND outbound reply targeting.
+  const inboundThreadName = resolveGoogleChatThreadName(event);
+  // Only suffix the session key when the space supports threading; outbound
+  // path still gets `replyThreadName` so replies land in the right thread
+  // even in non-threaded spaces (Google Chat's REST API accepts it harmlessly).
+  const sessionThreadName = spaceSupportsThreading(space) ? inboundThreadName : undefined;
+  // DMs have no thread concept — never leak thread targeting into a DM reply
+  // even if the raw event happens to carry a `thread.name`.
+  const replyThreadName = isGroup ? inboundThreadName : undefined;
+  // Bot-loop conversationId is the native space id — matches Slack's
+  // `prepared.message.channel` shape (no thread suffix). Bot loops are rare
+  // enough that space-level scope is sufficient; per-thread suppression
+  // would diverge from peer-channel behavior without strong justification.
   const sender = message.sender ?? event.user;
   const senderId = sender?.name ?? "";
   const senderName = sender?.displayName ?? "";
@@ -277,6 +323,36 @@ async function processMessageWithPipeline(params: {
     sessionStore: config.session?.store,
   });
 
+  // Suffix the resolved space-scoped session key with `:thread:<name>` when the
+  // message lives in a threaded space. parentSessionKey lets the first turn in
+  // a fresh thread session inherit space-level transcript so existing
+  // conversations are not orphaned on deploy.
+  const threadKeys = resolveThreadSessionKeys({
+    baseSessionKey: route.sessionKey,
+    threadId: sessionThreadName,
+    parentSessionKey: route.sessionKey,
+    // Identity: Google Chat thread names are case-sensitive REST resource ids;
+    // do not lowercase (the helper's default normalizer would).
+    normalizeThreadId: (id) => id,
+  });
+  const threadScopedSessionKey = threadKeys.sessionKey;
+  const threadParentSessionKey = threadKeys.parentSessionKey;
+  // Rebind the envelope builder so `previousTimestamp` reads the thread-scoped
+  // session's last-updated time, not the space-scoped key the original
+  // resolveInboundRouteEnvelopeBuilderWithRuntime closure captured.
+  const threadScopedBuildEnvelope =
+    threadScopedSessionKey === route.sessionKey
+      ? buildEnvelope
+      : createInboundEnvelopeBuilder({
+          cfg: config,
+          route: { ...route, sessionKey: threadScopedSessionKey },
+          sessionStore: config.session?.store,
+          resolveStorePath: core.channel.session.resolveStorePath,
+          readSessionUpdatedAt: core.channel.session.readSessionUpdatedAt,
+          resolveEnvelopeFormatOptions: core.channel.reply.resolveEnvelopeFormatOptions,
+          formatAgentEnvelope: core.channel.reply.formatAgentEnvelope,
+        });
+
   let mediaPath: string | undefined;
   let mediaType: string | undefined;
   if (attachments.length > 0) {
@@ -292,14 +368,13 @@ async function processMessageWithPipeline(params: {
     ? space.displayName || `space:${spaceId}`
     : senderName || `user:${senderId}`;
   const timestampMs = resolveGoogleChatTimestampMs(event.eventTime);
-  const { storePath, body } = buildEnvelope({
+  const { storePath, body } = threadScopedBuildEnvelope({
     channel: "Google Chat",
     from: fromLabel,
     timestamp: timestampMs,
     body: rawBody,
   });
 
-  const replyThreadName = isGroup ? message.thread?.name : undefined;
   const ctxPayload = core.channel.inbound.buildContext({
     channel: "googlechat",
     accountId: route.accountId,
@@ -315,12 +390,14 @@ async function processMessageWithPipeline(params: {
     conversation: {
       kind: isGroup ? "channel" : "direct",
       id: spaceId,
+      threadId: sessionThreadName,
       label: fromLabel,
     },
     route: {
       agentId: route.agentId,
       accountId: route.accountId,
-      routeSessionKey: route.sessionKey,
+      routeSessionKey: threadScopedSessionKey,
+      parentSessionKey: threadParentSessionKey,
     },
     reply: {
       to: `googlechat:${spaceId}`,
@@ -406,7 +483,7 @@ async function processMessageWithPipeline(params: {
         channel: "googlechat",
         accountId: route.accountId,
         agentId: route.agentId,
-        routeSessionKey: route.sessionKey,
+        routeSessionKey: threadScopedSessionKey,
         storePath,
         ctxPayload,
         recordInboundSession: core.channel.session.recordInboundSession,
@@ -455,10 +532,13 @@ async function processMessageWithPipeline(params: {
 }
 
 export const testing = {
+  processGoogleChatEvent,
   processMessageWithPipeline,
   resolveGoogleChatBotLoopProtection,
   resolveGoogleChatBotLoopProtectionConfig,
+  resolveGoogleChatThreadName,
   shouldSuppressGoogleChatBotLoop,
+  spaceSupportsThreading,
 };
 
 async function downloadAttachment(
