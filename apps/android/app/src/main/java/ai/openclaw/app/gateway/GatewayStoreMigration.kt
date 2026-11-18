@@ -12,6 +12,11 @@ internal class GatewayStoreMigration(
 
   fun run() {
     if (prefs.containsSecureKey(GatewayRegistryStore.STORAGE_KEY)) return
+    // Defer the entire migration (including legacy-key cleanup) while manual mode is
+    // enabled but misconfigured: the legacy keys likely hold a real, user-entered
+    // credential, not orphaned data, so run() retries on every launch until the host
+    // or port is fixed, or manual mode is turned off.
+    if (isManualModeEnabledAndInvalid()) return
 
     val activeEntry = legacyActiveEntry()
     migrateCredentials(activeEntry?.stableId)
@@ -28,24 +33,28 @@ internal class GatewayStoreMigration(
     )
   }
 
+  private fun isManualModeEnabledAndInvalid(): Boolean {
+    if (!prefs.getPlainBoolean("gateway.manual.enabled", false)) return false
+    val host = prefs.getPlainString("gateway.manual.host").orEmpty().trim()
+    val port = prefs.getPlainInt("gateway.manual.port", 18789)
+    return host.isEmpty() || port !in 1..65535
+  }
+
   private fun legacyActiveEntry(): GatewayRegistryEntry? {
     if (prefs.getPlainBoolean("gateway.manual.enabled", false)) {
+      // run() already returned early via isManualModeEnabledAndInvalid() for a
+      // misconfigured host/port, so manual mode is valid whenever we reach here.
       val host = prefs.getPlainString("gateway.manual.host").orEmpty().trim()
       val port = prefs.getPlainInt("gateway.manual.port", 18789)
-      if (host.isNotEmpty() && port in 1..65535) {
-        val endpoint = GatewayEndpoint.manual(host, port)
-        return GatewayRegistryEntry(
-          stableId = endpoint.stableId,
-          kind = GatewayRegistryEntryKind.MANUAL,
-          name = "$host:$port",
-          host = host,
-          port = port,
-          tls = prefs.getPlainBoolean("gateway.manual.tls", true),
-        )
-      }
-      // Manual mode is enabled but misconfigured: stay disconnected rather than
-      // falling back to a previously discovered gateway the user did not choose.
-      return null
+      val endpoint = GatewayEndpoint.manual(host, port)
+      return GatewayRegistryEntry(
+        stableId = endpoint.stableId,
+        kind = GatewayRegistryEntryKind.MANUAL,
+        name = "$host:$port",
+        host = host,
+        port = port,
+        tls = prefs.getPlainBoolean("gateway.manual.tls", true),
+      )
     }
 
     val stableId = prefs.getPlainString("gateway.lastDiscoveredStableID").orEmpty().trim()

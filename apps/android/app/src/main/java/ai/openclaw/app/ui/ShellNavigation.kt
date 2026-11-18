@@ -74,13 +74,7 @@ internal class ShellNavigation(
     /**
      * Persists shell navigation across process death for rememberSaveable.
      *
-     * This replaced three separately-saved values (activeTab, settingsRoute,
-     * returnToOverviewFromSettings) at the same call site. Positional scoping means
-     * a saved-instance-state bundle from before that change can still hand this
-     * restorer one of those old, differently-shaped values if the process is
-     * recreated after an app upgrade; wrap the whole decode so any shape mismatch
-     * (wrong type, short list, unrecognized enum name) falls back to a fresh
-     * ShellNavigation() instead of crashing the restore.
+     * Restores fresh navigation when saved data has an incompatible shape instead of crashing.
      */
     val Saver =
       Saver<ShellNavigation, Any>(

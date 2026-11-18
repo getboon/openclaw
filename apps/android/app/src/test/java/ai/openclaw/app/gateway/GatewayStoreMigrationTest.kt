@@ -77,6 +77,76 @@ class GatewayStoreMigrationTest {
   }
 
   @Test
+  fun invalidManualPortStaysDisconnectedInsteadOfFallingBackToDiscovered() {
+    val fixture = fixture()
+    fixture.plain
+      .edit()
+      .putBoolean("gateway.manual.enabled", true)
+      .putString("gateway.manual.host", "gateway.example")
+      .putInt("gateway.manual.port", 0)
+      .putString("gateway.lastDiscoveredStableID", "bonjour-gateway")
+      .commit()
+
+    val prefs = SecurePrefs(fixture.context, fixture.secure)
+
+    assertNull(prefs.gatewayRegistry.activeStableId.value)
+    assertNull(prefs.gatewayRegistry.activeEntry())
+  }
+
+  @Test
+  fun invalidManualConfigDefersMigrationAndPreservesLegacyCredential() {
+    val fixture = fixture()
+    fixture.plain
+      .edit()
+      .putBoolean("gateway.manual.enabled", true)
+      .putString("gateway.manual.host", "")
+      .commit()
+    fixture.secure
+      .edit()
+      .putString("gateway.manual.token", "still-needed-token")
+      .commit()
+
+    val prefs = SecurePrefs(fixture.context, fixture.secure)
+    // Migration runs on first gateway-state access.
+    prefs.gatewayRegistry.activeStableId.value
+
+    assertFalse(fixture.secure.contains(GatewayRegistryStore.STORAGE_KEY))
+    assertEquals("still-needed-token", fixture.secure.getString("gateway.manual.token", null))
+  }
+
+  @Test
+  fun fixingManualConfigLetsMigrationRunOnANextLaunch() {
+    val fixture = fixture()
+    fixture.plain
+      .edit()
+      .putBoolean("gateway.manual.enabled", true)
+      .putString("gateway.manual.host", "")
+      .commit()
+    fixture.secure
+      .edit()
+      .putString("gateway.manual.token", "still-needed-token")
+      .commit()
+
+    val prefs = SecurePrefs(fixture.context, fixture.secure)
+    prefs.gatewayRegistry.activeStableId.value
+    assertFalse(fixture.secure.contains(GatewayRegistryStore.STORAGE_KEY))
+
+    fixture.plain
+      .edit()
+      .putString("gateway.manual.host", "gateway.example")
+      .commit()
+    val stableId = GatewayEndpoint.manual("gateway.example", 18789).stableId
+
+    // A fresh SecurePrefs simulates the next app launch, since GatewayRegistryStore
+    // caches its in-memory state from the first access on the original instance.
+    val relaunchedPrefs = SecurePrefs(fixture.context, fixture.secure)
+
+    assertEquals(stableId, relaunchedPrefs.gatewayRegistry.activeStableId.value)
+    assertEquals("still-needed-token", relaunchedPrefs.loadGatewayCredentials(stableId).token)
+    assertFalse(fixture.secure.contains("gateway.manual.token"))
+  }
+
+  @Test
   fun discoveredOnlyStateBecomesActivePlaceholderEntry() {
     val fixture = fixture()
     fixture.plain
