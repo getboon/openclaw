@@ -8,6 +8,7 @@ import { formatErrorMessage } from "../src/infra/errors.ts";
 import { writePackageDistInventory } from "../src/infra/package-dist-inventory.ts";
 import { preparePackageChangelog } from "./package-changelog.mjs";
 import { createPnpmRunnerSpawnSpec } from "./pnpm-runner.mjs";
+import { prepareWorkspacePackDependencies } from "./lib/resolve-workspace-pack-deps.mjs";
 const requiredPreparedPathGroups = [
   ["dist/index.js", "dist/index.mjs"],
   ["dist/control-ui/index.html"],
@@ -179,6 +180,7 @@ async function main(): Promise<void> {
   await writeDistInventory();
   runBuildSmoke();
   await preparePackageChangelog();
+  prepareWorkspacePackDependencies();
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
