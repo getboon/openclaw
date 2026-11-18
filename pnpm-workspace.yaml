@@ -310,3 +310,6 @@ packageExtensions:
       sharp:
         optional: true
 
+patchedDependencies:
+  picomatch@4.0.4: patches/picomatch@4.0.4.patch
+  picomatch@4.0.7: patches/picomatch@4.0.7.patch

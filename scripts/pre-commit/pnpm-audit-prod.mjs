@@ -60,6 +60,33 @@ const AUDIT_ADVISORY_VERSION_OVERRIDES = [
     advisoryIds: new Set(["1243066", "GHSA-mrhx-c7xc-m3w5"]),
     unaffectedVersions: new Set(["3.25.76", "4.6.7"]),
   },
+  // GHSA-fc5q-39xc-vjpf (picomatch ReDoS via single-branch repeated extglobs,
+  // e.g. `+(*a)`) is real and reproduced locally (confirmed exponential
+  // backtracking at n=30 against `'a'.repeat(n) + '!'`), unlike the two
+  // overrides above. picomatch has shipped no fix as of 2026-11-18
+  // (first_patched_version is null on the advisory; the one linked PR,
+  // micromatch/picomatch#194, is unmerged and its own author says it does
+  // not fix this shape -- "`+(*a)` ... still takes ~53s ... untouched here
+  // and out of scope"). picomatch@4.0.7 and @4.0.4 (the only two resolved
+  // versions reaching production here, via vite/vitest/tinyglobby under
+  // extensions/qa-lab's @copilotkit/aimock) are patched in-tree instead
+  // (patches/picomatch@4.0.7.patch, patches/picomatch@4.0.4.patch): a branch
+  // with a bare top-level `*` alongside other content is now treated as
+  // risky and literalized, the same safety/correctness trade-off picomatch's
+  // own prior ReDoS mitigations (#182) already make. Verified against
+  // picomatch's own upstream test suites at both versions: 1981/1983 and
+  // 1973/1975 passing, with the only two newly-failing assertions
+  // (`*(a*|b)` matching "ax", `*/*(W*, *)*` matching a benign short string)
+  // independently reproduced as themselves exponential against an
+  // adversarial input on the unpatched code -- i.e. two more instances of
+  // the same unfixed upstream bug the existing suite never exercised
+  // adversarially, not false positives in this patch. Remove this override
+  // once picomatch ships a real fix and the floor is bumped past it.
+  {
+    packageName: "picomatch",
+    advisoryIds: new Set(["1247710", "GHSA-fc5q-39xc-vjpf"]),
+    unaffectedVersions: new Set(["4.0.7", "4.0.4"]),
+  },
 ];
 
 /**
