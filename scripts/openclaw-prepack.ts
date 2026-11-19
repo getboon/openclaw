@@ -8,6 +8,7 @@ import { formatErrorMessage } from "../src/infra/errors.ts";
 import { writePackageDistInventory } from "../src/infra/package-dist-inventory.ts";
 import { preparePackageChangelog } from "./package-changelog.mjs";
 import { createPnpmRunnerSpawnSpec } from "./pnpm-runner.mjs";
+import { prepareWorkspacePackDependencies } from "./lib/resolve-workspace-pack-deps.mjs";
 const requiredPreparedPathGroups = [
   ["dist/index.js", "dist/index.mjs"],
   ["dist/control-ui/index.html"],
@@ -178,6 +179,11 @@ async function main(): Promise<void> {
   ensurePreparedArtifacts();
   await writeDistInventory();
   runBuildSmoke();
+  // Resolve workspace: deps before touching the changelog: a missing-member
+  // error here aborts prepack with nothing else mutated yet, instead of
+  // leaving a packaged-only CHANGELOG.md behind with no postpack run to
+  // restore it.
+  prepareWorkspacePackDependencies();
   await preparePackageChangelog();
 }
 
