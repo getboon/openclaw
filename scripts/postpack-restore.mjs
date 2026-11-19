@@ -6,21 +6,26 @@
 import { restorePackageChangelog } from "./package-changelog.mjs";
 import { restoreWorkspacePackDependencies } from "./lib/resolve-workspace-pack-deps.mjs";
 
-const steps = [
-  ["package-changelog", () => restorePackageChangelog()],
-  ["resolve-workspace-pack-deps", () => restoreWorkspacePackDependencies()],
-];
-
-let failed = false;
-for (const [name, run] of steps) {
+/**
+ * @param {string} name
+ * @param {() => unknown} run
+ * @returns {Promise<boolean>} whether this step failed
+ */
+async function runRestoreStep(name, run) {
   try {
     await run();
+    return false;
   } catch (error) {
-    failed = true;
     const message = error instanceof Error ? error.message : String(error);
     console.error(`postpack-restore: ${name} failed: ${message}`);
+    return true;
   }
 }
-if (failed) {
+
+const changelogFailed = await runRestoreStep("package-changelog", () => restorePackageChangelog());
+const workspaceDepsFailed = await runRestoreStep("resolve-workspace-pack-deps", () =>
+  restoreWorkspacePackDependencies(),
+);
+if (changelogFailed || workspaceDepsFailed) {
   process.exitCode = 1;
 }
