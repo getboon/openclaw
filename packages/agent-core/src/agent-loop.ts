@@ -879,8 +879,9 @@ async function resolveToolCallTool(
 
 function isToolArgumentValidationError(error: unknown): error is ToolArgumentValidationError {
   return (
-    error instanceof Error &&
-    error.name === "ToolArgumentValidationError" &&
+    typeof error === "object" &&
+    error !== null &&
+    (error as { name?: unknown }).name === "ToolArgumentValidationError" &&
     typeof (error as { summary?: unknown }).summary === "string"
   );
 }
@@ -988,10 +989,8 @@ async function prepareToolCall(
   } catch (error) {
     // Put the single-line summary in `details.error` so a caller keying off
     // structured details sees which field failed, not just the generic
-    // multi-line `message`'s first line. Checked structurally, not via
-    // `instanceof`: ToolArgumentValidationError is only a type import here
-    // (see validation.ts) since the externally-resolved @openclaw/ai never
-    // carries this boon-side class as a runtime export.
+    // multi-line `message`'s first line. Matched structurally because
+    // `instanceof` breaks when the class comes from another @openclaw/ai copy.
     const details = isToolArgumentValidationError(error)
       ? { status: "error", error: error.summary }
       : undefined;
