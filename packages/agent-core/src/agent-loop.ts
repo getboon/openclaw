@@ -22,7 +22,8 @@ import type {
   AgentToolResult,
   StreamFn,
 } from "./types.js";
-import { ToolArgumentValidationError, validateToolArguments } from "./validation.js";
+import type { ToolArgumentValidationError } from "./validation.js";
+import { validateToolArguments } from "./validation.js";
 
 /** Callback used by synchronous loop runners to publish agent lifecycle events. */
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
@@ -876,6 +877,14 @@ async function resolveToolCallTool(
   return resolution;
 }
 
+function isToolArgumentValidationError(error: unknown): error is ToolArgumentValidationError {
+  return (
+    error instanceof Error &&
+    error.name === "ToolArgumentValidationError" &&
+    typeof (error as { summary?: unknown }).summary === "string"
+  );
+}
+
 async function prepareToolCall(
   currentContext: AgentContext,
   assistantMessage: AssistantMessage,
@@ -979,11 +988,13 @@ async function prepareToolCall(
   } catch (error) {
     // Put the single-line summary in `details.error` so a caller keying off
     // structured details sees which field failed, not just the generic
-    // multi-line `message`'s first line.
-    const details =
-      error instanceof ToolArgumentValidationError
-        ? { status: "error", error: error.summary }
-        : undefined;
+    // multi-line `message`'s first line. Checked structurally, not via
+    // `instanceof`: ToolArgumentValidationError is only a type import here
+    // (see validation.ts) since the externally-resolved @openclaw/ai never
+    // carries this boon-side class as a runtime export.
+    const details = isToolArgumentValidationError(error)
+      ? { status: "error", error: error.summary }
+      : undefined;
     return {
       kind: "immediate",
       result: createErrorToolResult(
