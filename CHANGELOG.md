@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.7.35-boon.2
+
+Fixes a gateway crash-loop on a host carrying on-disk legacy Telegram migration state (bot-info/update-offset/thread-bindings/allowFrom files).
+
+- **#337 (ENG-23040):** `telegram`'s and `whatsapp`'s `channel.ts`/`channel.setup.ts` statically imported their `detect*LegacyStateMigrations` helper and wired it into `ChannelPlugin.lifecycle.detectLegacyStateMigrations`, duplicating what the plugin SDK's dedicated `legacyStateMigrations` setup-entry feature already exposes through a synchronous `require()`. That duplicate import pulled the migration-detection module into each channel's main entry graph, which the channel's own lazily-`import()`-ed runtime chunks could also reach — making the same built module reachable through both a synchronous `require()` and a dynamic `import()` at once. On a host with legacy Telegram state present, that raced on every gateway boot (`Unexpected module status 0`) and crash-looped the gateway. Caught during the `2026.7.35-boon.1` canary rollout before it reached any wave or customer host. Fix removes the dead, duplicate wiring; no behavior change, since that lifecycle path was never actually reachable.
+- Base unchanged at `2026.7.35`. Fork gateway and every bundled plugin bumped to `2026.7.35-boon.2` in lockstep. Plugin changes beyond the version: `telegram` and `whatsapp` carry the #337 fix above; everything else in plugins is version-only.
+
 ## 2026.7.35-boon.1
 
 Advances the fork's upstream base from `2026.6.35` to `2026.7.35` — a 3,463-commit upstream sync, merged in one real (never squashed) merge commit, while preserving every fork patch unchanged.
