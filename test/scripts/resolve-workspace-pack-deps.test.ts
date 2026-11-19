@@ -1,8 +1,7 @@
 // Resolve Workspace Pack Deps tests cover rewriting workspace: protocol
-// dependencies before `npm pack` ships them unresolved (ENG-22960-class fork
-// release break: #307 introduced `@openclaw/ai` as a root `workspace:*`
-// dependency for the first time, which a plain `npm i -g` of the published
-// tarball cannot parse).
+// dependencies to a real, installable version before `npm pack` ships them
+// unresolved -- a plain `npm i -g` of a tarball with a literal
+// `"workspace:*"` specifier cannot parse it and fails with no clear error.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -99,7 +98,9 @@ describe("previewWorkspacePackDependencies / resolveWorkspacePackDependencies", 
       dependencies: { "@openclaw/ai": "workspace:*" },
     });
     const { rewritten } = previewWorkspacePackDependencies(dir);
-    expect(rewritten).toEqual([{ name: "@openclaw/ai", from: "workspace:*", to: "2026.7.35" }]);
+    expect(rewritten).toEqual([
+      { name: "@openclaw/ai", from: "workspace:*", to: "2026.7.35", section: "dependencies" },
+    ]);
     // Preview must not touch disk.
     expect(readJson(path.join(dir, "package.json")).dependencies).toEqual({
       "@openclaw/ai": "workspace:*",
@@ -116,8 +117,8 @@ describe("previewWorkspacePackDependencies / resolveWorkspacePackDependencies", 
     const { rewritten } = previewWorkspacePackDependencies(dir);
     expect(rewritten).toEqual(
       expect.arrayContaining([
-        { name: "@openclaw/ai", from: "workspace:^", to: "^2026.7.35" },
-        { name: "@openclaw/slack", from: "workspace:~", to: "~2026.7.35" },
+        { name: "@openclaw/ai", from: "workspace:^", to: "^2026.7.35", section: "dependencies" },
+        { name: "@openclaw/slack", from: "workspace:~", to: "~2026.7.35", section: "dependencies" },
       ]),
     );
   });
@@ -130,7 +131,27 @@ describe("previewWorkspacePackDependencies / resolveWorkspacePackDependencies", 
       dependencies: { "@openclaw/ai": "workspace:1.2.3" },
     });
     const { rewritten } = previewWorkspacePackDependencies(dir);
-    expect(rewritten).toEqual([{ name: "@openclaw/ai", from: "workspace:1.2.3", to: "1.2.3" }]);
+    expect(rewritten).toEqual([
+      { name: "@openclaw/ai", from: "workspace:1.2.3", to: "1.2.3", section: "dependencies" },
+    ]);
+  });
+
+  it("strips a fork -boon.N suffix from an explicit workspace:<version> pin too", () => {
+    const dir = makeTempDir();
+    makeFixture(dir, {
+      name: "openclaw",
+      version: "2026.7.35-boon.1",
+      dependencies: { "@openclaw/ai": "workspace:2026.7.35-boon.1" },
+    });
+    const { rewritten } = previewWorkspacePackDependencies(dir);
+    expect(rewritten).toEqual([
+      {
+        name: "@openclaw/ai",
+        from: "workspace:2026.7.35-boon.1",
+        to: "2026.7.35",
+        section: "dependencies",
+      },
+    ]);
   });
 
   it("does not touch a plain semver dependency", () => {
@@ -141,6 +162,33 @@ describe("previewWorkspacePackDependencies / resolveWorkspacePackDependencies", 
       dependencies: { "@openclaw/fs-safe": "0.8.5" },
     });
     expect(previewWorkspacePackDependencies(dir).rewritten).toEqual([]);
+  });
+
+  it("rewrites workspace: specifiers in optionalDependencies and peerDependencies too", () => {
+    const dir = makeTempDir();
+    makeFixture(dir, {
+      name: "openclaw",
+      version: "2026.7.35-boon.1",
+      optionalDependencies: { "@openclaw/ai": "workspace:*" },
+      peerDependencies: { "@openclaw/slack": "workspace:*" },
+    });
+    const { rewritten } = previewWorkspacePackDependencies(dir);
+    expect(rewritten).toEqual(
+      expect.arrayContaining([
+        {
+          name: "@openclaw/ai",
+          from: "workspace:*",
+          to: "2026.7.35",
+          section: "optionalDependencies",
+        },
+        {
+          name: "@openclaw/slack",
+          from: "workspace:*",
+          to: "2026.7.35",
+          section: "peerDependencies",
+        },
+      ]),
+    );
   });
 
   it("throws when a workspace: dependency has no matching workspace package", () => {
@@ -200,6 +248,21 @@ describe("prepareWorkspacePackDependencies / restoreWorkspacePackDependencies", 
     expect(restoreWorkspacePackDependencies(dir)).toBe(false);
   });
 
+  it("restores cleanly when the current file still matches the expected rewrite exactly", () => {
+    // The common case: nothing touched package.json between prepare and
+    // restore, so current === the rewrite prepare produced (not the backup).
+    const dir = makeTempDir();
+    makeFixture(dir, {
+      name: "openclaw",
+      version: "2026.7.35-boon.1",
+      dependencies: { "@openclaw/ai": "workspace:*" },
+    });
+    const original = readFileSync(path.join(dir, "package.json"), "utf8");
+    prepareWorkspacePackDependencies(dir);
+    expect(restoreWorkspacePackDependencies(dir)).toBe(true);
+    expect(readFileSync(path.join(dir, "package.json"), "utf8")).toBe(original);
+  });
+
   it("refuses to restore if package.json's version changed since the backup", () => {
     const dir = makeTempDir();
     makeFixture(dir, {
@@ -212,6 +275,25 @@ describe("prepareWorkspacePackDependencies / restoreWorkspacePackDependencies", 
     const packageJsonPath = path.join(dir, "package.json");
     const mutated = readJson(packageJsonPath);
     mutated.version = "2026.7.35-boon.2";
+    writeFileSync(packageJsonPath, `${JSON.stringify(mutated, null, 2)}\n`);
+
+    expect(() => restoreWorkspacePackDependencies(dir)).toThrow(/Refusing to restore/u);
+  });
+
+  it("refuses to restore over an unrelated same-version edit made after prepare", () => {
+    // Same package.json `version` as the backup, but different content --
+    // a version-only equality check would miss this and clobber the edit.
+    const dir = makeTempDir();
+    makeFixture(dir, {
+      name: "openclaw",
+      version: "2026.7.35-boon.1",
+      dependencies: { "@openclaw/ai": "workspace:*" },
+    });
+    prepareWorkspacePackDependencies(dir);
+
+    const packageJsonPath = path.join(dir, "package.json");
+    const mutated = readJson(packageJsonPath);
+    mutated.description = "edited mid-pack";
     writeFileSync(packageJsonPath, `${JSON.stringify(mutated, null, 2)}\n`);
 
     expect(() => restoreWorkspacePackDependencies(dir)).toThrow(/Refusing to restore/u);

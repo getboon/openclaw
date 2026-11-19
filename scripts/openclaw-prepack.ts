@@ -179,8 +179,12 @@ async function main(): Promise<void> {
   ensurePreparedArtifacts();
   await writeDistInventory();
   runBuildSmoke();
-  await preparePackageChangelog();
+  // Resolve workspace: deps before touching the changelog: a missing-member
+  // error here aborts prepack with nothing else mutated yet, instead of
+  // leaving a packaged-only CHANGELOG.md behind with no postpack run to
+  // restore it.
   prepareWorkspacePackDependencies();
+  await preparePackageChangelog();
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

@@ -1,30 +1,25 @@
-// `npm pack`/`npm publish` ship package.json as-is — they have no concept of
-// pnpm's `workspace:` protocol, so a root dependency on a local workspace
-// package (e.g. `@openclaw/ai`) ships the literal unresolved specifier
-// (`"workspace:*"`) into the published tarball. A plain `npm i -g` of that
-// tarball then asks npm's resolver to fetch `@openclaw/ai@workspace:*` from
-// the registry, which it cannot parse, and it fails with an unhelpful bare
-// `exit 1` and no further diagnostic (ENG-22960-class fork release break,
-// first hit on the #307 upstream sync that introduced `@openclaw/ai` as a
-// root dependency for the first time).
+// `npm pack`/`npm publish` ship package.json as-is: they have no concept of
+// pnpm's `workspace:` protocol, so a dependency on a local workspace package
+// ships the literal unresolved specifier (e.g. `"workspace:*"`) into the
+// published tarball. A plain `npm i -g` of that tarball then asks npm's
+// resolver to fetch that literal string as a version, which it cannot parse.
 //
 // Mirrors what `pnpm pack`/`pnpm publish` do automatically: rewrite each
 // `workspace:` specifier to the real version of the matching local package.
 //
-// The fork never publishes `packages/*` members under its own `-boon.N`
-// suffix (only the gateway tarball itself, plus msteams/slack/
-// diagnostics-prometheus as separate sibling assets) -- there is no
-// `@openclaw/ai@<base>-boon.N` anywhere for npm to fetch. `VERSION_ALIGNED_
-// PACKAGE_DIRS` in sync-plugin-versions.ts still bumps packages/ai's own
-// version field in lockstep with root for internal consistency, so the
-// resolved dependency strips that suffix back to the real, upstream-
-// published base version (e.g. `2026.7.35-boon.1` -> `2026.7.35`) rather
-// than using the local field verbatim.
+// The fork never publishes `packages/*` or `extensions/*` members under its
+// own `-boon.N` suffix -- only the gateway tarball itself, plus a short list
+// of plugins packed as separate sibling release assets. There is no
+// `<pkg>@<base>-boon.N` anywhere for npm to fetch for any other workspace
+// member, so the resolved dependency strips that suffix back to the real,
+// upstream-published base version (e.g. `2026.7.35-boon.1` -> `2026.7.35`)
+// rather than using the local package.json's version field verbatim.
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseForkReleaseVersion } from "./release-version.mjs";
 
 const WORKSPACE_PROTOCOL_PREFIX = "workspace:";
+const DEPENDENCY_SECTIONS = ["dependencies", "optionalDependencies", "peerDependencies"];
 const BACKUP_PATH = join(".artifacts", "resolve-workspace-pack-deps", "package.json.prepack-backup");
 
 function readJson(filePath) {
@@ -121,9 +116,45 @@ function resolveWorkspaceSpecifier(specifier, localVersion) {
   if (range === "^" || range === "~") {
     return `${range}${baseVersion}`;
   }
-  // An explicit workspace:<version> pin ships as-is; it is already a real
-  // semver value, not a protocol npm's resolver needs translated.
-  return range;
+  // An explicit workspace:<version> pin is already meant to be a real
+  // version, but still route it through the same base-version stripping: a
+  // pin that was itself copied from a fork-suffixed local version must not
+  // ship the unpublishable `-boon.N` form.
+  return publishableBaseVersion(range);
+}
+
+/**
+ * Rewrites every `workspace:` specifier across `dependencies`,
+ * `optionalDependencies`, and `peerDependencies` on an already-parsed
+ * package.json object, in place, against the given workspace member map.
+ *
+ * @param {Record<string, unknown>} packageJson
+ * @param {Map<string, { dir: string, version: string }>} members
+ * @returns {Array<{ name: string, from: string, to: string, section: string }>}
+ */
+function rewriteWorkspaceSpecifiers(packageJson, members) {
+  const rewritten = [];
+  for (const section of DEPENDENCY_SECTIONS) {
+    const deps = packageJson[section];
+    if (!deps || typeof deps !== "object") {
+      continue;
+    }
+    for (const [name, specifier] of Object.entries(deps)) {
+      if (typeof specifier !== "string" || !specifier.startsWith(WORKSPACE_PROTOCOL_PREFIX)) {
+        continue;
+      }
+      const member = members.get(name);
+      if (!member) {
+        throw new Error(
+          `root package.json ${section} entry "${name}" uses the workspace: protocol (${specifier}) but no matching workspace package was found to resolve it against`,
+        );
+      }
+      const resolvedSpecifier = resolveWorkspaceSpecifier(specifier, member.version);
+      deps[name] = resolvedSpecifier;
+      rewritten.push({ name, from: specifier, to: resolvedSpecifier, section });
+    }
+  }
+  return rewritten;
 }
 
 /**
@@ -131,29 +162,13 @@ function resolveWorkspaceSpecifier(specifier, localVersion) {
  * without touching disk. Safe to call freely for inspection.
  *
  * @param {string} rootDir
- * @returns {{ packageJson: object, rewritten: Array<{ name: string, from: string, to: string }> }}
+ * @returns {{ packageJson: object, rewritten: Array<{ name: string, from: string, to: string, section: string }> }}
  */
 export function previewWorkspacePackDependencies(rootDir = resolve(".")) {
   const packageJsonPath = join(rootDir, "package.json");
   const packageJson = readJson(packageJsonPath);
-  const dependencies = packageJson.dependencies ?? {};
   const members = collectWorkspaceMembers(rootDir);
-
-  const rewritten = [];
-  for (const [name, specifier] of Object.entries(dependencies)) {
-    if (typeof specifier !== "string" || !specifier.startsWith(WORKSPACE_PROTOCOL_PREFIX)) {
-      continue;
-    }
-    const member = members.get(name);
-    if (!member) {
-      throw new Error(
-        `root package.json dependency "${name}" uses the workspace: protocol (${specifier}) but no matching workspace package was found to resolve it against`,
-      );
-    }
-    const resolved = resolveWorkspaceSpecifier(specifier, member.version);
-    dependencies[name] = resolved;
-    rewritten.push({ name, from: specifier, to: resolved });
-  }
+  const rewritten = rewriteWorkspaceSpecifiers(packageJson, members);
   return { packageJson, rewritten };
 }
 
@@ -165,7 +180,7 @@ export function previewWorkspacePackDependencies(rootDir = resolve(".")) {
  * {@link prepareWorkspacePackDependencies} for the backed-up variant.
  *
  * @param {string} rootDir
- * @returns {{ rewritten: Array<{ name: string, from: string, to: string }> }}
+ * @returns {{ rewritten: Array<{ name: string, from: string, to: string, section: string }> }}
  */
 export function resolveWorkspacePackDependencies(rootDir = resolve(".")) {
   const packageJsonPath = join(rootDir, "package.json");
@@ -177,32 +192,36 @@ export function resolveWorkspacePackDependencies(rootDir = resolve(".")) {
 }
 
 /**
- * Prepack entry point: backs up package.json, then resolves `workspace:`
- * dependencies in place so `npm pack`/`npm publish` ship a real, installable
- * specifier. Pairs with {@link restoreWorkspacePackDependencies} in postpack,
- * mirroring the existing prepack/postpack backup-and-restore shape in
- * `scripts/package-changelog.mjs`.
+ * Prepack entry point: backs up package.json BEFORE mutating it, then
+ * resolves `workspace:` dependencies in place so `npm pack`/`npm publish`
+ * ship a real, installable specifier. Pairs with
+ * {@link restoreWorkspacePackDependencies} in postpack, mirroring the
+ * existing prepack/postpack backup-and-restore shape in
+ * `scripts/package-changelog.mjs`. The backup is written first so a failed
+ * backup write can never leave the checkout permanently rewritten with
+ * nothing to restore from.
  *
  * @param {string} rootDir
- * @returns {{ rewritten: Array<{ name: string, from: string, to: string }> }}
+ * @returns {{ rewritten: Array<{ name: string, from: string, to: string, section: string }> }}
  */
 export function prepareWorkspacePackDependencies(rootDir = resolve(".")) {
   const packageJsonPath = join(rootDir, "package.json");
   const backupPath = join(rootDir, BACKUP_PATH);
   const original = readFileSync(packageJsonPath, "utf8");
-  const result = resolveWorkspacePackDependencies(rootDir);
-  if (result.rewritten.length > 0) {
+  const { packageJson, rewritten } = previewWorkspacePackDependencies(rootDir);
+  if (rewritten.length > 0) {
     mkdirSync(dirname(backupPath), { recursive: true });
     writeFileSync(backupPath, original);
+    writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
   }
-  return result;
+  return { rewritten };
 }
 
 /**
- * Restores package.json from the prepack backup, if one exists. Refuses to
- * restore over a package.json whose version no longer matches the backup —
- * something else changed the package identity mid-pack, so blindly
- * overwriting it is not safe.
+ * Restores package.json from the prepack backup, if one exists. If the
+ * current file no longer matches what the backup's own rewrite would have
+ * produced, something else edited package.json since the backup was
+ * written — refuse rather than silently discard that edit.
  *
  * @param {string} rootDir
  * @returns {boolean} whether a backup was restored
@@ -213,14 +232,29 @@ export function restoreWorkspacePackDependencies(rootDir = resolve(".")) {
     return false;
   }
   const packageJsonPath = join(rootDir, "package.json");
-  const backup = readJson(backupPath);
-  const current = readJson(packageJsonPath);
-  if (backup.version !== current.version) {
-    throw new Error(
-      `Refusing to restore ${BACKUP_PATH}: package.json version changed from ${JSON.stringify(backup.version)} to ${JSON.stringify(current.version)} since the backup was written.`,
-    );
+  const backupText = readFileSync(backupPath, "utf8");
+  const currentText = readFileSync(packageJsonPath, "utf8");
+  if (currentText !== backupText) {
+    const backupPackageJson = JSON.parse(backupText);
+    const members = collectWorkspaceMembers(rootDir);
+    let expectedText;
+    try {
+      rewriteWorkspaceSpecifiers(backupPackageJson, members);
+      expectedText = `${JSON.stringify(backupPackageJson, null, 2)}\n`;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Refusing to restore ${BACKUP_PATH}: could not recompute the expected rewritten package.json to verify against the current file: ${message}`,
+        { cause: error },
+      );
+    }
+    if (currentText !== expectedText) {
+      throw new Error(
+        `Refusing to restore ${BACKUP_PATH} because package.json has changed since the backup was written.`,
+      );
+    }
   }
-  writeFileSync(packageJsonPath, readFileSync(backupPath));
+  writeFileSync(packageJsonPath, backupText);
   rmSync(backupPath, { force: true });
   return true;
 }
