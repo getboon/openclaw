@@ -14,7 +14,7 @@
 // member, so the resolved dependency strips that suffix back to the real,
 // upstream-published base version (e.g. `2026.7.35-boon.1` -> `2026.7.35`)
 // rather than using the local package.json's version field verbatim.
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseForkReleaseVersion } from "./release-version.mjs";
 
@@ -24,6 +24,20 @@ const BACKUP_PATH = join(".artifacts", "resolve-workspace-pack-deps", "package.j
 
 function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
+}
+
+/**
+ * Writes via a same-directory temp file + rename so a write that fails
+ * partway (disk full, process killed) can never leave `filePath` truncated
+ * -- the rename only lands once the full content is safely on disk.
+ *
+ * @param {string} filePath
+ * @param {string} content
+ */
+function writeFileAtomic(filePath, content) {
+  const tempPath = `${filePath}.${process.pid}.tmp`;
+  writeFileSync(tempPath, content);
+  renameSync(tempPath, filePath);
 }
 
 /**
@@ -186,7 +200,7 @@ export function resolveWorkspacePackDependencies(rootDir = resolve(".")) {
   const packageJsonPath = join(rootDir, "package.json");
   const { packageJson, rewritten } = previewWorkspacePackDependencies(rootDir);
   if (rewritten.length > 0) {
-    writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+    writeFileAtomic(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
   }
   return { rewritten };
 }
@@ -212,7 +226,7 @@ export function prepareWorkspacePackDependencies(rootDir = resolve(".")) {
   if (rewritten.length > 0) {
     mkdirSync(dirname(backupPath), { recursive: true });
     writeFileSync(backupPath, original);
-    writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+    writeFileAtomic(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
   }
   return { rewritten };
 }
@@ -254,7 +268,7 @@ export function restoreWorkspacePackDependencies(rootDir = resolve(".")) {
       );
     }
   }
-  writeFileSync(packageJsonPath, backupText);
+  writeFileAtomic(packageJsonPath, backupText);
   rmSync(backupPath, { force: true });
   return true;
 }

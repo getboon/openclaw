@@ -2,7 +2,7 @@
 // dependencies to a real, installable version before `npm pack` ships them
 // unresolved -- a plain `npm i -g` of a tarball with a literal
 // `"workspace:*"` specifier cannot parse it and fails with no clear error.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -232,6 +232,19 @@ describe("prepareWorkspacePackDependencies / restoreWorkspacePackDependencies", 
     const restored = restoreWorkspacePackDependencies(dir);
     expect(restored).toBe(true);
     expect(readFileSync(packageJsonPath, "utf8")).toBe(original);
+  });
+
+  it("leaves no leftover temp file from the atomic write", () => {
+    const dir = makeTempDir();
+    makeFixture(dir, {
+      name: "openclaw",
+      version: "2026.7.35-boon.1",
+      dependencies: { "@openclaw/ai": "workspace:*" },
+    });
+    prepareWorkspacePackDependencies(dir);
+    restoreWorkspacePackDependencies(dir);
+    const entries = readdirSync(dir);
+    expect(entries.some((entry) => entry.endsWith(".tmp"))).toBe(false);
   });
 
   it("is a no-op when there is nothing to resolve", () => {
