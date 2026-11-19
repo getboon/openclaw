@@ -14,7 +14,15 @@
 // member, so the resolved dependency strips that suffix back to the real,
 // upstream-published base version (e.g. `2026.7.35-boon.1` -> `2026.7.35`)
 // rather than using the local package.json's version field verbatim.
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseForkReleaseVersion } from "./release-version.mjs";
 
@@ -27,9 +35,10 @@ function readJson(filePath) {
 }
 
 /**
- * Writes via a same-directory temp file + rename so a write that fails
- * partway (disk full, process killed) can never leave `filePath` truncated
- * -- the rename only lands once the full content is safely on disk.
+ * Writes via a same-directory temp file + rename: the rename only lands
+ * after writeFileSync returns, so a write that fails partway (disk full,
+ * process killed) leaves the original file intact instead of truncated.
+ * This does not fsync, so it does not guarantee durability across power loss.
  *
  * @param {string} filePath
  * @param {string} content
