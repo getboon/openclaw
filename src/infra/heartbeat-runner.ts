@@ -98,6 +98,7 @@ import {
 } from "../process/command-queue.js";
 import { CommandLane } from "../process/lanes.js";
 import {
+  isCronSessionKey,
   isSubagentSessionKey,
   normalizeAgentId,
   parseAgentSessionKey,
@@ -112,7 +113,14 @@ import { loadOrCreateDeviceIdentity } from "./device-identity.js";
 import { formatErrorMessage, hasErrnoCode } from "./errors.js";
 import { resolveMainScopedEventSessionKey } from "./event-session-routing.js";
 import { isWithinActiveHours, resolveActiveHoursTimezone } from "./heartbeat-active-hours.js";
-import { recordRunStart, shouldDeferWake, type DeferDecision } from "./heartbeat-cooldown.js";
+import {
+  DEFAULT_FLOOD_THRESHOLD,
+  DEFAULT_FLOOD_WINDOW_MS,
+  DEFAULT_MIN_WAKE_SPACING_MS,
+  recordRunStart,
+  shouldDeferWake,
+  type DeferDecision,
+} from "./heartbeat-cooldown.js";
 import {
   buildCronEventPrompt,
   buildExecEventPrompt,
@@ -2399,6 +2407,49 @@ export async function runHeartbeatOnce(opts: {
 
 export const testing = { truncateHeartbeatPreview };
 
+function isChatCommandCompletion(params: {
+  cfg: OpenClawConfig;
+  agentId: string;
+  heartbeat?: HeartbeatConfig;
+  sessionKey: string;
+}): boolean {
+  const { cfg, agentId, heartbeat, sessionKey } = params;
+  const runSessionKey = resolveHeartbeatSession(cfg, agentId, heartbeat, sessionKey).sessionKey;
+  if (isCronSessionKey(runSessionKey)) {
+    return false;
+  }
+  const periodicSession = resolveHeartbeatSession(cfg, agentId, heartbeat);
+  if (runSessionKey === periodicSession.sessionKey) {
+    return false;
+  }
+  if (heartbeat?.isolatedSession === true) {
+    const { isolatedSessionKey } = resolveIsolatedHeartbeatSessionKey({
+      sessionKey: periodicSession.sessionKey,
+      configuredSessionKey: periodicSession.sessionKey,
+      sessionEntry: periodicSession.entry,
+    });
+    if (runSessionKey === isolatedSessionKey) {
+      return false;
+    }
+  }
+  return peekSystemEventEntries(runSessionKey).some((event) => isExecCompletionEvent(event.text));
+}
+
+function resolveDeferralRetryInMs(
+  agent: HeartbeatAgentState,
+  now: number,
+  reason: "min-spacing" | "flood",
+): number {
+  // The flood clears once fewer than the threshold starts stay in the window,
+  // and the window counts an entry until one ms past `ts + window`.
+  const starts = agent.recentRunStarts;
+  const retryAtMs =
+    reason === "min-spacing"
+      ? (agent.lastRunStartedAtMs ?? now) + DEFAULT_MIN_WAKE_SPACING_MS
+      : (starts[starts.length - DEFAULT_FLOOD_THRESHOLD] ?? now) + DEFAULT_FLOOD_WINDOW_MS + 1;
+  return Math.max(1, retryAtMs - now);
+}
+
 export function startHeartbeatRunner(opts: {
   cfg?: OpenClawConfig;
   readCurrentConfig?: () => OpenClawConfig;
@@ -2415,6 +2466,9 @@ export function startHeartbeatRunner(opts: {
     schedulerSeed: resolveHeartbeatSchedulerSeed(opts.stableSchedulerSeed),
     agents: new Map<string, HeartbeatAgentState>(),
     timer: null as NodeJS.Timeout | null,
+    // The wake layer reschedules its batch at 0 ms, so a delayed requestHeartbeat
+    // from inside the handler would spin; spacing retries need their own timers.
+    completionRetryTimers: new Map<string, NodeJS.Timeout>(),
     stopped: false,
   };
   const readCurrentConfig = opts.readCurrentConfig ?? (() => state.cfg);
@@ -2485,6 +2539,7 @@ export function startHeartbeatRunner(opts: {
     now: number,
     reason?: string,
     intent: HeartbeatWakeIntent = "event",
+    chatCommandCompletion = false,
   ): DeferDecision => {
     const decision = shouldDeferWake({
       intent,
@@ -2493,6 +2548,7 @@ export function startHeartbeatRunner(opts: {
       nextDueMs: agent.nextDueMs,
       lastRunStartedAtMs: agent.lastRunStartedAtMs,
       recentRunStarts: agent.recentRunStarts,
+      chatCommandCompletion,
     });
     if (decision.defer && decision.reason === "flood") {
       if (!agent.floodLoggedSinceLastRun) {
@@ -2513,6 +2569,31 @@ export function startHeartbeatRunner(opts: {
     agent.lastRunStartedAtMs = now;
     recordRunStart(agent.recentRunStarts, now);
     agent.floodLoggedSinceLastRun = false;
+  };
+
+  const armCompletionRetry = (params: {
+    agentId: string;
+    sessionKey: string;
+    reason?: string;
+    retryInMs: number;
+  }) => {
+    const key = `${params.agentId}::${params.sessionKey}`;
+    if (state.completionRetryTimers.has(key)) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      state.completionRetryTimers.delete(key);
+      requestHeartbeat({
+        source: "exec-event",
+        intent: "event",
+        reason: params.reason,
+        agentId: params.agentId,
+        sessionKey: params.sessionKey,
+        coalesceMs: 0,
+      });
+    }, params.retryInMs);
+    timer.unref?.();
+    state.completionRetryTimers.set(key, timer);
   };
 
   const scheduleNext = () => {
@@ -2670,23 +2751,59 @@ export function startHeartbeatRunner(opts: {
         if (!targetAgent) {
           return { status: "skipped", reason: "disabled" };
         }
-        const deferral = evaluateWakeDeferral(targetAgent, now, reason, intent);
+        const heartbeat = resolveHeartbeatForWake({
+          cfg: wakeConfig,
+          agentId: targetAgent.agentId,
+          configuredHeartbeat: targetAgent.heartbeat,
+          requestedHeartbeat,
+          source: params.source,
+          mergeRequestedHeartbeat: true,
+        });
+        const isExecEventWake = params.source === "exec-event";
+        const chatCommandCompletion =
+          isExecEventWake &&
+          requestedSessionKey !== undefined &&
+          isChatCommandCompletion({
+            cfg: wakeConfig,
+            agentId: targetAgent.agentId,
+            heartbeat,
+            sessionKey: requestedSessionKey,
+          });
+        const deferral = evaluateWakeDeferral(
+          targetAgent,
+          now,
+          reason,
+          intent,
+          chatCommandCompletion,
+        );
         if (deferral.defer) {
+          const deferralLog = {
+            agentId: targetAgent.agentId,
+            sessionKey: requestedSessionKey,
+            reason: deferral.reason,
+          };
+          if (chatCommandCompletion && requestedSessionKey && deferral.reason !== "not-due") {
+            const retryInMs = resolveDeferralRetryInMs(targetAgent, now, deferral.reason);
+            armCompletionRetry({
+              agentId: targetAgent.agentId,
+              sessionKey: requestedSessionKey,
+              reason,
+              retryInMs,
+            });
+            log.info("heartbeat: exec event wake deferred", { ...deferralLog, retryInMs });
+            return { status: "skipped", reason: deferral.reason };
+          }
           advanceStaleScheduleAfterDeferral(targetAgent, now, reason, deferral);
+          if (isExecEventWake) {
+            log.info("heartbeat: exec event wake deferred", { ...deferralLog, dropped: true });
+          }
           return { status: "skipped", reason: deferral.reason };
         }
         try {
           const res = await runOnce({
             cfg: wakeConfig,
             agentId: targetAgent.agentId,
-            heartbeat: resolveHeartbeatForWake({
-              cfg: wakeConfig,
-              agentId: targetAgent.agentId,
-              configuredHeartbeat: targetAgent.heartbeat,
-              requestedHeartbeat,
-              source: params.source,
-              mergeRequestedHeartbeat: true,
-            }),
+            heartbeat,
             source: params.source,
             intent,
             reason,
@@ -2704,9 +2821,11 @@ export function startHeartbeatRunner(opts: {
           }
           // Non-retryable outcome (ran, disabled, failed-but-not-busy). Record
           // bookkeeping and move the due slot so scheduleNext() cannot hot-loop
-          // on a stale past-due agent.
+          // on a stale past-due agent. Chat completions keep the periodic cadence.
           recordRunBookkeeping(targetAgent, now);
-          advanceAgentSchedule(targetAgent, now, reason);
+          if (!chatCommandCompletion) {
+            advanceAgentSchedule(targetAgent, now, reason);
+          }
           return res.status === "ran" ? { status: "ran", durationMs: Date.now() - startedAt } : res;
         } catch (err) {
           const errMsg = formatErrorMessage(err);
@@ -2717,7 +2836,9 @@ export function startHeartbeatRunner(opts: {
           // purposes — record bookkeeping so the wake layer doesn't tight-loop
           // on the same reason.
           recordRunBookkeeping(targetAgent, now);
-          advanceAgentSchedule(targetAgent, now, reason);
+          if (!chatCommandCompletion) {
+            advanceAgentSchedule(targetAgent, now, reason);
+          }
           return { status: "failed", reason: errMsg };
         }
       }
@@ -2878,6 +2999,10 @@ export function startHeartbeatRunner(opts: {
       clearTimeout(state.timer);
     }
     state.timer = null;
+    for (const timer of state.completionRetryTimers.values()) {
+      clearTimeout(timer);
+    }
+    state.completionRetryTimers.clear();
   };
 
   opts.abortSignal?.addEventListener("abort", cleanup, { once: true });

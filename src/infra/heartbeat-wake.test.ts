@@ -276,6 +276,53 @@ describe("heartbeat-wake", () => {
     await Promise.resolve();
   });
 
+  function setHangingHeartbeatHandler() {
+    let finishRun = () => {};
+    const firstRun = new Promise<{ status: "ran"; durationMs: number }>((resolve) => {
+      finishRun = () => resolve({ status: "ran", durationMs: 1 });
+    });
+    const handler = vi
+      .fn()
+      .mockReturnValueOnce(firstRun)
+      .mockResolvedValue({ status: "ran", durationMs: 1 });
+    setHeartbeatWakeHandler(handler);
+    return { handler, finishRun };
+  }
+
+  it("waits for an in-flight run without re-arming the wake timer", async () => {
+    vi.useFakeTimers();
+    const { handler, finishRun } = setHangingHeartbeatHandler();
+    requestHeartbeat(wake("interval", { coalesceMs: 0 }));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    requestHeartbeat(wake("exec-event", { sessionKey: "agent:main:dm", coalesceMs: 0 }));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(timeoutSpy).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    finishRun();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(handler).toHaveBeenCalledTimes(2);
+    expectWakeCall(handler, 1, wake("exec-event", { sessionKey: "agent:main:dm" }));
+  });
+
+  it("runs a wake queued during an interrupted run after a new handler is registered", async () => {
+    vi.useFakeTimers();
+    setHangingHeartbeatHandler();
+    requestHeartbeat(wake("interval", { coalesceMs: 0 }));
+    await vi.advanceTimersByTimeAsync(1);
+    requestHeartbeat(wake("exec-event", { sessionKey: "agent:main:dm", coalesceMs: 0 }));
+    await vi.advanceTimersByTimeAsync(1);
+
+    const handlerB = vi.fn().mockResolvedValue({ status: "ran", durationMs: 1 });
+    setHeartbeatWakeHandler(handlerB);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(handlerB).toHaveBeenCalledTimes(1);
+    expectWakeCall(handlerB, 0, wake("exec-event", { sessionKey: "agent:main:dm" }));
+  });
+
   it("clears stale retry cooldown when a new handler is registered", async () => {
     vi.useFakeTimers();
     const handlerA = vi

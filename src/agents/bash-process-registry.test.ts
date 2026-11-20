@@ -7,12 +7,15 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProcessSession } from "./bash-process-registry.js";
 import {
+  acknowledgeNotifyOnExit,
   addSession,
   appendOutput,
+  deleteSession,
   drainSession,
   listFinishedSessions,
   markBackgrounded,
   markExited,
+  recordNotifyOnExitRemoval,
   resetProcessRegistryForTests,
   tail,
 } from "./bash-process-registry.js";
@@ -170,6 +173,31 @@ describe("bash process registry", () => {
         totalOutputChars: 0,
       },
     ]);
+  });
+
+  it("removes a recorded exit event once when the exit is acknowledged", () => {
+    const remove = vi.fn();
+    recordNotifyOnExitRemoval("sess", remove);
+    expect(remove).not.toHaveBeenCalled();
+
+    acknowledgeNotifyOnExit("sess");
+    acknowledgeNotifyOnExit("sess");
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes an exit event recorded after the exit was acknowledged", () => {
+    const remove = vi.fn();
+    acknowledgeNotifyOnExit("sess");
+    recordNotifyOnExitRemoval("sess", remove);
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("forgets the acknowledgement when the session is deleted", () => {
+    const remove = vi.fn();
+    acknowledgeNotifyOnExit("sess");
+    deleteSession("sess");
+    recordNotifyOnExitRemoval("sess", remove);
+    expect(remove).not.toHaveBeenCalled();
   });
 });
 
