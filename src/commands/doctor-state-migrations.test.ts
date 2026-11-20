@@ -130,12 +130,14 @@ vi.mock("../channels/plugins/bundled.js", async () => {
             : null,
       },
     ]),
-    listBundledChannelLegacyStateMigrationDetectors: vi.fn(() => [
-      ({ oauthDir }: { oauthDir: string }) => detectWhatsAppLegacyStateMigrations({ oauthDir }),
-      ({ cfg, env }: { cfg: OpenClawConfig; env: NodeJS.ProcessEnv }) =>
-        detectTelegramAllowFromMigration({ cfg, env }),
-      () => mockedChannelMigrationPlans.plans,
-    ]),
+    listBundledChannelLegacyStateMigrationDetectors: vi.fn(() =>
+      Promise.resolve([
+        ({ oauthDir }: { oauthDir: string }) => detectWhatsAppLegacyStateMigrations({ oauthDir }),
+        ({ cfg, env }: { cfg: OpenClawConfig; env: NodeJS.ProcessEnv }) =>
+          detectTelegramAllowFromMigration({ cfg, env }),
+        () => mockedChannelMigrationPlans.plans,
+      ]),
+    ),
   };
 });
 

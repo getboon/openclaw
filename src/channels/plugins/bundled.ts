@@ -435,6 +435,12 @@ function loadGeneratedBundledChannelSetupEntry(params: {
     }
     return setupEntry;
   } catch (error) {
+    // Let the unsettled-ESM race (nodejs/node#62130) propagate instead of caching it as a
+    // permanent null: callers that retry need to see it, and callers that don't retry catch
+    // it locally below so a transient race can't poison this id for the rest of the process.
+    if (isUnsettledEsmModuleError(error)) {
+      throw error;
+    }
     const detail = describeBundledChannelLoadError(error, params.metadata.manifest.id);
     log.warn(
       `[channels] failed to load bundled channel setup entry ${params.metadata.manifest.id}: ${detail}`,
@@ -797,6 +803,28 @@ function getBundledChannelAccountInspectorForRoot(
   }
 }
 
+// For non-retrying callers of getLazyGeneratedBundledChannelSetupEntryForRoot: falls back to
+// null on the same unsettled-ESM race the retry loop below handles, instead of letting it
+// propagate uncaught. A later retrying call can still recover the entry, since the race no
+// longer gets cached as a permanent null (see loadGeneratedBundledChannelSetupEntry).
+function getLazyGeneratedBundledChannelSetupEntryForRootOrNullOnUnsettledRace(
+  id: ChannelId,
+  rootScope: BundledChannelRootScope,
+  loadContext: BundledChannelLoadContext,
+): BundledChannelSetupEntryRuntimeContract | null {
+  try {
+    return getLazyGeneratedBundledChannelSetupEntryForRoot(id, rootScope, loadContext);
+  } catch (error) {
+    if (!isUnsettledEsmModuleError(error)) {
+      throw error;
+    }
+    log.warn(
+      `[channels] bundled channel setup entry ${id} hit an unsettled ESM module error and was skipped for this call: ${formatErrorMessage(error)}`,
+    );
+    return null;
+  }
+}
+
 function getBundledChannelSetupPluginForRoot(
   id: ChannelId,
   rootScope: BundledChannelRootScope,
@@ -808,7 +836,11 @@ function getBundledChannelSetupPluginForRoot(
   if (loadContext.setupPluginLoadInProgressIds.has(id)) {
     return undefined;
   }
-  const entry = getLazyGeneratedBundledChannelSetupEntryForRoot(id, rootScope, loadContext);
+  const entry = getLazyGeneratedBundledChannelSetupEntryForRootOrNullOnUnsettledRace(
+    id,
+    rootScope,
+    loadContext,
+  );
   if (!entry) {
     return undefined;
   }
@@ -818,6 +850,14 @@ function getBundledChannelSetupPluginForRoot(
     loadContext.lazySetupPluginsById.set(id, plugin);
     return plugin;
   } catch (error) {
+    // Don't cache the unsettled-ESM race as a permanent null: it's transient, and a later
+    // call (once the race has passed) should get a real chance to load the plugin.
+    if (isUnsettledEsmModuleError(error)) {
+      log.warn(
+        `[channels] bundled channel setup ${id} hit an unsettled ESM module error and was skipped for this call: ${formatErrorMessage(error)}`,
+      );
+      return undefined;
+    }
     const detail = describeBundledChannelLoadError(error, id);
     log.warn(`[channels] failed to load bundled channel setup ${id}: ${detail}`);
     loadContext.lazySetupPluginsById.set(id, null);
@@ -835,7 +875,11 @@ function getBundledChannelSetupSecretsForRoot(
   if (loadContext.lazySetupSecretsById.has(id)) {
     return loadContext.lazySetupSecretsById.get(id) ?? undefined;
   }
-  const entry = getLazyGeneratedBundledChannelSetupEntryForRoot(id, rootScope, loadContext);
+  const entry = getLazyGeneratedBundledChannelSetupEntryForRootOrNullOnUnsettledRace(
+    id,
+    rootScope,
+    loadContext,
+  );
   if (!entry) {
     return undefined;
   }
@@ -846,6 +890,14 @@ function getBundledChannelSetupSecretsForRoot(
     loadContext.lazySetupSecretsById.set(id, secrets ?? null);
     return secrets;
   } catch (error) {
+    // Same rationale as getBundledChannelSetupPluginForRoot above: don't let a transient
+    // unsettled-ESM race become a permanent null for this id.
+    if (isUnsettledEsmModuleError(error)) {
+      log.warn(
+        `[channels] bundled channel setup secrets ${id} hit an unsettled ESM module error and was skipped for this call: ${formatErrorMessage(error)}`,
+      );
+      return undefined;
+    }
     const detail = describeBundledChannelLoadError(error, id);
     log.warn(`[channels] failed to load bundled channel setup secrets ${id}: ${detail}`);
     loadContext.lazySetupSecretsById.set(id, null);
@@ -878,7 +930,11 @@ export function listBundledChannelLegacySessionSurfaces(
   return listBundledChannelPluginIdsForSetupFeature(rootScope, "legacySessionSurfaces", {
     config: options.config,
   }).flatMap((id) => {
-    const setupEntry = getLazyGeneratedBundledChannelSetupEntryForRoot(id, rootScope, loadContext);
+    const setupEntry = getLazyGeneratedBundledChannelSetupEntryForRootOrNullOnUnsettledRace(
+      id,
+      rootScope,
+      loadContext,
+    );
     const surface = setupEntry?.loadLegacySessionSurface?.();
     if (surface) {
       return [surface];
@@ -891,28 +947,72 @@ export function listBundledChannelLegacySessionSurfaces(
   });
 }
 
-export function listBundledChannelLegacyStateMigrationDetectors(
+const UNSETTLED_ESM_MODULE_RETRY_LIMIT = 3;
+
+// Node's require(esm) bridge can throw this when a required ESM module's link job
+// hasn't settled yet (nodejs/node#62130, open upstream, no fix). Retrying after a
+// yield recovers instead of crashing the caller.
+function isUnsettledEsmModuleError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error as NodeJS.ErrnoException).code === "ERR_INTERNAL_ASSERTION" &&
+    error.message.includes("Unexpected module status")
+  );
+}
+
+function yieldEventLoopTurn(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+}
+
+export async function listBundledChannelLegacyStateMigrationDetectors(
   options: {
     config?: OpenClawConfig;
   } = {},
-): readonly BundledChannelLegacyStateMigrationDetector[] {
+): Promise<readonly BundledChannelLegacyStateMigrationDetector[]> {
   const { rootScope, loadContext } = resolveActiveBundledChannelLoadScope();
-  return listBundledChannelPluginIdsForSetupFeature(rootScope, "legacyStateMigrations", {
+  const ids = listBundledChannelPluginIdsForSetupFeature(rootScope, "legacyStateMigrations", {
     config: options.config,
-  }).flatMap((id) => {
-    const setupEntry = getLazyGeneratedBundledChannelSetupEntryForRoot(id, rootScope, loadContext);
-    const detector = setupEntry?.loadLegacyStateMigrationDetector?.();
-    if (detector) {
-      return [detector];
-    }
-    if (!hasSetupEntryFeature(setupEntry, "legacyStateMigrations")) {
-      return [];
-    }
-    const plugin = getBundledChannelSetupPluginForRoot(id, rootScope, loadContext);
-    return plugin?.lifecycle?.detectLegacyStateMigrations
-      ? [plugin.lifecycle.detectLegacyStateMigrations]
-      : [];
   });
+  const detectors: BundledChannelLegacyStateMigrationDetector[] = [];
+  for (let index = 0; index < ids.length; index += 1) {
+    const id = ids[index];
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const setupEntry = getLazyGeneratedBundledChannelSetupEntryForRoot(
+          id,
+          rootScope,
+          loadContext,
+        );
+        const detector = setupEntry?.loadLegacyStateMigrationDetector?.();
+        if (detector) {
+          detectors.push(detector);
+        } else if (hasSetupEntryFeature(setupEntry, "legacyStateMigrations")) {
+          const plugin = getBundledChannelSetupPluginForRoot(id, rootScope, loadContext);
+          if (plugin?.lifecycle?.detectLegacyStateMigrations) {
+            detectors.push(plugin.lifecycle.detectLegacyStateMigrations);
+          }
+        }
+        break;
+      } catch (error) {
+        if (!isUnsettledEsmModuleError(error) || attempt >= UNSETTLED_ESM_MODULE_RETRY_LIMIT) {
+          throw error;
+        }
+        log.warn(
+          `[channels] retrying legacy state migration detector load for ${id} after unsettled ESM module error (attempt ${attempt + 1}/${UNSETTLED_ESM_MODULE_RETRY_LIMIT}): ${formatErrorMessage(error)}`,
+        );
+        await yieldEventLoopTurn();
+      }
+    }
+    // Yield between channels (not after the last one) so a channel whose sidecar
+    // shares a leaf dependency chunk with the next one (e.g. telegram/imessage)
+    // gets a turn to fully link before the next synchronous require starts.
+    if (index < ids.length - 1) {
+      await yieldEventLoopTurn();
+    }
+  }
+  return detectors;
 }
 
 export function getBundledChannelAccountInspector(

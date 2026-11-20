@@ -815,13 +815,13 @@ describe("bundled channel entry shape guards", () => {
       );
 
       expect(
-        bundled.listBundledChannelLegacyStateMigrationDetectors({
+        await bundled.listBundledChannelLegacyStateMigrationDetectors({
           config: { channels: { alpha: { enabled: false } } },
         }),
       ).toStrictEqual([]);
       expect(testGlobal["__bundledSetupOnlySetupLoaded"]).toBeUndefined();
 
-      const detectors = bundled.listBundledChannelLegacyStateMigrationDetectors();
+      const detectors = await bundled.listBundledChannelLegacyStateMigrationDetectors();
       expect(
         detectors.map((detector) =>
           detector({ cfg: {}, env: {}, stateDir: "/state", oauthDir: "/oauth" } as never),
@@ -1369,5 +1369,84 @@ module.exports = {
     }
 
     expect(offenders).toStrictEqual([]);
+  });
+});
+
+describe("legacy state migration detector loading", () => {
+  it("yields an event-loop turn between channels instead of requiring them in one synchronous burst", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-bundled-detector-scheduling-"));
+    const previousBundledPluginsDir = process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
+    const channelIds = ["alpha", "beta"] as const;
+    for (const channelId of channelIds) {
+      const pluginDir = path.join(root, "dist", "extensions", channelId);
+      fs.mkdirSync(pluginDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(pluginDir, "index.js"),
+        ["throw new Error('main entry should not load for detector-only listing');", ""].join("\n"),
+        "utf8",
+      );
+      fs.writeFileSync(
+        path.join(pluginDir, "setup-entry.js"),
+        [
+          "export default {",
+          "  kind: 'bundled-channel-setup-entry',",
+          "  features: { legacyStateMigrations: true },",
+          "  loadSetupPlugin() {",
+          "    throw new Error('setup plugin should not load for detector-only listing');",
+          "  },",
+          "  loadLegacyStateMigrationDetector() {",
+          "    return () => [];",
+          "  },",
+          "};",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+    }
+
+    vi.doMock("../../plugins/bundled-channel-runtime.js", () => ({
+      listBundledChannelPluginMetadata: () =>
+        channelIds.map((channelId) => ({
+          dirName: channelId,
+          manifest: { id: channelId, channels: [channelId] },
+          source: { source: "./index.js", built: "./index.js" },
+          setupSource: { source: "./setup-entry.js", built: "./setup-entry.js" },
+        })),
+      resolveBundledChannelGeneratedPath: (
+        rootDir: string,
+        entry: BundledEntrySource,
+        pluginDirName: string,
+      ) =>
+        path.join(
+          rootDir,
+          "dist",
+          "extensions",
+          pluginDirName,
+          (entry.built ?? entry.source ?? "./index.js").replace(/^\.\//u, ""),
+        ),
+    }));
+
+    const immediateSpy = vi.spyOn(globalThis, "setImmediate");
+    try {
+      process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = path.join(root, "dist", "extensions");
+
+      const bundled = await importFreshModule<typeof import("./bundled.js")>(
+        import.meta.url,
+        "./bundled.js?scope=legacy-state-migration-detector-scheduling",
+      );
+
+      const detectors = await bundled.listBundledChannelLegacyStateMigrationDetectors();
+
+      expect(detectors).toHaveLength(2);
+      // Regression guard: two channels means exactly one between-channel yield. Must
+      // not revert to a single synchronous flatMap over every channel's sidecar
+      // require -- that shape let two channels sharing a leaf dependency chunk race
+      // Node's require(esm) bridge (nodejs/node#62130) and crash-loop the gateway.
+      expect(immediateSpy.mock.calls.length).toBe(1);
+    } finally {
+      immediateSpy.mockRestore();
+      restoreBundledPluginsDir(previousBundledPluginsDir);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
