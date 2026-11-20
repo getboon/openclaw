@@ -435,6 +435,12 @@ function loadGeneratedBundledChannelSetupEntry(params: {
     }
     return setupEntry;
   } catch (error) {
+    // Let the unsettled-ESM race (nodejs/node#62130) propagate instead of caching it as a
+    // permanent null: callers that retry need to see it, and callers that don't retry catch
+    // it locally below so a transient race can't poison this id for the rest of the process.
+    if (isUnsettledEsmModuleError(error)) {
+      throw error;
+    }
     const detail = describeBundledChannelLoadError(error, params.metadata.manifest.id);
     log.warn(
       `[channels] failed to load bundled channel setup entry ${params.metadata.manifest.id}: ${detail}`,
@@ -797,6 +803,28 @@ function getBundledChannelAccountInspectorForRoot(
   }
 }
 
+// For non-retrying callers of getLazyGeneratedBundledChannelSetupEntryForRoot: falls back to
+// null on the same unsettled-ESM race the retry loop below handles, instead of letting it
+// propagate uncaught. A later retrying call can still recover the entry, since the race no
+// longer gets cached as a permanent null (see loadGeneratedBundledChannelSetupEntry).
+function getLazyGeneratedBundledChannelSetupEntryForRootOrNullOnUnsettledRace(
+  id: ChannelId,
+  rootScope: BundledChannelRootScope,
+  loadContext: BundledChannelLoadContext,
+): BundledChannelSetupEntryRuntimeContract | null {
+  try {
+    return getLazyGeneratedBundledChannelSetupEntryForRoot(id, rootScope, loadContext);
+  } catch (error) {
+    if (!isUnsettledEsmModuleError(error)) {
+      throw error;
+    }
+    log.warn(
+      `[channels] bundled channel setup entry ${id} hit an unsettled ESM module error and was skipped for this call: ${formatErrorMessage(error)}`,
+    );
+    return null;
+  }
+}
+
 function getBundledChannelSetupPluginForRoot(
   id: ChannelId,
   rootScope: BundledChannelRootScope,
@@ -808,7 +836,11 @@ function getBundledChannelSetupPluginForRoot(
   if (loadContext.setupPluginLoadInProgressIds.has(id)) {
     return undefined;
   }
-  const entry = getLazyGeneratedBundledChannelSetupEntryForRoot(id, rootScope, loadContext);
+  const entry = getLazyGeneratedBundledChannelSetupEntryForRootOrNullOnUnsettledRace(
+    id,
+    rootScope,
+    loadContext,
+  );
   if (!entry) {
     return undefined;
   }
@@ -835,7 +867,11 @@ function getBundledChannelSetupSecretsForRoot(
   if (loadContext.lazySetupSecretsById.has(id)) {
     return loadContext.lazySetupSecretsById.get(id) ?? undefined;
   }
-  const entry = getLazyGeneratedBundledChannelSetupEntryForRoot(id, rootScope, loadContext);
+  const entry = getLazyGeneratedBundledChannelSetupEntryForRootOrNullOnUnsettledRace(
+    id,
+    rootScope,
+    loadContext,
+  );
   if (!entry) {
     return undefined;
   }
@@ -878,7 +914,11 @@ export function listBundledChannelLegacySessionSurfaces(
   return listBundledChannelPluginIdsForSetupFeature(rootScope, "legacySessionSurfaces", {
     config: options.config,
   }).flatMap((id) => {
-    const setupEntry = getLazyGeneratedBundledChannelSetupEntryForRoot(id, rootScope, loadContext);
+    const setupEntry = getLazyGeneratedBundledChannelSetupEntryForRootOrNullOnUnsettledRace(
+      id,
+      rootScope,
+      loadContext,
+    );
     const surface = setupEntry?.loadLegacySessionSurface?.();
     if (surface) {
       return [surface];
