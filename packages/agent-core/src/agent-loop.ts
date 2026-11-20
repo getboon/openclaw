@@ -22,7 +22,7 @@ import type {
   AgentToolResult,
   StreamFn,
 } from "./types.js";
-import type { ToolArgumentValidationError } from "./validation.js";
+import type { ToolArgumentValidationErrorShape } from "./validation.js";
 import { validateToolArguments } from "./validation.js";
 
 /** Callback used by synchronous loop runners to publish agent lifecycle events. */
@@ -877,7 +877,7 @@ async function resolveToolCallTool(
   return resolution;
 }
 
-function isToolArgumentValidationError(error: unknown): error is ToolArgumentValidationError {
+function isToolArgumentValidationError(error: unknown): error is ToolArgumentValidationErrorShape {
   return (
     typeof error === "object" &&
     error !== null &&
