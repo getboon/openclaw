@@ -943,6 +943,9 @@ export async function listBundledChannelLegacyStateMigrationDetectors(
         if (!isUnsettledEsmModuleError(error) || attempt >= UNSETTLED_ESM_MODULE_RETRY_LIMIT) {
           throw error;
         }
+        log.warn(
+          `[channels] retrying legacy state migration detector load for ${id} after unsettled ESM module error (attempt ${attempt + 1}/${UNSETTLED_ESM_MODULE_RETRY_LIMIT}): ${formatErrorMessage(error)}`,
+        );
         await yieldEventLoopTurn();
       }
     }
