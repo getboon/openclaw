@@ -891,28 +891,38 @@ export function listBundledChannelLegacySessionSurfaces(
   });
 }
 
-export function listBundledChannelLegacyStateMigrationDetectors(
+export async function listBundledChannelLegacyStateMigrationDetectors(
   options: {
     config?: OpenClawConfig;
   } = {},
-): readonly BundledChannelLegacyStateMigrationDetector[] {
+): Promise<readonly BundledChannelLegacyStateMigrationDetector[]> {
   const { rootScope, loadContext } = resolveActiveBundledChannelLoadScope();
-  return listBundledChannelPluginIdsForSetupFeature(rootScope, "legacyStateMigrations", {
+  const ids = listBundledChannelPluginIdsForSetupFeature(rootScope, "legacyStateMigrations", {
     config: options.config,
-  }).flatMap((id) => {
+  });
+  const detectors: BundledChannelLegacyStateMigrationDetector[] = [];
+  for (const id of ids) {
     const setupEntry = getLazyGeneratedBundledChannelSetupEntryForRoot(id, rootScope, loadContext);
     const detector = setupEntry?.loadLegacyStateMigrationDetector?.();
     if (detector) {
-      return [detector];
+      detectors.push(detector);
+    } else if (hasSetupEntryFeature(setupEntry, "legacyStateMigrations")) {
+      const plugin = getBundledChannelSetupPluginForRoot(id, rootScope, loadContext);
+      if (plugin?.lifecycle?.detectLegacyStateMigrations) {
+        detectors.push(plugin.lifecycle.detectLegacyStateMigrations);
+      }
     }
-    if (!hasSetupEntryFeature(setupEntry, "legacyStateMigrations")) {
-      return [];
-    }
-    const plugin = getBundledChannelSetupPluginForRoot(id, rootScope, loadContext);
-    return plugin?.lifecycle?.detectLegacyStateMigrations
-      ? [plugin.lifecycle.detectLegacyStateMigrations]
-      : [];
-  });
+    // Yield a full event-loop turn between channels: each loadLegacyStateMigrationDetector()
+    // call is a synchronous require(esm) of that channel's sidecar module, and two bundled
+    // sidecars sharing a leaf dependency chunk (e.g. telegram's and imessage's) required
+    // back-to-back with no turn between them can throw ERR_INTERNAL_ASSERTION ("Unexpected
+    // module status 0") from Node's require(esm) bridge — open upstream as nodejs/node#62130.
+    // setImmediate, not just a microtask, so the prior require's ESM job fully settles first.
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+  return detectors;
 }
 
 export function getBundledChannelAccountInspector(

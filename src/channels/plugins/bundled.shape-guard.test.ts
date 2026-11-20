@@ -815,13 +815,13 @@ describe("bundled channel entry shape guards", () => {
       );
 
       expect(
-        bundled.listBundledChannelLegacyStateMigrationDetectors({
+        await bundled.listBundledChannelLegacyStateMigrationDetectors({
           config: { channels: { alpha: { enabled: false } } },
         }),
       ).toStrictEqual([]);
       expect(testGlobal["__bundledSetupOnlySetupLoaded"]).toBeUndefined();
 
-      const detectors = bundled.listBundledChannelLegacyStateMigrationDetectors();
+      const detectors = await bundled.listBundledChannelLegacyStateMigrationDetectors();
       expect(
         detectors.map((detector) =>
           detector({ cfg: {}, env: {}, stateDir: "/state", oauthDir: "/oauth" } as never),

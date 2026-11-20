@@ -118,48 +118,57 @@ vi.mock("../channels/plugins/bundled.js", () => {
         },
       },
     ]),
-    listBundledChannelLegacyStateMigrationDetectors: vi.fn(() => [
-      ({ oauthDir }: { oauthDir: string }) => {
-        let entries: fsSync.Dirent[];
-        try {
-          entries = fsSync.readdirSync(oauthDir, { withFileTypes: true });
-        } catch {
-          return [];
-        }
-        return entries.flatMap((entry) => {
-          if (!entry.isFile() || !/^(creds|pre-key-1)\.json$/u.test(entry.name)) {
+    listBundledChannelLegacyStateMigrationDetectors: vi.fn(() =>
+      Promise.resolve([
+        ({ oauthDir }: { oauthDir: string }) => {
+          let entries: fsSync.Dirent[];
+          try {
+            entries = fsSync.readdirSync(oauthDir, { withFileTypes: true });
+          } catch {
             return [];
           }
-          const sourcePath = path.join(oauthDir, entry.name);
-          const targetPath = path.join(oauthDir, "mobileauth", "default", entry.name);
-          return fileExists(targetPath)
-            ? []
-            : [
+          return entries.flatMap((entry) => {
+            if (!entry.isFile() || !/^(creds|pre-key-1)\.json$/u.test(entry.name)) {
+              return [];
+            }
+            const sourcePath = path.join(oauthDir, entry.name);
+            const targetPath = path.join(oauthDir, "mobileauth", "default", entry.name);
+            return fileExists(targetPath)
+              ? []
+              : [
+                  {
+                    kind: "move" as const,
+                    label: `MobileAuth auth ${entry.name}`,
+                    sourcePath,
+                    targetPath,
+                  },
+                ];
+          });
+        },
+        ({ cfg, env }: { cfg: OpenClawConfig; env: NodeJS.ProcessEnv }) => {
+          const root = env.OPENCLAW_STATE_DIR;
+          if (!root) {
+            return [];
+          }
+          const sourcePath = path.join(root, "credentials", "chatapp-allowFrom.json");
+          const targetPath = path.join(
+            root,
+            "credentials",
+            `chatapp-${resolveChatAppAccountId(cfg)}-allowFrom.json`,
+          );
+          return fileExists(sourcePath) && !fileExists(targetPath)
+            ? [
                 {
-                  kind: "move" as const,
-                  label: `MobileAuth auth ${entry.name}`,
+                  kind: "copy" as const,
+                  label: "ChatApp pairing allowFrom",
                   sourcePath,
                   targetPath,
                 },
-              ];
-        });
-      },
-      ({ cfg, env }: { cfg: OpenClawConfig; env: NodeJS.ProcessEnv }) => {
-        const root = env.OPENCLAW_STATE_DIR;
-        if (!root) {
-          return [];
-        }
-        const sourcePath = path.join(root, "credentials", "chatapp-allowFrom.json");
-        const targetPath = path.join(
-          root,
-          "credentials",
-          `chatapp-${resolveChatAppAccountId(cfg)}-allowFrom.json`,
-        );
-        return fileExists(sourcePath) && !fileExists(targetPath)
-          ? [{ kind: "copy" as const, label: "ChatApp pairing allowFrom", sourcePath, targetPath }]
-          : [];
-      },
-    ]),
+              ]
+            : [];
+        },
+      ]),
+    ),
   };
 });
 
