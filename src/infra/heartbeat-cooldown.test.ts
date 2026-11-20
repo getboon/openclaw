@@ -379,6 +379,48 @@ describe("shouldDeferWake", () => {
       ).toEqual({ defer: false });
     });
   });
+
+  describe("chat command completion wakes", () => {
+    const floodedRunStarts = [40_000, 42_000, 44_000, 46_000, 48_000];
+    const spacedRun = {
+      ...afterRun,
+      lastRunStartedAtMs: afterRun.now - DEFAULT_MIN_WAKE_SPACING_MS,
+    };
+
+    it.each([
+      { label: "skips not-due", input: spacedRun, expected: { defer: false } },
+      {
+        label: "keeps min-spacing",
+        input: { ...afterRun, lastRunStartedAtMs: afterRun.now - 10_000 },
+        expected: { defer: true, reason: "min-spacing" },
+      },
+      {
+        label: "keeps flood",
+        input: { ...afterRun, recentRunStarts: floodedRunStarts },
+        expected: { defer: true, reason: "flood" },
+      },
+    ])("$label", ({ input, expected }) => {
+      expect(
+        decide({
+          ...input,
+          source: "exec-event",
+          reason: "exec-event",
+          chatCommandCompletion: true,
+        }),
+      ).toEqual(expected);
+    });
+
+    it("keeps not-due without the flag", () => {
+      expect(
+        decide({
+          ...spacedRun,
+          source: "exec-event",
+          reason: "exec-event",
+          chatCommandCompletion: false,
+        }),
+      ).toEqual({ defer: true, reason: "not-due" });
+    });
+  });
 });
 
 describe("recordRunStart", () => {

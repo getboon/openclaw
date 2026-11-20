@@ -16,7 +16,10 @@ import {
 } from "../infra/exec-approvals.js";
 import { requestHeartbeat } from "../infra/heartbeat-wake.js";
 import { findPathKey, mergePathPrepend, removePathPrepend } from "../infra/path-prepend.js";
-import { enqueueSystemEvent } from "../infra/system-events.js";
+import {
+  consumeSelectedSystemEventEntries,
+  enqueueSystemEventEntry,
+} from "../infra/system-events.js";
 import { isSubagentSessionKey } from "../sessions/session-key-utils.js";
 /**
  * Bash exec runtime.
@@ -49,6 +52,7 @@ import {
   appendOutput,
   createSessionSlug,
   markExited,
+  recordNotifyOnExitRemoval,
   tail,
 } from "./bash-process-registry.js";
 import { renderExecUpdateText } from "./bash-tools.exec-output.js";
@@ -354,10 +358,17 @@ function maybeNotifyOnExit(session: ProcessSession, status: "completed" | "faile
     mainKey: session.mainKey,
     sessionScope: session.sessionScope,
   };
-  enqueueSystemEvent(summary, {
-    sessionKey: resolveEventSessionKeyForPolicy(sessionKey, eventRouting),
+  const eventSessionKey = resolveEventSessionKeyForPolicy(sessionKey, eventRouting);
+  const event = enqueueSystemEventEntry(summary, {
+    sessionKey: eventSessionKey,
     deliveryContext: session.notifyDeliveryContext,
   });
+  if (event) {
+    // A process poll or log that already showed this exit must not get a second relay turn.
+    recordNotifyOnExitRemoval(session.id, () =>
+      consumeSelectedSystemEventEntries(eventSessionKey, [event]),
+    );
+  }
   // Subagent sessions receive exec results via process poll and announce flow;
   // the heartbeat would fall back to the main session and cause spurious wakes.
   if (!isSubagentSessionKey(sessionKey)) {

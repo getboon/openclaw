@@ -319,6 +319,7 @@ Use `accountId` to target a specific account on multi-account channels like Tele
     - Heartbeat-only replies do **not** keep the session alive. Heartbeat metadata may update the session row, but idle expiry uses `lastInteractionAt` from the last real user/channel message, and daily expiry uses `sessionStartedAt`.
     - Control UI and WebChat history hide heartbeat prompts and OK-only acknowledgments. The underlying session transcript can still contain those turns for audit/replay.
     - Detached [background tasks](/automation/tasks) can enqueue a system event and wake heartbeat when the main session should notice something quickly. That wake does not make the heartbeat run a background task.
+    - When a background command exits in a chat that is not the heartbeat session, OpenClaw wakes that chat without waiting for the next heartbeat interval. These wakes still run at least 30 seconds apart and at most 5 per minute.
 
   </Accordion>
 </AccordionGroup>

@@ -217,8 +217,8 @@ function schedule(coalesceMs: number, kind: WakeTimerKind = "normal") {
         return;
       }
       if (running) {
+        // The in-flight batch reschedules from its finally block.
         scheduled = true;
-        schedule(delay, kind);
         return;
       }
 
