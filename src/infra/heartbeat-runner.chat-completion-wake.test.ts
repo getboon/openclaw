@@ -195,16 +195,19 @@ describe("startHeartbeatRunner chat command completion wakes", () => {
     {
       label: "the isolated heartbeat session",
       sessionKey: `${MAIN_KEY}:heartbeat`,
+      resolvedKey: `${MAIN_KEY}:heartbeat`,
       cfg: heartbeatConfig({ heartbeat: { isolatedSession: true } }),
     },
     {
       label: "a heartbeat.session override",
       sessionKey: DM_KEY,
+      resolvedKey: DM_KEY,
       cfg: heartbeatConfig({ heartbeat: { session: DM_KEY } }),
     },
     {
       label: "a dmScope main DM that resolves to the main session",
       sessionKey: "agent:main:telegram:work:direct:123",
+      resolvedKey: MAIN_KEY,
       cfg: heartbeatConfig({
         session: { dmScope: "main" },
         channels: { telegram: { accounts: { work: { allowFrom: ["123"] } } } },
@@ -213,15 +216,18 @@ describe("startHeartbeatRunner chat command completion wakes", () => {
     {
       label: "global session scope",
       sessionKey: DM_KEY,
+      resolvedKey: "global",
       cfg: heartbeatConfig({ session: { scope: "global" } }),
     },
-  ])("keeps the not-due gate for $label", async ({ sessionKey, cfg }) => {
+  ])("keeps the not-due gate for $label", async ({ sessionKey, resolvedKey, cfg }) => {
     const runSpy = createRunSpy();
     const runner = startRunner(runSpy, cfg);
     await runIntervalTick();
 
     await vi.advanceTimersByTimeAsync(5 * 60_000);
+    // The runner checks the queue of the session the wake resolves to.
     enqueueSystemEvent(KILLED, { sessionKey });
+    enqueueSystemEvent(KILLED, { sessionKey: resolvedKey });
     await wakeExecEvent(sessionKey);
     await vi.advanceTimersByTimeAsync(5 * 60_000);
 
