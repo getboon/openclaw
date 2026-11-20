@@ -850,6 +850,14 @@ function getBundledChannelSetupPluginForRoot(
     loadContext.lazySetupPluginsById.set(id, plugin);
     return plugin;
   } catch (error) {
+    // Don't cache the unsettled-ESM race as a permanent null: it's transient, and a later
+    // call (once the race has passed) should get a real chance to load the plugin.
+    if (isUnsettledEsmModuleError(error)) {
+      log.warn(
+        `[channels] bundled channel setup ${id} hit an unsettled ESM module error and was skipped for this call: ${formatErrorMessage(error)}`,
+      );
+      return undefined;
+    }
     const detail = describeBundledChannelLoadError(error, id);
     log.warn(`[channels] failed to load bundled channel setup ${id}: ${detail}`);
     loadContext.lazySetupPluginsById.set(id, null);
@@ -882,6 +890,14 @@ function getBundledChannelSetupSecretsForRoot(
     loadContext.lazySetupSecretsById.set(id, secrets ?? null);
     return secrets;
   } catch (error) {
+    // Same rationale as getBundledChannelSetupPluginForRoot above: don't let a transient
+    // unsettled-ESM race become a permanent null for this id.
+    if (isUnsettledEsmModuleError(error)) {
+      log.warn(
+        `[channels] bundled channel setup secrets ${id} hit an unsettled ESM module error and was skipped for this call: ${formatErrorMessage(error)}`,
+      );
+      return undefined;
+    }
     const detail = describeBundledChannelLoadError(error, id);
     log.warn(`[channels] failed to load bundled channel setup secrets ${id}: ${detail}`);
     loadContext.lazySetupSecretsById.set(id, null);
