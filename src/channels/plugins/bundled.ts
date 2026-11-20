@@ -891,6 +891,25 @@ export function listBundledChannelLegacySessionSurfaces(
   });
 }
 
+const UNSETTLED_ESM_MODULE_RETRY_LIMIT = 3;
+
+// Node's require(esm) bridge can throw this when a required ESM module's link job
+// hasn't settled yet (nodejs/node#62130, open upstream, no fix). Retrying after a
+// yield recovers instead of crashing the caller.
+function isUnsettledEsmModuleError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error as NodeJS.ErrnoException).code === "ERR_INTERNAL_ASSERTION" &&
+    error.message.includes("Unexpected module status")
+  );
+}
+
+function yieldEventLoopTurn(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+}
+
 export async function listBundledChannelLegacyStateMigrationDetectors(
   options: {
     config?: OpenClawConfig;
@@ -901,26 +920,38 @@ export async function listBundledChannelLegacyStateMigrationDetectors(
     config: options.config,
   });
   const detectors: BundledChannelLegacyStateMigrationDetector[] = [];
-  for (const id of ids) {
-    const setupEntry = getLazyGeneratedBundledChannelSetupEntryForRoot(id, rootScope, loadContext);
-    const detector = setupEntry?.loadLegacyStateMigrationDetector?.();
-    if (detector) {
-      detectors.push(detector);
-    } else if (hasSetupEntryFeature(setupEntry, "legacyStateMigrations")) {
-      const plugin = getBundledChannelSetupPluginForRoot(id, rootScope, loadContext);
-      if (plugin?.lifecycle?.detectLegacyStateMigrations) {
-        detectors.push(plugin.lifecycle.detectLegacyStateMigrations);
+  for (let index = 0; index < ids.length; index += 1) {
+    const id = ids[index];
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const setupEntry = getLazyGeneratedBundledChannelSetupEntryForRoot(
+          id,
+          rootScope,
+          loadContext,
+        );
+        const detector = setupEntry?.loadLegacyStateMigrationDetector?.();
+        if (detector) {
+          detectors.push(detector);
+        } else if (hasSetupEntryFeature(setupEntry, "legacyStateMigrations")) {
+          const plugin = getBundledChannelSetupPluginForRoot(id, rootScope, loadContext);
+          if (plugin?.lifecycle?.detectLegacyStateMigrations) {
+            detectors.push(plugin.lifecycle.detectLegacyStateMigrations);
+          }
+        }
+        break;
+      } catch (error) {
+        if (!isUnsettledEsmModuleError(error) || attempt >= UNSETTLED_ESM_MODULE_RETRY_LIMIT) {
+          throw error;
+        }
+        await yieldEventLoopTurn();
       }
     }
-    // Yield a full event-loop turn between channels: each loadLegacyStateMigrationDetector()
-    // call is a synchronous require(esm) of that channel's sidecar module, and two bundled
-    // sidecars sharing a leaf dependency chunk (e.g. telegram's and imessage's) required
-    // back-to-back with no turn between them can throw ERR_INTERNAL_ASSERTION ("Unexpected
-    // module status 0") from Node's require(esm) bridge — open upstream as nodejs/node#62130.
-    // setImmediate, not just a microtask, so the prior require's ESM job fully settles first.
-    await new Promise<void>((resolve) => {
-      setImmediate(resolve);
-    });
+    // Yield between channels (not after the last one) so a channel whose sidecar
+    // shares a leaf dependency chunk with the next one (e.g. telegram/imessage)
+    // gets a turn to fully link before the next synchronous require starts.
+    if (index < ids.length - 1) {
+      await yieldEventLoopTurn();
+    }
   }
   return detectors;
 }
