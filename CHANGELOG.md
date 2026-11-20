@@ -2,6 +2,14 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.7.35-boon.3
+
+Fixes the same gateway crash-loop #337 did not: `2026.7.35-boon.2`'s canary re-run hit the identical `Unexpected module status 0` crash, proving the duplicate-import wiring #337 removed was real dead code but not the actual race. Also fixes a crash when anything imports the plugin SDK's agent harness.
+
+- **#340 (ENG-23040):** `listBundledChannelLegacyStateMigrationDetectors()` (`src/channels/plugins/bundled.ts`) required all five `legacyStateMigrations`-bearing channels' ESM sidecars back-to-back in one synchronous tick. Node's `require(esm)` bridge can throw `ERR_INTERNAL_ASSERTION: Unexpected module status 0` when a required module's link job hasn't settled yet — a confirmed open upstream Node bug ([nodejs/node#62130](https://github.com/nodejs/node/issues/62130)) that elides the application call site from its own stack trace even at a 100-frame limit. The loader now yields a full event-loop turn between each channel's load and, specifically for this error, retries up to 3 times with a yield before each retry. The same synchronous require also runs inside the setup-entry module's own load and inside the setup plugin/secrets loaders; those paths previously swallowed this one transient error and cached a permanent `null` for the channel's id, so a later caller never got a real chance to retry even after the race had passed — both are now fixed to not poison that cache. Each retry logs the channel id and attempt number so a live run shows whether the mitigation is firing. Scoped to `bundled.ts`; the public plugin SDK's synchronous-require contract is unchanged, and the sibling `listBundledChannelLegacySessionSurfaces()` (same shape, no observed crash) is a known follow-up, not fixed speculatively.
+- **#339 (ENG-23048):** any consumer that imports `openclaw/plugin-sdk/agent-harness` or otherwise transitively loads `packages/agent-core`'s compiled module crashed at load time with `SyntaxError: The requested module '@openclaw/ai/validation' does not provide an export named 'ToolArgumentValidationError'`, since `@openclaw/ai`'s published build never actually exported it. `agent-core` now owns its own `ToolArgumentValidationError` instead of depending on `@openclaw/ai`'s runtime identity for it.
+- Base unchanged at `2026.7.35`. Fork gateway and every bundled plugin bumped to `2026.7.35-boon.3` in lockstep. Plugin changes beyond the version: none beyond the two fixes above, which both live in core/SDK surfaces, not plugin packages.
+
 ## 2026.7.35-boon.2
 
 Fixes a gateway crash-loop on a host carrying on-disk legacy Telegram migration state (bot-info/update-offset/thread-bindings/allowFrom files).
