@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.7.35-boon.4
+
+Fixes a silent drop of background command results in chats: after any heartbeat had run, the agent said it would report back on a backgrounded `exec` and then never did.
+
+- **#342 (ENG-22434):** after any heartbeat had run, the exit of a background `exec` in a chat (DM, group, thread, Boon Web) was dropped by the heartbeat `not-due` cooldown, with no retry and no log line. Such completions now skip only the interval check. The 30 s spacing and the flood guard still apply. Spacing and flood deferrals now retry instead of being dropped, and every exec-event deferral logs one info line. Heartbeat, cron, and shared-main sessions keep the interval gate. The wake layer no longer spins at about 1 ms while a long run is in flight. An exit already seen through `process poll`/`process log` in the same turn is not relayed a second time.
+- Base unchanged at `2026.7.35`. Fork gateway and every bundled plugin bumped to `2026.7.35-boon.4` in lockstep. Plugin changes beyond the version: none. The #342 fix lives in core (`src/infra/heartbeat-*`, `src/agents/bash-*`), not in plugin packages.
+
 ## 2026.7.35-boon.3
 
 Fixes the same gateway crash-loop #337 did not: `2026.7.35-boon.2`'s canary re-run hit the identical `Unexpected module status 0` crash, proving the duplicate-import wiring #337 removed was real dead code but not the actual race. Also fixes a crash when anything imports the plugin SDK's agent harness.
