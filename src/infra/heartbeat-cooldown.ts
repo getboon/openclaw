@@ -23,7 +23,7 @@ export const DEFAULT_MIN_WAKE_SPACING_MS = 30_000;
 // flood window, the dispatcher logs a warning and forces the wake to defer to
 // the next scheduled tick. Tuned so a normal heartbeat that legitimately uses
 // `manual` retry doesn't trip it but a feedback loop does.
-const DEFAULT_FLOOD_WINDOW_MS = 60_000;
+export const DEFAULT_FLOOD_WINDOW_MS = 60_000;
 export const DEFAULT_FLOOD_THRESHOLD = 5;
 
 export type DeferDecision =
@@ -51,6 +51,8 @@ export type ShouldDeferInput = {
   floodWindowMs?: number;
   /** Override the flood-window threshold. */
   floodThreshold?: number;
+  /** A command completion queued in a chat session, not the heartbeat session. */
+  chatCommandCompletion?: boolean;
 };
 
 /**
@@ -64,6 +66,8 @@ export type ShouldDeferInput = {
  * | immediate     | Run                        | Run (never deferred, except flood)      |
  * | scheduled     | Defer if now < nextDueMs   | Defer if now < nextDueMs                |
  * | event         | Run (bootstrap responsive) | Defer if now < nextDueMs OR within floor |
+ *
+ * A chat command completion event skips only the `now < nextDueMs` check.
  *
  * Immediate is for documented wake-now delivery paths such as `openclaw system
  * event --mode now`, task completion follow-ups, cron `--wake now`, and
@@ -114,7 +118,7 @@ export function shouldDeferWake(input: ShouldDeferInput): DeferDecision {
     return { defer: false };
   }
 
-  if (input.now < input.nextDueMs) {
+  if (!input.chatCommandCompletion && input.now < input.nextDueMs) {
     return { defer: true, reason: "not-due" };
   }
 

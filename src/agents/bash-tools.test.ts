@@ -12,6 +12,7 @@ import {
 } from "../infra/heartbeat-wake.js";
 import { applyPathPrepend, findPathKey } from "../infra/path-prepend.js";
 import {
+  enqueueSystemEvent,
   peekSystemEventEntries,
   peekSystemEvents,
   resetSystemEventsForTest,
@@ -23,6 +24,7 @@ import {
   getFinishedSession,
   markBackgrounded,
   markExited,
+  recordNotifyOnExitRemoval,
   resetProcessRegistryForTests,
   type ProcessSession,
 } from "./bash-process-registry.js";
@@ -278,6 +280,9 @@ const TEST_EXEC_DEFAULTS = {
   ask: "off" as const,
 };
 const DEFAULT_NOTIFY_SESSION_KEY = "agent:main:main";
+const ACK_SESSION_KEY = "agent:main:msteams:direct:29:peer-1";
+const OTHER_ACK_SESSION_KEY = "agent:main:msteams:direct:29:peer-2";
+const UNRELATED_SYSTEM_EVENT = "Node connected";
 const ECHO_HI_COMMAND = shellEcho("hi");
 let callIdCounter = 0;
 const nextCallId = () => `call${++callIdCounter}`;
@@ -409,17 +414,6 @@ function useCapturedEnv(keys: string[], afterCapture?: () => void) {
   });
 }
 
-async function waitForCompletion(sessionId: string) {
-  let status = PROCESS_STATUS_RUNNING;
-  await expect
-    .poll(async () => {
-      status = (await pollProcessSession({ tool: processTool, sessionId })).status;
-      return status;
-    }, BACKGROUND_POLL_OPTIONS)
-    .not.toBe(PROCESS_STATUS_RUNNING);
-  return status;
-}
-
 function requireSessionId(details: { sessionId?: string }): string {
   if (!details.sessionId) {
     throw new Error("expected sessionId in exec result details");
@@ -481,10 +475,13 @@ async function drainNotifyEvents(sessionKey = DEFAULT_NOTIFY_SESSION_KEY) {
   });
 }
 
+// Waits through the registry because a process poll that shows the exit consumes its event.
 async function runBackgroundCommandToCompletion(tool: ExecToolInstance, command: string) {
   const sessionId = await startBackgroundCommand(tool, command);
-  const status = await waitForCompletion(sessionId);
-  return { sessionId, status };
+  await expect
+    .poll(() => getFinishedSession(sessionId)?.status, BACKGROUND_POLL_OPTIONS)
+    .toBeDefined();
+  return { sessionId, status: getFinishedSession(sessionId)?.status };
 }
 
 type ProcessLogWindow = { offset?: number; limit?: number };
@@ -650,25 +647,32 @@ const readBackgroundLogSnapshot = async (
     totalLines: readTotalLines(log.details),
   };
 };
+const createSeededSession = (): ProcessSession => ({
+  id: `seeded-log-${nextCallId()}`,
+  command: "seeded log",
+  startedAt: Date.now(),
+  maxOutputChars: 100_000,
+  pendingMaxOutputChars: 100_000,
+  pendingStdout: [],
+  pendingStderr: [],
+  pendingStdoutChars: 0,
+  pendingStderrChars: 0,
+  totalOutputChars: 0,
+  aggregated: "",
+  tail: "",
+  exited: false,
+  truncated: false,
+  backgrounded: false,
+  cursorKeyMode: "unknown",
+});
+const seedRunningBackgroundSession = () => {
+  const session = createSeededSession();
+  addSession(session);
+  markBackgrounded(session);
+  return session;
+};
 const seedFinishedLogSession = (lines: string[]) => {
-  const session: ProcessSession = {
-    id: `seeded-log-${nextCallId()}`,
-    command: "seeded log",
-    startedAt: Date.now(),
-    maxOutputChars: 100_000,
-    pendingMaxOutputChars: 100_000,
-    pendingStdout: [],
-    pendingStderr: [],
-    pendingStdoutChars: 0,
-    pendingStderrChars: 0,
-    totalOutputChars: 0,
-    aggregated: "",
-    tail: "",
-    exited: false,
-    truncated: false,
-    backgrounded: false,
-    cursorKeyMode: "unknown",
-  };
+  const session = createSeededSession();
   addSession(session);
   appendOutput(session, "stdout", lines.join("\n"));
   markBackgrounded(session);
@@ -895,6 +899,68 @@ describe("exec notifyOnExit", () => {
   });
 
   it.each<NotifyNoopCase>(NOOP_NOTIFY_CASES)("$label", runNotifyNoopCase);
+
+  const ackCases = (["poll", "log"] as const).flatMap((action) => [
+    { action, exit: "code 0", command: shellEcho("notify") },
+    { action, exit: "code 1", command: joinCommands([shellEcho("boom"), COMMAND_EXIT_WITH_ERROR]) },
+  ]);
+
+  it.each(ackCases)(
+    "$action of a $exit exit consumes only that exit event",
+    async ({ action, exit, command }) => {
+      const tool = createNotifyOnExitExecTool({ sessionKey: ACK_SESSION_KEY });
+      const otherTool = createNotifyOnExitExecTool({ sessionKey: OTHER_ACK_SESSION_KEY });
+      enqueueSystemEvent(UNRELATED_SYSTEM_EVENT, { sessionKey: ACK_SESSION_KEY });
+      const sessionId = await startBackgroundCommand(tool, command);
+      const otherSessionId = await startBackgroundCommand(otherTool, shellEcho("other"));
+      await waitForNotifyEvent(sessionId, ACK_SESSION_KEY);
+      await waitForNotifyEvent(otherSessionId, OTHER_ACK_SESSION_KEY);
+      expect(peekSystemEvents(ACK_SESSION_KEY)).toEqual([
+        UNRELATED_SYSTEM_EVENT,
+        expect.stringContaining(`(${sessionId.slice(0, 8)}, ${exit})`),
+      ]);
+
+      await executeProcessTool(processTool, { action, sessionId });
+
+      expect(peekSystemEvents(ACK_SESSION_KEY)).toEqual([UNRELATED_SYSTEM_EVENT]);
+      expect(peekSystemEvents(OTHER_ACK_SESSION_KEY)).toEqual([
+        expect.stringContaining(otherSessionId.slice(0, 8)),
+      ]);
+    },
+  );
+
+  it("keeps the exit event when the session is only listed", async () => {
+    const tool = createNotifyOnExitExecTool({ sessionKey: ACK_SESSION_KEY });
+    const sessionId = await startBackgroundCommand(tool, shellEcho("notify"));
+    await waitForNotifyEvent(sessionId, ACK_SESSION_KEY);
+
+    await listProcessSessions(processTool);
+
+    expect(peekSystemEvents(ACK_SESSION_KEY)).toEqual([
+      expect.stringContaining(sessionId.slice(0, 8)),
+    ]);
+  });
+
+  it("acknowledges an exit only once poll or log shows it", async () => {
+    const session = seedRunningBackgroundSession();
+    const remove = vi.fn();
+    recordNotifyOnExitRemoval(session.id, remove);
+    await readProcessLog(session.id);
+    await executeProcessTool(processTool, { action: "poll", sessionId: session.id });
+    expect(remove).not.toHaveBeenCalled();
+
+    setTimeout(() => {
+      markExited(session, 0, null, PROCESS_STATUS_COMPLETED);
+    }, 10);
+    const poll = await executeProcessTool(processTool, {
+      action: "poll",
+      sessionId: session.id,
+      timeout: 2_000,
+    });
+
+    expect(readProcessStatus(poll.details)).toBe(PROCESS_STATUS_COMPLETED);
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("exec PATH handling", () => {

@@ -10,6 +10,7 @@ import { killProcessTree } from "../process/kill-tree.js";
 import { getProcessSupervisor } from "../process/supervisor/index.js";
 import {
   type ProcessSession,
+  acknowledgeNotifyOnExit,
   deleteSession,
   drainSession,
   getFinishedSession,
@@ -395,6 +396,7 @@ export function createProcessTool(
           if (!scopedSession) {
             if (scopedFinished) {
               resetPollRetrySuggestion(params.sessionId);
+              acknowledgeNotifyOnExit(params.sessionId);
               return {
                 content: [
                   {
@@ -474,6 +476,7 @@ export function createProcessTool(
             : recordPollRetrySuggestion(params.sessionId, hasNewOutput);
           if (exited) {
             resetPollRetrySuggestion(params.sessionId);
+            acknowledgeNotifyOnExit(params.sessionId);
           }
           const runtime = exited ? undefined : describeRunningSession(scopedSession);
           return {
@@ -565,6 +568,7 @@ export function createProcessTool(
             );
             const status = mapFinishedStatusToResultStatus(scopedFinished.status);
             const logDefaultTailNote = defaultTailNote(totalLines, window.usingDefaultTail);
+            acknowledgeNotifyOnExit(params.sessionId);
             return {
               content: [
                 { type: "text", text: (slice || "(no output recorded)") + logDefaultTailNote },

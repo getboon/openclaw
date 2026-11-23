@@ -109,6 +109,9 @@ interface FinishedSession {
 
 const runningSessions = new Map<string, ProcessSession>();
 const finishedSessions = new Map<string, FinishedSession>();
+// Keyed by id, not stored on the finished record: a poll that sees the exit
+// re-runs markExited, which replaces that record.
+const notifyOnExitAcks = new Map<string, { remove?: () => void; acknowledged: boolean }>();
 
 let sweeper: NodeJS.Timeout | null = null;
 
@@ -141,6 +144,22 @@ export function getFinishedSession(id: string) {
 export function deleteSession(id: string) {
   runningSessions.delete(id);
   finishedSessions.delete(id);
+  notifyOnExitAcks.delete(id);
+}
+
+/** Keeps the handle that removes a queued exit event until the agent sees the exit. */
+export function recordNotifyOnExitRemoval(id: string, remove: () => void) {
+  if (notifyOnExitAcks.get(id)?.acknowledged) {
+    remove();
+    return;
+  }
+  notifyOnExitAcks.set(id, { remove, acknowledged: false });
+}
+
+/** Removes the queued exit event of a session whose exit a poll or log showed. */
+export function acknowledgeNotifyOnExit(id: string) {
+  notifyOnExitAcks.get(id)?.remove?.();
+  notifyOnExitAcks.set(id, { acknowledged: true });
 }
 
 /** Appends process output while enforcing aggregate and pending-output caps. */
@@ -339,6 +358,7 @@ export function listFinishedSessions() {
 export function resetProcessRegistryForTests() {
   runningSessions.clear();
   finishedSessions.clear();
+  notifyOnExitAcks.clear();
   stopSweeper();
 }
 
@@ -357,6 +377,7 @@ function pruneFinishedSessions() {
   for (const [id, session] of finishedSessions.entries()) {
     if (session.endedAt < cutoff) {
       finishedSessions.delete(id);
+      notifyOnExitAcks.delete(id);
     }
   }
 }
