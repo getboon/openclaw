@@ -3,6 +3,7 @@ import {
   hasOutboundReplyContent,
   isReasoningReplyPayload,
 } from "openclaw/plugin-sdk/reply-payload";
+import { getReplyPayloadMetadata } from "./reply-payload.js";
 import type { ReplyPayload } from "./types.js";
 
 /**
@@ -41,4 +42,20 @@ export function resolveHeartbeatReplyPayload(
     }
   }
   return undefined;
+}
+
+/** Message-tool replies staged for this session's current conversation, in order. */
+export function resolveHeartbeatSourceReplyPayloads(
+  replyResult: ReplyPayload | ReplyPayload[] | undefined,
+  params: { sessionKey: string; exclude?: ReplyPayload },
+): ReplyPayload[] {
+  const payloads = Array.isArray(replyResult) ? replyResult : replyResult ? [replyResult] : [];
+  return payloads.filter(
+    (payload) =>
+      payload !== params.exclude &&
+      getReplyPayloadMetadata(payload)?.sourceReplyTranscriptMirror?.sessionKey ===
+        params.sessionKey &&
+      !isReasoningReplyPayload(payload) &&
+      hasOutboundReplyContent(payload),
+  );
 }

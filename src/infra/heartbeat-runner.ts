@@ -27,7 +27,10 @@ import { resolveModelRefFromString, type ModelRef } from "../agents/model-select
 import { STREAM_ERROR_FALLBACK_TEXT } from "../agents/stream-message-shared.js";
 import { resolveEffectiveAgentRuntime } from "../agents/thinking-runtime.js";
 import { DEFAULT_HEARTBEAT_FILENAME } from "../agents/workspace.js";
-import { resolveHeartbeatReplyPayload } from "../auto-reply/heartbeat-reply-payload.js";
+import {
+  resolveHeartbeatReplyPayload,
+  resolveHeartbeatSourceReplyPayloads,
+} from "../auto-reply/heartbeat-reply-payload.js";
 import {
   getHeartbeatToolNotificationText,
   resolveHeartbeatToolResponseFromReplyResult,
@@ -43,6 +46,7 @@ import {
   stripHeartbeatToken,
   type HeartbeatTask,
 } from "../auto-reply/heartbeat.js";
+import { getReplyPayloadMetadata } from "../auto-reply/reply-payload.js";
 import { replaceGenericExternalRunFailureText } from "../auto-reply/reply/agent-runner-failure-copy.js";
 import { resolveDefaultModel } from "../auto-reply/reply/directive-handling.defaults.js";
 import {
@@ -2049,6 +2053,61 @@ export async function runHeartbeatOnce(opts: {
       });
       return { status: "skipped", reason: HEARTBEAT_SKIP_REQUESTS_IN_FLIGHT };
     }
+    const sourceReplyPayloads = resolveHeartbeatSourceReplyPayloads(replyResult, {
+      sessionKey: runSessionKey,
+      exclude: replyPayload,
+    });
+    let sentSourceReplies = false;
+    // Message-tool replies staged for this chat are delivered on their own, so no
+    // later skip branch (ack token, duplicate main) can drop them.
+    if (
+      sourceReplyPayloads.length > 0 &&
+      !heartbeatToolResponse &&
+      delivery.channel !== "none" &&
+      delivery.to &&
+      visibility.showAlerts &&
+      !useIsolatedSession &&
+      runSessionKey !== resolveHeartbeatSession(cfg, agentId, heartbeat).sessionKey
+    ) {
+      let readiness: { ok: boolean } = { ok: true };
+      if (heartbeatChannelPlugin?.heartbeat?.checkReady) {
+        readiness = await heartbeatChannelPlugin.heartbeat.checkReady({
+          cfg,
+          accountId: delivery.accountId,
+          deps: opts.deps,
+        });
+      }
+      if (readiness.ok) {
+        const send = await sendDurableMessageBatch({
+          cfg,
+          channel: delivery.channel,
+          to: delivery.to,
+          accountId: delivery.accountId,
+          session: outboundSession,
+          identity: outboundIdentity,
+          threadId: delivery.threadId,
+          payloads: sourceReplyPayloads.map((payload) => {
+            const { text, mediaUrls } = resolveSendableOutboundReplyParts(payload);
+            return { text, mediaUrls };
+          }),
+          deps: opts.deps,
+        });
+        if (send.status === "failed" || send.status === "partial_failed") {
+          throw send.error;
+        }
+        sentSourceReplies = send.status === "sent";
+        if (sentSourceReplies) {
+          await clearSatisfiedPendingFinalDelivery();
+          log.info("heartbeat: delivered staged source replies", {
+            count: sourceReplyPayloads.length,
+            channel: delivery.channel,
+          });
+        }
+      }
+    }
+    // After staged replies went out, a token-only main is a plain ack, not the
+    // exec result, so it must not be relayed as literal HEARTBEAT_OK.
+    const relaysExecCompletionInMain = hasRelayableExecCompletion && !sentSourceReplies;
     const includeReasoning = heartbeat?.includeReasoning === true;
     const reasoningPayloads = includeReasoning
       ? resolveHeartbeatReasoningPayloads(replyResult).filter((payload) => payload !== replyPayload)
@@ -2137,7 +2196,7 @@ export async function runHeartbeatOnce(opts: {
     // fall back to the original reply text.
     const execFallbackText =
       !heartbeatToolResponse &&
-      hasRelayableExecCompletion &&
+      relaysExecCompletionInMain &&
       !normalized.text.trim() &&
       !normalized.isInternalPlaceholderOnly &&
       replyPayload?.text?.trim()
@@ -2162,7 +2221,7 @@ export async function runHeartbeatOnce(opts: {
     const shouldSkipMain =
       normalized.shouldSkip &&
       !normalized.hasMedia &&
-      (!hasRelayableExecCompletion || normalized.isInternalPlaceholderOnly);
+      (!relaysExecCompletionInMain || normalized.isInternalPlaceholderOnly);
     if (shouldSkipMain && reasoningPayloads.length === 0) {
       await restoreHeartbeatUpdatedAt({
         storePath,
@@ -2205,6 +2264,7 @@ export async function runHeartbeatOnce(opts: {
     const isDuplicateMain =
       !shouldSkipMain &&
       !mediaUrls.length &&
+      !(replyPayload && getReplyPayloadMetadata(replyPayload)?.sourceReplyTranscriptMirror) &&
       Boolean(prevHeartbeatText.trim()) &&
       normalized.text.trim() === prevHeartbeatText.trim() &&
       typeof prevHeartbeatAt === "number" &&
