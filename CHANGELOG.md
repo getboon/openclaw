@@ -2,6 +2,13 @@
 
 Docs: https://docs.openclaw.ai
 
+## 2026.7.35-boon.5
+
+Fixes background command results that the agent sent with the `message` tool never showing in Boon Web chats.
+
+- **#344 (ENG-22434):** in a Boon Web chat, when the completion turn started by a background command's exit sent the output with the `message` tool, the chat showed only the turn's closing text (for example `Done.`), or nothing for a repeated result. Boon Web stages a `message` send as an internal source reply, and the heartbeat runner delivered only the last reply payload. Heartbeat turns now send their staged replies for the chat's own session first, then the final text as before. A token-only ack after them is not posted, and a staged reply is never dropped as a duplicate. Slack and Microsoft Teams, which send `message` replies directly, and turns without a `message` send are unchanged.
+- Base unchanged at `2026.7.35`. Fork gateway and every bundled plugin bumped to `2026.7.35-boon.5` in lockstep. Plugin changes beyond the version: none. The #344 fix lives in core (`src/infra/heartbeat-runner.ts`, `src/auto-reply/heartbeat-reply-payload.ts`), not in plugin packages.
+
 ## 2026.7.35-boon.4
 
 Fixes a silent drop of background command results in chats: after any heartbeat had run, the agent said it would report back on a backgrounded `exec` and then never did.
