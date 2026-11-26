@@ -207,6 +207,7 @@ function applyAnthropicCacheControlToMessages(
     return;
   }
 
+  const previousUserMarkerLimit = markerLimit - countAnthropicMessageCacheControlMarkers(messages);
   let fallbackToolResult: Record<string, unknown> | undefined;
 
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -235,7 +236,7 @@ function applyAnthropicCacheControlToMessages(
       ];
       if (fallbackToolResult) {
         fallbackToolResult.cache_control = cacheControl;
-      } else if (markerLimit > 1) {
+      } else if (previousUserMarkerLimit > 1) {
         applyAnthropicCacheControlToPreviousUserTurn(
           messages,
           i,
@@ -266,7 +267,7 @@ function applyAnthropicCacheControlToMessages(
         blockRecord.cache_control = cacheControl;
         if (fallbackToolResult) {
           fallbackToolResult.cache_control = cacheControl;
-        } else if (markerLimit > 1) {
+        } else if (previousUserMarkerLimit > 1) {
           applyAnthropicCacheControlToPreviousUserTurn(
             messages,
             i,
@@ -297,6 +298,30 @@ function countAnthropicCacheControlMarkers(blocks: unknown): number {
   for (const block of blocks) {
     if (block && typeof block === "object" && "cache_control" in block) {
       count += 1;
+    }
+  }
+  return count;
+}
+
+function countAnthropicMessageCacheControlMarkers(messages: unknown[]): number {
+  let count = 0;
+  for (const message of messages) {
+    if (!message || typeof message !== "object") {
+      continue;
+    }
+    const content = (message as Record<string, unknown>).content;
+    if (!Array.isArray(content)) {
+      continue;
+    }
+    count += countAnthropicCacheControlMarkers(content);
+    for (const block of content) {
+      if (!block || typeof block !== "object") {
+        continue;
+      }
+      const blockRecord = block as Record<string, unknown>;
+      if (blockRecord.type === "tool_result") {
+        count += countAnthropicCacheControlMarkers(blockRecord.content);
+      }
     }
   }
   return count;
