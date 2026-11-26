@@ -3603,7 +3603,10 @@ describe("anthropic transport stream", () => {
       ]);
 
       expect(messages).toEqual([
-        { role: "user", content: [{ type: "text", text: "earlier question" }] },
+        {
+          role: "user",
+          content: [{ type: "text", text: "earlier question", cache_control: ephemeral }],
+        },
         { role: "assistant", content: [{ type: "text", text: "earlier answer" }] },
         {
           role: "user",
@@ -3795,7 +3798,13 @@ describe("anthropic transport stream", () => {
       expect(contentBlocks(turnNCall3[6])).toEqual([
         expect.objectContaining({ type: "tool_result", cache_control: ephemeral }),
       ]);
-      expect(contentBlocks(turnN1Call1[2])).toEqual([{ type: "text", text: "Read a.txt" }]);
+      expect(contentBlocks(turnN1Call1[2])).toEqual([
+        { type: "text", text: "Read a.txt", cache_control: ephemeral },
+      ]);
+      expect(contentBlocks(turnN1Call1.at(-1))).toEqual([
+        { type: "text", text: "Thanks", cache_control: ephemeral },
+        { type: "text", text: carrierText },
+      ]);
 
       const carrierIndexes = [
         [turnNCall1, 2],
