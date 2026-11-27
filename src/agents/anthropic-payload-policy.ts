@@ -141,6 +141,61 @@ function stripAnthropicSystemPromptBoundary(system: unknown): void {
   }
 }
 
+function findLastStableUserBlock(
+  content: unknown[],
+  cacheBreakpointOptOutBlocks: ReadonlySet<object>,
+): Record<string, unknown> | undefined {
+  for (let j = content.length - 1; j >= 0; j--) {
+    const block = content[j];
+    if (!block || typeof block !== "object" || cacheBreakpointOptOutBlocks.has(block)) {
+      continue;
+    }
+    const blockRecord = block as Record<string, unknown>;
+    if (blockRecord.type === "text" || blockRecord.type === "image") {
+      return blockRecord;
+    }
+  }
+  return undefined;
+}
+
+// Anthropic looks back at most 20 blocks from a breakpoint. After a long tool loop the
+// active user marker cannot reach the previous turn's cache entry, so anchor it directly.
+function applyAnthropicCacheControlToPreviousUserTurn(
+  messages: unknown[],
+  activeUserIndex: number,
+  cacheControl: AnthropicEphemeralCacheControl,
+  cacheBreakpointOptOutMessageIndexes: ReadonlySet<number>,
+  cacheBreakpointOptOutBlocks: ReadonlySet<object>,
+): void {
+  for (let i = activeUserIndex + 1; i < messages.length; i++) {
+    if (!cacheBreakpointOptOutMessageIndexes.has(i)) {
+      return;
+    }
+  }
+
+  for (let i = activeUserIndex - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (!message || typeof message !== "object" || cacheBreakpointOptOutMessageIndexes.has(i)) {
+      continue;
+    }
+    const record = message as Record<string, unknown>;
+    if (record.role !== "user") {
+      continue;
+    }
+    if (typeof record.content === "string") {
+      record.content = [{ type: "text", text: record.content, cache_control: cacheControl }];
+      return;
+    }
+    const block = Array.isArray(record.content)
+      ? findLastStableUserBlock(record.content, cacheBreakpointOptOutBlocks)
+      : undefined;
+    if (block) {
+      block.cache_control ??= cacheControl;
+      return;
+    }
+  }
+}
+
 function applyAnthropicCacheControlToMessages(
   messages: unknown,
   cacheControl: AnthropicEphemeralCacheControl,
@@ -152,6 +207,7 @@ function applyAnthropicCacheControlToMessages(
     return;
   }
 
+  const previousUserMarkerLimit = markerLimit - countAnthropicMessageCacheControlMarkers(messages);
   let fallbackToolResult: Record<string, unknown> | undefined;
 
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -178,8 +234,16 @@ function applyAnthropicCacheControlToMessages(
           cache_control: cacheControl,
         },
       ];
-      if (fallbackToolResult && markerLimit > 1) {
+      if (fallbackToolResult) {
         fallbackToolResult.cache_control = cacheControl;
+      } else if (previousUserMarkerLimit > 1) {
+        applyAnthropicCacheControlToPreviousUserTurn(
+          messages,
+          i,
+          cacheControl,
+          cacheBreakpointOptOutMessageIndexes,
+          cacheBreakpointOptOutBlocks,
+        );
       }
       return;
     }
@@ -201,8 +265,16 @@ function applyAnthropicCacheControlToMessages(
           return;
         }
         blockRecord.cache_control = cacheControl;
-        if (fallbackToolResult && markerLimit > 1) {
+        if (fallbackToolResult) {
           fallbackToolResult.cache_control = cacheControl;
+        } else if (previousUserMarkerLimit > 1) {
+          applyAnthropicCacheControlToPreviousUserTurn(
+            messages,
+            i,
+            cacheControl,
+            cacheBreakpointOptOutMessageIndexes,
+            cacheBreakpointOptOutBlocks,
+          );
         }
         return;
       }
@@ -226,6 +298,30 @@ function countAnthropicCacheControlMarkers(blocks: unknown): number {
   for (const block of blocks) {
     if (block && typeof block === "object" && "cache_control" in block) {
       count += 1;
+    }
+  }
+  return count;
+}
+
+function countAnthropicMessageCacheControlMarkers(messages: unknown[]): number {
+  let count = 0;
+  for (const message of messages) {
+    if (!message || typeof message !== "object") {
+      continue;
+    }
+    const content = (message as Record<string, unknown>).content;
+    if (!Array.isArray(content)) {
+      continue;
+    }
+    count += countAnthropicCacheControlMarkers(content);
+    for (const block of content) {
+      if (!block || typeof block !== "object") {
+        continue;
+      }
+      const blockRecord = block as Record<string, unknown>;
+      if (blockRecord.type === "tool_result") {
+        count += countAnthropicCacheControlMarkers(blockRecord.content);
+      }
     }
   }
   return count;

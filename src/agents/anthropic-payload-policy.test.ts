@@ -377,6 +377,380 @@ describe("anthropic payload policy", () => {
     });
   });
 
+  describe("previous user turn anchor", () => {
+    const shortPolicy = () =>
+      resolveAnthropicPayloadPolicy({
+        provider: "anthropic",
+        api: "anthropic-messages",
+        baseUrl: "https://api.anthropic.com/v1",
+        cacheRetention: "short",
+        enableCacheControl: true,
+      });
+    const ephemeral = { type: "ephemeral" as const };
+
+    function toolLoop(steps: number): TestPayload["messages"] {
+      return Array.from({ length: steps }, (_, step) => [
+        {
+          role: "assistant",
+          content: [{ type: "tool_use", id: `tool_${step}`, name: "exec", input: {} }],
+        },
+        {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: `tool_${step}`, content: `out ${step}` }],
+        },
+      ]).flat();
+    }
+
+    function allBlocks(payload: TestPayload): Array<Record<string, unknown>> {
+      const blocks = (Array.isArray(payload.system) ? [...payload.system] : []) as Array<
+        Record<string, unknown>
+      >;
+      for (const message of payload.messages) {
+        if (!Array.isArray(message.content)) {
+          continue;
+        }
+        for (const block of message.content as Array<Record<string, unknown>>) {
+          blocks.push(block);
+          if (block.type === "tool_result" && Array.isArray(block.content)) {
+            blocks.push(...block.content);
+          }
+        }
+      }
+      return blocks;
+    }
+
+    function countMarkers(payload: TestPayload): number {
+      return allBlocks(payload).filter((block) => block.cache_control !== undefined).length;
+    }
+
+    function messageTexts(payload: TestPayload): string[] {
+      return payload.messages.flatMap((message) =>
+        typeof message.content === "string"
+          ? [message.content]
+          : (message.content as Array<Record<string, unknown>>).flatMap((block) =>
+              typeof block.text === "string" ? [block.text] : [],
+            ),
+      );
+    }
+
+    function longLoopPayload(carrierBlock: Record<string, unknown>): TestPayload {
+      return {
+        system: [{ type: "text", text: "system" }],
+        messages: [
+          { role: "user", content: "Read the logs." },
+          ...toolLoop(12),
+          { role: "assistant", content: [{ type: "text", text: "Done." }] },
+          { role: "user", content: [textBlock("Thanks"), carrierBlock] },
+        ],
+      };
+    }
+
+    it("anchors the previous user turn on the first call after a long tool loop", () => {
+      const carrierBlock = textBlock("volatile current-turn metadata");
+      const payload = longLoopPayload(carrierBlock);
+
+      applyAnthropicPayloadPolicyToParams(
+        payload,
+        shortPolicy(),
+        new Set(),
+        new Set([carrierBlock]),
+      );
+
+      expect(payload.messages[0]).toEqual({
+        role: "user",
+        content: [textBlock("Read the logs.", ephemeral)],
+      });
+      expect(payload.messages.at(-1)).toEqual({
+        role: "user",
+        content: [textBlock("Thanks", ephemeral), textBlock("volatile current-turn metadata")],
+      });
+      const toolResults = allBlocks(payload).filter((block) => block.type === "tool_result");
+      expect(toolResults).toHaveLength(12);
+      expect(toolResults.filter((block) => block.cache_control !== undefined)).toEqual([]);
+      expect(countMarkers(payload)).toBe(3);
+    });
+
+    it("keeps message text bytes unchanged when anchoring the previous user turn", () => {
+      const payload = longLoopPayload(textBlock("Merged later."));
+      payload.messages.push({ role: "user", content: "volatile carrier message" });
+      const before = messageTexts(payload);
+
+      applyAnthropicPayloadPolicyToParams(
+        payload,
+        shortPolicy(),
+        new Set([payload.messages.length - 1]),
+      );
+
+      expect(payload.messages[0]?.content).toEqual([textBlock("Read the logs.", ephemeral)]);
+      expect(payload.messages.at(-1)).toEqual({
+        role: "user",
+        content: "volatile carrier message",
+      });
+      expect(messageTexts(payload)).toEqual(before);
+    });
+
+    it.each([
+      {
+        name: "the last stable block before an opted-out block",
+        previousContent: [textBlock("first"), textBlock("second"), textBlock("opted out")],
+        optOutBlock: 2,
+        markedBlock: 1,
+      },
+      {
+        name: "a trailing image block",
+        previousContent: [
+          textBlock("look at this"),
+          { type: "image", source: { type: "base64", media_type: "image/png", data: "aGk=" } },
+        ],
+        optOutBlock: undefined,
+        markedBlock: 1,
+      },
+    ])(
+      "anchors the previous user turn on $name",
+      ({ previousContent, optOutBlock, markedBlock }) => {
+        const optOutBlocks = new Set<object>(
+          optOutBlock === undefined ? [] : [previousContent[optOutBlock]!],
+        );
+        const payload: TestPayload = {
+          system: [{ type: "text", text: "system" }],
+          messages: [
+            { role: "user", content: previousContent },
+            { role: "assistant", content: [{ type: "text", text: "Answer." }] },
+            { role: "user", content: "Next question" },
+          ],
+        };
+
+        applyAnthropicPayloadPolicyToParams(payload, shortPolicy(), new Set(), optOutBlocks);
+
+        expect(payload.messages[0]?.content).toBe(previousContent);
+        const marked = previousContent.map((block) => "cache_control" in block);
+        expect(marked).toEqual(previousContent.map((_, index) => index === markedBlock));
+        expect(payload.messages[2]?.content).toEqual([textBlock("Next question", ephemeral)]);
+      },
+    );
+
+    it.each([
+      {
+        name: "a mid-loop call",
+        trailing: [
+          {
+            role: "assistant",
+            content: [{ type: "tool_use", id: "tool_1", name: "exec", input: {} }],
+          },
+          {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "tool_1", content: "out" }],
+          },
+        ],
+        expectedTrailing: [
+          {
+            role: "assistant",
+            content: [{ type: "tool_use", id: "tool_1", name: "exec", input: {} }],
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "tool_1",
+                content: "out",
+                cache_control: ephemeral,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        name: "a trailing assistant prefill",
+        trailing: [{ role: "assistant", content: [{ type: "text", text: "Sure" }] }],
+        expectedTrailing: [{ role: "assistant", content: [{ type: "text", text: "Sure" }] }],
+      },
+    ])("does not anchor the previous user turn for $name", ({ trailing, expectedTrailing }) => {
+      const payload: TestPayload = {
+        system: [{ type: "text", text: "system" }],
+        messages: [
+          { role: "user", content: "Q1" },
+          { role: "assistant", content: [{ type: "text", text: "A1" }] },
+          { role: "user", content: "Q2" },
+          ...trailing,
+        ],
+      };
+
+      applyAnthropicPayloadPolicyToParams(payload, shortPolicy(), new Set());
+
+      expect(payload.messages).toEqual([
+        { role: "user", content: "Q1" },
+        { role: "assistant", content: [{ type: "text", text: "A1" }] },
+        { role: "user", content: [textBlock("Q2", ephemeral)] },
+        ...expectedTrailing,
+      ]);
+    });
+
+    it("marks only the active user turn when one message marker remains", () => {
+      const payload: TestPayload = {
+        system: [
+          { type: "text", text: "one" },
+          { type: "text", text: "two" },
+          { type: "text", text: "three" },
+        ],
+        messages: [
+          { role: "user", content: "Q1" },
+          { role: "assistant", content: [{ type: "text", text: "A1" }] },
+          { role: "user", content: "Q2" },
+        ],
+      };
+
+      applyAnthropicPayloadPolicyToParams(payload, shortPolicy(), new Set());
+
+      expect(payload.messages[0]).toEqual({ role: "user", content: "Q1" });
+      expect(payload.messages[2]).toEqual({ role: "user", content: [textBlock("Q2", ephemeral)] });
+      expect(countMarkers(payload)).toBe(4);
+    });
+
+    it("keeps an existing previous user marker without adding another", () => {
+      const longMarker = { type: "ephemeral" as const, ttl: "1h" as const };
+      const payload: TestPayload = {
+        system: [{ type: "text", text: "system" }],
+        messages: [
+          { role: "user", content: [textBlock("Q1", longMarker)] },
+          { role: "assistant", content: [{ type: "text", text: "A1" }] },
+          { role: "user", content: "Q2" },
+        ],
+      };
+
+      applyAnthropicPayloadPolicyToParams(payload, shortPolicy(), new Set());
+
+      expect(payload.messages[0]).toEqual({ role: "user", content: [textBlock("Q1", longMarker)] });
+      expect(payload.messages[2]).toEqual({ role: "user", content: [textBlock("Q2", ephemeral)] });
+      expect(countMarkers(payload)).toBe(3);
+    });
+
+    it.each([
+      {
+        name: "an assistant block",
+        history: [
+          { role: "user", content: "Q0" },
+          { role: "assistant", content: [textBlock("A0", ephemeral)] },
+        ],
+      },
+      {
+        name: "nested tool_result content",
+        history: [
+          {
+            role: "assistant",
+            content: [{ type: "tool_use", id: "tool_0", name: "exec", input: {} }],
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "tool_0",
+                content: [textBlock("out", ephemeral)],
+              },
+            ],
+          },
+        ],
+      },
+    ])("skips the previous user anchor when $name already uses the last marker", ({ history }) => {
+      const payload: TestPayload = {
+        system: [
+          { type: "text", text: "one" },
+          { type: "text", text: "two" },
+        ],
+        messages: [
+          ...history,
+          { role: "user", content: "Q1" },
+          { role: "assistant", content: [{ type: "text", text: "A1" }] },
+          { role: "user", content: "Q2" },
+        ],
+      };
+
+      applyAnthropicPayloadPolicyToParams(payload, shortPolicy(), new Set());
+
+      expect(payload.messages[2]).toEqual({ role: "user", content: "Q1" });
+      expect(payload.messages[4]).toEqual({ role: "user", content: [textBlock("Q2", ephemeral)] });
+      expect(countMarkers(payload)).toBe(4);
+    });
+
+    it.each([
+      {
+        name: "uses the last two free markers",
+        system: [textBlock("one"), textBlock("two")],
+        messages: [
+          { role: "user", content: "Q1" },
+          { role: "assistant", content: [textBlock("A1")] },
+          { role: "user", content: "Q2" },
+        ],
+        optOutIndexes: [],
+        expected: [
+          { role: "user", content: [textBlock("Q1", ephemeral)] },
+          { role: "assistant", content: [textBlock("A1")] },
+          { role: "user", content: [textBlock("Q2", ephemeral)] },
+        ],
+        markers: 4,
+      },
+      {
+        name: "skips an opted-out message between the user turns",
+        system: [textBlock("system")],
+        messages: [
+          { role: "user", content: "Q1" },
+          { role: "assistant", content: [textBlock("A1")] },
+          { role: "user", content: "stale carrier" },
+          { role: "user", content: "Q2" },
+        ],
+        optOutIndexes: [2],
+        expected: [
+          { role: "user", content: [textBlock("Q1", ephemeral)] },
+          { role: "assistant", content: [textBlock("A1")] },
+          { role: "user", content: "stale carrier" },
+          { role: "user", content: [textBlock("Q2", ephemeral)] },
+        ],
+        markers: 3,
+      },
+      {
+        name: "skips the tool_result of a previous turn that ended mid-loop",
+        system: [textBlock("system")],
+        messages: [
+          { role: "user", content: "Q0" },
+          {
+            role: "assistant",
+            content: [{ type: "tool_use", id: "tool_0", name: "exec", input: {} }],
+          },
+          {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "tool_0", content: "out" }],
+          },
+          { role: "user", content: "Q1" },
+        ],
+        optOutIndexes: [],
+        expected: [
+          { role: "user", content: [textBlock("Q0", ephemeral)] },
+          {
+            role: "assistant",
+            content: [{ type: "tool_use", id: "tool_0", name: "exec", input: {} }],
+          },
+          {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "tool_0", content: "out" }],
+          },
+          { role: "user", content: [textBlock("Q1", ephemeral)] },
+        ],
+        markers: 3,
+      },
+    ])(
+      "anchors the previous user turn and $name",
+      ({ system, messages, optOutIndexes, expected, markers }) => {
+        const payload: TestPayload = { system, messages };
+
+        applyAnthropicPayloadPolicyToParams(payload, shortPolicy(), new Set(optOutIndexes));
+
+        expect(payload.messages).toEqual(expected);
+        expect(countMarkers(payload)).toBe(markers);
+      },
+    );
+  });
+
   it("denies proxied Anthropic service tier but honors explicit long TTL for custom hosts", () => {
     const policy = resolveAnthropicPayloadPolicy({
       provider: "anthropic",
