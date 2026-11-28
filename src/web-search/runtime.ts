@@ -265,6 +265,21 @@ function resolveExplicitWebSearchProviderId(params: {
   return undefined;
 }
 
+// ENG-21224: a separately-named, explicitly-configured recovery provider —
+// see runWebSearch below for how it's used once candidates are loaded. Reads
+// it ahead of that so the provider-load SCOPE (just below) can also account
+// for it: scoping candidate-loading to only the primary's owning plugin would
+// otherwise silently filter the fallback's plugin out before it ever reaches
+// the candidate list, making the fallback a no-op whenever the primary has
+// known manifest ownership (true for every bundled provider in production).
+function resolveExplicitFallbackWebSearchProviderId(search?: WebSearchConfig): string | undefined {
+  const raw = (search as Record<string, unknown> | undefined)?.fallbackProvider;
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+  return normalizeLowercaseStringOrEmpty(raw) || undefined;
+}
+
 function resolveExplicitWebSearchProviderPluginIds(params: {
   config?: OpenClawConfig;
   search?: WebSearchConfig;
@@ -276,12 +291,29 @@ function resolveExplicitWebSearchProviderPluginIds(params: {
   if (!providerId) {
     return undefined;
   }
-  const ownerPluginId = resolveManifestContractOwnerPluginId({
-    config: params.config,
-    contract: "webSearchProviders",
-    value: providerId,
-  });
-  return ownerPluginId ? [ownerPluginId] : undefined;
+  const requiredProviderIds = [providerId];
+  const fallbackProviderId = resolveExplicitFallbackWebSearchProviderId(params.search);
+  if (fallbackProviderId && fallbackProviderId !== providerId) {
+    requiredProviderIds.push(fallbackProviderId);
+  }
+  const pluginIds: string[] = [];
+  for (const id of requiredProviderIds) {
+    const ownerPluginId = resolveManifestContractOwnerPluginId({
+      config: params.config,
+      contract: "webSearchProviders",
+      value: id,
+    });
+    // Unknown ownership for ANY required provider (primary or fallback) means
+    // we cannot safely narrow the load scope — fall back to loading every
+    // provider (unscoped), the same safe default as the pre-existing
+    // single-id behavior, rather than risk silently dropping one we were
+    // explicitly told to load.
+    if (!ownerPluginId) {
+      return undefined;
+    }
+    pluginIds.push(ownerPluginId);
+  }
+  return pluginIds;
 }
 
 function resolveWebSearchProviderLoadScope(params: {
@@ -468,6 +500,16 @@ export async function runWebSearch(params: RunWebSearchParams): Promise<RunWebSe
     providerId: params.providerId,
     providers: candidates,
   });
+  // ENG-21224 review: fallbackProvider is an operator-configured safety net
+  // for the operator-configured PRIMARY (tools.web.search.provider) — it must
+  // not also silently kick in for a caller-supplied providerId override (e.g.
+  // `openclaw capability web search --provider <id>`, a diagnostic command
+  // whose entire purpose is observing exactly that one provider's real
+  // behavior). Masking that provider's failure with a different provider's
+  // success there would defeat the command, not help it.
+  const explicitFallbackId = params.providerId
+    ? undefined
+    : resolveExplicitFallbackWebSearchProviderId(search);
   let lastError: unknown;
   let sawUnavailableProvider = false;
 
@@ -498,10 +540,40 @@ export async function runWebSearch(params: RunWebSearchParams): Promise<RunWebSe
         result: executed,
       };
     } catch (error) {
-      lastError = error;
       if (!allowFallback) {
+        // One narrow recovery attempt at a separately-named, explicitly
+        // configured fallback — not a reopening of auto-detect fallback.
+        if (explicitFallbackId && explicitFallbackId !== candidate.id) {
+          const fallbackCandidate = candidates.find((entry) => entry.id === explicitFallbackId);
+          if (fallbackCandidate) {
+            try {
+              const fallbackDefinition = fallbackCandidate.createTool({
+                config,
+                agentDir: params.agentDir,
+                searchConfig: search as Record<string, unknown> | undefined,
+                runtimeMetadata: runtimeWebSearch,
+              });
+              if (fallbackDefinition) {
+                const fallbackExecuted = await fallbackDefinition.execute(params.args, {
+                  signal: params.signal,
+                });
+                // A fallback that reports its own failure as structured output
+                // (e.g. a missing API key) did not actually recover anything —
+                // fall through to the ORIGINAL primary error below, same as a
+                // thrown fallback error.
+                if (!isStructuredAvailabilityError(fallbackExecuted)) {
+                  return { provider: fallbackCandidate.id, result: fallbackExecuted };
+                }
+              }
+            } catch {
+              // Fallback also failed — report the ORIGINAL primary error below,
+              // not the fallback's, so operators still see the root cause.
+            }
+          }
+        }
         throw error;
       }
+      lastError = error;
     }
   }
 

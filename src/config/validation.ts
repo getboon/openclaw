@@ -1535,15 +1535,18 @@ function validateConfigObjectWithPluginsBase(
     return hasPluginEvidenceForWebSearchProvider(providerId);
   };
 
-  const validateWebSearchProvider = () => {
-    const provider = config.tools?.web?.search?.provider;
-    if (typeof provider !== "string") {
+  // ENG-21224: shared by both tools.web.search.provider and the new
+  // tools.web.search.fallbackProvider -- a typo'd fallback is otherwise
+  // invisible (config validates clean, then silently never fires at
+  // runtime), which directly undercuts the field's own point: keeping a
+  // recoverable failure visible instead of silent.
+  const validateWebSearchProviderValue = (value: unknown, pathEntry: string, label: string) => {
+    if (typeof value !== "string") {
       return;
     }
-    const trimmed = provider.trim();
-    const pathEntry = "tools.web.search.provider";
+    const trimmed = value.trim();
     if (!trimmed) {
-      issues.push({ path: pathEntry, message: "web_search provider must not be empty" });
+      issues.push({ path: pathEntry, message: `${label} must not be empty` });
       return;
     }
     const activeProviderIds = collectActiveWebSearchProviderIds();
@@ -1556,13 +1559,13 @@ function validateConfigObjectWithPluginsBase(
     if (installCatalogEntry) {
       const issue = {
         path: pathEntry,
-        message: `web_search provider is not available: ${trimmed} (install or enable plugin "${installCatalogEntry.pluginId}", then run openclaw doctor --fix)`,
+        message: `${label} is not available: ${trimmed} (install or enable plugin "${installCatalogEntry.pluginId}", then run openclaw doctor --fix)`,
         allowedValues: collectKnownWebSearchProviderIds(),
       };
       if (hasPluginEvidenceForWebSearchProvider(trimmed, installCatalogEntry.pluginId)) {
         warnings.push({
           ...issue,
-          message: `web_search provider is not available: ${trimmed} (configured plugin "${installCatalogEntry.pluginId}" is unavailable; Gateway will ignore this optional provider until the plugin is installed/enabled or openclaw doctor --fix repairs the config)`,
+          message: `${label} is not available: ${trimmed} (configured plugin "${installCatalogEntry.pluginId}" is unavailable; Gateway will ignore this optional provider until the plugin is installed/enabled or openclaw doctor --fix repairs the config)`,
         });
         return;
       }
@@ -1575,7 +1578,7 @@ function validateConfigObjectWithPluginsBase(
     }
     const issue = {
       path: pathEntry,
-      message: `unknown web_search provider: ${trimmed}`,
+      message: `unknown ${label}: ${trimmed}`,
       allowedValues,
     };
     if (hasStalePluginEvidenceForUnknownWebSearchProvider(trimmed)) {
@@ -1586,6 +1589,19 @@ function validateConfigObjectWithPluginsBase(
       return;
     }
     issues.push(issue);
+  };
+
+  const validateWebSearchProvider = () => {
+    validateWebSearchProviderValue(
+      config.tools?.web?.search?.provider,
+      "tools.web.search.provider",
+      "web_search provider",
+    );
+    validateWebSearchProviderValue(
+      config.tools?.web?.search?.fallbackProvider,
+      "tools.web.search.fallbackProvider",
+      "web_search fallback provider",
+    );
   };
 
   const parseProviderModelRef = (value: string): { provider: string; model: string } | null => {
